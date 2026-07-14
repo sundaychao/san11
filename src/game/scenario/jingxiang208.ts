@@ -34,6 +34,8 @@ const forces: Record<ForceId, Force> = {
   },
 };
 
+export const SCENARIO_FORCES = forces;
+
 const citySeeds: CitySeed[] = [
   { id: 'wan', name: '宛', ownerId: 'cao', governorId: 'cao-cao', gold: 9000, food: 30000, population: 120000, troops: 16000, commerce: 60, agriculture: 45, order: 82, training: 72, mapX: 0.37, mapY: 0.17 },
   { id: 'xiangyang', name: '襄阳', ownerId: 'cao', governorId: 'cao-ren', gold: 8200, food: 34000, population: 115000, troops: 14500, commerce: 52, agriculture: 55, order: 78, training: 68, mapX: 0.25, mapY: 0.42 },
