@@ -151,3 +151,7 @@ export function clearSaves(storage: SaveAdapter) {
   storage.removeItem(AUTO_SAVE_KEY);
   storage.removeItem(MANUAL_SAVE_KEY);
 }
+
+export function clearSave(storage: SaveAdapter, slot: SaveSlot) {
+  storage.removeItem(keyFor(slot));
+}

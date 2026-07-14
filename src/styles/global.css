@@ -59,7 +59,8 @@ button { color: inherit; }
 .save-actions button, .error-screen button { min-height: 42px; display: inline-flex; align-items: center; gap: 8px; padding: 0 15px; border: 1px solid var(--gold-line); border-radius: 3px; background: var(--gold); color: var(--ink); cursor: pointer; }
 .save-actions svg, .error-screen button svg { width: 17px; }
 .start-error { grid-column: 2; border: 0; background: transparent; color: #e9a59d; text-align: left; }
-.invalid-save { grid-column: 2; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid #a95b51; color: #edaaa2; font-size: 12px; }
+.invalid-save { grid-column: 2; display: grid; gap: 7px; padding: 10px 12px; border: 1px solid #a95b51; color: #edaaa2; font-size: 12px; }
+.invalid-save > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .invalid-save button { min-height: 34px; padding: 0 10px; border: 1px solid #c97b71; border-radius: 2px; background: transparent; color: #f0b0a8; cursor: pointer; }
 
 .game-shell { min-height: 100dvh; display: grid; grid-template: 64px 1fr / 1fr 320px; overflow: hidden; background: #717b6e; }

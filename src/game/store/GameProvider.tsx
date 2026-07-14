@@ -10,6 +10,7 @@ import {
 import { runAiTurn } from '../ai';
 import { executeCommand } from '../commands';
 import {
+  clearSave,
   clearSaves,
   loadSave,
   type LoadResult,
@@ -27,13 +28,14 @@ interface GameContextValue {
   error: string | null;
   hasAutosave: boolean;
   hasManualSave: boolean;
-  saveProblem: string | null;
+  invalidSaves: Array<{ slot: SaveSlot; reason: string }>;
   startGame(forceId: ForceId, seed?: number): void;
   loadGame(slot: SaveSlot): LoadResult;
   issueCommand(command: GameCommand): void;
   endMonth(): void;
   manualSave(): void;
   resetGame(): void;
+  clearSave(slot: SaveSlot): void;
   selectCity(cityId: CityId | null): void;
   clearError(): void;
 }
@@ -135,14 +137,21 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     setSaveRevision((value) => value + 1);
   }, [storage]);
 
+  const clearSaveSlot = useCallback((slot: SaveSlot) => {
+    clearSave(storage, slot);
+    setSaveRevision((value) => value + 1);
+  }, [storage]);
+
   const availability = useMemo(() => {
     const auto = loadSave(storage, 'auto');
     const manual = loadSave(storage, 'manual');
-    const invalid = [auto, manual].find((result) => !result.ok && result.reason !== '没有存档');
+    const invalidSaves = ([['auto', auto], ['manual', manual]] as const).flatMap(([slot, result]) => (
+      !result.ok && result.reason !== '没有存档' ? [{ slot, reason: result.reason }] : []
+    ));
     return {
       hasAutosave: auto.ok,
       hasManualSave: manual.ok,
-      saveProblem: invalid && !invalid.ok ? invalid.reason : null,
+      invalidSaves,
     };
   }, [saveRevision, storage]);
 
@@ -157,9 +166,10 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     endMonth,
     manualSave,
     resetGame,
+    clearSave: clearSaveSlot,
     selectCity: setSelectedCityId,
     clearError: () => setError(null),
-  }), [availability, endMonth, error, issueCommand, loadGame, manualSave, resetGame, selectedCityId, startGame, state]);
+  }), [availability, clearSaveSlot, endMonth, error, issueCommand, loadGame, manualSave, resetGame, selectedCityId, startGame, state]);
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 }

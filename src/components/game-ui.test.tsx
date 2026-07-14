@@ -39,11 +39,13 @@ describe('game interface shell', () => {
   it('reports and can clear an unreadable save', async () => {
     const user = userEvent.setup();
     window.localStorage.setItem('jingxiang-208-autosave-v1', '{broken');
+    writeSave(window.localStorage, 'manual', createGame('sun', 2));
 
     render(<App />);
 
     expect(screen.getByRole('alert')).toHaveTextContent('存档无法读取');
-    await user.click(screen.getByRole('button', { name: '清除损坏存档' }));
+    await user.click(screen.getByRole('button', { name: '清除损坏的自动存档' }));
     expect(window.localStorage.getItem('jingxiang-208-autosave-v1')).toBeNull();
+    expect(window.localStorage.getItem('jingxiang-208-manual-v1')).not.toBeNull();
   });
 });

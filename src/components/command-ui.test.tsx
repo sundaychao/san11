@@ -92,4 +92,21 @@ describe('final settlement', () => {
     await user.click(screen.getByRole('button', { name: '返回结算' }));
     expect(screen.getByRole('heading', { name: '荆襄国力结算' })).toBeVisible();
   });
+
+  it('labels every row in a multi-way tied settlement', () => {
+    const state = createGame('liu', 5);
+    state.month = 24;
+    state.phase = 'finished';
+    for (const city of Object.values(state.cities)) {
+      Object.assign(city, { gold: 5000, food: 20000, population: 90000, troops: 10000, commerce: 50, agriculture: 50, order: 80, training: 70 });
+    }
+    for (const officer of Object.values(state.officers)) {
+      if (officer.forceId) Object.assign(officer.stats, { leadership: 70, war: 70, intelligence: 70, politics: 70, charisma: 70 });
+    }
+
+    renderState(state);
+
+    expect(screen.getAllByText('并列 1')).toHaveLength(4);
+    expect(screen.getByText(/最终并列第/)).toBeVisible();
+  });
 });
