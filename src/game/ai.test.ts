@@ -1,0 +1,41 @@
+import { describe, expect, it } from 'vitest';
+import { validateCommand } from './commands';
+import { chooseAiCommand, runAiTurn } from './ai';
+import { createGame } from './scenario/jingxiang208';
+
+describe('AI turn', () => {
+  it('prioritizes patrol when public order is below 60', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.order = 40;
+
+    expect(chooseAiCommand(state, 'liu')?.type).toBe('patrol');
+  });
+
+  it('only chooses a legal command', () => {
+    const state = createGame('liu', 1);
+    const command = chooseAiCommand(state, 'liu');
+
+    expect(command).not.toBeNull();
+    expect(validateCommand(state, 'liu', command!)).toEqual([]);
+  });
+
+  it('runs several legal actions without exhausting below zero', () => {
+    const state = createGame('liu', 1);
+
+    const next = runAiTurn(state, 'liu');
+
+    expect(next.actionPoints.liu).toBeGreaterThanOrEqual(0);
+    expect(next.actionPoints.liu).toBeLessThan(80);
+    expect(next.logs.length).toBeGreaterThan(state.logs.length);
+    expect(state.actionPoints.liu).toBe(80);
+  });
+
+  it('returns null when no officer can act', () => {
+    const state = createGame('liu', 1);
+    for (const officer of Object.values(state.officers)) {
+      if (officer.forceId === 'liu') officer.acted = true;
+    }
+
+    expect(chooseAiCommand(state, 'liu')).toBeNull();
+  });
+});
