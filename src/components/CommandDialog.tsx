@@ -1,5 +1,5 @@
 import { AlertCircle, X } from 'lucide-react';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { COMMAND_AP, COMMAND_LABELS, validateCommand } from '../game/commands';
 import { useGame } from '../game/store/GameProvider';
 import type { CityId, GameCommand } from '../game/types';
@@ -25,6 +25,15 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
   const [troops, setTroops] = useState('');
   const [officerIds, setOfficerIds] = useState<string[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    previousFocus.current = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    dialog?.querySelector<HTMLElement>('select:not([disabled])')?.focus();
+    return () => previousFocus.current?.focus();
+  }, []);
 
   if (!state) return null;
   const city = state.cities[cityId];
@@ -69,9 +78,29 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
     setOfficerIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   };
 
+  const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLFormElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), select:not([disabled]), input:not([disabled])'));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable.at(-1)!;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <form className="command-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="command-title" onSubmit={submit}>
+      <form ref={dialogRef} className="command-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="command-title" onSubmit={submit} onKeyDown={handleDialogKeyDown}>
         <header>
           <div><p>{city.name}政务 · 行动力 {COMMAND_AP[type]}</p><h2 id="command-title">{label}</h2></div>
           <button type="button" className="icon-button" aria-label="关闭指令" title="关闭" onClick={onClose}><X /></button>

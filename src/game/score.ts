@@ -62,20 +62,21 @@ export function rankForces(state: GameState): ForceRanking[] {
     FORCE_IDS.indexOf(left.forceId) - FORCE_IDS.indexOf(right.forceId),
   );
 
+  const sameResult = (left: typeof rows[number] | undefined, right: typeof rows[number] | undefined) => Boolean(
+    left && right && left.score === right.score &&
+      left.metrics.order === right.metrics.order &&
+      left.metrics.gold === right.metrics.gold &&
+      left.metrics.officers === right.metrics.officers,
+  );
+  let currentRank = 1;
   return rows.map((row, index) => {
-    const previous = rows[index - 1];
-    const tied = Boolean(
-      previous &&
-        previous.score === row.score &&
-        previous.metrics.order === row.metrics.order &&
-        previous.metrics.gold === row.metrics.gold &&
-        previous.metrics.officers === row.metrics.officers,
-    );
+    if (index > 0 && !sameResult(rows[index - 1], row)) currentRank = index + 1;
+    const tied = sameResult(rows[index - 1], row) || sameResult(row, rows[index + 1]);
     return {
       forceId: row.forceId,
       name: row.name,
       score: row.score,
-      rank: tied ? index : index + 1,
+      rank: currentRank,
       tied,
     };
   });

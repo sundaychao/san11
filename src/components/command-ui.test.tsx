@@ -40,6 +40,19 @@ describe('command interface', () => {
     expect(screen.getByText('已行动')).toBeVisible();
   });
 
+  it('moves focus into the command dialog, closes on Escape, and restores focus', async () => {
+    const user = userEvent.setup();
+    renderState();
+    const launcher = screen.getByRole('button', { name: '巡察' });
+
+    await user.click(launcher);
+    expect(screen.getByLabelText('执行武将')).toHaveFocus();
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog', { name: '巡察' })).not.toBeInTheDocument();
+    expect(launcher).toHaveFocus();
+  });
+
   it('shows live validation instead of executing an invalid transfer', async () => {
     const user = userEvent.setup();
     renderState();
@@ -64,5 +77,19 @@ describe('final settlement', () => {
     expect(screen.getAllByRole('row')).toHaveLength(5);
     expect(screen.getByRole('button', { name: '重新开局' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '查看最终地图' })).toBeEnabled();
+  });
+
+  it('can return from the final map to the settlement', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 5);
+    state.month = 24;
+    state.phase = 'finished';
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: '查看最终地图' }));
+    expect(screen.getByRole('button', { name: '返回结算' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: '巡察' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '返回结算' }));
+    expect(screen.getByRole('heading', { name: '荆襄国力结算' })).toBeVisible();
   });
 });

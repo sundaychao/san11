@@ -47,6 +47,8 @@ const citySeeds: CitySeed[] = [
   { id: 'guiyang', name: '桂阳', ownerId: 'biao', governorId: 'wen-pin', gold: 7100, food: 36000, population: 80000, troops: 11500, commerce: 47, agriculture: 63, order: 88, training: 67, mapX: 0.84, mapY: 0.71 },
 ];
 
+export const CITY_IDS = citySeeds.map((city) => city.id);
+
 function stats(leadership: number, war: number, intelligence: number, politics: number, charisma: number): Stats {
   return { leadership, war, intelligence, politics, charisma };
 }
@@ -77,6 +79,8 @@ const officerSeeds: OfficerSeed[] = [
   { id: 'yi-ji', name: '伊籍', forceId: null, cityId: 'xiangyang', stats: stats(38, 24, 82, 86, 90) },
   { id: 'mi-zhu', name: '糜竺', forceId: null, cityId: 'guiyang', stats: stats(32, 22, 78, 92, 88) },
 ];
+
+export const OFFICER_IDS = officerSeeds.map((officer) => officer.id);
 
 function toRecord<T extends { id: string }>(items: T[]): Record<string, T> {
   return Object.fromEntries(items.map((item) => [item.id, item]));

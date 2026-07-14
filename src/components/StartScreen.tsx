@@ -3,7 +3,7 @@ import { FORCE_IDS, SCENARIO_FORCES } from '../game/scenario/jingxiang208';
 import { useGame } from '../game/store/GameProvider';
 
 export function StartScreen() {
-  const { hasAutosave, hasManualSave, loadGame, startGame, error, clearError } = useGame();
+  const { hasAutosave, hasManualSave, saveProblem, loadGame, startGame, resetGame, error, clearError } = useGame();
 
   return (
     <main className="start-screen">
@@ -38,6 +38,12 @@ export function StartScreen() {
         <div className="save-actions">
           {hasAutosave && <button type="button" onClick={() => loadGame('auto')}><Play aria-hidden="true" />继续游戏</button>}
           {hasManualSave && <button type="button" onClick={() => loadGame('manual')}><ScrollText aria-hidden="true" />读取手动存档</button>}
+        </div>
+      )}
+      {saveProblem && (
+        <div className="invalid-save" role="alert">
+          <span>{saveProblem}</span>
+          <button type="button" onClick={resetGame}>清除损坏存档</button>
         </div>
       )}
       {error && <button className="start-error" type="button" onClick={clearError}>{error}</button>}

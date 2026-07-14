@@ -125,6 +125,24 @@ describe('command engine', () => {
     expect(enemy).toContain('只能调往己方城市');
   });
 
+  it('rejects an empty transfer', () => {
+    const state = createGame('liu', 1);
+
+    expect(validateCommand(state, 'liu', {
+      type: 'transfer', cityId: 'jiangling', officerId: 'liu-bei', targetCityId: 'wuling',
+      gold: 0, food: 0, troops: 0, officerIds: [],
+    })).toContain('至少调动物资或一名武将');
+  });
+
+  it('does not allow a city governor to be transferred', () => {
+    const state = createGame('liu', 1);
+
+    expect(validateCommand(state, 'liu', {
+      type: 'transfer', cityId: 'jiangling', officerId: 'guan-yu', targetCityId: 'wuling',
+      gold: 0, food: 0, troops: 0, officerIds: ['liu-bei'],
+    })).toContain('太守不可调离任所');
+  });
+
   it('rejects an officer who already acted', () => {
     const state = createGame('liu', 1);
     state.officers['liu-bei'].acted = true;

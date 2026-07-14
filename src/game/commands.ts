@@ -42,6 +42,9 @@ function validateTransfer(state: GameState, forceId: ForceId, command: Extract<G
   if ([command.gold, command.food, command.troops].some((value) => !Number.isFinite(value) || value < 0)) {
     errors.push('调动数值不能为负数');
   }
+  if (command.gold === 0 && command.food === 0 && command.troops === 0 && command.officerIds.length === 0) {
+    errors.push('至少调动物资或一名武将');
+  }
   if (source) {
     if (command.gold > source.gold) errors.push(`资金不足 ${command.gold}`);
     if (command.food > source.food) errors.push(`粮草不足 ${command.food}`);
@@ -51,6 +54,10 @@ function validateTransfer(state: GameState, forceId: ForceId, command: Extract<G
     const officer = state.officers[officerId];
     if (!officer || officer.forceId !== forceId || officer.cityId !== command.cityId) {
       errors.push('只能调动出发城市内的己方武将');
+      break;
+    }
+    if (source?.governorId === officerId) {
+      errors.push('太守不可调离任所');
       break;
     }
   }

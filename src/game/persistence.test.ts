@@ -60,6 +60,26 @@ describe('persistence', () => {
     expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '存档无法读取' });
   });
 
+  it('rejects missing city records and incomplete officer stats', () => {
+    const missingCity = createGame('liu', 1) as unknown as { cities: Record<string, unknown> };
+    delete missingCity.cities.jiangling;
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify(missingCity));
+    expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '存档无法读取' });
+
+    const missingStat = createGame('liu', 1) as unknown as { officers: Record<string, { stats: Record<string, number> }> };
+    delete missingStat.officers['liu-bei'].stats.politics;
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify(missingStat));
+    expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '存档无法读取' });
+  });
+
+  it('rejects broken governor and officer location references', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.governorId = 'cao-cao';
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify(state));
+
+    expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '存档无法读取' });
+  });
+
   it('reports an empty slot', () => {
     expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '没有存档' });
   });

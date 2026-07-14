@@ -1,5 +1,5 @@
-import { FORCE_IDS } from './scenario/jingxiang208';
-import type { City, GameState, Officer } from './types';
+import { CITY_IDS, FORCE_IDS, OFFICER_IDS } from './scenario/jingxiang208';
+import type { City, Force, GameState, Officer, Stats } from './types';
 
 export const AUTO_SAVE_KEY = 'jingxiang-208-autosave-v1';
 export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
@@ -30,6 +30,11 @@ function validPercentage(value: unknown) {
 
 function validResource(value: unknown) {
   return finite(value) && value >= 0;
+}
+
+function exactKeys(value: object, expected: readonly string[]) {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
 }
 
 function validCity(value: unknown): value is City {
@@ -64,8 +69,17 @@ function validOfficer(value: unknown): value is Officer {
     typeof officer.cityId === 'string' &&
     typeof officer.acted === 'boolean' &&
     Boolean(stats) &&
+    exactKeys(stats!, ['leadership', 'war', 'intelligence', 'politics', 'charisma'] satisfies Array<keyof Stats>) &&
     Object.values(stats!).every((stat) => finite(stat) && stat >= 1 && stat <= 100)
   );
+}
+
+function validForce(value: unknown): value is Force {
+  if (!value || typeof value !== 'object') return false;
+  const force = value as Partial<Force>;
+  return typeof force.id === 'string' && FORCE_IDS.includes(force.id as Force['id']) &&
+    typeof force.name === 'string' && typeof force.leaderId === 'string' &&
+    typeof force.color === 'string' && typeof force.description === 'string';
 }
 
 export function isGameState(value: unknown): value is GameState {
@@ -84,20 +98,34 @@ export function isGameState(value: unknown): value is GameState {
     !state.actionPoints ||
     !state.forces ||
     !Array.isArray(state.logs) ||
-    !finite(state.seed) ||
+    !Number.isSafeInteger(state.seed) || state.seed! < 0 || state.seed! > 0xffffffff ||
     !Number.isInteger(state.rngCursor) ||
-    state.rngCursor! < 0
+    state.rngCursor! < 0 || !Number.isSafeInteger(state.rngCursor) ||
+    (state.phase === 'finished' && state.month !== 24)
   ) return false;
+
+  if (!exactKeys(state.cities, CITY_IDS) || !exactKeys(state.officers, OFFICER_IDS) ||
+      !exactKeys(state.actionPoints, FORCE_IDS) || !exactKeys(state.forces, FORCE_IDS)) return false;
 
   const cities = Object.values(state.cities);
   const officers = Object.values(state.officers);
+  const cityById = state.cities;
+  const officerById = state.officers;
   return (
-    cities.length === 8 &&
-    cities.every(validCity) &&
-    officers.length === 24 &&
-    officers.every(validOfficer) &&
-    FORCE_IDS.every((forceId) => validResource(state.actionPoints![forceId]) && Boolean(state.forces![forceId])) &&
-    state.logs.every((log) => Boolean(log) && typeof log.id === 'string' && typeof log.message === 'string' && finite(log.month))
+    cities.every((city) => validCity(city) && cityById[city.id] === city &&
+      Boolean(officerById[city.governorId]) &&
+      officerById[city.governorId].forceId === city.ownerId &&
+      officerById[city.governorId].cityId === city.id) &&
+    officers.every((officer) => validOfficer(officer) && officerById[officer.id] === officer &&
+      CITY_IDS.includes(officer.cityId) &&
+      (officer.forceId === null || cityById[officer.cityId].ownerId === officer.forceId)) &&
+    FORCE_IDS.every((forceId) => Number.isInteger(state.actionPoints![forceId]) && validResource(state.actionPoints![forceId]) &&
+      state.actionPoints![forceId] <= 80 && validForce(state.forces![forceId]) &&
+      state.forces![forceId].id === forceId &&
+      officerById[state.forces![forceId].leaderId]?.forceId === forceId) &&
+    state.logs.every((log) => Boolean(log) && typeof log.id === 'string' && typeof log.message === 'string' &&
+      Number.isInteger(log.month) && log.month >= 1 && log.month <= 24 &&
+      (log.forceId === null || FORCE_IDS.includes(log.forceId)))
   );
 }
 

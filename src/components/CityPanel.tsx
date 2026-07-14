@@ -1,4 +1,5 @@
-import { Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
+import { ChevronDown, ChevronUp, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
+import { useState } from 'react';
 import { useGame } from '../game/store/GameProvider';
 import type { GameCommand } from '../game/types';
 
@@ -21,6 +22,7 @@ const formatNumber = (value: number) => value.toLocaleString('en-US');
 
 export function CityPanel({ onCommand }: CityPanelProps) {
   const { state, selectedCityId } = useGame();
+  const [collapsed, setCollapsed] = useState(false);
   if (!state || !selectedCityId) return null;
 
   const city = state.cities[selectedCityId];
@@ -30,7 +32,7 @@ export function CityPanel({ onCommand }: CityPanelProps) {
   const owned = city.ownerId === state.playerForceId;
 
   return (
-    <aside className="city-panel tool-panel" aria-label="城市经营面板">
+    <aside className={`city-panel tool-panel${collapsed ? ' is-collapsed' : ''}`} aria-label="城市经营面板">
       <header className="city-heading">
         <span className="force-line" style={{ backgroundColor: owner.color }} aria-hidden="true" />
         <div>
@@ -38,6 +40,15 @@ export function CityPanel({ onCommand }: CityPanelProps) {
           <h2>{city.name}</h2>
         </div>
         <b>{owned ? '本势力' : '他势力'}</b>
+        <button
+          type="button"
+          className="sheet-toggle icon-button"
+          aria-label={collapsed ? '展开城市面板' : '收起城市面板'}
+          title={collapsed ? '展开城市面板' : '收起城市面板'}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          {collapsed ? <ChevronUp /> : <ChevronDown />}
+        </button>
       </header>
 
       <dl className="city-resources">
@@ -72,7 +83,7 @@ export function CityPanel({ onCommand }: CityPanelProps) {
         </div>
       </section>
 
-      {owned ? (
+      {owned && state.phase === 'playing' ? (
         <section className="command-grid" aria-label="城市指令">
           {COMMANDS.map(({ type, label, Icon }) => (
             <button key={type} type="button" onClick={() => onCommand?.(type)}>
@@ -81,7 +92,7 @@ export function CityPanel({ onCommand }: CityPanelProps) {
           ))}
         </section>
       ) : (
-        <p className="readonly-note">仅可查看他势力城市情报</p>
+        <p className="readonly-note">{state.phase === 'finished' ? '经营期已经结束' : '仅可查看他势力城市情报'}</p>
       )}
     </aside>
   );

@@ -35,4 +35,15 @@ describe('game interface shell', () => {
 
     expect(screen.getByRole('button', { name: '继续游戏' })).toBeEnabled();
   });
+
+  it('reports and can clear an unreadable save', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem('jingxiang-208-autosave-v1', '{broken');
+
+    render(<App />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('存档无法读取');
+    await user.click(screen.getByRole('button', { name: '清除损坏存档' }));
+    expect(window.localStorage.getItem('jingxiang-208-autosave-v1')).toBeNull();
+  });
 });

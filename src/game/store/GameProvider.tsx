@@ -27,6 +27,7 @@ interface GameContextValue {
   error: string | null;
   hasAutosave: boolean;
   hasManualSave: boolean;
+  saveProblem: string | null;
   startGame(forceId: ForceId, seed?: number): void;
   loadGame(slot: SaveSlot): LoadResult;
   issueCommand(command: GameCommand): void;
@@ -134,10 +135,16 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     setSaveRevision((value) => value + 1);
   }, [storage]);
 
-  const availability = useMemo(() => ({
-    hasAutosave: loadSave(storage, 'auto').ok,
-    hasManualSave: loadSave(storage, 'manual').ok,
-  }), [saveRevision, storage]);
+  const availability = useMemo(() => {
+    const auto = loadSave(storage, 'auto');
+    const manual = loadSave(storage, 'manual');
+    const invalid = [auto, manual].find((result) => !result.ok && result.reason !== '没有存档');
+    return {
+      hasAutosave: auto.ok,
+      hasManualSave: manual.ok,
+      saveProblem: invalid && !invalid.ok ? invalid.reason : null,
+    };
+  }, [saveRevision, storage]);
 
   const value = useMemo<GameContextValue>(() => ({
     state,

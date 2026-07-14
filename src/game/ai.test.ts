@@ -38,4 +38,25 @@ describe('AI turn', () => {
 
     expect(chooseAiCommand(state, 'liu')).toBeNull();
   });
+
+  it('advances the persisted random cursor for weighted fallback development', () => {
+    const state = createGame('liu', 77);
+    for (const city of Object.values(state.cities)) {
+      if (city.ownerId === 'liu') {
+        city.order = 80;
+        city.food = 99999;
+        city.gold = 99999;
+        city.training = 100;
+        city.population = 0;
+      }
+    }
+    for (const officer of Object.values(state.officers)) {
+      if (officer.forceId === null && ['jiangling', 'wuling'].includes(officer.cityId)) officer.forceId = 'cao';
+    }
+
+    const next = runAiTurn(state, 'liu');
+
+    expect(next.rngCursor).toBeGreaterThan(state.rngCursor);
+    expect(next.logs.some((log) => log.message.includes('开发'))).toBe(true);
+  });
 });
