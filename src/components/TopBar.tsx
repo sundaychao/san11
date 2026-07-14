@@ -18,7 +18,7 @@ export function TopBar() {
       <div className="top-metric"><span>行动力</span><strong>{state.actionPoints[state.playerForceId]}</strong></div>
       <div className="top-actions">
         <button className="icon-button" type="button" onClick={manualSave} title="手动存档" aria-label="手动存档"><Save aria-hidden="true" /></button>
-        <button className="next-month" type="button" onClick={endMonth} aria-label="进行到下月"><SkipForward aria-hidden="true" />进行·下月</button>
+        <button className="next-month" type="button" onClick={endMonth} aria-label="进行到下月" disabled={state.phase === 'finished'}><SkipForward aria-hidden="true" />进行·下月</button>
       </div>
     </header>
   );

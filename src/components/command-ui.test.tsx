@@ -1,0 +1,56 @@
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it } from 'vitest';
+import { createGame } from '../game/scenario/jingxiang208';
+import { GameProvider } from '../game/store/GameProvider';
+import { GameShell } from './GameShell';
+
+function renderState(state = createGame('liu', 3)) {
+  return render(
+    <GameProvider initialState={state}>
+      <GameShell />
+    </GameProvider>,
+  );
+}
+
+describe('command interface', () => {
+  it('executes a patrol through the command dialog', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    await user.click(screen.getByRole('button', { name: '巡察' }));
+    const dialog = screen.getByRole('dialog', { name: '巡察' });
+    await user.selectOptions(within(dialog).getByLabelText('执行武将'), 'liu-bei');
+    await user.click(within(dialog).getByRole('button', { name: '执行巡察' }));
+
+    expect(screen.queryByRole('dialog', { name: '巡察' })).not.toBeInTheDocument();
+    expect(screen.getByText(/刘备巡察江陵/)).toBeVisible();
+    expect(screen.getByText('已行动')).toBeVisible();
+  });
+
+  it('shows live validation instead of executing an invalid transfer', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    await user.click(screen.getByRole('button', { name: '调动' }));
+    const dialog = screen.getByRole('dialog', { name: '调动' });
+    await user.type(within(dialog).getByLabelText('调动资金'), '999999');
+
+    expect(within(dialog).getByText(/资金不足/)).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: '执行调动' })).toBeDisabled();
+  });
+});
+
+describe('final settlement', () => {
+  it('shows rankings and restart controls after month 24', () => {
+    const state = createGame('liu', 5);
+    state.month = 24;
+    state.phase = 'finished';
+    renderState(state);
+
+    expect(screen.getByRole('heading', { name: '荆襄国力结算' })).toBeVisible();
+    expect(screen.getAllByRole('row')).toHaveLength(5);
+    expect(screen.getByRole('button', { name: '重新开局' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '查看最终地图' })).toBeEnabled();
+  });
+});
