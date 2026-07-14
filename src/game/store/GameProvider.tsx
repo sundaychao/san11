@@ -62,7 +62,11 @@ function browserStorage(): SaveAdapter {
 export function GameProvider({ children, initialState = null, storage: storageProp }: GameProviderProps) {
   const storage = storageProp ?? browserStorage();
   const [state, dispatch] = useReducer(reducer, initialState);
-  const [selectedCityId, setSelectedCityId] = useState<CityId | null>(null);
+  const [selectedCityId, setSelectedCityId] = useState<CityId | null>(() => (
+    initialState
+      ? Object.values(initialState.cities).find((city) => city.ownerId === initialState.playerForceId)?.id ?? null
+      : null
+  ));
   const [error, setError] = useState<string | null>(null);
   const [saveRevision, setSaveRevision] = useState(0);
 
