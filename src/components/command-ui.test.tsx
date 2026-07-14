@@ -14,6 +14,18 @@ function renderState(state = createGame('liu', 3)) {
 }
 
 describe('command interface', () => {
+  it('confirms before ending a month with legal actions remaining', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    await user.click(screen.getByRole('button', { name: '进行到下月' }));
+
+    expect(screen.getByRole('dialog', { name: '结束本月' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '确认进行' }));
+    expect(screen.queryByRole('dialog', { name: '结束本月' })).not.toBeInTheDocument();
+    expect(screen.getByText('五月')).toBeVisible();
+  });
+
   it('executes a patrol through the command dialog', async () => {
     const user = userEvent.setup();
     renderState();
