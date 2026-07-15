@@ -99,6 +99,21 @@ describe('game interface shell', () => {
     expect(within(menu).getByRole('button', { name: '调动' })).toBeVisible();
   });
 
+  it('does not open the command menu when clicking an enemy city', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const xiangyangMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('襄阳'));
+    expect(xiangyangMarker).toBeTruthy();
+    await user.click(xiangyangMarker!);
+
+    expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
+  });
+
   it('closes the current city command menu level on each right click', async () => {
     const user = userEvent.setup();
     render(

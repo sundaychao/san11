@@ -151,7 +151,9 @@ export function StrategicMap({ onCityMenu }: StrategicMapProps) {
                 data-testid="city-marker"
                 onClick={(event) => {
                   selectCity(city.id);
-                  onCityMenu?.(city.id, { x: event.clientX + 12, y: event.clientY });
+                  if (city.ownerId === state.playerForceId) {
+                    onCityMenu?.(city.id, { x: event.clientX + 12, y: event.clientY });
+                  }
                 }}
               >
                 <span className="city-fort" aria-hidden="true"><i /></span>
