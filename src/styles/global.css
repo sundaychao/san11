@@ -215,6 +215,17 @@ button { color: inherit; }
 .intel-row > span { width: 7px; align-self: stretch; background: var(--force-color); }
 .intel-row strong { color: #fff6d6; font-size: 13px; }
 .intel-row small { color: var(--muted); font-size: 11px; text-align: right; }
+.officer-list-dialog { width: min(760px, calc(100vw - 72px)); max-height: min(680px, calc(100dvh - 96px)); display: grid; gap: 13px; padding: 16px; overflow: hidden; background: rgba(18, 43, 45, 0.96); }
+.officer-list-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.officer-list-dialog header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
+.officer-list-dialog h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 26px; }
+.officer-table-wrap { min-height: 0; overflow: auto; border: 1px solid rgba(146, 136, 115, 0.65); }
+.officer-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.officer-table th, .officer-table td { min-height: 34px; padding: 8px 10px; border-bottom: 1px solid rgba(146, 136, 115, 0.5); text-align: right; font-size: 12px; }
+.officer-table thead th { position: sticky; top: 0; z-index: 1; background: rgba(18, 43, 45, 0.98); color: var(--gold); font-weight: 700; }
+.officer-table th:first-child, .officer-table td:first-child, .officer-table th:nth-child(2), .officer-table td:nth-child(2) { text-align: left; }
+.officer-table tbody th { color: #fff6d6; font-size: 13px; }
+.officer-table tbody tr:hover { background: rgba(197, 173, 111, 0.12); }
 .city-panel h2, .event-log h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; letter-spacing: 0; }
 .city-heading { display: grid; grid-template-columns: 5px 1fr auto auto; gap: 10px; align-items: center; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
 .city-heading .force-line { align-self: stretch; min-height: 48px; }

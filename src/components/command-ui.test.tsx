@@ -26,6 +26,24 @@ describe('command interface', () => {
     expect(screen.getByText('五月')).toBeVisible();
   });
 
+  it('opens a force officer list from the top bar with five stats', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    await user.click(screen.getByRole('button', { name: '武将' }));
+
+    const dialog = screen.getByRole('dialog', { name: '武将一览' });
+    const liuBeiRow = within(dialog).getByRole('row', { name: /刘备/ });
+    expect(within(dialog).getByText('统帅')).toBeVisible();
+    expect(within(dialog).getByText('武力')).toBeVisible();
+    expect(within(dialog).getByText('智力')).toBeVisible();
+    expect(within(dialog).getByText('政治')).toBeVisible();
+    expect(within(dialog).getByText('魅力')).toBeVisible();
+    expect(liuBeiRow).toHaveTextContent('78');
+    expect(within(liuBeiRow).getByText('75')).toBeVisible();
+    expect(within(liuBeiRow).getByText('99')).toBeVisible();
+  });
+
   it('executes a patrol through the command dialog', async () => {
     const user = userEvent.setup();
     renderState();
