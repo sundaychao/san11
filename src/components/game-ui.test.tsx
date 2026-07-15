@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { App } from '../app/App';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
-import { writeSave } from '../game/persistence';
+import { MANUAL_SAVE_KEY, writeSave } from '../game/persistence';
 import { GameShell } from './GameShell';
 
 describe('game interface shell', () => {
@@ -149,6 +149,30 @@ describe('game interface shell', () => {
     expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
   });
 
+  it('closes the current city command menu level on each outside left click', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    const menu = screen.getByTestId('city-command-menu');
+
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    expect(within(menu).getByRole('button', { name: '出征' })).toBeVisible();
+
+    fireEvent.mouseDown(screen.getByTestId('map-viewport'), { button: 0 });
+    expect(within(menu).queryByRole('button', { name: '出征' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('city-command-menu')).toBeVisible();
+
+    fireEvent.mouseDown(screen.getByTestId('map-viewport'), { button: 0 });
+    expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
+  });
+
   it('closes the first-level city command menu from a right click anywhere', async () => {
     const user = userEvent.setup();
     render(
@@ -180,11 +204,66 @@ describe('game interface shell', () => {
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
     const menu = screen.getByTestId('map-context-menu');
     expect(within(menu).getByRole('button', { name: '进行' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '情报' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '储存' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '载入' })).toBeVisible();
 
     await user.click(within(menu).getByRole('button', { name: '进行' }));
 
     expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+  });
+
+  it('closes the map context menu from a left click outside the menu', () => {
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+    expect(screen.getByTestId('map-context-menu')).toBeVisible();
+
+    fireEvent.mouseDown(screen.getByTestId('map-viewport'), { button: 0 });
+
+    expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
+  });
+
+  it('opens intelligence from the map context menu', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+    await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '情报' }));
+
+    const dialog = screen.getByRole('dialog', { name: '情报' });
+    expect(within(dialog).getByText('刘备')).toBeVisible();
+    expect(within(dialog).getByText('江陵')).toBeVisible();
+  });
+
+  it('saves and loads from the map context menu', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+    await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '储存' }));
+    expect(window.localStorage.getItem(MANUAL_SAVE_KEY)).not.toBeNull();
+
+    await user.click(screen.getByTestId('end-ten-day-button'));
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+    await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '载入' }));
+
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
   });
 
   it('edits map cells and exports the edited grid from the map editor', async () => {

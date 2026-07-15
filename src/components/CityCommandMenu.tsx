@@ -1,5 +1,5 @@
 import { Building2, ChevronRight, Swords, Users } from 'lucide-react';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { CityId, GameCommand } from '../game/types';
 
 type MenuSection = 'urban' | 'military' | 'talent';
@@ -35,6 +35,7 @@ interface CityCommandMenuProps {
 
 export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy }: CityCommandMenuProps) {
   const [activeSection, setActiveSection] = useState<MenuSection | null>(null);
+  const menuRef = useRef<HTMLElement>(null);
 
   const runCommand = (item: { command?: GameCommand['type']; action?: 'deploy' }) => {
     if (item.action === 'deploy') onDeploy(cityId);
@@ -56,8 +57,24 @@ export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy
     return () => document.removeEventListener('contextmenu', handleContextMenu);
   }, [activeSection, onClose]);
 
+  useEffect(() => {
+    const handleMouseDown = (event: globalThis.MouseEvent) => {
+      if (event.button !== 0) return;
+      if (menuRef.current?.contains(event.target as Node)) return;
+      if (activeSection) {
+        setActiveSection(null);
+        return;
+      }
+      onClose();
+    };
+
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [activeSection, onClose]);
+
   return (
     <nav
+      ref={menuRef}
       className="city-command-menu tool-panel"
       data-testid="city-command-menu"
       style={{ left: position.x, top: position.y } as CSSProperties}

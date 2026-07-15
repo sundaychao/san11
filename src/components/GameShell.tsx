@@ -1,5 +1,5 @@
 import { ArrowLeft, RotateCcw } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { deploymentCells } from '../game/battle/actions';
 import type { GridCoord } from '../game/battle/grid';
 import {
@@ -28,21 +28,24 @@ import { StrategicMap } from './StrategicMap';
 import { TopBar } from './TopBar';
 
 export function GameShell() {
-  const { deployUnit, endTenDay, state, selectedCityId, resetGame } = useGame();
+  const { deployUnit, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, state, selectedCityId, resetGame } = useGame();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [pendingDeploy, setPendingDeploy] = useState<DeployConfirmInput | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
   const [mapContextMenu, setMapContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [showIntel, setShowIntel] = useState(false);
   const [viewFinalMap, setViewFinalMap] = useState(false);
   const [editorState, setEditorState] = useState<MapEditorState | null>(null);
   const [editorTool, setEditorTool] = useState<MapEditorTool>('plain');
   const [editorExport, setEditorExport] = useState('');
+  const mapContextMenuRef = useRef<HTMLElement>(null);
   const closeCommand = useCallback(() => setActiveCommand(null), []);
   const launchCommand = useCallback((type: GameCommand['type']) => {
     setActiveCommand(type);
     setCityMenu(null);
     setMapContextMenu(null);
+    setShowIntel(false);
   }, []);
 
   const openEditor = useCallback(() => {
@@ -54,6 +57,7 @@ export function GameShell() {
     setEditorExport('');
     setCityMenu(null);
     setMapContextMenu(null);
+    setShowIntel(false);
   }, [state]);
 
   const editCell = useCallback((coord: { q: number; r: number }) => {
@@ -72,6 +76,7 @@ export function GameShell() {
     setPendingDeploy(null);
     setCityMenu(null);
     setMapContextMenu(null);
+    setShowIntel(false);
   }, []);
 
   const deployTargets = useMemo(() => (
@@ -106,6 +111,34 @@ export function GameShell() {
     setMapContextMenu(null);
     endTenDay();
   }, [endTenDay]);
+
+  const openIntelFromMap = useCallback(() => {
+    setMapContextMenu(null);
+    setShowIntel(true);
+  }, []);
+
+  const saveFromMap = useCallback(() => {
+    manualSave();
+    setMapContextMenu(null);
+  }, [manualSave]);
+
+  const loadFromMap = useCallback(() => {
+    if (hasManualSave) loadGame('manual');
+    else if (hasAutosave) loadGame('auto');
+    setMapContextMenu(null);
+  }, [hasAutosave, hasManualSave, loadGame]);
+
+  useEffect(() => {
+    if (!mapContextMenu) return undefined;
+    const closeOnLeftClickOutside = (event: globalThis.MouseEvent) => {
+      if (event.button !== 0) return;
+      if (mapContextMenuRef.current?.contains(event.target as Node)) return;
+      setMapContextMenu(null);
+    };
+
+    document.addEventListener('mousedown', closeOnLeftClickOutside);
+    return () => document.removeEventListener('mousedown', closeOnLeftClickOutside);
+  }, [mapContextMenu]);
 
   return (
     <main className="game-shell">
@@ -153,13 +186,54 @@ export function GameShell() {
       )}
       {mapContextMenu && (
         <nav
+          ref={mapContextMenuRef}
           className="map-context-menu tool-panel"
           data-testid="map-context-menu"
           style={{ left: mapContextMenu.x, top: mapContextMenu.y }}
           aria-label="地图命令菜单"
         >
           <button type="button" onClick={proceedTenDayFromMap}>进行</button>
+          <button type="button" onClick={openIntelFromMap}>情报</button>
+          <button type="button" onClick={saveFromMap}>储存</button>
+          <button type="button" onClick={loadFromMap}>载入</button>
         </nav>
+      )}
+      {showIntel && state && (
+        <section className="intel-panel tool-panel" role="dialog" aria-modal="false" aria-labelledby="intel-title">
+          <header>
+            <div>
+              <p>全局情报</p>
+              <h2 id="intel-title">情报</h2>
+            </div>
+            <button type="button" className="secondary-button" onClick={() => setShowIntel(false)}>关闭</button>
+          </header>
+          <div className="intel-grid">
+            <section aria-label="势力情报">
+              <h3>势力</h3>
+              {Object.values(state.forces).map((force) => {
+                const ownedCities = Object.values(state.cities).filter((city) => city.ownerId === force.id);
+                const troops = ownedCities.reduce((sum, city) => sum + city.troops, 0);
+                return (
+                  <div key={force.id} className="intel-row">
+                    <span style={{ '--force-color': force.color } as CSSProperties} />
+                    <strong>{force.name}</strong>
+                    <small>{ownedCities.length} 城 / {troops.toLocaleString('en-US')} 兵</small>
+                  </div>
+                );
+              })}
+            </section>
+            <section aria-label="城市情报">
+              <h3>城市</h3>
+              {Object.values(state.cities).map((city) => (
+                <div key={city.id} className="intel-row">
+                  <span style={{ '--force-color': state.forces[city.ownerId].color } as CSSProperties} />
+                  <strong>{city.name}</strong>
+                  <small>{state.forces[city.ownerId].name} / {city.troops.toLocaleString('en-US')} 兵</small>
+                </div>
+              ))}
+            </section>
+          </div>
+        </section>
       )}
       {activeCommand && selectedCityId && <CommandDialog type={activeCommand} cityId={selectedCityId} onClose={closeCommand} />}
       {deployCityId && (
