@@ -4,7 +4,7 @@ import { sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
 import type { EditableCityMarker } from '../game/map-editor/editor';
 import { useGame } from '../game/store/GameProvider';
-import type { CityId, GridCell } from '../game/types';
+import type { CityId, GridCell, TroopType } from '../game/types';
 
 interface MapView {
   x: number;
@@ -16,6 +16,14 @@ const INITIAL_VIEW: MapView = { x: 0, y: 0, scale: 1 };
 const CELL_SIZE = 43;
 const WORLD_WIDTH = GRID_WIDTH * CELL_SIZE;
 const WORLD_HEIGHT = GRID_HEIGHT * CELL_SIZE;
+const TROOP_TEXTURES: Record<TroopType, { glyph: string; label: string }> = {
+  sword: { glyph: '剑', label: '剑兵' },
+  spear: { glyph: '枪', label: '枪兵' },
+  halberd: { glyph: '戟', label: '戟兵' },
+  crossbow: { glyph: '弩', label: '弩兵' },
+  cavalry: { glyph: '骑', label: '骑兵' },
+  siege: { glyph: '械', label: '兵器' },
+};
 
 function cellPosition(q: number, r: number) {
   return {
@@ -164,22 +172,38 @@ export function StrategicMap({
           {Object.values(state.units).map((unit) => {
             const position = cellPosition(unit.q, unit.r);
             const leaderName = state.officers[unit.leaderId]?.name ?? '';
+            const troopType = unit.troopType ?? 'sword';
+            const texture = TROOP_TEXTURES[troopType];
+            const centerX = position.x + CELL_SIZE / 2;
+            const centerY = position.y + CELL_SIZE / 2;
             return (
-              <g key={unit.id} data-testid="battle-unit-marker" className="battle-unit-marker">
+              <g
+                key={unit.id}
+                data-testid="battle-unit-marker"
+                data-troop-type={troopType}
+                className={`battle-unit-marker troop-${troopType}`}
+                aria-label={`${leaderName} ${texture.label}`}
+              >
                 <text
                   className="battle-unit-leader-name"
-                  x={position.x + CELL_SIZE / 2}
+                  x={centerX}
                   y={Math.max(12, position.y - 5)}
                 >
                   {leaderName}
                 </text>
-                <circle
-                  cx={position.x + CELL_SIZE / 2}
-                  cy={position.y + CELL_SIZE / 2}
-                  r={CELL_SIZE * 0.34}
-                  style={{ '--force-color': state.forces[unit.forceId].color } as CSSProperties}
-                />
-                <text className="battle-unit-troops" x={position.x + CELL_SIZE / 2} y={position.y + CELL_SIZE / 2 + 4}>{Math.floor(unit.troops / 1000)}</text>
+                <g className="battle-unit-model" style={{ '--force-color': state.forces[unit.forceId].color } as CSSProperties}>
+                  <ellipse className="battle-unit-shadow" cx={centerX} cy={centerY + 15} rx={CELL_SIZE * 0.28} ry={CELL_SIZE * 0.08} />
+                  <path
+                    className="battle-unit-body"
+                    d={`M ${centerX - 15} ${centerY - 10} L ${centerX + 7} ${centerY - 15} L ${centerX + 17} ${centerY + 6} L ${centerX - 7} ${centerY + 16} L ${centerX - 18} ${centerY + 2} Z`}
+                  />
+                  <path
+                    className="battle-unit-crest"
+                    d={`M ${centerX - 8} ${centerY - 13} L ${centerX + 10} ${centerY - 16} L ${centerX + 4} ${centerY - 5} L ${centerX - 13} ${centerY - 1} Z`}
+                  />
+                  <text className="battle-unit-model-glyph" x={centerX} y={centerY + 4}>{texture.glyph}</text>
+                </g>
+                <text className="battle-unit-troops" x={centerX} y={centerY + 24}>{Math.floor(unit.troops / 1000)}</text>
               </g>
             );
           })}

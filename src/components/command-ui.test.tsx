@@ -88,6 +88,8 @@ describe('command interface', () => {
 
     const unitMarker = screen.getByTestId('battle-unit-marker');
     expect(unitMarker).toBeVisible();
+    expect(unitMarker).toHaveAttribute('data-troop-type', 'spear');
+    expect(within(unitMarker).getByText('枪')).toBeVisible();
     expect(within(unitMarker).getByText('刘备')).toBeVisible();
   });
 });
