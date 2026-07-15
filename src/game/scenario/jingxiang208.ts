@@ -1,5 +1,5 @@
 import { CITY_GRID_CENTERS, createBattleGrid } from '../battle/scenario';
-import type { City, CityId, Force, ForceId, GameState, Officer, Stats } from '../types';
+import type { City, CityId, Force, ForceId, GameState, Officer, OfficerAptitudes, Stats } from '../types';
 
 type CitySeed = Omit<City, 'durability' | 'gridQ' | 'gridR' | 'id' | 'maxDurability'> & { id: CityId };
 type OfficerSeed = Omit<Officer, 'acted' | 'location'>;
@@ -53,6 +53,51 @@ export const CITY_IDS = citySeeds.map((city) => city.id);
 function stats(leadership: number, war: number, intelligence: number, politics: number, charisma: number): Stats {
   return { leadership, war, intelligence, politics, charisma };
 }
+
+function aptitudes(
+  spear: OfficerAptitudes['spear'],
+  halberd: OfficerAptitudes['halberd'],
+  crossbow: OfficerAptitudes['crossbow'],
+  cavalry: OfficerAptitudes['cavalry'],
+  siege: OfficerAptitudes['siege'],
+  navy: OfficerAptitudes['navy'],
+): OfficerAptitudes {
+  return { spear, halberd, crossbow, cavalry, siege, navy };
+}
+
+const defaultAptitudes = aptitudes('B', 'B', 'B', 'B', 'C', 'C');
+
+const officerProfiles: Partial<Record<string, { skill: string; aptitudes: OfficerAptitudes }>> = {
+  'cao-cao': { skill: '奸雄', aptitudes: aptitudes('A', 'A', 'A', 'S', 'A', 'B') },
+  'cao-ren': { skill: '坚守', aptitudes: aptitudes('A', 'S', 'B', 'A', 'B', 'C') },
+  'xun-yu': { skill: '王佐', aptitudes: aptitudes('C', 'C', 'B', 'C', 'A', 'C') },
+  'xu-huang': { skill: '沉着', aptitudes: aptitudes('A', 'S', 'B', 'A', 'B', 'C') },
+  'xiahou-dun': { skill: '刚将', aptitudes: aptitudes('A', 'A', 'B', 'S', 'C', 'C') },
+  'xiahou-yuan': { skill: '急袭', aptitudes: aptitudes('B', 'A', 'S', 'S', 'C', 'C') },
+  'zhang-liao': { skill: '威风', aptitudes: aptitudes('A', 'A', 'A', 'S', 'B', 'C') },
+  'guo-jia': { skill: '鬼谋', aptitudes: aptitudes('C', 'C', 'A', 'B', 'A', 'C') },
+  'liu-bei': { skill: '仁德', aptitudes: aptitudes('A', 'A', 'B', 'B', 'C', 'C') },
+  'guan-yu': { skill: '神将', aptitudes: aptitudes('S', 'S', 'B', 'A', 'C', 'C') },
+  'zhang-fei': { skill: '斗神', aptitudes: aptitudes('S', 'A', 'B', 'A', 'C', 'C') },
+  'zhuge-liang': { skill: '神算', aptitudes: aptitudes('B', 'B', 'A', 'C', 'S', 'B') },
+  'jian-yong': { skill: '论客', aptitudes: aptitudes('C', 'C', 'B', 'C', 'C', 'C') },
+  'sun-qian': { skill: '能吏', aptitudes: aptitudes('C', 'C', 'B', 'C', 'C', 'C') },
+  'chen-dao': { skill: '白毦', aptitudes: aptitudes('A', 'A', 'B', 'A', 'C', 'C') },
+  'liao-hua': { skill: '踏破', aptitudes: aptitudes('B', 'A', 'B', 'B', 'C', 'C') },
+  'ma-su': { skill: '百出', aptitudes: aptitudes('B', 'C', 'A', 'B', 'A', 'C') },
+  'sun-quan': { skill: '明君', aptitudes: aptitudes('B', 'B', 'A', 'B', 'B', 'A') },
+  'zhou-yu': { skill: '火神', aptitudes: aptitudes('A', 'B', 'A', 'B', 'S', 'S') },
+  'lu-su': { skill: '富豪', aptitudes: aptitudes('B', 'B', 'A', 'C', 'A', 'S') },
+  'gan-ning': { skill: '威风', aptitudes: aptitudes('A', 'A', 'A', 'B', 'C', 'S') },
+  'taishi-ci': { skill: '弓神', aptitudes: aptitudes('A', 'B', 'S', 'A', 'C', 'A') },
+  'lu-meng': { skill: '攻心', aptitudes: aptitudes('A', 'A', 'A', 'B', 'A', 'S') },
+  'wen-pin': { skill: '水将', aptitudes: aptitudes('A', 'A', 'B', 'B', 'C', 'A') },
+  'zhao-yun': { skill: '洞察', aptitudes: aptitudes('S', 'A', 'A', 'S', 'C', 'C') },
+  'pang-tong': { skill: '连环', aptitudes: aptitudes('B', 'C', 'A', 'C', 'S', 'B') },
+  'huang-zhong': { skill: '弓神', aptitudes: aptitudes('A', 'B', 'S', 'A', 'C', 'C') },
+  'wei-yan': { skill: '猛者', aptitudes: aptitudes('S', 'A', 'B', 'A', 'C', 'C') },
+  'ma-liang': { skill: '能吏', aptitudes: aptitudes('C', 'C', 'B', 'C', 'A', 'C') },
+};
 
 const officerSeeds: OfficerSeed[] = [
   { id: 'cao-cao', name: '曹操', forceId: 'cao', cityId: 'wan', stats: stats(96, 72, 91, 94, 96) },
@@ -124,12 +169,17 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
       durability: 3000,
     };
   })) as Record<CityId, City>;
-  const officers = toRecord(officerSeeds.map((officer) => ({
-    ...officer,
-    location: { kind: officer.forceId === null ? 'unaffiliated' : 'city', cityId: officer.cityId } as Officer['location'],
-    stats: { ...officer.stats },
-    acted: false,
-  })));
+  const officers = toRecord(officerSeeds.map((officer) => {
+    const profile = officerProfiles[officer.id];
+    return {
+      ...officer,
+      location: { kind: officer.forceId === null ? 'unaffiliated' : 'city', cityId: officer.cityId } as Officer['location'],
+      stats: { ...officer.stats },
+      skill: profile?.skill ?? '无',
+      aptitudes: { ...(profile?.aptitudes ?? defaultAptitudes) },
+      acted: false,
+    };
+  }));
 
   return {
     schemaVersion: 2,

@@ -18,6 +18,17 @@ export interface Stats {
   charisma: number;
 }
 
+export type AptitudeGrade = 'S' | 'A' | 'B' | 'C';
+
+export interface OfficerAptitudes {
+  spear: AptitudeGrade;
+  halberd: AptitudeGrade;
+  crossbow: AptitudeGrade;
+  cavalry: AptitudeGrade;
+  siege: AptitudeGrade;
+  navy: AptitudeGrade;
+}
+
 export interface Officer {
   id: string;
   name: string;
@@ -25,6 +36,8 @@ export interface Officer {
   cityId: CityId;
   location: OfficerLocation;
   stats: Stats;
+  skill?: string;
+  aptitudes?: OfficerAptitudes;
   acted: boolean;
 }
 

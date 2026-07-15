@@ -28,22 +28,47 @@ describe('command interface', () => {
     expect(screen.getByText('五月')).toBeVisible();
   });
 
-  it('opens a force officer list from the top bar with five stats', async () => {
+  it('opens a categorized force officer list with ownership, stats, skills, aptitudes, and status', async () => {
     const user = userEvent.setup();
     renderState();
 
     await user.click(screen.getByRole('button', { name: '武将' }));
 
     const dialog = screen.getByRole('dialog', { name: '武将一览' });
-    const liuBeiRow = within(dialog).getByRole('row', { name: /刘备/ });
+    expect(within(dialog).getByRole('button', { name: '所属' })).toHaveClass('is-active');
+    expect(within(dialog).getByRole('button', { name: '能力' })).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: '特技' })).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: '适性' })).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: '状态' })).toBeVisible();
+    const officerRow = (name: string) => within(dialog).getByRole('rowheader', { name }).closest('tr')!;
+
+    const ownershipRow = officerRow('刘备');
+    expect(ownershipRow).toHaveTextContent('刘备军');
+    expect(ownershipRow).toHaveTextContent('江陵');
+
+    await user.click(within(dialog).getByRole('button', { name: '能力' }));
+    const abilityRow = officerRow('刘备');
     expect(within(dialog).getByText('统帅')).toBeVisible();
     expect(within(dialog).getByText('武力')).toBeVisible();
     expect(within(dialog).getByText('智力')).toBeVisible();
     expect(within(dialog).getByText('政治')).toBeVisible();
     expect(within(dialog).getByText('魅力')).toBeVisible();
-    expect(liuBeiRow).toHaveTextContent('78');
-    expect(within(liuBeiRow).getByText('75')).toBeVisible();
-    expect(within(liuBeiRow).getByText('99')).toBeVisible();
+    expect(abilityRow).toHaveTextContent('78');
+    expect(within(abilityRow).getByText('75')).toBeVisible();
+    expect(within(abilityRow).getByText('99')).toBeVisible();
+
+    await user.click(within(dialog).getByRole('button', { name: '特技' }));
+    expect(officerRow('刘备')).toHaveTextContent('仁德');
+
+    await user.click(within(dialog).getByRole('button', { name: '适性' }));
+    expect(within(dialog).getByText('枪')).toBeVisible();
+    expect(within(dialog).getByText('戟')).toBeVisible();
+    expect(within(dialog).getByText('弩')).toBeVisible();
+    expect(within(dialog).getByText('骑')).toBeVisible();
+    expect(within(dialog).getByText('兵器')).toBeVisible();
+    expect(within(dialog).getByText('水军')).toBeVisible();
+    const aptitudeCells = within(officerRow('刘备')).getAllByRole('cell').map((cell) => cell.textContent);
+    expect(aptitudeCells).toEqual(['A', 'A', 'B', 'B', 'C', 'C']);
   });
 
   it('shows current officer task and time only when a task is active', async () => {
@@ -66,6 +91,7 @@ describe('command interface', () => {
     await user.click(screen.getByRole('button', { name: '武将' }));
 
     const dialog = screen.getByRole('dialog', { name: '武将一览' });
+    await user.click(within(dialog).getByRole('button', { name: '状态' }));
     const guanYuRow = within(dialog).getByRole('row', { name: /关羽/ });
     const jianYongRow = within(dialog).getByRole('row', { name: /简雍/ });
     const liuBeiRow = within(dialog).getByRole('row', { name: /刘备/ });

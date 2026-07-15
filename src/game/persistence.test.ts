@@ -30,6 +30,17 @@ describe('persistence', () => {
     expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
   });
 
+  it('loads older v2 saves without officer skill and aptitude fields', () => {
+    const state = createGame('liu', 9);
+    for (const officer of Object.values(state.officers)) {
+      delete officer.skill;
+      delete officer.aptitudes;
+    }
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify(state));
+
+    expect(loadSave(storage, 'auto')).toEqual({ ok: true, state });
+  });
+
   it('uses an independent manual slot', () => {
     writeSave(storage, 'manual', createGame('sun', 2));
 

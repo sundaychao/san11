@@ -7,6 +7,7 @@ export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
 export type SaveSlot = 'auto' | 'manual';
 
 const TROOP_TYPES = ['sword', 'spear', 'halberd', 'crossbow', 'cavalry', 'siege'];
+const APTITUDE_GRADES = ['S', 'A', 'B', 'C'];
 
 export interface SaveAdapter {
   getItem(key: string): string | null;
@@ -77,6 +78,13 @@ function validOfficerLocation(location: unknown) {
     Number(value.remainingTenDays) > 0;
 }
 
+function validOfficerAptitudes(value: unknown) {
+  if (!value || typeof value !== 'object') return false;
+  const aptitudes = value as Record<string, unknown>;
+  return exactKeys(aptitudes, ['spear', 'halberd', 'crossbow', 'cavalry', 'siege', 'navy']) &&
+    Object.values(aptitudes).every((grade) => APTITUDE_GRADES.includes(String(grade)));
+}
+
 function validOfficer(value: unknown): value is Officer {
   if (!value || typeof value !== 'object') return false;
   const officer = value as Partial<Officer>;
@@ -88,6 +96,8 @@ function validOfficer(value: unknown): value is Officer {
     typeof officer.cityId === 'string' &&
     validOfficerLocation(officer.location) &&
     typeof officer.acted === 'boolean' &&
+    (officer.skill === undefined || typeof officer.skill === 'string') &&
+    (officer.aptitudes === undefined || validOfficerAptitudes(officer.aptitudes)) &&
     Boolean(stats) &&
     exactKeys(stats!, ['leadership', 'war', 'intelligence', 'politics', 'charisma'] satisfies Array<keyof Stats>) &&
     Object.values(stats!).every((stat) => finite(stat) && stat >= 1 && stat <= 100)
