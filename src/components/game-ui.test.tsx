@@ -98,4 +98,28 @@ describe('game interface shell', () => {
     expect(within(menu).getByRole('button', { name: '探索人才' })).toBeVisible();
     expect(within(menu).getByRole('button', { name: '调动' })).toBeVisible();
   });
+
+  it('closes the current city command menu level on each right click', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    const menu = screen.getByTestId('city-command-menu');
+
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    expect(within(menu).getByRole('button', { name: '出征' })).toBeVisible();
+
+    await user.pointer({ keys: '[MouseRight]', target: menu });
+    expect(within(menu).queryByRole('button', { name: '出征' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('city-command-menu')).toBeVisible();
+
+    await user.pointer({ keys: '[MouseRight]', target: menu });
+    expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
+  });
 });
