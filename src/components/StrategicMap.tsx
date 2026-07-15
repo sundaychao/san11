@@ -210,7 +210,8 @@ export function StrategicMap({
             const position = cellPosition(unit.q, unit.r);
             const leaderName = state.officers[unit.leaderId]?.name ?? '';
             const troopType = unit.troopType ?? 'sword';
-            const texture = TROOP_TEXTURES[troopType];
+            const unitKind = unit.kind ?? 'combat';
+            const texture = unitKind === 'transport' ? { glyph: '输', label: '输送队' } : TROOP_TEXTURES[troopType];
             const centerX = position.x + CELL_SIZE / 2;
             const centerY = position.y + CELL_SIZE / 2;
             return (
@@ -219,7 +220,8 @@ export function StrategicMap({
                 data-testid="battle-unit-marker"
                 data-grid-position={`${unit.q},${unit.r}`}
                 data-troop-type={troopType}
-                className={`battle-unit-marker troop-${troopType}${selectedUnitId === unit.id ? ' is-selected' : ''}`}
+                data-unit-kind={unitKind}
+                className={`battle-unit-marker troop-${troopType} unit-${unitKind}${selectedUnitId === unit.id ? ' is-selected' : ''}`}
                 aria-label={`${leaderName} ${texture.label}`}
                 onPointerDown={(event) => {
                   if (event.button !== 0) return;

@@ -33,6 +33,15 @@ interface DeployInput {
   food: number;
 }
 
+interface TransportInput {
+  cityId: CityId;
+  officerId: string;
+  destination?: GridCoord;
+  troops: number;
+  gold: number;
+  food: number;
+}
+
 function cellAt(state: GameState, coord: GridCoord): GridCell | undefined {
   return state.grid.find((cell) => cell.q === coord.q && cell.r === coord.r);
 }
@@ -226,6 +235,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   next.officers[input.officerId].location = { kind: 'unit', unitId };
   next.units[unitId] = {
     id: unitId,
+    kind: 'combat',
     forceId,
     leaderId: input.officerId,
     homeCityId: input.cityId,
@@ -244,6 +254,62 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
     month: next.month,
     forceId,
     message: `${officer.name}率军从${city.name}出征`,
+  });
+  return next;
+}
+
+export function deployTransportUnit(state: GameState, forceId: ForceId, input: TransportInput): GameState {
+  const city = state.cities[input.cityId];
+  const officer = state.officers[input.officerId];
+  if (state.phase !== 'playing') throw new Error('游戏已经结束');
+  if (state.turnForceId !== forceId) throw new Error('不是当前势力回合');
+  if (!city || city.ownerId !== forceId) throw new Error('只能从己方城市输送');
+  if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== city.id) {
+    throw new Error('武将不在输送城市');
+  }
+  if (officer.acted) throw new Error('武将已经行动');
+  if (state.actionPoints[forceId] < DEPLOY_AP_COST) throw new Error('行动力不足 20');
+  if (!Number.isInteger(input.troops) || input.troops < 0 || input.troops > 10000) throw new Error('输送士兵必须为 0-10000');
+  if (!Number.isInteger(input.gold) || input.gold < 0 || input.gold > city.gold) throw new Error('资金不足');
+  if (!Number.isInteger(input.food) || input.food < 0 || input.food > city.food) throw new Error('兵粮不足');
+  if (input.troops === 0 && input.gold === 0 && input.food === 0) throw new Error('至少输送一种资源');
+  if (city.troops - input.troops < 500) throw new Error('城市至少保留 500 兵力');
+
+  const spawn = input.destination ?? deploymentCells(state, input.cityId)[0];
+  if (!spawn) throw new Error('没有合法输送位置');
+  if (!deploymentCells(state, input.cityId).some((coord) => coord.q === spawn.q && coord.r === spawn.r)) {
+    throw new Error('输送位置超出移动范围');
+  }
+
+  const next = structuredClone(state);
+  const unitId = `transport-${next.month}-${next.tenDay}-${input.officerId}-${Object.keys(next.units).length + 1}`;
+  next.cities[input.cityId].troops -= input.troops;
+  next.cities[input.cityId].gold -= input.gold;
+  next.cities[input.cityId].food -= input.food;
+  next.actionPoints[forceId] -= DEPLOY_AP_COST;
+  next.officers[input.officerId].acted = true;
+  next.officers[input.officerId].location = { kind: 'unit', unitId };
+  next.units[unitId] = {
+    id: unitId,
+    kind: 'transport',
+    forceId,
+    leaderId: input.officerId,
+    homeCityId: input.cityId,
+    gold: input.gold,
+    q: spawn.q,
+    r: spawn.r,
+    troops: input.troops,
+    food: input.food,
+    energy: 100,
+    movementRemaining: BASE_MOVEMENT,
+    moved: true,
+    acted: false,
+  };
+  next.logs.push({
+    id: `transport-${unitId}`,
+    month: next.month,
+    forceId,
+    message: `${officer.name}从${city.name}输送物资`,
   });
   return next;
 }

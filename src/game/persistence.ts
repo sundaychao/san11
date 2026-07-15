@@ -115,9 +115,11 @@ function validUnit(value: unknown): value is ArmyUnit {
   const unit = value as Partial<ArmyUnit>;
   return typeof unit.id === 'string' &&
     FORCE_IDS.includes(unit.forceId!) &&
+    (unit.kind === undefined || unit.kind === 'combat' || unit.kind === 'transport') &&
     typeof unit.leaderId === 'string' &&
     CITY_IDS.includes(unit.homeCityId!) &&
     (unit.troopType === undefined || TROOP_TYPES.includes(unit.troopType)) &&
+    (unit.gold === undefined || validResource(unit.gold)) &&
     Number.isInteger(unit.q) &&
     Number.isInteger(unit.r) &&
     validResource(unit.troops) &&

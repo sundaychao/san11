@@ -26,6 +26,7 @@ import { MapEditorPanel } from './MapEditorPanel';
 import { ResultOverlay } from './ResultOverlay';
 import { StrategicMap } from './StrategicMap';
 import { TopBar } from './TopBar';
+import { TransportDialog, type TransportConfirmInput } from './TransportDialog';
 
 const TERRAIN_LABELS: Record<TerrainType, string> = {
   road: '道路',
@@ -37,10 +38,12 @@ const TERRAIN_LABELS: Record<TerrainType, string> = {
 };
 
 export function GameShell() {
-  const { deployUnit, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, moveUnit, state, selectedCityId, resetGame } = useGame();
+  const { deployTransportUnit, deployUnit, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, moveUnit, state, selectedCityId, resetGame } = useGame();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
+  const [transportCityId, setTransportCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [pendingDeploy, setPendingDeploy] = useState<DeployConfirmInput | null>(null);
+  const [pendingTransport, setPendingTransport] = useState<TransportConfirmInput | null>(null);
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [hoveredCell, setHoveredCell] = useState<GridCell | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
@@ -86,7 +89,20 @@ export function GameShell() {
 
   const openDeployDialog = useCallback((cityId: NonNullable<typeof selectedCityId>) => {
     setDeployCityId(cityId);
+    setTransportCityId(null);
     setPendingDeploy(null);
+    setPendingTransport(null);
+    setCityMenu(null);
+    setMapContextMenu(null);
+    setShowIntel(false);
+    setSelectedUnitId(null);
+  }, []);
+
+  const openTransportDialog = useCallback((cityId: NonNullable<typeof selectedCityId>) => {
+    setTransportCityId(cityId);
+    setDeployCityId(null);
+    setPendingDeploy(null);
+    setPendingTransport(null);
     setCityMenu(null);
     setMapContextMenu(null);
     setShowIntel(false);
@@ -94,8 +110,10 @@ export function GameShell() {
   }, []);
 
   const deployTargets = useMemo(() => (
-    state && pendingDeploy ? deploymentCells(state, pendingDeploy.cityId) : []
-  ), [pendingDeploy, state]);
+    state && (pendingDeploy || pendingTransport)
+      ? deploymentCells(state, (pendingDeploy ?? pendingTransport)!.cityId)
+      : []
+  ), [pendingDeploy, pendingTransport, state]);
   const moveTargets = useMemo(() => (
     state && selectedUnitId ? movementCells(state, selectedUnitId) : []
   ), [selectedUnitId, state]);
@@ -104,17 +122,31 @@ export function GameShell() {
     setDeployCityId(null);
   }, []);
 
+  const closeTransportDialog = useCallback(() => {
+    setTransportCityId(null);
+  }, []);
+
   const confirmDeploySetup = useCallback((input: DeployConfirmInput) => {
     setPendingDeploy(input);
     setDeployCityId(null);
   }, []);
 
+  const confirmTransportSetup = useCallback((input: TransportConfirmInput) => {
+    setPendingTransport(input);
+    setTransportCityId(null);
+  }, []);
+
   const selectDeployTarget = useCallback((coord: GridCoord) => {
-    if (!pendingDeploy) return;
+    if (!pendingDeploy && !pendingTransport) return;
     if (!deployTargets.some((target) => target.q === coord.q && target.r === coord.r)) return;
-    deployUnit({ ...pendingDeploy, destination: coord });
+    if (pendingTransport) {
+      deployTransportUnit({ ...pendingTransport, destination: coord });
+      setPendingTransport(null);
+      return;
+    }
+    deployUnit({ ...pendingDeploy!, destination: coord });
     setPendingDeploy(null);
-  }, [deployTargets, deployUnit, pendingDeploy]);
+  }, [deployTargets, deployTransportUnit, deployUnit, pendingDeploy, pendingTransport]);
 
   const selectUnit = useCallback((unitId: string) => {
     if (!state) return;
@@ -136,13 +168,13 @@ export function GameShell() {
   }, [moveTargets, moveUnit, selectedUnitId]);
 
   const openMapContextMenu = useCallback((position: { x: number; y: number }) => {
-    if (cityMenu || editorState || deployCityId || pendingDeploy) {
+    if (cityMenu || editorState || deployCityId || transportCityId || pendingDeploy || pendingTransport) {
       setCityMenu(null);
       return;
     }
     setSelectedUnitId(null);
     setMapContextMenu(position);
-  }, [cityMenu, deployCityId, editorState, pendingDeploy]);
+  }, [cityMenu, deployCityId, editorState, pendingDeploy, pendingTransport, transportCityId]);
 
   const proceedTenDayFromMap = useCallback(() => {
     setMapContextMenu(null);
@@ -229,6 +261,7 @@ export function GameShell() {
           position={cityMenu.position}
           onCommand={launchCommand}
           onDeploy={openDeployDialog}
+          onTransport={openTransportDialog}
           onClose={() => setCityMenu(null)}
         />
       )}
@@ -289,6 +322,13 @@ export function GameShell() {
           cityId={deployCityId}
           onConfirm={confirmDeploySetup}
           onClose={closeDeployDialog}
+        />
+      )}
+      {transportCityId && (
+        <TransportDialog
+          cityId={transportCityId}
+          onConfirm={confirmTransportSetup}
+          onClose={closeTransportDialog}
         />
       )}
       {state?.phase === 'finished' && !viewFinalMap && <ResultOverlay onViewMap={() => setViewFinalMap(true)} />}

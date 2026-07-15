@@ -10,7 +10,7 @@ const SECTIONS: Array<{ id: MenuSection; label: string; Icon: typeof Building2 }
   { id: 'talent', label: '人才', Icon: Users },
 ];
 
-const SUB_COMMANDS: Record<MenuSection, Array<{ label: string; command?: GameCommand['type']; action?: 'deploy' }>> = {
+const SUB_COMMANDS: Record<MenuSection, Array<{ label: string; command?: GameCommand['type']; action?: 'deploy' | 'transport' }>> = {
   urban: [
     { label: '开发', command: 'develop' },
     { label: '巡查', command: 'patrol' },
@@ -18,6 +18,7 @@ const SUB_COMMANDS: Record<MenuSection, Array<{ label: string; command?: GameCom
   military: [
     { label: '训练', command: 'train' },
     { label: '出征', action: 'deploy' },
+    { label: '输送', action: 'transport' },
   ],
   talent: [
     { label: '探索人才', command: 'talent' },
@@ -30,15 +31,17 @@ interface CityCommandMenuProps {
   position: { x: number; y: number };
   onCommand(type: GameCommand['type']): void;
   onDeploy(cityId: CityId): void;
+  onTransport(cityId: CityId): void;
   onClose(): void;
 }
 
-export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy }: CityCommandMenuProps) {
+export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy, onTransport }: CityCommandMenuProps) {
   const [activeSection, setActiveSection] = useState<MenuSection | null>(null);
   const menuRef = useRef<HTMLElement>(null);
 
-  const runCommand = (item: { command?: GameCommand['type']; action?: 'deploy' }) => {
+  const runCommand = (item: { command?: GameCommand['type']; action?: 'deploy' | 'transport' }) => {
     if (item.action === 'deploy') onDeploy(cityId);
+    if (item.action === 'transport') onTransport(cityId);
     if (item.command) onCommand(item.command);
     onClose();
   };

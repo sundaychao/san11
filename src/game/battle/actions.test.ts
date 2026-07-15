@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createGame } from '../scenario/jingxiang208';
 import { settleTenDay } from '../turn';
-import { attackCity, attackUnit, deployUnit, deploymentCells, moveUnit, waitUnit } from './actions';
+import { attackCity, attackUnit, deployTransportUnit, deployUnit, deploymentCells, moveUnit, waitUnit } from './actions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 
 function cityKeys(state: ReturnType<typeof createGame>) {
@@ -73,6 +73,37 @@ describe('battle deployment and movement actions', () => {
     const unit = Object.values(next.units)[0];
     expect(unit.q).toBe(destination.q);
     expect(unit.r).toBe(destination.r);
+  });
+
+  it('deploys a transport unit with troops, gold, and food to a selected legal cell', () => {
+    const state = createGame('liu', 1);
+    const destination = deploymentCells(state, 'jiangling')[0];
+
+    const next = deployTransportUnit(state, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      destination,
+      troops: 1200,
+      gold: 900,
+      food: 1800,
+    });
+
+    const unit = Object.values(next.units)[0];
+    expect(unit).toMatchObject({
+      kind: 'transport',
+      leaderId: 'guan-yu',
+      troops: 1200,
+      gold: 900,
+      food: 1800,
+      q: destination.q,
+      r: destination.r,
+      movementRemaining: 5,
+      moved: true,
+    });
+    expect(next.cities.jiangling.troops).toBe(state.cities.jiangling.troops - 1200);
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 900);
+    expect(next.cities.jiangling.food).toBe(state.cities.jiangling.food - 1800);
+    expect(next.officers['guan-yu'].location).toEqual({ kind: 'unit', unitId: unit.id });
   });
 
   it('rejects deployment that would leave fewer than 500 city troops', () => {

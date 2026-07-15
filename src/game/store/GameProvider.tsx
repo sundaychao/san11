@@ -11,6 +11,7 @@ import { runAiTurn } from '../ai';
 import {
   attackCity as resolveAttackCity,
   attackUnit as resolveAttackUnit,
+  deployTransportUnit as resolveDeployTransportUnit,
   deployUnit as resolveDeployUnit,
   moveUnit as resolveMoveUnit,
   waitUnit as resolveWaitUnit,
@@ -41,6 +42,7 @@ interface GameContextValue {
   loadGame(slot: SaveSlot): LoadResult;
   issueCommand(command: GameCommand): void;
   deployUnit(input: { cityId: CityId; officerId: string; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; food: number }): void;
+  deployTransportUnit(input: { cityId: CityId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }): void;
   moveUnit(unitId: string, destination: { q: number; r: number }): void;
   attackUnit(attackerId: string, targetId: string): void;
   attackCity(attackerId: string, cityId: CityId): void;
@@ -152,6 +154,10 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     applyBattleAction((current) => resolveDeployUnit(current, current.playerForceId, input));
   }, [applyBattleAction]);
 
+  const deployTransport = useCallback((input: { cityId: CityId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }) => {
+    applyBattleAction((current) => resolveDeployTransportUnit(current, current.playerForceId, input));
+  }, [applyBattleAction]);
+
   const moveBattleUnit = useCallback((unitId: string, destination: { q: number; r: number }) => {
     applyBattleAction((current) => resolveMoveUnit(current, current.playerForceId, unitId, destination));
   }, [applyBattleAction]);
@@ -225,6 +231,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     loadGame,
     issueCommand,
     deployUnit: deployBattleUnit,
+    deployTransportUnit: deployTransport,
     moveUnit: moveBattleUnit,
     attackUnit: attackBattleUnit,
     attackCity: attackBattleCity,
@@ -236,7 +243,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     clearSave: clearSaveSlot,
     selectCity: setSelectedCityId,
     clearError: () => setError(null),
-  }), [attackBattleCity, attackBattleUnit, availability, clearSaveSlot, deployBattleUnit, endMonth, endTenDay, error, issueCommand, loadGame, manualSave, moveBattleUnit, resetGame, selectedCityId, startGame, state, waitBattleUnit]);
+  }), [attackBattleCity, attackBattleUnit, availability, clearSaveSlot, deployBattleUnit, deployTransport, endMonth, endTenDay, error, issueCommand, loadGame, manualSave, moveBattleUnit, resetGame, selectedCityId, startGame, state, waitBattleUnit]);
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 }

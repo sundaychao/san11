@@ -100,6 +100,36 @@ describe('command interface', () => {
     expect(within(unitMarker).getByText('刘备')).toBeVisible();
   });
 
+  it('opens a transport dialog from the military menu and places a transport unit', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    await user.click(within(menu).getByRole('button', { name: '输送' }));
+
+    const dialog = screen.getByRole('dialog', { name: '输送编制' });
+    expect(within(dialog).getByLabelText('执行武将')).toBeVisible();
+    expect(within(dialog).getByLabelText('输送士兵')).toBeVisible();
+    expect(within(dialog).getByLabelText('输送资金')).toBeVisible();
+    expect(within(dialog).getByLabelText('输送兵粮')).toBeVisible();
+    await user.clear(within(dialog).getByLabelText('输送资金'));
+    await user.type(within(dialog).getByLabelText('输送资金'), '900');
+    await user.click(within(dialog).getByRole('button', { name: '确定输送' }));
+
+    expect(screen.queryByRole('dialog', { name: '输送编制' })).not.toBeInTheDocument();
+    const transportCell = screen.getAllByTestId(/deploy-target-/)[0];
+    fireEvent.pointerDown(transportCell, { button: 0, buttons: 1 });
+
+    const unitMarker = screen.getByTestId('battle-unit-marker');
+    expect(unitMarker).toBeVisible();
+    expect(unitMarker).toHaveAttribute('data-unit-kind', 'transport');
+    expect(within(unitMarker).getByText('输')).toBeVisible();
+  });
+
   it('shows movement range for a refreshed unit and moves it to a selected cell', async () => {
     const user = userEvent.setup();
     renderState();

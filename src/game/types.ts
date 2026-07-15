@@ -102,10 +102,12 @@ export interface GridCell {
 
 export interface ArmyUnit {
   id: string;
+  kind?: 'combat' | 'transport';
   forceId: ForceId;
   leaderId: string;
   homeCityId: CityId;
   troopType?: TroopType;
+  gold?: number;
   q: number;
   r: number;
   troops: number;
