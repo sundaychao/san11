@@ -89,7 +89,7 @@ describe('battle deployment and movement actions', () => {
     })).toThrow(/500/);
   });
 
-  it('moves a unit to an adjacent legal cell and reduces movement by terrain cost', () => {
+  it('moves a unit to an adjacent legal cell and clears movement until next ten-day reset', () => {
     const deployed = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -108,13 +108,15 @@ describe('battle deployment and movement actions', () => {
 
     const next = moveUnit(deployed, 'liu', unit.id, destinationCell!);
     const movedUnit = next.units[unit.id];
-    const expectedCost = ['forest', 'hill'].includes(destinationCell!.terrain) ? 2 : 1;
-
     expect(movedUnit.q).toBe(destinationCell!.q);
     expect(movedUnit.r).toBe(destinationCell!.r);
-    expect(movedUnit.movementRemaining).toBe(5 - expectedCost);
+    expect(movedUnit.movementRemaining).toBe(0);
     expect(movedUnit.moved).toBe(true);
     expect(movedUnit.acted).toBe(false);
+
+    const reset = settleTenDay(next);
+    expect(reset.units[unit.id].movementRemaining).toBe(5);
+    expect(reset.units[unit.id].moved).toBe(false);
   });
 
   it('rejects movement into an occupied cell', () => {

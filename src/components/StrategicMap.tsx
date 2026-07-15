@@ -45,6 +45,10 @@ interface StrategicMapProps {
   deployTargets?: GridCoord[];
   selectedDeployTarget?: GridCoord | null;
   onDeployTargetSelect?(coord: GridCoord): void;
+  moveTargets?: GridCoord[];
+  selectedUnitId?: string | null;
+  onMoveTargetSelect?(coord: GridCoord): void;
+  onUnitSelect?(unitId: string): void;
   onMapContextMenu?(position: { x: number; y: number }): void;
 }
 
@@ -53,11 +57,15 @@ export function StrategicMap({
   editorCities,
   editorGrid,
   editorMode = false,
+  moveTargets = [],
   onCityMenu,
   onDeployTargetSelect,
   onEditorCellPaint,
   onMapContextMenu,
+  onMoveTargetSelect,
+  onUnitSelect,
   selectedDeployTarget,
+  selectedUnitId,
 }: StrategicMapProps) {
   const { state, selectedCityId, selectCity } = useGame();
   const [view, setView] = useState<MapView>(INITIAL_VIEW);
@@ -110,6 +118,8 @@ export function StrategicMap({
     }));
   const deployTargetKeys = new Set(deployTargets.map((coord) => `${coord.q},${coord.r}`));
   const deployMode = deployTargetKeys.size > 0;
+  const moveTargetKeys = new Set(moveTargets.map((coord) => `${coord.q},${coord.r}`));
+  const moveMode = moveTargetKeys.size > 0;
   const selectedDeployKey = selectedDeployTarget ? `${selectedDeployTarget.q},${selectedDeployTarget.r}` : null;
 
   return (
@@ -129,25 +139,31 @@ export function StrategicMap({
         data-testid="map-content"
         style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
       >
-        <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
+        <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}${moveMode ? ' is-moving' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
           {displayGrid.map((cell) => {
             const position = cellPosition(cell.q, cell.r);
             const cellKey = `${cell.q},${cell.r}`;
             const isDeployTarget = deployTargetKeys.has(cellKey);
+            const isMoveTarget = moveTargetKeys.has(cellKey);
             const isSelectedDeployTarget = selectedDeployKey === cellKey;
             return (
               <rect
                 key={`${cell.q},${cell.r}`}
-                data-testid={editorMode ? `editor-cell-${cell.q}-${cell.r}` : isDeployTarget ? `deploy-target-${cell.q}-${cell.r}` : undefined}
+                data-testid={editorMode ? `editor-cell-${cell.q}-${cell.r}` : isDeployTarget ? `deploy-target-${cell.q}-${cell.r}` : isMoveTarget ? `move-target-${cell.q}-${cell.r}` : undefined}
                 x={position.x}
                 y={position.y}
                 width={CELL_SIZE}
                 height={CELL_SIZE}
-                className={`battle-cell terrain-${cell.terrain}${isDeployTarget ? ' is-deploy-target' : ''}${isSelectedDeployTarget ? ' is-selected-deploy-target' : ''}`}
+                className={`battle-cell terrain-${cell.terrain}${isDeployTarget ? ' is-deploy-target' : ''}${isMoveTarget ? ' is-move-target' : ''}${isSelectedDeployTarget ? ' is-selected-deploy-target' : ''}`}
                 onPointerDown={(event) => {
                   if (isDeployTarget) {
                     event.stopPropagation();
                     onDeployTargetSelect?.({ q: cell.q, r: cell.r });
+                    return;
+                  }
+                  if (isMoveTarget) {
+                    event.stopPropagation();
+                    onMoveTargetSelect?.({ q: cell.q, r: cell.r });
                     return;
                   }
                   if (!editorMode || event.button !== 0) return;
@@ -189,9 +205,15 @@ export function StrategicMap({
               <g
                 key={unit.id}
                 data-testid="battle-unit-marker"
+                data-grid-position={`${unit.q},${unit.r}`}
                 data-troop-type={troopType}
-                className={`battle-unit-marker troop-${troopType}`}
+                className={`battle-unit-marker troop-${troopType}${selectedUnitId === unit.id ? ' is-selected' : ''}`}
                 aria-label={`${leaderName} ${texture.label}`}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.stopPropagation();
+                  onUnitSelect?.(unit.id);
+                }}
               >
                 <text
                   className="battle-unit-leader-name"
@@ -217,7 +239,7 @@ export function StrategicMap({
             );
           })}
         </svg>
-        <div className={`city-marker-layer${editorMode || deployMode ? ' is-editing' : ''}`} aria-label="荆襄城市">
+        <div className={`city-marker-layer${editorMode || deployMode || moveMode ? ' is-editing' : ''}`} aria-label="荆襄城市">
           {Object.values(state.cities).map((city) => {
             const force = state.forces[city.ownerId];
             const selected = selectedCityId === city.id;

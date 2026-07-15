@@ -1,6 +1,6 @@
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { deploymentCells } from '../game/battle/actions';
+import { deploymentCells, movementCells } from '../game/battle/actions';
 import type { GridCoord } from '../game/battle/grid';
 import {
   clearEditor,
@@ -28,10 +28,11 @@ import { StrategicMap } from './StrategicMap';
 import { TopBar } from './TopBar';
 
 export function GameShell() {
-  const { deployUnit, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, state, selectedCityId, resetGame } = useGame();
+  const { deployUnit, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, moveUnit, state, selectedCityId, resetGame } = useGame();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [pendingDeploy, setPendingDeploy] = useState<DeployConfirmInput | null>(null);
+  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
   const [mapContextMenu, setMapContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showIntel, setShowIntel] = useState(false);
@@ -46,6 +47,7 @@ export function GameShell() {
     setCityMenu(null);
     setMapContextMenu(null);
     setShowIntel(false);
+    setSelectedUnitId(null);
   }, []);
 
   const openEditor = useCallback(() => {
@@ -58,6 +60,7 @@ export function GameShell() {
     setCityMenu(null);
     setMapContextMenu(null);
     setShowIntel(false);
+    setSelectedUnitId(null);
   }, [state]);
 
   const editCell = useCallback((coord: { q: number; r: number }) => {
@@ -77,11 +80,15 @@ export function GameShell() {
     setCityMenu(null);
     setMapContextMenu(null);
     setShowIntel(false);
+    setSelectedUnitId(null);
   }, []);
 
   const deployTargets = useMemo(() => (
     state && pendingDeploy ? deploymentCells(state, pendingDeploy.cityId) : []
   ), [pendingDeploy, state]);
+  const moveTargets = useMemo(() => (
+    state && selectedUnitId ? movementCells(state, selectedUnitId) : []
+  ), [selectedUnitId, state]);
 
   const closeDeployDialog = useCallback(() => {
     setDeployCityId(null);
@@ -99,17 +106,38 @@ export function GameShell() {
     setPendingDeploy(null);
   }, [deployTargets, deployUnit, pendingDeploy]);
 
+  const selectUnit = useCallback((unitId: string) => {
+    if (!state) return;
+    const unit = state.units[unitId];
+    if (!unit || unit.forceId !== state.playerForceId || unit.moved || unit.movementRemaining <= 0) {
+      setSelectedUnitId(null);
+      return;
+    }
+    setCityMenu(null);
+    setMapContextMenu(null);
+    setSelectedUnitId(unitId);
+  }, [state]);
+
+  const selectMoveTarget = useCallback((coord: GridCoord) => {
+    if (!selectedUnitId) return;
+    if (!moveTargets.some((target) => target.q === coord.q && target.r === coord.r)) return;
+    moveUnit(selectedUnitId, coord);
+    setSelectedUnitId(null);
+  }, [moveTargets, moveUnit, selectedUnitId]);
+
   const openMapContextMenu = useCallback((position: { x: number; y: number }) => {
     if (cityMenu || editorState || deployCityId || pendingDeploy) {
       setCityMenu(null);
       return;
     }
+    setSelectedUnitId(null);
     setMapContextMenu(position);
   }, [cityMenu, deployCityId, editorState, pendingDeploy]);
 
   const proceedTenDayFromMap = useCallback(() => {
     setMapContextMenu(null);
     endTenDay();
+    setSelectedUnitId(null);
   }, [endTenDay]);
 
   const openIntelFromMap = useCallback(() => {
@@ -154,6 +182,10 @@ export function GameShell() {
         onEditorCellPaint={editCell}
         deployTargets={deployTargets}
         onDeployTargetSelect={selectDeployTarget}
+        moveTargets={moveTargets}
+        selectedUnitId={selectedUnitId}
+        onMoveTargetSelect={selectMoveTarget}
+        onUnitSelect={selectUnit}
         onMapContextMenu={openMapContextMenu}
       />
       <button type="button" className="map-editor-toggle primary-button" onClick={openEditor}>地图编辑</button>

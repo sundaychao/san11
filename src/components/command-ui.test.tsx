@@ -92,6 +92,33 @@ describe('command interface', () => {
     expect(within(unitMarker).getByText('枪')).toBeVisible();
     expect(within(unitMarker).getByText('刘备')).toBeVisible();
   });
+
+  it('shows movement range for a refreshed unit and moves it to a selected cell', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    await user.click(within(menu).getByRole('button', { name: '出征' }));
+
+    const dialog = screen.getByRole('dialog', { name: '出征编制' });
+    await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
+    fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
+
+    await user.click(screen.getByTestId('end-ten-day-button'));
+    const unitMarker = screen.getByTestId('battle-unit-marker');
+    fireEvent.pointerDown(unitMarker, { button: 0, buttons: 1 });
+
+    const moveTarget = screen.getAllByTestId(/move-target-/)[0];
+    const [, q, r] = moveTarget.getAttribute('data-testid')!.match(/move-target-(\d+)-(\d+)/)!;
+    fireEvent.pointerDown(moveTarget, { button: 0, buttons: 1 });
+
+    expect(screen.queryByTestId(/move-target-/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('battle-unit-marker')).toHaveAttribute('data-grid-position', `${q},${r}`);
+  });
 });
 
 describe('final settlement', () => {

@@ -182,6 +182,18 @@ function reachableCosts(state: GameState, unit: ArmyUnit) {
   return costs;
 }
 
+export function movementCells(state: GameState, unitId: string): GridCoord[] {
+  const unit = state.units[unitId];
+  if (!unit || unit.moved || unit.movementRemaining <= 0) return [];
+  return [...reachableCosts(state, unit).entries()]
+    .filter(([key]) => key !== gridKey(unit))
+    .map(([key]) => {
+      const [q, r] = key.split(',').map(Number);
+      return { q, r };
+    })
+    .sort((a, b) => a.q - b.q || a.r - b.r);
+}
+
 export function deployUnit(state: GameState, forceId: ForceId, input: DeployInput): GameState {
   const city = state.cities[input.cityId];
   const target = state.cities[input.targetCityId];
@@ -246,7 +258,7 @@ export function moveUnit(state: GameState, forceId: ForceId, unitId: string, des
   const next = structuredClone(state);
   next.units[unitId].q = destination.q;
   next.units[unitId].r = destination.r;
-  next.units[unitId].movementRemaining -= cost;
+  next.units[unitId].movementRemaining = 0;
   next.units[unitId].moved = true;
   return next;
 }
