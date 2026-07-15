@@ -47,6 +47,7 @@ interface StrategicMapProps {
   onDeployTargetSelect?(coord: GridCoord): void;
   moveTargets?: GridCoord[];
   selectedUnitId?: string | null;
+  onCellHover?(coord: GridCoord | null): void;
   onMoveTargetSelect?(coord: GridCoord): void;
   onUnitSelect?(unitId: string): void;
   onMapContextMenu?(position: { x: number; y: number }): void;
@@ -59,6 +60,7 @@ export function StrategicMap({
   editorMode = false,
   moveTargets = [],
   onCityMenu,
+  onCellHover,
   onDeployTargetSelect,
   onEditorCellPaint,
   onMapContextMenu,
@@ -132,6 +134,7 @@ export function StrategicMap({
       onPointerMove={handlePointerMove}
       onPointerUp={stopDragging}
       onPointerCancel={stopDragging}
+      onPointerLeave={() => onCellHover?.(null)}
       onContextMenu={handleContextMenu}
     >
       <div
@@ -171,6 +174,7 @@ export function StrategicMap({
                   onEditorCellPaint?.({ q: cell.q, r: cell.r });
                 }}
                 onPointerEnter={(event) => {
+                  onCellHover?.({ q: cell.q, r: cell.r });
                   if (!editorMode || event.buttons !== 1) return;
                   event.stopPropagation();
                   onEditorCellPaint?.({ q: cell.q, r: cell.r });

@@ -33,6 +33,7 @@ export function GameShell() {
   const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [pendingDeploy, setPendingDeploy] = useState<DeployConfirmInput | null>(null);
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
+  const [hoveredCoord, setHoveredCoord] = useState<GridCoord | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
   const [mapContextMenu, setMapContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showIntel, setShowIntel] = useState(false);
@@ -184,10 +185,16 @@ export function GameShell() {
         onDeployTargetSelect={selectDeployTarget}
         moveTargets={moveTargets}
         selectedUnitId={selectedUnitId}
+        onCellHover={setHoveredCoord}
         onMoveTargetSelect={selectMoveTarget}
         onUnitSelect={selectUnit}
         onMapContextMenu={openMapContextMenu}
       />
+      {hoveredCoord && (
+        <div className="hover-coordinate tool-panel" data-testid="hover-coordinate">
+          坐标：{hoveredCoord.q},{hoveredCoord.r}
+        </div>
+      )}
       <button type="button" className="map-editor-toggle primary-button" onClick={openEditor}>地图编辑</button>
       <CityPanel onCommand={launchCommand} />
       <BattlePanel />

@@ -43,6 +43,28 @@ describe('StrategicMap', () => {
     expect(screen.getByTestId('map-content').style.transform).toContain('scale(0.85)');
   });
 
+  it('shows the hovered grid coordinate at the bottom center of the interface', async () => {
+    const user = userEvent.setup();
+    renderGame();
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    await user.click(screen.getByRole('button', { name: '军事' }));
+    await user.click(screen.getByRole('button', { name: '出征' }));
+    await user.click(screen.getByRole('button', { name: '确定出征' }));
+
+    const deploymentCell = screen.getAllByTestId(/deploy-target-/)[0];
+    const [, q, r] = deploymentCell.getAttribute('data-testid')!.match(/deploy-target-(\d+)-(\d+)/)!;
+    fireEvent.pointerEnter(deploymentCell);
+
+    expect(screen.getByTestId('hover-coordinate')).toHaveTextContent(`坐标：${q},${r}`);
+
+    fireEvent.pointerLeave(screen.getByTestId('map-viewport'));
+
+    expect(screen.queryByTestId('hover-coordinate')).not.toBeInTheDocument();
+  });
+
   it('shows all six management commands for an owned city', () => {
     renderGame();
 
