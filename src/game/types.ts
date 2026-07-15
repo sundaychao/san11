@@ -23,9 +23,15 @@ export interface Officer {
   name: string;
   forceId: ForceId | null;
   cityId: CityId;
+  location: OfficerLocation;
   stats: Stats;
   acted: boolean;
 }
+
+export type OfficerLocation =
+  | { kind: 'city'; cityId: CityId }
+  | { kind: 'unit'; unitId: string }
+  | { kind: 'unaffiliated'; cityId: CityId };
 
 export interface City {
   id: CityId;
@@ -42,6 +48,10 @@ export interface City {
   training: number;
   mapX: number;
   mapY: number;
+  gridQ: number;
+  gridR: number;
+  durability: number;
+  maxDurability: number;
 }
 
 export interface Force {
@@ -60,18 +70,47 @@ export interface GameLog {
 }
 
 export interface GameState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   scenarioId: 'jingxiang-208';
   seed: number;
   rngCursor: number;
   month: number;
+  tenDay: TenDay;
+  turnForceId: ForceId;
   playerForceId: ForceId;
   phase: 'playing' | 'finished';
   actionPoints: Record<ForceId, number>;
   forces: Record<ForceId, Force>;
   cities: Record<CityId, City>;
   officers: Record<string, Officer>;
+  grid: GridCell[];
+  units: Record<string, ArmyUnit>;
   logs: GameLog[];
+}
+
+export type TenDay = 1 | 2 | 3;
+
+export type TerrainType = 'road' | 'plain' | 'forest' | 'hill' | 'mountain' | 'deepWater';
+
+export interface GridCell {
+  q: number;
+  r: number;
+  terrain: TerrainType;
+}
+
+export interface ArmyUnit {
+  id: string;
+  forceId: ForceId;
+  leaderId: string;
+  homeCityId: CityId;
+  q: number;
+  r: number;
+  troops: number;
+  food: number;
+  energy: number;
+  movementRemaining: number;
+  moved: boolean;
+  acted: boolean;
 }
 
 export type GameCommand =

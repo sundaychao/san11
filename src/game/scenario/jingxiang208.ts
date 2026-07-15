@@ -1,7 +1,8 @@
+import { CITY_GRID_CENTERS, createBattleGrid } from '../battle/scenario';
 import type { City, CityId, Force, ForceId, GameState, Officer, Stats } from '../types';
 
-type CitySeed = Omit<City, 'id'> & { id: CityId };
-type OfficerSeed = Omit<Officer, 'acted'>;
+type CitySeed = Omit<City, 'durability' | 'gridQ' | 'gridR' | 'id' | 'maxDurability'> & { id: CityId };
+type OfficerSeed = Omit<Officer, 'acted' | 'location'>;
 
 const forces: Record<ForceId, Force> = {
   cao: {
@@ -89,21 +90,39 @@ function toRecord<T extends { id: string }>(items: T[]): Record<string, T> {
 export const FORCE_IDS: ForceId[] = ['cao', 'liu', 'sun', 'biao'];
 
 export function createGame(playerForceId: ForceId, seed = Date.now()): GameState {
-  const cities = toRecord(citySeeds.map((city) => ({ ...city }))) as Record<CityId, City>;
-  const officers = toRecord(officerSeeds.map((officer) => ({ ...officer, stats: { ...officer.stats }, acted: false })));
+  const cities = toRecord(citySeeds.map((city) => {
+    const center = CITY_GRID_CENTERS[city.id];
+    return {
+      ...city,
+      gridQ: center.q,
+      gridR: center.r,
+      maxDurability: 3000,
+      durability: 3000,
+    };
+  })) as Record<CityId, City>;
+  const officers = toRecord(officerSeeds.map((officer) => ({
+    ...officer,
+    location: { kind: officer.forceId === null ? 'unaffiliated' : 'city', cityId: officer.cityId } as Officer['location'],
+    stats: { ...officer.stats },
+    acted: false,
+  })));
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     scenarioId: 'jingxiang-208',
     seed: seed >>> 0,
     rngCursor: 0,
     month: 1,
+    tenDay: 1,
+    turnForceId: playerForceId,
     playerForceId,
     phase: 'playing',
     actionPoints: { cao: 80, liu: 80, sun: 80, biao: 80 },
     forces: structuredClone(forces),
     cities,
     officers,
+    grid: createBattleGrid(),
+    units: {},
     logs: [
       {
         id: 'opening',

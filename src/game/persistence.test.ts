@@ -20,7 +20,7 @@ describe('persistence', () => {
 
   beforeEach(() => { storage = new MemoryStorage(); });
 
-  it('round-trips a valid v1 autosave', () => {
+  it('round-trips a valid v2 autosave', () => {
     const state = createGame('liu', 9);
 
     writeSave(storage, 'auto', state);
@@ -45,7 +45,7 @@ describe('persistence', () => {
 
   it('rejects incompatible schema versions', () => {
     const state = createGame('liu', 1) as unknown as Record<string, unknown>;
-    state.schemaVersion = 2;
+    state.schemaVersion = 99;
     storage.setItem(AUTO_SAVE_KEY, JSON.stringify(state));
 
     expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '存档版本不兼容' });

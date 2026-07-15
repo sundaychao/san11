@@ -1,5 +1,5 @@
 import { CITY_IDS, FORCE_IDS, OFFICER_IDS } from './scenario/jingxiang208';
-import type { City, Force, GameState, Officer, Stats } from './types';
+import type { ArmyUnit, City, Force, GameState, GridCell, Officer, Stats } from './types';
 
 export const AUTO_SAVE_KEY = 'jingxiang-208-autosave-v1';
 export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
@@ -54,7 +54,12 @@ function validCity(value: unknown): value is City {
     validPercentage(city.order) &&
     validPercentage(city.training) &&
     finite(city.mapX) && city.mapX >= 0 && city.mapX <= 1 &&
-    finite(city.mapY) && city.mapY >= 0 && city.mapY <= 1
+    finite(city.mapY) && city.mapY >= 0 && city.mapY <= 1 &&
+    Number.isInteger(city.gridQ) && city.gridQ! >= 0 &&
+    Number.isInteger(city.gridR) && city.gridR! >= 0 &&
+    validResource(city.maxDurability) &&
+    validResource(city.durability) &&
+    city.durability! <= city.maxDurability!
   );
 }
 
@@ -67,6 +72,8 @@ function validOfficer(value: unknown): value is Officer {
     typeof officer.name === 'string' &&
     (officer.forceId === null || FORCE_IDS.includes(officer.forceId!)) &&
     typeof officer.cityId === 'string' &&
+    Boolean(officer.location) &&
+    typeof officer.location === 'object' &&
     typeof officer.acted === 'boolean' &&
     Boolean(stats) &&
     exactKeys(stats!, ['leadership', 'war', 'intelligence', 'politics', 'charisma'] satisfies Array<keyof Stats>) &&
@@ -82,21 +89,51 @@ function validForce(value: unknown): value is Force {
     typeof force.color === 'string' && typeof force.description === 'string';
 }
 
+function validGridCell(value: unknown): value is GridCell {
+  if (!value || typeof value !== 'object') return false;
+  const cell = value as Partial<GridCell>;
+  return Number.isInteger(cell.q) && cell.q! >= 0 &&
+    Number.isInteger(cell.r) && cell.r! >= 0 &&
+    ['road', 'plain', 'forest', 'hill', 'mountain', 'deepWater'].includes(cell.terrain!);
+}
+
+function validUnit(value: unknown): value is ArmyUnit {
+  if (!value || typeof value !== 'object') return false;
+  const unit = value as Partial<ArmyUnit>;
+  return typeof unit.id === 'string' &&
+    FORCE_IDS.includes(unit.forceId!) &&
+    typeof unit.leaderId === 'string' &&
+    CITY_IDS.includes(unit.homeCityId!) &&
+    Number.isInteger(unit.q) &&
+    Number.isInteger(unit.r) &&
+    validResource(unit.troops) &&
+    validResource(unit.food) &&
+    validResource(unit.energy) &&
+    unit.energy! <= 100 &&
+    validResource(unit.movementRemaining) &&
+    typeof unit.moved === 'boolean' &&
+    typeof unit.acted === 'boolean';
+}
+
 export function isGameState(value: unknown): value is GameState {
   if (!value || typeof value !== 'object') return false;
   const state = value as Partial<GameState>;
   if (
-    state.schemaVersion !== 1 ||
+    state.schemaVersion !== 2 ||
     state.scenarioId !== 'jingxiang-208' ||
     !Number.isInteger(state.month) ||
     state.month! < 1 ||
     state.month! > 24 ||
+    ![1, 2, 3].includes(state.tenDay!) ||
+    !FORCE_IDS.includes(state.turnForceId!) ||
     !FORCE_IDS.includes(state.playerForceId!) ||
     !['playing', 'finished'].includes(state.phase!) ||
     !state.cities ||
     !state.officers ||
     !state.actionPoints ||
     !state.forces ||
+    !Array.isArray(state.grid) ||
+    !state.units ||
     !Array.isArray(state.logs) ||
     !Number.isSafeInteger(state.seed) || state.seed! < 0 || state.seed! > 0xffffffff ||
     !Number.isInteger(state.rngCursor) ||
@@ -118,7 +155,13 @@ export function isGameState(value: unknown): value is GameState {
       officerById[city.governorId].cityId === city.id) &&
     officers.every((officer) => validOfficer(officer) && officerById[officer.id] === officer &&
       CITY_IDS.includes(officer.cityId) &&
-      (officer.forceId === null || cityById[officer.cityId].ownerId === officer.forceId)) &&
+      (officer.forceId === null || cityById[officer.cityId].ownerId === officer.forceId) &&
+      (officer.location.kind === 'unit'
+        ? Boolean(state.units![officer.location.unitId])
+        : CITY_IDS.includes(officer.location.cityId))) &&
+    state.grid.every(validGridCell) &&
+    Object.values(state.units).every((unit) => validUnit(unit) && state.units![unit.id] === unit &&
+      Boolean(officerById[unit.leaderId])) &&
     FORCE_IDS.every((forceId) => Number.isInteger(state.actionPoints![forceId]) && validResource(state.actionPoints![forceId]) &&
       state.actionPoints![forceId] <= 80 && validForce(state.forces![forceId]) &&
       state.forces![forceId].id === forceId &&
@@ -139,7 +182,7 @@ export function loadSave(storage: SaveAdapter, slot: SaveSlot): LoadResult {
   if (raw === null) return { ok: false, reason: '没有存档' };
   try {
     const parsed = JSON.parse(raw) as { schemaVersion?: unknown };
-    if (parsed?.schemaVersion !== 1) return { ok: false, reason: '存档版本不兼容' };
+    if (parsed?.schemaVersion !== 2) return { ok: false, reason: '存档版本不兼容' };
     if (!isGameState(parsed)) return { ok: false, reason: '存档无法读取' };
     return { ok: true, state: parsed };
   } catch {
