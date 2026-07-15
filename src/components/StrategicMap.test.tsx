@@ -3,7 +3,17 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
+import type { TerrainType } from '../game/types';
 import { GameShell } from './GameShell';
+
+const TERRAIN_LABELS: Record<TerrainType, string> = {
+  road: '道路',
+  plain: '平地',
+  forest: '森林',
+  hill: '丘陵',
+  mountain: '高山',
+  deepWater: '水域',
+};
 
 function renderGame() {
   return render(
@@ -56,9 +66,10 @@ describe('StrategicMap', () => {
 
     const deploymentCell = screen.getAllByTestId(/deploy-target-/)[0];
     const [, q, r] = deploymentCell.getAttribute('data-testid')!.match(/deploy-target-(\d+)-(\d+)/)!;
+    const terrain = [...deploymentCell.classList].find((className) => className.startsWith('terrain-'))?.replace('terrain-', '') as TerrainType;
     fireEvent.pointerEnter(deploymentCell);
 
-    expect(screen.getByTestId('hover-coordinate')).toHaveTextContent(`坐标：${q},${r}`);
+    expect(screen.getByTestId('hover-coordinate')).toHaveTextContent(`坐标：${q},${r} 地形：${TERRAIN_LABELS[terrain]}`);
 
     fireEvent.pointerLeave(screen.getByTestId('map-viewport'));
 

@@ -47,7 +47,7 @@ interface StrategicMapProps {
   onDeployTargetSelect?(coord: GridCoord): void;
   moveTargets?: GridCoord[];
   selectedUnitId?: string | null;
-  onCellHover?(coord: GridCoord | null): void;
+  onCellHover?(cell: GridCell | null): void;
   onMoveTargetSelect?(coord: GridCoord): void;
   onUnitSelect?(unitId: string): void;
   onMapContextMenu?(position: { x: number; y: number }): void;
@@ -174,7 +174,7 @@ export function StrategicMap({
                   onEditorCellPaint?.({ q: cell.q, r: cell.r });
                 }}
                 onPointerEnter={(event) => {
-                  onCellHover?.({ q: cell.q, r: cell.r });
+                  onCellHover?.(cell);
                   if (!editorMode || event.buttons !== 1) return;
                   event.stopPropagation();
                   onEditorCellPaint?.({ q: cell.q, r: cell.r });

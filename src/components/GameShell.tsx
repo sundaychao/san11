@@ -15,7 +15,7 @@ import {
   type MapEditorTool,
 } from '../game/map-editor/editor';
 import { useGame } from '../game/store/GameProvider';
-import type { GameCommand, TerrainType } from '../game/types';
+import type { GameCommand, GridCell, TerrainType } from '../game/types';
 import { BattlePanel } from './BattlePanel';
 import { CityCommandMenu } from './CityCommandMenu';
 import { CityPanel } from './CityPanel';
@@ -27,13 +27,22 @@ import { ResultOverlay } from './ResultOverlay';
 import { StrategicMap } from './StrategicMap';
 import { TopBar } from './TopBar';
 
+const TERRAIN_LABELS: Record<TerrainType, string> = {
+  road: '道路',
+  plain: '平地',
+  forest: '森林',
+  hill: '丘陵',
+  mountain: '高山',
+  deepWater: '水域',
+};
+
 export function GameShell() {
   const { deployUnit, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, moveUnit, state, selectedCityId, resetGame } = useGame();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [pendingDeploy, setPendingDeploy] = useState<DeployConfirmInput | null>(null);
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
-  const [hoveredCoord, setHoveredCoord] = useState<GridCoord | null>(null);
+  const [hoveredCell, setHoveredCell] = useState<GridCell | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
   const [mapContextMenu, setMapContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showIntel, setShowIntel] = useState(false);
@@ -185,14 +194,14 @@ export function GameShell() {
         onDeployTargetSelect={selectDeployTarget}
         moveTargets={moveTargets}
         selectedUnitId={selectedUnitId}
-        onCellHover={setHoveredCoord}
+        onCellHover={setHoveredCell}
         onMoveTargetSelect={selectMoveTarget}
         onUnitSelect={selectUnit}
         onMapContextMenu={openMapContextMenu}
       />
-      {hoveredCoord && (
+      {hoveredCell && (
         <div className="hover-coordinate tool-panel" data-testid="hover-coordinate">
-          坐标：{hoveredCoord.q},{hoveredCoord.r}
+          坐标：{hoveredCell.q},{hoveredCell.r} 地形：{TERRAIN_LABELS[hoveredCell.terrain]}
         </div>
       )}
       <button type="button" className="map-editor-toggle primary-button" onClick={openEditor}>地图编辑</button>
