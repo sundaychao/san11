@@ -106,7 +106,9 @@ describe('StrategicMap', () => {
     expect(jianglingMarker).toBeTruthy();
 
     expect(within(jianglingMarker!).getByTestId('city-marker-troops')).toHaveTextContent('13500');
+    expect(within(jianglingMarker!).getByTestId('city-marker-stat-divider')).toBeVisible();
     expect(within(jianglingMarker!).getByTestId('city-marker-population')).toHaveTextContent('95000');
+    expect(jianglingMarker!.querySelector('.city-marker-stat i')).not.toBeInTheDocument();
   });
 
   it('shows all six management commands for an owned city', () => {

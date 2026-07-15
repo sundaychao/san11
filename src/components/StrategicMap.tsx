@@ -279,8 +279,9 @@ export function StrategicMap({
                 <span className="city-marker-copy">
                   <strong>{city.name}</strong>
                   <span className="city-marker-stats" aria-hidden="true">
-                    <span className="city-marker-stat" data-testid="city-marker-troops"><i />{city.troops}</span>
-                    <span className="city-marker-stat" data-testid="city-marker-population"><i />{city.population}</span>
+                    <span className="city-marker-stat" data-testid="city-marker-troops">{city.troops}</span>
+                    <span className="city-marker-stat-divider" data-testid="city-marker-stat-divider" />
+                    <span className="city-marker-stat" data-testid="city-marker-population">{city.population}</span>
                   </span>
                 </span>
               </button>
