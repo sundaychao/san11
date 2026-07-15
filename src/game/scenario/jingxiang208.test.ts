@@ -6,18 +6,18 @@ describe('jingxiang 208 scenario', () => {
     const game = createGame('liu', 20804);
 
     expect(Object.keys(game.cities)).toHaveLength(8);
-    expect(Object.values(game.officers)).toHaveLength(24);
-    expect(Object.values(game.officers).filter((officer) => officer.forceId)).toHaveLength(16);
+    expect(Object.keys(game.officers).length).toBeGreaterThanOrEqual(48);
+    expect(Object.values(game.officers).filter((officer) => officer.forceId)).toHaveLength(40);
     expect(Object.values(game.officers).filter((officer) => !officer.forceId)).toHaveLength(8);
   });
 
   it.each(['cao', 'liu', 'sun', 'biao'] as const)(
-    '%s starts with two cities and four officers',
+    '%s starts with two cities and at least ten officers',
     (forceId) => {
       const game = createGame(forceId, 1);
 
       expect(Object.values(game.cities).filter((city) => city.ownerId === forceId)).toHaveLength(2);
-      expect(Object.values(game.officers).filter((officer) => officer.forceId === forceId)).toHaveLength(4);
+      expect(Object.values(game.officers).filter((officer) => officer.forceId === forceId)).toHaveLength(10);
       expect(game.actionPoints[forceId]).toBe(80);
     },
   );
