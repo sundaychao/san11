@@ -28,6 +28,7 @@ interface DeployInput {
   officerId: string;
   targetCityId: CityId;
   troopType?: TroopType;
+  destination?: GridCoord;
   troops: number;
   food: number;
 }
@@ -89,6 +90,42 @@ function spawnCellFor(state: GameState, city: City, target: City) {
   return [...candidates.values()]
     .filter((coord) => isLegalUnitCell(state, coord))
     .sort((a, b) => distance(a, cityCenter(target)) - distance(b, cityCenter(target)) || a.q - b.q || a.r - b.r)[0];
+}
+
+export function deploymentCells(state: GameState, cityId: CityId, movement = BASE_MOVEMENT): GridCoord[] {
+  const city = state.cities[cityId];
+  if (!city) return [];
+  const start = cityCenter(city);
+  const ownCityKeys = new Set(sevenCellCityFootprint(start).map(gridKey));
+  const cityKeys = allCityKeys(state);
+  const unitKeys = occupiedUnitKeys(state);
+  const costs = new Map<string, number>([[gridKey(start), 0]]);
+  const coords = new Map<string, GridCoord>([[gridKey(start), start]]);
+  const frontier: GridCoord[] = [start];
+
+  while (frontier.length > 0) {
+    const current = frontier.shift()!;
+    const currentCost = costs.get(gridKey(current))!;
+    for (const neighbor of neighborsOf(current.q, current.r)) {
+      const key = gridKey(neighbor);
+      const insideOwnCity = ownCityKeys.has(key);
+      const terrainCost = insideOwnCity ? 1 : movementCost(state, neighbor);
+      if (!Number.isFinite(terrainCost)) continue;
+      if (!insideOwnCity && cityKeys.has(key)) continue;
+      if (unitKeys.has(key)) continue;
+      const nextCost = currentCost + terrainCost;
+      if (nextCost > movement) continue;
+      if (costs.has(key) && costs.get(key)! <= nextCost) continue;
+      costs.set(key, nextCost);
+      coords.set(key, neighbor);
+      frontier.push(neighbor);
+    }
+  }
+
+  return [...coords.entries()]
+    .filter(([key]) => key !== gridKey(start) && !cityKeys.has(key))
+    .map(([, coord]) => coord)
+    .sort((a, b) => a.q - b.q || a.r - b.r);
 }
 
 function assertUnitTurn(state: GameState, forceId: ForceId, unitId: string): ArmyUnit {
@@ -162,8 +199,11 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   if (!Number.isInteger(input.food) || input.food < 0 || input.food > city.food) throw new Error('粮草不足');
   if (city.troops - input.troops < 500) throw new Error('城市至少保留 500 兵力');
 
-  const spawn = spawnCellFor(state, city, target);
+  const spawn = input.destination ?? spawnCellFor(state, city, target);
   if (!spawn) throw new Error('没有合法出生格');
+  if (!deploymentCells(state, input.cityId).some((coord) => coord.q === spawn.q && coord.r === spawn.r)) {
+    throw new Error('出征位置超出移动范围');
+  }
 
   const next = structuredClone(state);
   const unitId = `unit-${next.month}-${next.tenDay}-${input.officerId}-${Object.keys(next.units).length + 1}`;

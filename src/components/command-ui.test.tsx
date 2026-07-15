@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { createGame } from '../game/scenario/jingxiang208';
@@ -79,6 +79,9 @@ describe('command interface', () => {
     expect(within(dialog).getByLabelText('主将')).toBeVisible();
     await user.selectOptions(within(dialog).getByLabelText('兵种'), 'spear');
     await user.selectOptions(within(dialog).getByLabelText('目标城池'), 'xiangyang');
+    const deploymentCell = screen.getAllByTestId(/deploy-target-/)[0];
+    fireEvent.pointerDown(deploymentCell, { button: 0, buttons: 1 });
+    expect(within(dialog).getByText(/出征位置/)).toBeVisible();
     await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
 
     expect(screen.queryByRole('dialog', { name: '出征编制' })).not.toBeInTheDocument();

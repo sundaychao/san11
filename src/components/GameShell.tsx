@@ -1,5 +1,7 @@
 import { ArrowLeft, RotateCcw } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { deploymentCells } from '../game/battle/actions';
+import type { GridCoord } from '../game/battle/grid';
 import {
   clearEditor,
   createEditorState,
@@ -29,6 +31,7 @@ export function GameShell() {
   const { state, selectedCityId, resetGame } = useGame();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
+  const [deployDestination, setDeployDestination] = useState<GridCoord | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
   const [viewFinalMap, setViewFinalMap] = useState(false);
   const [editorState, setEditorState] = useState<MapEditorState | null>(null);
@@ -63,7 +66,17 @@ export function GameShell() {
 
   const openDeployDialog = useCallback((cityId: NonNullable<typeof selectedCityId>) => {
     setDeployCityId(cityId);
+    setDeployDestination(null);
     setCityMenu(null);
+  }, []);
+
+  const deployTargets = useMemo(() => (
+    state && deployCityId ? deploymentCells(state, deployCityId) : []
+  ), [deployCityId, state]);
+
+  const closeDeployDialog = useCallback(() => {
+    setDeployCityId(null);
+    setDeployDestination(null);
   }, []);
 
   return (
@@ -75,6 +88,9 @@ export function GameShell() {
         editorCities={editorState?.cities}
         editorMode={Boolean(editorState)}
         onEditorCellPaint={editCell}
+        deployTargets={deployTargets}
+        selectedDeployTarget={deployDestination}
+        onDeployTargetSelect={setDeployDestination}
       />
       <button type="button" className="map-editor-toggle primary-button" onClick={openEditor}>地图编辑</button>
       <CityPanel onCommand={launchCommand} />
@@ -105,7 +121,13 @@ export function GameShell() {
         />
       )}
       {activeCommand && selectedCityId && <CommandDialog type={activeCommand} cityId={selectedCityId} onClose={closeCommand} />}
-      {deployCityId && <DeployDialog cityId={deployCityId} onClose={() => setDeployCityId(null)} />}
+      {deployCityId && (
+        <DeployDialog
+          cityId={deployCityId}
+          destination={deployDestination}
+          onClose={closeDeployDialog}
+        />
+      )}
       {state?.phase === 'finished' && !viewFinalMap && <ResultOverlay onViewMap={() => setViewFinalMap(true)} />}
       {state?.phase === 'finished' && viewFinalMap && (
         <nav className="final-map-actions tool-panel" aria-label="最终地图操作">

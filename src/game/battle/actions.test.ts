@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createGame } from '../scenario/jingxiang208';
 import { settleTenDay } from '../turn';
-import { attackCity, attackUnit, deployUnit, moveUnit, waitUnit } from './actions';
+import { attackCity, attackUnit, deployUnit, deploymentCells, moveUnit, waitUnit } from './actions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 
 function cityKeys(state: ReturnType<typeof createGame>) {
@@ -56,6 +56,24 @@ describe('battle deployment and movement actions', () => {
     });
 
     expect(Object.values(next.units)[0].troopType).toBe('spear');
+  });
+
+  it('deploys to a selected legal cell inside the city movement range', () => {
+    const state = createGame('liu', 1);
+    const destination = deploymentCells(state, 'jiangling')[0];
+
+    const next = deployUnit(state, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      destination,
+      troops: 4000,
+      food: 6000,
+    });
+
+    const unit = Object.values(next.units)[0];
+    expect(unit.q).toBe(destination.q);
+    expect(unit.r).toBe(destination.r);
   });
 
   it('rejects deployment that would leave fewer than 500 city troops', () => {

@@ -1,10 +1,12 @@
 import { AlertCircle, Swords, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import type { GridCoord } from '../game/battle/grid';
 import { useGame } from '../game/store/GameProvider';
 import type { CityId, Officer, TroopType } from '../game/types';
 
 interface DeployDialogProps {
   cityId: CityId;
+  destination: GridCoord | null;
   onClose(): void;
 }
 
@@ -34,7 +36,7 @@ function officerAbility(officer: Officer | undefined, troopType: TroopType) {
   };
 }
 
-export function DeployDialog({ cityId, onClose }: DeployDialogProps) {
+export function DeployDialog({ cityId, destination, onClose }: DeployDialogProps) {
   const { deployUnit, state } = useGame();
   const [officerId, setOfficerId] = useState('');
   const [troopType, setTroopType] = useState<TroopType>('sword');
@@ -68,6 +70,7 @@ export function DeployDialog({ cityId, onClose }: DeployDialogProps) {
   const errors = [
     !activeOfficerId ? '没有可出征武将' : '',
     !activeTargetId ? '没有可攻击目标' : '',
+    !destination ? '请选择出征位置' : '',
     !Number.isInteger(troopAmount) || troopAmount < 1000 || troopAmount > 10000 ? '士兵必须为 1000-10000' : '',
     city.troops - troopAmount < 500 ? '城市至少保留 500 兵力' : '',
     !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > city.food ? '兵粮不足' : '',
@@ -82,6 +85,7 @@ export function DeployDialog({ cityId, onClose }: DeployDialogProps) {
         officerId: activeOfficerId,
         targetCityId: activeTargetId as CityId,
         troopType,
+        destination: destination ?? undefined,
         troops: troopAmount,
         food: foodAmount,
       });
@@ -92,7 +96,7 @@ export function DeployDialog({ cityId, onClose }: DeployDialogProps) {
   };
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="modal-backdrop deploy-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <form ref={dialogRef} className="deploy-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="deploy-title" onSubmit={submit}>
         <header>
           <div>
@@ -141,6 +145,7 @@ export function DeployDialog({ cityId, onClose }: DeployDialogProps) {
             <label><span>士兵</span><input aria-label="出征士兵" type="number" min="1000" max="10000" value={activeTroops} onChange={(event) => setTroops(event.target.value)} /></label>
             <label><span>兵粮</span><input aria-label="出征兵粮" type="number" min="0" value={activeFood} onChange={(event) => setFood(event.target.value)} /></label>
           </div>
+          <p className="deploy-position">出征位置：{destination ? `${destination.q},${destination.r}` : '点击地图高亮格'}</p>
         </section>
 
         <aside className="deploy-right" aria-label="部队能力">
