@@ -91,6 +91,7 @@ export interface GameState {
 export type TenDay = 1 | 2 | 3;
 
 export type TerrainType = 'road' | 'plain' | 'forest' | 'hill' | 'mountain' | 'deepWater';
+export type TroopType = 'sword' | 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'siege';
 
 export interface GridCell {
   q: number;
@@ -103,6 +104,7 @@ export interface ArmyUnit {
   forceId: ForceId;
   leaderId: string;
   homeCityId: CityId;
+  troopType?: TroopType;
   q: number;
   r: number;
   troops: number;

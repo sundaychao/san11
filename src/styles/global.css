@@ -210,9 +210,28 @@ button { color: inherit; }
 .event-log li i { width: 7px; height: 7px; margin-top: 5px; }
 .modal-backdrop, .result-backdrop { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(10, 15, 13, 0.72); }
 .command-dialog { width: min(500px, 100%); max-height: min(720px, calc(100dvh - 32px)); padding: 18px; overflow: auto; }
-.command-dialog > header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
+.deploy-dialog { width: min(980px, calc(100vw - 36px)); max-height: min(760px, calc(100dvh - 28px)); display: grid; grid-template-columns: minmax(360px, 1.15fr) minmax(280px, 0.85fr); gap: 16px 18px; padding: 18px; overflow: auto; background: rgba(18, 43, 45, 0.95); }
+.command-dialog > header, .deploy-dialog > header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
+.deploy-dialog > header { grid-column: 1 / -1; }
 .command-dialog > header p, .result-overlay header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
-.command-dialog h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 26px; }
+.deploy-dialog > header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
+.command-dialog h2, .deploy-dialog h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 26px; }
+.deploy-left, .deploy-right { min-width: 0; padding: 12px; border: 1px solid rgba(146, 136, 115, 0.65); background: rgba(12, 28, 31, 0.58); }
+.deploy-left { display: grid; align-content: start; gap: 12px; }
+.deploy-troop-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+.deploy-troop-grid button { min-height: 54px; display: grid; place-items: center; gap: 3px; padding: 6px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.06); cursor: pointer; }
+.deploy-troop-grid button:hover, .deploy-troop-grid button:focus-visible, .deploy-troop-grid button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.22); outline: none; }
+.deploy-troop-grid svg { width: 18px; height: 18px; color: var(--gold); }
+.deploy-right { display: grid; align-content: start; gap: 11px; }
+.deploy-right h3 { margin: 0; color: var(--gold); font-size: 13px; font-weight: 600; }
+.deploy-ability { display: grid; grid-template-columns: 1fr 56px; gap: 5px 10px; padding: 10px; border: 1px solid rgba(146, 136, 115, 0.65); font-variant-numeric: tabular-nums; }
+.deploy-ability span, .deploy-stock dt { color: var(--muted); font-size: 12px; }
+.deploy-ability strong { text-align: right; color: #fff6d6; }
+.deploy-stock { display: grid; gap: 6px; margin: 0; }
+.deploy-stock > div { display: grid; grid-template-columns: 48px 1fr; align-items: center; gap: 10px; min-height: 34px; padding: 0 8px; border: 1px solid rgba(146, 136, 115, 0.55); }
+.deploy-stock dd { margin: 0; color: #fff6d6; text-align: right; font-variant-numeric: tabular-nums; }
+.deploy-errors { grid-column: 1 / -1; margin-top: 0; }
+.deploy-dialog footer { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 0; }
 .field-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 12px; margin-top: 15px; }
 .field-row > span, .amount-grid label > span { color: var(--muted); font-size: 12px; }
 .field-row select, .amount-grid input { width: 100%; min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 2px; background: #26362f; color: var(--paper); }

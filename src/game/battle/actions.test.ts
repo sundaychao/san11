@@ -45,6 +45,19 @@ describe('battle deployment and movement actions', () => {
     expect(next.actionPoints.liu).toBe(60);
   });
 
+  it('records the selected troop type on a deployed unit', () => {
+    const next = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troops: 4000,
+      food: 6000,
+      troopType: 'spear',
+    });
+
+    expect(Object.values(next.units)[0].troopType).toBe('spear');
+  });
+
   it('rejects deployment that would leave fewer than 500 city troops', () => {
     const state = createGame('liu', 1);
     state.cities.wuling.troops = 10400;

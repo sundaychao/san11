@@ -6,6 +6,8 @@ export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
 
 export type SaveSlot = 'auto' | 'manual';
 
+const TROOP_TYPES = ['sword', 'spear', 'halberd', 'crossbow', 'cavalry', 'siege'];
+
 export interface SaveAdapter {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -104,6 +106,7 @@ function validUnit(value: unknown): value is ArmyUnit {
     FORCE_IDS.includes(unit.forceId!) &&
     typeof unit.leaderId === 'string' &&
     CITY_IDS.includes(unit.homeCityId!) &&
+    (unit.troopType === undefined || TROOP_TYPES.includes(unit.troopType)) &&
     Number.isInteger(unit.q) &&
     Number.isInteger(unit.r) &&
     validResource(unit.troops) &&

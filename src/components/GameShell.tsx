@@ -18,6 +18,7 @@ import { BattlePanel } from './BattlePanel';
 import { CityCommandMenu } from './CityCommandMenu';
 import { CityPanel } from './CityPanel';
 import { CommandDialog } from './CommandDialog';
+import { DeployDialog } from './DeployDialog';
 import { EventLog } from './EventLog';
 import { MapEditorPanel } from './MapEditorPanel';
 import { ResultOverlay } from './ResultOverlay';
@@ -25,8 +26,9 @@ import { StrategicMap } from './StrategicMap';
 import { TopBar } from './TopBar';
 
 export function GameShell() {
-  const { deployUnit, state, selectedCityId, resetGame } = useGame();
+  const { state, selectedCityId, resetGame } = useGame();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
+  const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
   const [viewFinalMap, setViewFinalMap] = useState(false);
   const [editorState, setEditorState] = useState<MapEditorState | null>(null);
@@ -59,20 +61,10 @@ export function GameShell() {
     });
   }, [editorTool]);
 
-  const quickDeployFromCity = useCallback((cityId: NonNullable<typeof selectedCityId>) => {
-    if (!state) return;
-    const city = state.cities[cityId];
-    const officer = Object.values(state.officers).find((candidate) => (
-      candidate.forceId === state.playerForceId &&
-      candidate.location.kind === 'city' &&
-      candidate.location.cityId === cityId &&
-      !candidate.acted
-    ));
-    const target = Object.values(state.cities).find((candidate) => candidate.ownerId !== state.playerForceId);
-    if (!officer || !target || city.ownerId !== state.playerForceId) return;
-    deployUnit({ cityId, officerId: officer.id, targetCityId: target.id, troops: 4000, food: 6000 });
+  const openDeployDialog = useCallback((cityId: NonNullable<typeof selectedCityId>) => {
+    setDeployCityId(cityId);
     setCityMenu(null);
-  }, [deployUnit, state]);
+  }, []);
 
   return (
     <main className="game-shell">
@@ -108,11 +100,12 @@ export function GameShell() {
           cityId={cityMenu.cityId}
           position={cityMenu.position}
           onCommand={launchCommand}
-          onDeploy={quickDeployFromCity}
+          onDeploy={openDeployDialog}
           onClose={() => setCityMenu(null)}
         />
       )}
       {activeCommand && selectedCityId && <CommandDialog type={activeCommand} cityId={selectedCityId} onClose={closeCommand} />}
+      {deployCityId && <DeployDialog cityId={deployCityId} onClose={() => setDeployCityId(null)} />}
       {state?.phase === 'finished' && !viewFinalMap && <ResultOverlay onViewMap={() => setViewFinalMap(true)} />}
       {state?.phase === 'finished' && viewFinalMap && (
         <nav className="final-map-actions tool-panel" aria-label="最终地图操作">

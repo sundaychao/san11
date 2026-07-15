@@ -27,7 +27,7 @@ import {
 } from '../persistence';
 import { createGame, FORCE_IDS } from '../scenario/jingxiang208';
 import { settleMonth, settleTenDay } from '../turn';
-import type { CityId, ForceId, GameCommand, GameState } from '../types';
+import type { CityId, ForceId, GameCommand, GameState, TroopType } from '../types';
 
 interface GameContextValue {
   state: GameState | null;
@@ -39,7 +39,7 @@ interface GameContextValue {
   startGame(forceId: ForceId, seed?: number): void;
   loadGame(slot: SaveSlot): LoadResult;
   issueCommand(command: GameCommand): void;
-  deployUnit(input: { cityId: CityId; officerId: string; targetCityId: CityId; troops: number; food: number }): void;
+  deployUnit(input: { cityId: CityId; officerId: string; targetCityId: CityId; troopType?: TroopType; troops: number; food: number }): void;
   moveUnit(unitId: string, destination: { q: number; r: number }): void;
   attackUnit(attackerId: string, targetId: string): void;
   attackCity(attackerId: string, cityId: CityId): void;
@@ -139,7 +139,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     }
   }, [persist, state]);
 
-  const deployBattleUnit = useCallback((input: { cityId: CityId; officerId: string; targetCityId: CityId; troops: number; food: number }) => {
+  const deployBattleUnit = useCallback((input: { cityId: CityId; officerId: string; targetCityId: CityId; troopType?: TroopType; troops: number; food: number }) => {
     applyBattleAction((current) => resolveDeployUnit(current, current.playerForceId, input));
   }, [applyBattleAction]);
 

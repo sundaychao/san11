@@ -1,4 +1,4 @@
-import type { ArmyUnit, City, CityId, ForceId, GameState, GridCell, TerrainType } from '../types';
+import type { ArmyUnit, City, CityId, ForceId, GameState, GridCell, TerrainType, TroopType } from '../types';
 import { nextRandom } from '../random';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 
@@ -27,6 +27,7 @@ interface DeployInput {
   cityId: CityId;
   officerId: string;
   targetCityId: CityId;
+  troopType?: TroopType;
   troops: number;
   food: number;
 }
@@ -176,6 +177,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
     forceId,
     leaderId: input.officerId,
     homeCityId: input.cityId,
+    troopType: input.troopType ?? 'sword',
     q: spawn.q,
     r: spawn.r,
     troops: input.troops,

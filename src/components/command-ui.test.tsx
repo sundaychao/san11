@@ -64,6 +64,26 @@ describe('command interface', () => {
     expect(within(dialog).getByText(/资金不足/)).toBeVisible();
     expect(within(dialog).getByRole('button', { name: '执行调动' })).toBeDisabled();
   });
+  it('opens a deployment dialog from the city menu and deploys the selected troop type', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    await user.click(within(menu).getByRole('button', { name: '出征' }));
+
+    const dialog = screen.getByRole('dialog', { name: '出征编制' });
+    expect(within(dialog).getByLabelText('主将')).toBeVisible();
+    await user.selectOptions(within(dialog).getByLabelText('兵种'), 'spear');
+    await user.selectOptions(within(dialog).getByLabelText('目标城池'), 'xiangyang');
+    await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
+
+    expect(screen.queryByRole('dialog', { name: '出征编制' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('battle-unit-marker')).toBeVisible();
+  });
 });
 
 describe('final settlement', () => {
