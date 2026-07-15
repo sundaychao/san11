@@ -266,7 +266,7 @@ export function StrategicMap({
                   top: `${markerPosition.top}%`,
                   '--force-color': force.color,
                 } as CSSProperties}
-                aria-label={`${city.name} ${force.name} ${city.troops.toLocaleString('en-US')}兵`}
+                aria-label={`${city.name} ${force.name} ${city.troops.toLocaleString('en-US')}兵 ${city.population.toLocaleString('en-US')}人`}
                 data-testid="city-marker"
                 onClick={(event) => {
                   selectCity(city.id);
@@ -278,7 +278,10 @@ export function StrategicMap({
                 <span className="city-fort" aria-hidden="true"><i /></span>
                 <span className="city-marker-copy">
                   <strong>{city.name}</strong>
-                  <small>{force.name} · {city.troops.toLocaleString('en-US')}</small>
+                  <span className="city-marker-stats" aria-hidden="true">
+                    <span className="city-marker-stat" data-testid="city-marker-troops"><i />{city.troops}</span>
+                    <span className="city-marker-stat" data-testid="city-marker-population"><i />{city.population}</span>
+                  </span>
                 </span>
               </button>
             );

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { CITY_GRID_CENTERS, GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
@@ -97,6 +97,16 @@ describe('StrategicMap', () => {
 
     expect(Number.parseFloat(jianglingMarker!.style.left)).toBeCloseTo(expectedLeft, 4);
     expect(Number.parseFloat(jianglingMarker!.style.top)).toBeCloseTo(expectedTop, 4);
+  });
+
+  it('shows troop and population values next to the city name on map markers', () => {
+    renderGame();
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+
+    expect(within(jianglingMarker!).getByTestId('city-marker-troops')).toHaveTextContent('13500');
+    expect(within(jianglingMarker!).getByTestId('city-marker-population')).toHaveTextContent('95000');
   });
 
   it('shows all six management commands for an owned city', () => {
