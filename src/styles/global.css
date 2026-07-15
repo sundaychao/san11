@@ -105,7 +105,7 @@ button { color: inherit; }
 .troop-crossbow { --troop-tone: #8f6f9f; }
 .troop-cavalry { --troop-tone: #c06a4b; }
 .troop-siege { --troop-tone: #879099; }
-.battle-unit-troops { fill: #fff6d6; font-size: 10px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 2px; }
+.battle-unit-troops { fill: #fff6d6; font-size: 8px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 2px; }
 .battle-unit-leader-name { fill: #fff6d6; font-size: 11px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 3px; vector-effect: non-scaling-stroke; }
 .city-marker-layer { position: absolute; inset: 0; pointer-events: none; }
 .city-marker-layer.is-editing { pointer-events: none; opacity: 0.8; }

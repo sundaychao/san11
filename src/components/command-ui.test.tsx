@@ -116,6 +116,7 @@ describe('command interface', () => {
     expect(unitMarker).toHaveAttribute('data-troop-type', 'spear');
     expect(within(unitMarker).getByText('枪')).toBeVisible();
     expect(within(unitMarker).getByText('刘备')).toBeVisible();
+    expect(within(unitMarker).getByText('4,000')).toBeVisible();
   });
 
   it('opens a transport dialog from the military menu and places a transport unit', async () => {
@@ -146,6 +147,7 @@ describe('command interface', () => {
     expect(unitMarker).toBeVisible();
     expect(unitMarker).toHaveAttribute('data-unit-kind', 'transport');
     expect(within(unitMarker).getByText('输')).toBeVisible();
+    expect(within(unitMarker).getByText('1,000')).toBeVisible();
   });
 
   it('shows movement range for a refreshed unit and moves it to a selected cell', async () => {

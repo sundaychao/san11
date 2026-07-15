@@ -248,7 +248,7 @@ export function StrategicMap({
                   />
                   <text className="battle-unit-model-glyph" x={centerX} y={centerY + 4}>{texture.glyph}</text>
                 </g>
-                <text className="battle-unit-troops" x={centerX} y={centerY + 24}>{Math.floor(unit.troops / 1000)}</text>
+                <text className="battle-unit-troops" x={centerX} y={centerY + 24}>{unit.troops.toLocaleString('en-US')}</text>
               </g>
             );
           })}
