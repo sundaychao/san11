@@ -77,8 +77,8 @@ describe('command interface', () => {
 
     const dialog = screen.getByRole('dialog', { name: '出征编制' });
     expect(within(dialog).getByLabelText('主将')).toBeVisible();
+    expect(within(dialog).queryByLabelText('目标城池')).not.toBeInTheDocument();
     await user.selectOptions(within(dialog).getByLabelText('兵种'), 'spear');
-    await user.selectOptions(within(dialog).getByLabelText('目标城池'), 'xiangyang');
     await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
 
     expect(screen.queryByRole('dialog', { name: '出征编制' })).not.toBeInTheDocument();

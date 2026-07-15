@@ -65,7 +65,6 @@ describe('battle deployment and movement actions', () => {
     const next = deployUnit(state, 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
-      targetCityId: 'xiangyang',
       destination,
       troops: 4000,
       food: 6000,

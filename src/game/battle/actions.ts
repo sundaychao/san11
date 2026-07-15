@@ -26,7 +26,7 @@ const TERRAIN_DEFENSE: Record<TerrainType, number> = {
 interface DeployInput {
   cityId: CityId;
   officerId: string;
-  targetCityId: CityId;
+  targetCityId?: CityId;
   troopType?: TroopType;
   destination?: GridCoord;
   troops: number;
@@ -196,12 +196,12 @@ export function movementCells(state: GameState, unitId: string): GridCoord[] {
 
 export function deployUnit(state: GameState, forceId: ForceId, input: DeployInput): GameState {
   const city = state.cities[input.cityId];
-  const target = state.cities[input.targetCityId];
+  const target = input.targetCityId ? state.cities[input.targetCityId] : undefined;
   const officer = state.officers[input.officerId];
   if (state.phase !== 'playing') throw new Error('游戏已经结束');
   if (state.turnForceId !== forceId) throw new Error('不是当前势力回合');
   if (!city || city.ownerId !== forceId) throw new Error('只能从己方城市出征');
-  if (!target) throw new Error('目标城市不存在');
+  if (input.targetCityId && !target) throw new Error('目标城市不存在');
   if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== city.id) {
     throw new Error('武将不在出征城市');
   }
@@ -211,7 +211,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   if (!Number.isInteger(input.food) || input.food < 0 || input.food > city.food) throw new Error('粮草不足');
   if (city.troops - input.troops < 500) throw new Error('城市至少保留 500 兵力');
 
-  const spawn = input.destination ?? spawnCellFor(state, city, target);
+  const spawn = input.destination ?? (target ? spawnCellFor(state, city, target) : deploymentCells(state, input.cityId)[0]);
   if (!spawn) throw new Error('没有合法出生格');
   if (!deploymentCells(state, input.cityId).some((coord) => coord.q === spawn.q && coord.r === spawn.r)) {
     throw new Error('出征位置超出移动范围');

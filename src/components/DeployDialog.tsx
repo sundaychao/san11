@@ -6,7 +6,6 @@ import type { CityId, Officer, TroopType } from '../game/types';
 export interface DeployConfirmInput {
   cityId: CityId;
   officerId: string;
-  targetCityId: CityId;
   troopType: TroopType;
   troops: number;
   food: number;
@@ -48,7 +47,6 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const { state } = useGame();
   const [officerId, setOfficerId] = useState('');
   const [troopType, setTroopType] = useState<TroopType>('sword');
-  const [targetCityId, setTargetCityId] = useState<CityId | ''>('');
   const [troops, setTroops] = useState('');
   const [food, setFood] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -68,8 +66,6 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const availableOfficers = officers.filter((officer) => !officer.acted);
   const activeOfficerId = officerId || availableOfficers[0]?.id || '';
   const activeOfficer = state.officers[activeOfficerId];
-  const targetCities = Object.values(state.cities).filter((target) => target.ownerId !== state.playerForceId);
-  const activeTargetId = targetCityId || targetCities[0]?.id || '';
   const activeTroops = troops || String(Math.min(4000, Math.max(1000, city.troops - 500)));
   const activeFood = food || String(Math.min(6000, city.food));
   const troopAmount = toAmount(activeTroops);
@@ -77,7 +73,6 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const ability = useMemo(() => officerAbility(activeOfficer, troopType), [activeOfficer, troopType]);
   const errors = [
     !activeOfficerId ? '没有可出征武将' : '',
-    !activeTargetId ? '没有可攻击目标' : '',
     !Number.isInteger(troopAmount) || troopAmount < 1000 || troopAmount > 10000 ? '士兵必须为 1000-10000' : '',
     city.troops - troopAmount < 500 ? '城市至少保留 500 兵力' : '',
     !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > city.food ? '兵粮不足' : '',
@@ -90,7 +85,6 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
       onConfirm({
         cityId,
         officerId: activeOfficerId,
-        targetCityId: activeTargetId as CityId,
         troopType,
         troops: troopAmount,
         food: foodAmount,
@@ -121,13 +115,6 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
                   {officer.name} · 统{officer.stats.leadership} 武{officer.stats.war}{officer.acted ? '（已行动）' : ''}
                 </option>
               ))}
-            </select>
-          </label>
-
-          <label className="field-row">
-            <span>目标城池</span>
-            <select aria-label="目标城池" value={activeTargetId} onChange={(event) => setTargetCityId(event.target.value as CityId)}>
-              {targetCities.map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}
             </select>
           </label>
 
