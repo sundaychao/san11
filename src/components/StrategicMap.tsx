@@ -1,9 +1,10 @@
 import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
 import { useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from 'react';
-import { sevenCellCityFootprint } from '../game/battle/grid';
+import { sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
+import type { EditableCityMarker } from '../game/map-editor/editor';
 import { useGame } from '../game/store/GameProvider';
-import type { CityId } from '../game/types';
+import type { CityId, GridCell } from '../game/types';
 
 interface MapView {
   x: number;
@@ -29,9 +30,13 @@ function clampScale(value: number) {
 
 interface StrategicMapProps {
   onCityMenu?(cityId: CityId, position: { x: number; y: number }): void;
+  editorGrid?: GridCell[];
+  editorCities?: EditableCityMarker[];
+  editorMode?: boolean;
+  onEditorCellPaint?(coord: GridCoord): void;
 }
 
-export function StrategicMap({ onCityMenu }: StrategicMapProps) {
+export function StrategicMap({ editorCities, editorGrid, editorMode = false, onCityMenu, onEditorCellPaint }: StrategicMapProps) {
   const { state, selectedCityId, selectCity } = useGame();
   const [view, setView] = useState<MapView>(INITIAL_VIEW);
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
@@ -65,6 +70,17 @@ export function StrategicMap({ onCityMenu }: StrategicMapProps) {
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
 
+  const displayGrid = editorGrid ?? state.grid;
+  const displayCities = editorMode
+    ? (editorCities ?? []).map((city) => ({ ...city, forceColor: '#d1b943' }))
+    : Object.values(state.cities).map((city) => ({
+      id: city.id,
+      label: city.name,
+      q: city.gridQ,
+      r: city.gridR,
+      forceColor: state.forces[city.ownerId].color,
+    }));
+
   return (
     <section
       className="map-region"
@@ -81,22 +97,33 @@ export function StrategicMap({ onCityMenu }: StrategicMapProps) {
         data-testid="map-content"
         style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
       >
-        <svg className="battle-grid-overlay" data-testid="battle-grid-overlay" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
-          {state.grid.map((cell) => {
+        <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
+          {displayGrid.map((cell) => {
             const position = cellPosition(cell.q, cell.r);
             return (
               <rect
                 key={`${cell.q},${cell.r}`}
+                data-testid={editorMode ? `editor-cell-${cell.q}-${cell.r}` : undefined}
                 x={position.x}
                 y={position.y}
                 width={CELL_SIZE}
                 height={CELL_SIZE}
                 className={`battle-cell terrain-${cell.terrain}`}
+                onPointerDown={(event) => {
+                  if (!editorMode || event.button !== 0) return;
+                  event.stopPropagation();
+                  onEditorCellPaint?.({ q: cell.q, r: cell.r });
+                }}
+                onPointerEnter={(event) => {
+                  if (!editorMode || event.buttons !== 1) return;
+                  event.stopPropagation();
+                  onEditorCellPaint?.({ q: cell.q, r: cell.r });
+                }}
               />
             );
           })}
-          {Object.values(state.cities).flatMap((city) => (
-            sevenCellCityFootprint({ q: city.gridQ, r: city.gridR }).map((coord) => {
+          {displayCities.flatMap((city) => (
+            sevenCellCityFootprint(city).map((coord) => {
               const position = cellPosition(coord.q, coord.r);
               return (
                 <rect
@@ -106,7 +133,7 @@ export function StrategicMap({ onCityMenu }: StrategicMapProps) {
                   width={CELL_SIZE - 4}
                   height={CELL_SIZE - 4}
                   className="city-footprint-cell"
-                  style={{ '--force-color': state.forces[city.ownerId].color } as CSSProperties}
+                  style={{ '--force-color': city.forceColor } as CSSProperties}
                 />
               );
             })
@@ -126,7 +153,7 @@ export function StrategicMap({ onCityMenu }: StrategicMapProps) {
             );
           })}
         </svg>
-        <div className="city-marker-layer" aria-label="荆襄城市">
+        <div className={`city-marker-layer${editorMode ? ' is-editing' : ''}`} aria-label="荆襄城市">
           {Object.values(state.cities).map((city) => {
             const force = state.forces[city.ownerId];
             const selected = selectedCityId === city.id;

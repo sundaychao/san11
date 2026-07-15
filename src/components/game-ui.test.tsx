@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../app/App';
 import { createGame } from '../game/scenario/jingxiang208';
@@ -165,5 +165,30 @@ describe('game interface shell', () => {
     await user.pointer({ keys: '[MouseRight]', target: screen.getByTestId('map-viewport') });
 
     expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
+  });
+
+  it('edits map cells and exports the edited grid from the map editor', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: '地图编辑' }));
+    expect(screen.getByRole('region', { name: '地图编辑器' })).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '高山' }));
+    fireEvent.pointerDown(screen.getByTestId('editor-cell-0-0'), { button: 0, buttons: 1 });
+    await user.click(screen.getByRole('button', { name: '城市' }));
+    fireEvent.pointerDown(screen.getByTestId('editor-cell-4-4'), { button: 0, buttons: 1 });
+
+    await user.click(screen.getByRole('button', { name: '导出 JSON' }));
+    const exportOutput = screen.getByTestId('map-editor-export');
+    const exportValue = (exportOutput as HTMLTextAreaElement).value;
+
+    expect(exportValue).toContain('"terrain": "mountain"');
+    expect(exportValue).toContain('"cities"');
+    expect(exportValue).toContain('"q": 4');
   });
 });

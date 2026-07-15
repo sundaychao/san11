@@ -78,7 +78,9 @@ button { color: inherit; }
 .map-region:active { cursor: grabbing; }
 .map-content { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: center; will-change: transform; }
 .battle-grid-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.battle-grid-overlay.is-editing { pointer-events: auto; }
 .battle-cell { fill: rgba(255, 255, 255, 0.025); stroke: rgba(236, 231, 211, 0.34); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.battle-grid-overlay.is-editing .battle-cell { cursor: crosshair; }
 .terrain-road { fill: rgba(206, 186, 124, 0.11); }
 .terrain-forest { fill: rgba(28, 72, 42, 0.18); }
 .terrain-hill { fill: rgba(83, 83, 65, 0.2); }
@@ -88,6 +90,7 @@ button { color: inherit; }
 .battle-unit-marker circle { fill: var(--force-color); stroke: #fff3c4; stroke-width: 3; filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.5)); vector-effect: non-scaling-stroke; }
 .battle-unit-marker text { fill: #171f1c; font-size: 14px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(255, 244, 205, 0.75); stroke-width: 2px; }
 .city-marker-layer { position: absolute; inset: 0; }
+.city-marker-layer.is-editing { pointer-events: none; opacity: 0.8; }
 .city-marker {
   position: absolute;
   width: 118px;
@@ -117,6 +120,20 @@ button { color: inherit; }
 .mini-map > button { position: absolute; width: 8px; height: 8px; padding: 0; border: 1px solid #f4edd9; border-radius: 0; transform: translate(-50%, -50%); cursor: pointer; }
 .mini-map > button.is-selected { width: 12px; height: 12px; outline: 2px solid #f2d778; }
 .tool-panel { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--panel-shadow); }
+.map-editor-toggle { position: fixed; z-index: 30; top: 78px; left: 160px; min-height: 40px; }
+.map-editor-panel { position: fixed; z-index: 36; left: 14px; top: 124px; width: 282px; display: grid; gap: 12px; padding: 12px; }
+.map-editor-panel header { display: flex; align-items: start; justify-content: space-between; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.map-editor-panel header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
+.map-editor-panel h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 22px; }
+.map-editor-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.map-editor-tools button { min-height: 36px; display: grid; grid-template-columns: 17px 1fr; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.07); color: var(--paper); text-align: left; cursor: pointer; }
+.map-editor-tools button:hover, .map-editor-tools button:focus-visible, .map-editor-tools button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.2); outline: none; }
+.map-editor-tools svg, .map-editor-actions svg { width: 16px; height: 16px; }
+.map-editor-actions { display: flex; gap: 6px; }
+.map-editor-actions button { flex: 1; min-width: 0; min-height: 36px; padding: 0 8px; font-size: 12px; }
+.map-editor-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+.map-editor-status { margin: 0; color: var(--muted); font-size: 12px; }
+.map-editor-panel textarea { width: 100%; min-height: 110px; resize: vertical; padding: 8px; border: 1px solid var(--line); border-radius: 2px; background: rgba(12, 18, 16, 0.72); color: #f4edd9; font-family: Consolas, "Courier New", monospace; font-size: 11px; line-height: 1.45; }
 .city-panel { z-index: 10; width: 320px; padding: 16px; overflow: auto; border-width: 0 0 0 1px; }
 .battle-panel { position: fixed; z-index: 14; right: 336px; top: 78px; display: grid; gap: 8px; width: 170px; padding: 10px; }
 .battle-panel header { display: flex; align-items: center; gap: 8px; }
