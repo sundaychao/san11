@@ -20,7 +20,7 @@ import { BattlePanel } from './BattlePanel';
 import { CityCommandMenu } from './CityCommandMenu';
 import { CityPanel } from './CityPanel';
 import { CommandDialog } from './CommandDialog';
-import { DeployDialog } from './DeployDialog';
+import { DeployDialog, type DeployConfirmInput } from './DeployDialog';
 import { EventLog } from './EventLog';
 import { MapEditorPanel } from './MapEditorPanel';
 import { ResultOverlay } from './ResultOverlay';
@@ -28,10 +28,10 @@ import { StrategicMap } from './StrategicMap';
 import { TopBar } from './TopBar';
 
 export function GameShell() {
-  const { state, selectedCityId, resetGame } = useGame();
+  const { deployUnit, state, selectedCityId, resetGame } = useGame();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
-  const [deployDestination, setDeployDestination] = useState<GridCoord | null>(null);
+  const [pendingDeploy, setPendingDeploy] = useState<DeployConfirmInput | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
   const [viewFinalMap, setViewFinalMap] = useState(false);
   const [editorState, setEditorState] = useState<MapEditorState | null>(null);
@@ -66,18 +66,29 @@ export function GameShell() {
 
   const openDeployDialog = useCallback((cityId: NonNullable<typeof selectedCityId>) => {
     setDeployCityId(cityId);
-    setDeployDestination(null);
+    setPendingDeploy(null);
     setCityMenu(null);
   }, []);
 
   const deployTargets = useMemo(() => (
-    state && deployCityId ? deploymentCells(state, deployCityId) : []
-  ), [deployCityId, state]);
+    state && pendingDeploy ? deploymentCells(state, pendingDeploy.cityId) : []
+  ), [pendingDeploy, state]);
 
   const closeDeployDialog = useCallback(() => {
     setDeployCityId(null);
-    setDeployDestination(null);
   }, []);
+
+  const confirmDeploySetup = useCallback((input: DeployConfirmInput) => {
+    setPendingDeploy(input);
+    setDeployCityId(null);
+  }, []);
+
+  const selectDeployTarget = useCallback((coord: GridCoord) => {
+    if (!pendingDeploy) return;
+    if (!deployTargets.some((target) => target.q === coord.q && target.r === coord.r)) return;
+    deployUnit({ ...pendingDeploy, destination: coord });
+    setPendingDeploy(null);
+  }, [deployTargets, deployUnit, pendingDeploy]);
 
   return (
     <main className="game-shell">
@@ -89,8 +100,7 @@ export function GameShell() {
         editorMode={Boolean(editorState)}
         onEditorCellPaint={editCell}
         deployTargets={deployTargets}
-        selectedDeployTarget={deployDestination}
-        onDeployTargetSelect={setDeployDestination}
+        onDeployTargetSelect={selectDeployTarget}
       />
       <button type="button" className="map-editor-toggle primary-button" onClick={openEditor}>地图编辑</button>
       <CityPanel onCommand={launchCommand} />
@@ -124,7 +134,7 @@ export function GameShell() {
       {deployCityId && (
         <DeployDialog
           cityId={deployCityId}
-          destination={deployDestination}
+          onConfirm={confirmDeploySetup}
           onClose={closeDeployDialog}
         />
       )}

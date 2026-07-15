@@ -212,7 +212,6 @@ button { color: inherit; }
 .event-log li { display: grid; grid-template-columns: 7px 1fr; gap: 8px; align-items: start; margin: 6px 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .event-log li i { width: 7px; height: 7px; margin-top: 5px; }
 .modal-backdrop, .result-backdrop { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(10, 15, 13, 0.72); }
-.deploy-backdrop { pointer-events: none; place-items: start end; padding: 78px 336px 20px 20px; background: transparent; }
 .command-dialog { width: min(500px, 100%); max-height: min(720px, calc(100dvh - 32px)); padding: 18px; overflow: auto; }
 .deploy-dialog { pointer-events: auto; width: min(760px, calc(100vw - 376px)); max-height: min(760px, calc(100dvh - 98px)); display: grid; grid-template-columns: minmax(320px, 1.15fr) minmax(240px, 0.85fr); gap: 16px 18px; padding: 18px; overflow: auto; background: rgba(18, 43, 45, 0.95); }
 .command-dialog > header, .deploy-dialog > header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
@@ -234,7 +233,6 @@ button { color: inherit; }
 .deploy-stock { display: grid; gap: 6px; margin: 0; }
 .deploy-stock > div { display: grid; grid-template-columns: 48px 1fr; align-items: center; gap: 10px; min-height: 34px; padding: 0 8px; border: 1px solid rgba(146, 136, 115, 0.55); }
 .deploy-stock dd { margin: 0; color: #fff6d6; text-align: right; font-variant-numeric: tabular-nums; }
-.deploy-position { margin: 0; padding: 8px 10px; border: 1px solid rgba(146, 136, 115, 0.55); color: #fff6d6; font-size: 12px; }
 .deploy-errors { grid-column: 1 / -1; margin-top: 0; }
 .deploy-dialog footer { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 0; }
 .field-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 12px; margin-top: 15px; }

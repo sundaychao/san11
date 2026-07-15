@@ -79,12 +79,13 @@ describe('command interface', () => {
     expect(within(dialog).getByLabelText('主将')).toBeVisible();
     await user.selectOptions(within(dialog).getByLabelText('兵种'), 'spear');
     await user.selectOptions(within(dialog).getByLabelText('目标城池'), 'xiangyang');
-    const deploymentCell = screen.getAllByTestId(/deploy-target-/)[0];
-    fireEvent.pointerDown(deploymentCell, { button: 0, buttons: 1 });
-    expect(within(dialog).getByText(/出征位置/)).toBeVisible();
     await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
 
     expect(screen.queryByRole('dialog', { name: '出征编制' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('battle-unit-marker')).not.toBeInTheDocument();
+    const deploymentCell = screen.getAllByTestId(/deploy-target-/)[0];
+    fireEvent.pointerDown(deploymentCell, { button: 0, buttons: 1 });
+
     expect(screen.getByTestId('battle-unit-marker')).toBeVisible();
   });
 });
