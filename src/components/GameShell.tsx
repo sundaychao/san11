@@ -28,11 +28,12 @@ import { StrategicMap } from './StrategicMap';
 import { TopBar } from './TopBar';
 
 export function GameShell() {
-  const { deployUnit, state, selectedCityId, resetGame } = useGame();
+  const { deployUnit, endTenDay, state, selectedCityId, resetGame } = useGame();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [pendingDeploy, setPendingDeploy] = useState<DeployConfirmInput | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
+  const [mapContextMenu, setMapContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [viewFinalMap, setViewFinalMap] = useState(false);
   const [editorState, setEditorState] = useState<MapEditorState | null>(null);
   const [editorTool, setEditorTool] = useState<MapEditorTool>('plain');
@@ -41,6 +42,7 @@ export function GameShell() {
   const launchCommand = useCallback((type: GameCommand['type']) => {
     setActiveCommand(type);
     setCityMenu(null);
+    setMapContextMenu(null);
   }, []);
 
   const openEditor = useCallback(() => {
@@ -51,6 +53,7 @@ export function GameShell() {
     ));
     setEditorExport('');
     setCityMenu(null);
+    setMapContextMenu(null);
   }, [state]);
 
   const editCell = useCallback((coord: { q: number; r: number }) => {
@@ -68,6 +71,7 @@ export function GameShell() {
     setDeployCityId(cityId);
     setPendingDeploy(null);
     setCityMenu(null);
+    setMapContextMenu(null);
   }, []);
 
   const deployTargets = useMemo(() => (
@@ -90,17 +94,34 @@ export function GameShell() {
     setPendingDeploy(null);
   }, [deployTargets, deployUnit, pendingDeploy]);
 
+  const openMapContextMenu = useCallback((position: { x: number; y: number }) => {
+    if (cityMenu || editorState || deployCityId || pendingDeploy) {
+      setCityMenu(null);
+      return;
+    }
+    setMapContextMenu(position);
+  }, [cityMenu, deployCityId, editorState, pendingDeploy]);
+
+  const proceedTenDayFromMap = useCallback(() => {
+    setMapContextMenu(null);
+    endTenDay();
+  }, [endTenDay]);
+
   return (
     <main className="game-shell">
       <TopBar />
       <StrategicMap
-        onCityMenu={(cityId, position) => setCityMenu({ cityId, position })}
+        onCityMenu={(cityId, position) => {
+          setMapContextMenu(null);
+          setCityMenu({ cityId, position });
+        }}
         editorGrid={editorState?.grid}
         editorCities={editorState?.cities}
         editorMode={Boolean(editorState)}
         onEditorCellPaint={editCell}
         deployTargets={deployTargets}
         onDeployTargetSelect={selectDeployTarget}
+        onMapContextMenu={openMapContextMenu}
       />
       <button type="button" className="map-editor-toggle primary-button" onClick={openEditor}>地图编辑</button>
       <CityPanel onCommand={launchCommand} />
@@ -129,6 +150,16 @@ export function GameShell() {
           onDeploy={openDeployDialog}
           onClose={() => setCityMenu(null)}
         />
+      )}
+      {mapContextMenu && (
+        <nav
+          className="map-context-menu tool-panel"
+          data-testid="map-context-menu"
+          style={{ left: mapContextMenu.x, top: mapContextMenu.y }}
+          aria-label="地图命令菜单"
+        >
+          <button type="button" onClick={proceedTenDayFromMap}>进行</button>
+        </nav>
       )}
       {activeCommand && selectedCityId && <CommandDialog type={activeCommand} cityId={selectedCityId} onClose={closeCommand} />}
       {deployCityId && (

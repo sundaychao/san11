@@ -168,7 +168,7 @@ export function isGameState(value: unknown): value is GameState {
     Object.values(state.units).every((unit) => validUnit(unit) && state.units![unit.id] === unit &&
       Boolean(officerById[unit.leaderId])) &&
     FORCE_IDS.every((forceId) => Number.isInteger(state.actionPoints![forceId]) && validResource(state.actionPoints![forceId]) &&
-      state.actionPoints![forceId] <= 80 && validForce(state.forces![forceId]) &&
+      state.actionPoints![forceId] <= 160 && validForce(state.forces![forceId]) &&
       state.forces![forceId].id === forceId &&
       officerById[state.forces![forceId].leaderId]?.forceId === forceId) &&
     state.logs.every((log) => Boolean(log) && typeof log.id === 'string' && typeof log.message === 'string' &&

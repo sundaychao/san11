@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createGame } from './scenario/jingxiang208';
-import { settleMonth } from './turn';
+import { settleMonth, settleTenDay } from './turn';
 
 describe('monthly settlement', () => {
   it('settles revenue and restores monthly actions', () => {
@@ -44,5 +44,31 @@ describe('monthly settlement', () => {
     settleMonth(state);
 
     expect(state).toEqual(snapshot);
+  });
+});
+
+describe('ten-day settlement', () => {
+  it('restores action points each ten-day and carries over half of the unused points', () => {
+    const state = createGame('liu', 1);
+    state.tenDay = 1;
+    state.actionPoints.liu = 60;
+
+    const next = settleTenDay(state);
+
+    expect(next.tenDay).toBe(2);
+    expect(next.actionPoints.liu).toBe(110);
+  });
+
+  it('carries action points across the month boundary into the next first ten-day', () => {
+    const state = createGame('liu', 1);
+    state.month = 1;
+    state.tenDay = 3;
+    state.actionPoints.liu = 40;
+
+    const next = settleTenDay(state);
+
+    expect(next.month).toBe(2);
+    expect(next.tenDay).toBe(1);
+    expect(next.actionPoints.liu).toBe(100);
   });
 });

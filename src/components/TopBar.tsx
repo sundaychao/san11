@@ -64,7 +64,7 @@ export function TopBar() {
           <section className="confirm-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="end-month-title">
             <p>仍有武将和行动力可用</p>
             <h2 id="end-month-title">结束本月</h2>
-            <p>未使用的行动力不会保留。确定交由其他势力行动并进入下月吗？</p>
+            <p>未使用行动力的一半会结转到下一旬。确定交由其他势力行动并进入下月吗？</p>
             <footer>
               <button type="button" className="secondary-button" onClick={() => setConfirmEnd(false)}>取消</button>
               <button type="button" className="primary-button" onClick={confirm}>确认进行</button>

@@ -17,6 +17,8 @@ const EVENTS: CityEvent[] = [
   { name: '人才传闻', apply: () => undefined },
 ];
 
+const BASE_TEN_DAY_ACTION_POINTS = 80;
+
 function applyPossibleEvent(state: GameState, city: City) {
   const roll = nextRandom(state.seed, state.rngCursor);
   state.rngCursor = roll.cursor;
@@ -42,7 +44,7 @@ export function settleMonth(state: GameState): GameState {
     city.population += Math.floor((city.population * 0.005 * city.order) / 100);
     applyPossibleEvent(next, city);
   }
-  for (const forceId of FORCE_IDS) next.actionPoints[forceId] = 80;
+  for (const forceId of FORCE_IDS) next.actionPoints[forceId] = BASE_TEN_DAY_ACTION_POINTS;
   for (const officer of Object.values(next.officers)) officer.acted = false;
 
   if (next.month === 24) {
@@ -53,6 +55,12 @@ export function settleMonth(state: GameState): GameState {
     next.logs.push({ id: `month-${next.month}`, month: next.month, forceId: null, message: `进入建安十三年后的第${next.month}个月。` });
   }
   return next;
+}
+
+function restoreTenDayActionPoints(next: GameState, previous: GameState) {
+  for (const forceId of FORCE_IDS) {
+    next.actionPoints[forceId] = BASE_TEN_DAY_ACTION_POINTS + Math.floor(previous.actionPoints[forceId] / 2);
+  }
 }
 
 function removeUnit(next: GameState, unit: ArmyUnit) {
@@ -96,6 +104,7 @@ export function settleTenDay(state: GameState): GameState {
     next.tenDay = next.tenDay === 1 ? 2 : 3;
   }
 
+  restoreTenDayActionPoints(next, state);
   next.turnForceId = next.playerForceId;
   return next;
 }

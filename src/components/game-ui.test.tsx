@@ -167,6 +167,26 @@ describe('game interface shell', () => {
     expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
   });
 
+  it('opens a proceed menu from a right click on empty map space and advances the ten-day turn', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+    const menu = screen.getByTestId('map-context-menu');
+    expect(within(menu).getByRole('button', { name: '进行' })).toBeVisible();
+
+    await user.click(within(menu).getByRole('button', { name: '进行' }));
+
+    expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+  });
+
   it('edits map cells and exports the edited grid from the map editor', async () => {
     const user = userEvent.setup();
     render(

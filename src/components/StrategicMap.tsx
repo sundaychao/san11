@@ -1,5 +1,5 @@
 import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
-import { useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from 'react';
+import { useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import { sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
 import type { EditableCityMarker } from '../game/map-editor/editor';
@@ -45,6 +45,7 @@ interface StrategicMapProps {
   deployTargets?: GridCoord[];
   selectedDeployTarget?: GridCoord | null;
   onDeployTargetSelect?(coord: GridCoord): void;
+  onMapContextMenu?(position: { x: number; y: number }): void;
 }
 
 export function StrategicMap({
@@ -55,6 +56,7 @@ export function StrategicMap({
   onCityMenu,
   onDeployTargetSelect,
   onEditorCellPaint,
+  onMapContextMenu,
   selectedDeployTarget,
 }: StrategicMapProps) {
   const { state, selectedCityId, selectCity } = useGame();
@@ -70,6 +72,12 @@ export function StrategicMap({
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
     zoom(event.deltaY < 0 ? 0.15 : -0.15);
+  };
+
+  const handleContextMenu = (event: MouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('button')) return;
+    event.preventDefault();
+    onMapContextMenu?.({ x: event.clientX + 10, y: event.clientY + 4 });
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -114,6 +122,7 @@ export function StrategicMap({
       onPointerMove={handlePointerMove}
       onPointerUp={stopDragging}
       onPointerCancel={stopDragging}
+      onContextMenu={handleContextMenu}
     >
       <div
         className="map-content"

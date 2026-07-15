@@ -186,6 +186,20 @@ button { color: inherit; }
   box-shadow: var(--panel-shadow);
 }
 .city-command-secondary button { grid-template-columns: 1fr; min-width: 108px; }
+.map-context-menu { position: fixed; z-index: 35; display: grid; min-width: 92px; padding: 4px; }
+.map-context-menu button {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--paper);
+  text-align: left;
+  cursor: pointer;
+}
+.map-context-menu button:hover, .map-context-menu button:focus-visible {
+  background: rgba(197, 173, 111, 0.18);
+  outline: none;
+}
 .city-panel h2, .event-log h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; letter-spacing: 0; }
 .city-heading { display: grid; grid-template-columns: 5px 1fr auto auto; gap: 10px; align-items: center; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
 .city-heading .force-line { align-self: stretch; min-height: 48px; }
