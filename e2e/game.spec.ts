@@ -4,9 +4,7 @@ test('plays, restores, and completes the Jingxiang scenario', async ({ page }, t
   await page.goto('/');
   await page.getByRole('button', { name: '选择刘备' }).click();
 
-  const mapImage = page.getByTestId('map-image');
-  await expect(mapImage).toBeVisible();
-  expect(await mapImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  await expect(page.getByTestId('battle-grid-overlay')).toBeVisible();
   expect(await page.getByTestId('city-marker').count()).toBe(8);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth));
 

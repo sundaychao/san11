@@ -69,6 +69,17 @@ describe('game interface shell', () => {
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
   });
 
+  it('renders the battle map without a raster background image for now', () => {
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    expect(screen.queryByTestId('map-image')).not.toBeInTheDocument();
+    expect(screen.getByTestId('battle-grid-overlay')).toBeVisible();
+  });
+
   it('opens a nested city command menu next to a clicked city', async () => {
     const user = userEvent.setup();
     render(

@@ -81,14 +81,7 @@ export function StrategicMap({ onCityMenu }: StrategicMapProps) {
         data-testid="map-content"
         style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
       >
-        <img
-          className="map-image"
-          data-testid="map-image"
-          src="/assets/jingxiang-map.png"
-          alt="水墨画风格的荆襄山川地形图"
-          draggable={false}
-        />
-        <svg className="battle-grid-overlay" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
+        <svg className="battle-grid-overlay" data-testid="battle-grid-overlay" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
           {state.grid.map((cell) => {
             const position = cellPosition(cell.q, cell.r);
             return (
@@ -174,7 +167,6 @@ export function StrategicMap({ onCityMenu }: StrategicMapProps) {
       </div>
 
       <div className="mini-map tool-panel" aria-label="荆襄小地图">
-        <img src="/assets/jingxiang-map.png" alt="" draggable={false} />
         {Object.values(state.cities).map((city) => (
           <button
             key={city.id}
