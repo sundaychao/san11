@@ -1,4 +1,5 @@
 import type { ArmyUnit, City, CityId, ForceId, GameState, GridCell, TerrainType } from '../types';
+import { nextRandom } from '../random';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 
 const DEPLOY_AP_COST = 20;
@@ -11,6 +12,15 @@ const TERRAIN_COST: Record<TerrainType, number> = {
   hill: 2,
   mountain: Number.POSITIVE_INFINITY,
   deepWater: Number.POSITIVE_INFINITY,
+};
+
+const TERRAIN_DEFENSE: Record<TerrainType, number> = {
+  road: 1,
+  plain: 1,
+  forest: 0.85,
+  hill: 0.8,
+  mountain: 1,
+  deepWater: 1,
 };
 
 interface DeployInput {
@@ -58,6 +68,10 @@ function distance(a: GridCoord, b: GridCoord) {
   return Math.abs(a.q - b.q) + Math.abs(a.r - b.r);
 }
 
+function areAdjacent(a: GridCoord, b: GridCoord) {
+  return neighborsOf(a.q, a.r).some((coord) => coord.q === b.q && coord.r === b.r);
+}
+
 function cityCenter(city: City): GridCoord {
   return { q: city.gridQ, r: city.gridR };
 }
@@ -82,6 +96,30 @@ function assertUnitTurn(state: GameState, forceId: ForceId, unitId: string): Arm
   if (unit.forceId !== forceId) throw new Error('只能操作己方部队');
   if (unit.acted) throw new Error('部队已经行动');
   return unit;
+}
+
+function damageRoll(state: GameState, attacker: ArmyUnit, defenderTerrain: TerrainType, counter = false) {
+  const officer = state.officers[attacker.leaderId];
+  const roll = nextRandom(state.seed, state.rngCursor);
+  state.rngCursor = roll.cursor;
+  const attackScore = attacker.troops * (0.08 + officer.stats.leadership / 2000 + officer.stats.war / 3000);
+  const rawDamage = 240 + attackScore;
+  const randomModifier = 0.92 + roll.value * 0.16;
+  const damage = Math.round(rawDamage * TERRAIN_DEFENSE[defenderTerrain] * randomModifier * (counter ? 0.6 : 1));
+  return Math.min(2200, Math.max(120, damage));
+}
+
+function unitTerrain(state: GameState, unit: ArmyUnit) {
+  return cellAt(state, unit)?.terrain ?? 'plain';
+}
+
+function removeUnit(next: GameState, unit: ArmyUnit) {
+  const officer = next.officers[unit.leaderId];
+  delete next.units[unit.id];
+  const retreatCity = Object.values(next.cities).find((city) => city.ownerId === unit.forceId);
+  officer.location = retreatCity ? { kind: 'city', cityId: retreatCity.id } : { kind: 'unaffiliated', cityId: unit.homeCityId };
+  officer.cityId = officer.location.cityId;
+  officer.acted = false;
 }
 
 function reachableCosts(state: GameState, unit: ArmyUnit) {
@@ -175,5 +213,80 @@ export function waitUnit(state: GameState, forceId: ForceId, unitId: string): Ga
   assertUnitTurn(state, forceId, unitId);
   const next = structuredClone(state);
   next.units[unitId].acted = true;
+  return next;
+}
+
+export function attackUnit(state: GameState, forceId: ForceId, attackerId: string, targetId: string): GameState {
+  const attacker = assertUnitTurn(state, forceId, attackerId);
+  const target = state.units[targetId];
+  if (!target) throw new Error('目标部队不存在');
+  if (target.forceId === forceId) throw new Error('不能攻击己方部队');
+  if (attacker.energy < 10) throw new Error('气力不足');
+  if (!areAdjacent(attacker, target)) throw new Error('目标不相邻');
+
+  const next = structuredClone(state);
+  const nextAttacker = next.units[attackerId];
+  const nextTarget = next.units[targetId];
+  const damage = Math.min(nextTarget.troops, damageRoll(next, nextAttacker, unitTerrain(next, nextTarget)));
+  nextTarget.troops -= damage;
+  nextAttacker.energy -= 10;
+  nextAttacker.acted = true;
+
+  if (nextTarget.troops <= 0) {
+    removeUnit(next, nextTarget);
+    return next;
+  }
+
+  if (areAdjacent(nextTarget, nextAttacker)) {
+    const counterDamage = Math.min(nextAttacker.troops, damageRoll(next, nextTarget, unitTerrain(next, nextAttacker), true));
+    nextAttacker.troops -= counterDamage;
+    if (nextAttacker.troops <= 0) removeUnit(next, nextAttacker);
+  }
+
+  return next;
+}
+
+function isAdjacentToCity(city: City, unit: ArmyUnit) {
+  return sevenCellCityFootprint(cityCenter(city)).some((coord) => areAdjacent(coord, unit));
+}
+
+export function attackCity(state: GameState, forceId: ForceId, attackerId: string, cityId: CityId): GameState {
+  const attacker = assertUnitTurn(state, forceId, attackerId);
+  const city = state.cities[cityId];
+  if (!city) throw new Error('城市不存在');
+  if (city.ownerId === forceId) throw new Error('不能攻击己方城市');
+  if (attacker.energy < 10) throw new Error('气力不足');
+  if (!isAdjacentToCity(city, attacker)) throw new Error('部队不在城市外围');
+
+  const next = structuredClone(state);
+  const nextAttacker = next.units[attackerId];
+  const nextCity = next.cities[cityId];
+  const damage = damageRoll(next, nextAttacker, 'plain');
+  nextCity.troops = Math.max(0, nextCity.troops - Math.round(damage * 0.65));
+  nextCity.durability = Math.max(0, nextCity.durability - Math.round(damage * 0.45));
+  nextAttacker.energy -= 10;
+  nextAttacker.acted = true;
+
+  if (nextCity.troops === 0 || nextCity.durability === 0) {
+    const oldOwner = nextCity.ownerId;
+    nextCity.ownerId = forceId;
+    nextCity.order = Math.max(0, nextCity.order - 20);
+    nextCity.gold = Math.floor(nextCity.gold / 2);
+    nextCity.food = Math.floor(nextCity.food / 2);
+    nextCity.governorId = null;
+    const garrison = Math.min(1000, Math.floor(nextAttacker.troops * 0.2));
+    const transfer = Math.min(garrison, Math.max(0, nextAttacker.troops - 1));
+    nextCity.troops = transfer;
+    nextAttacker.troops -= transfer;
+    nextCity.durability = Math.ceil(nextCity.maxDurability * 0.2);
+    for (const officer of Object.values(next.officers)) {
+      if (officer.forceId === oldOwner && officer.location.kind === 'city' && officer.location.cityId === cityId) {
+        const retreat = Object.values(next.cities).find((candidate) => candidate.ownerId === oldOwner);
+        officer.location = retreat ? { kind: 'city', cityId: retreat.id } : { kind: 'unaffiliated', cityId };
+        officer.cityId = officer.location.cityId;
+      }
+    }
+  }
+
   return next;
 }

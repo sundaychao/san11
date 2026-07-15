@@ -37,7 +37,7 @@ export interface City {
   id: CityId;
   name: string;
   ownerId: ForceId;
-  governorId: string;
+  governorId: string | null;
   gold: number;
   food: number;
   population: number;

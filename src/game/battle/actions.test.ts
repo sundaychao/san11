@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createGame } from '../scenario/jingxiang208';
-import { deployUnit, moveUnit, waitUnit } from './actions';
+import { settleTenDay } from '../turn';
+import { attackCity, attackUnit, deployUnit, moveUnit, waitUnit } from './actions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 
 function cityKeys(state: ReturnType<typeof createGame>) {
@@ -119,5 +120,93 @@ describe('battle deployment and movement actions', () => {
     const next = waitUnit(deployed, 'liu', unit.id);
 
     expect(next.units[unit.id].acted).toBe(true);
+  });
+
+  it('damages an adjacent enemy unit and receives a counterattack', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troops: 4000,
+      food: 6000,
+    });
+    const attacker = Object.values(deployed.units)[0];
+    const enemyId = 'unit-enemy-cao-ren';
+    const enemyPosition = neighborsOf(attacker.q, attacker.r)[0];
+    deployed.units[enemyId] = {
+      id: enemyId,
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      q: enemyPosition.q,
+      r: enemyPosition.r,
+      troops: 3500,
+      food: 4000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    deployed.officers['cao-ren'].location = { kind: 'unit', unitId: enemyId };
+
+    const next = attackUnit(deployed, 'liu', attacker.id, enemyId);
+
+    expect(next.units[enemyId].troops).toBeLessThan(3500);
+    expect(next.units[attacker.id].troops).toBeLessThan(4000);
+    expect(next.units[attacker.id].energy).toBe(90);
+    expect(next.units[attacker.id].acted).toBe(true);
+    expect(next.units[enemyId].acted).toBe(false);
+  });
+
+  it('captures a city when siege damage drops garrison or durability to zero', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troops: 6000,
+      food: 6000,
+    });
+    const attacker = Object.values(deployed.units)[0];
+    const target = deployed.cities.xiangyang;
+    const blockedKeys = cityKeys(deployed);
+    const siegeCell = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR })
+      .flatMap((coord) => neighborsOf(coord.q, coord.r))
+      .find((coord) => !blockedKeys.has(gridKey(coord)))!;
+    deployed.units[attacker.id].q = siegeCell.q;
+    deployed.units[attacker.id].r = siegeCell.r;
+    deployed.cities.xiangyang.troops = 100;
+    deployed.cities.xiangyang.durability = 100;
+
+    const next = attackCity(deployed, 'liu', attacker.id, 'xiangyang');
+
+    expect(next.cities.xiangyang.ownerId).toBe('liu');
+    expect(next.cities.xiangyang.governorId).toBeNull();
+    expect(next.cities.xiangyang.troops).toBeGreaterThan(0);
+    expect(next.units[attacker.id].troops).toBeLessThan(6000);
+    expect(next.units[attacker.id].acted).toBe(true);
+  });
+
+  it('settles supply and advances ten-day turns', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troops: 4000,
+      food: 50,
+    });
+    const unit = Object.values(deployed.units)[0];
+    deployed.units[unit.id].acted = true;
+    deployed.units[unit.id].energy = 40;
+
+    const next = settleTenDay(deployed);
+
+    expect(next.tenDay).toBe(2);
+    expect(next.turnForceId).toBe('liu');
+    expect(next.units[unit.id].food).toBe(0);
+    expect(next.units[unit.id].energy).toBe(20);
+    expect(next.units[unit.id].troops).toBeLessThan(4000);
+    expect(next.units[unit.id].movementRemaining).toBe(5);
+    expect(next.units[unit.id].moved).toBe(false);
+    expect(next.units[unit.id].acted).toBe(false);
   });
 });

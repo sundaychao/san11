@@ -1,7 +1,7 @@
 import { clamp } from './commands';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
-import type { City, GameState } from './types';
+import type { ArmyUnit, City, GameState } from './types';
 
 interface CityEvent {
   name: string;
@@ -52,5 +52,50 @@ export function settleMonth(state: GameState): GameState {
     next.month += 1;
     next.logs.push({ id: `month-${next.month}`, month: next.month, forceId: null, message: `进入建安十三年后的第${next.month}个月。` });
   }
+  return next;
+}
+
+function removeUnit(next: GameState, unit: ArmyUnit) {
+  const officer = next.officers[unit.leaderId];
+  delete next.units[unit.id];
+  const retreatCity = Object.values(next.cities).find((city) => city.ownerId === unit.forceId);
+  officer.location = retreatCity ? { kind: 'city', cityId: retreatCity.id } : { kind: 'unaffiliated', cityId: unit.homeCityId };
+  officer.cityId = officer.location.cityId;
+  officer.acted = false;
+}
+
+function settleUnitSupply(next: GameState, unit: ArmyUnit) {
+  const foodCost = Math.max(100, Math.ceil(unit.troops / 20));
+  if (unit.food >= foodCost) {
+    unit.food -= foodCost;
+    unit.energy = Math.min(100, unit.energy + 5);
+  } else {
+    unit.food = 0;
+    unit.energy = Math.max(0, unit.energy - 20);
+    unit.troops = Math.max(0, unit.troops - Math.max(100, Math.ceil(unit.troops * 0.08)));
+  }
+
+  if (unit.troops <= 0) {
+    removeUnit(next, unit);
+    return;
+  }
+
+  unit.movementRemaining = 5;
+  unit.moved = false;
+  unit.acted = false;
+}
+
+export function settleTenDay(state: GameState): GameState {
+  let next = structuredClone(state);
+  for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
+
+  if (next.tenDay === 3) {
+    next = settleMonth(next);
+    next.tenDay = 1;
+  } else {
+    next.tenDay = next.tenDay === 1 ? 2 : 3;
+  }
+
+  next.turnForceId = next.playerForceId;
   return next;
 }

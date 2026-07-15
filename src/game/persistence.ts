@@ -44,7 +44,7 @@ function validCity(value: unknown): value is City {
     typeof city.id === 'string' &&
     typeof city.name === 'string' &&
     FORCE_IDS.includes(city.ownerId!) &&
-    typeof city.governorId === 'string' &&
+    (city.governorId === null || typeof city.governorId === 'string') &&
     validResource(city.gold) &&
     validResource(city.food) &&
     validResource(city.population) &&
@@ -150,9 +150,11 @@ export function isGameState(value: unknown): value is GameState {
   const officerById = state.officers;
   return (
     cities.every((city) => validCity(city) && cityById[city.id] === city &&
-      Boolean(officerById[city.governorId]) &&
-      officerById[city.governorId].forceId === city.ownerId &&
-      officerById[city.governorId].cityId === city.id) &&
+      (city.governorId === null || (
+        Boolean(officerById[city.governorId]) &&
+        officerById[city.governorId].forceId === city.ownerId &&
+        officerById[city.governorId].cityId === city.id
+      ))) &&
     officers.every((officer) => validOfficer(officer) && officerById[officer.id] === officer &&
       CITY_IDS.includes(officer.cityId) &&
       (officer.forceId === null || cityById[officer.cityId].ownerId === officer.forceId) &&
