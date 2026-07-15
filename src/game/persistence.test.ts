@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createGame } from './scenario/jingxiang208';
+import { executeCommand } from './commands';
 import {
   AUTO_SAVE_KEY,
   MANUAL_SAVE_KEY,
@@ -7,6 +7,7 @@ import {
   type SaveAdapter,
   writeSave,
 } from './persistence';
+import { createGame } from './scenario/jingxiang208';
 
 class MemoryStorage implements SaveAdapter {
   readonly values = new Map<string, string>();
@@ -34,6 +35,16 @@ describe('persistence', () => {
 
     expect(storage.getItem(MANUAL_SAVE_KEY)).not.toBeNull();
     expect(storage.getItem(AUTO_SAVE_KEY)).toBeNull();
+  });
+
+  it('round-trips officers moving between cities', () => {
+    const state = executeCommand(createGame('liu', 9), 'liu', {
+      type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['guan-yu'],
+    });
+
+    writeSave(storage, 'auto', state);
+
+    expect(loadSave(storage, 'auto')).toEqual({ ok: true, state });
   });
 
   it('rejects corrupt data without deleting it', () => {

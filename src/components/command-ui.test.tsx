@@ -53,17 +53,24 @@ describe('command interface', () => {
     expect(launcher).toHaveFocus();
   });
 
-  it('shows live validation instead of executing an invalid transfer', async () => {
+  it('opens a personnel-only transfer dialog and starts a transfer', async () => {
     const user = userEvent.setup();
     renderState();
 
     await user.click(screen.getByRole('button', { name: '调动' }));
     const dialog = screen.getByRole('dialog', { name: '调动' });
-    await user.type(within(dialog).getByLabelText('调动资金'), '999999');
+    expect(within(dialog).queryByLabelText('执行武将')).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('调动资金')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('调动兵粮')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('调动兵力')).not.toBeInTheDocument();
 
-    expect(within(dialog).getByText(/资金不足/)).toBeVisible();
-    expect(within(dialog).getByRole('button', { name: '执行调动' })).toBeDisabled();
+    await user.click(within(dialog).getByLabelText(/关羽/));
+    await user.click(within(dialog).getByRole('button', { name: '执行调动' }));
+
+    expect(screen.queryByRole('dialog', { name: '调动' })).not.toBeInTheDocument();
+    expect(screen.getByText(/调动关羽/)).toBeVisible();
   });
+
   it('opens a deployment dialog from the city menu and deploys the selected troop type', async () => {
     const user = userEvent.setup();
     renderState();

@@ -4,7 +4,7 @@ import type { City, ForceId, GameCommand, GameState, Officer } from './types';
 
 function availableOfficers(state: GameState, forceId: ForceId, city: City) {
   return Object.values(state.officers).filter(
-    (officer) => officer.forceId === forceId && officer.cityId === city.id && !officer.acted,
+    (officer) => officer.forceId === forceId && officer.location.kind === 'city' && officer.location.cityId === city.id && !officer.acted,
   );
 }
 
@@ -74,7 +74,9 @@ function chooseAiDecision(state: GameState, forceId: ForceId): AiDecision {
     }
   }
   for (const city of cities) {
-    const hasTalent = Object.values(state.officers).some((officer) => officer.forceId === null && officer.cityId === city.id);
+    const hasTalent = Object.values(state.officers).some((officer) =>
+      officer.forceId === null && officer.location.kind === 'unaffiliated' && officer.location.cityId === city.id,
+    );
     if (hasTalent) {
       const command = cityCommand(state, forceId, city, 'talent', 'intelligence');
       if (command) return selected(command);

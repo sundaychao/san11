@@ -93,9 +93,30 @@ function settleUnitSupply(next: GameState, unit: ArmyUnit) {
   unit.acted = false;
 }
 
+function settleOfficerTransfers(next: GameState) {
+  for (const officer of Object.values(next.officers)) {
+    if (officer.location.kind !== 'transfer') continue;
+    officer.location.remainingTenDays -= 1;
+    if (officer.location.remainingTenDays > 0) continue;
+
+    const targetCityId = officer.location.targetCityId;
+    const target = next.cities[targetCityId];
+    officer.location = { kind: 'city', cityId: targetCityId };
+    officer.cityId = targetCityId;
+    officer.acted = false;
+    next.logs.push({
+      id: `transfer-arrive-${next.month}-${officer.id}-${next.logs.length}`,
+      month: next.month,
+      forceId: officer.forceId,
+      message: `${officer.name}抵达${target.name}`,
+    });
+  }
+}
+
 export function settleTenDay(state: GameState): GameState {
   let next = structuredClone(state);
   for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
+  settleOfficerTransfers(next);
 
   if (next.tenDay === 3) {
     next = settleMonth(next);

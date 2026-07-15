@@ -11,17 +11,18 @@ function hasLegalActions(state: GameState) {
   const forceId = state.playerForceId;
   const targetCity = Object.values(state.cities).find((city) => city.ownerId === forceId);
   return Object.values(state.officers)
-    .filter((officer) => officer.forceId === forceId && !officer.acted)
+    .filter((officer) => officer.forceId === forceId && officer.location.kind === 'city' && !officer.acted)
     .some((officer) => {
+      const cityId = officer.location.kind === 'city' ? officer.location.cityId : officer.cityId;
       const commands: GameCommand[] = [
-        { type: 'develop', cityId: officer.cityId, officerId: officer.id, focus: 'commerce' },
-        { type: 'recruit', cityId: officer.cityId, officerId: officer.id },
-        { type: 'train', cityId: officer.cityId, officerId: officer.id },
-        { type: 'patrol', cityId: officer.cityId, officerId: officer.id },
-        { type: 'talent', cityId: officer.cityId, officerId: officer.id },
+        { type: 'develop', cityId, officerId: officer.id, focus: 'commerce' },
+        { type: 'recruit', cityId, officerId: officer.id },
+        { type: 'train', cityId, officerId: officer.id },
+        { type: 'patrol', cityId, officerId: officer.id },
+        { type: 'talent', cityId, officerId: officer.id },
       ];
-      if (targetCity && targetCity.id !== officer.cityId) {
-        commands.push({ type: 'transfer', cityId: officer.cityId, officerId: officer.id, targetCityId: targetCity.id, gold: 0, food: 0, troops: 0, officerIds: [] });
+      if (targetCity && targetCity.id !== cityId) {
+        commands.push({ type: 'transfer', cityId, targetCityId: targetCity.id, officerIds: [officer.id] });
       }
       return commands.some((command) => validateCommand(state, forceId, command).length === 0);
     });

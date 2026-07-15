@@ -289,6 +289,7 @@ button { color: inherit; }
 .segmented-field input:checked + span { background: var(--gold); color: var(--ink); font-weight: 700; }
 .amount-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 13px; }
 .amount-grid label { display: grid; gap: 5px; }
+.command-note { margin-top: 10px; padding: 8px 10px; border: 1px solid rgba(146, 136, 115, 0.45); background: rgba(15, 30, 29, 0.72); color: var(--muted); font-size: 12px; }
 .transfer-officers > div { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
 .transfer-officers label { display: flex; align-items: center; gap: 7px; padding: 7px; border: 1px solid rgba(146, 136, 115, 0.65); font-size: 12px; cursor: pointer; }
 .transfer-officers input { accent-color: var(--gold); }

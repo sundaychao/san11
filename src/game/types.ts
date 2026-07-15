@@ -31,7 +31,8 @@ export interface Officer {
 export type OfficerLocation =
   | { kind: 'city'; cityId: CityId }
   | { kind: 'unit'; unitId: string }
-  | { kind: 'unaffiliated'; cityId: CityId };
+  | { kind: 'unaffiliated'; cityId: CityId }
+  | { kind: 'transfer'; fromCityId: CityId; targetCityId: CityId; remainingTenDays: number };
 
 export interface City {
   id: CityId;
@@ -124,11 +125,7 @@ export type GameCommand =
   | {
       type: 'transfer';
       cityId: CityId;
-      officerId: string;
       targetCityId: CityId;
-      gold: number;
-      food: number;
-      troops: number;
       officerIds: string[];
     };
 

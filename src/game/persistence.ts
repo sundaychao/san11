@@ -65,6 +65,18 @@ function validCity(value: unknown): value is City {
   );
 }
 
+function validOfficerLocation(location: unknown) {
+  if (!location || typeof location !== 'object') return false;
+  const value = location as Record<string, unknown>;
+  if (value.kind === 'unit') return typeof value.unitId === 'string';
+  if (value.kind === 'city' || value.kind === 'unaffiliated') return CITY_IDS.includes(value.cityId as City['id']);
+  return value.kind === 'transfer' &&
+    CITY_IDS.includes(value.fromCityId as City['id']) &&
+    CITY_IDS.includes(value.targetCityId as City['id']) &&
+    Number.isInteger(value.remainingTenDays) &&
+    Number(value.remainingTenDays) > 0;
+}
+
 function validOfficer(value: unknown): value is Officer {
   if (!value || typeof value !== 'object') return false;
   const officer = value as Partial<Officer>;
@@ -74,8 +86,7 @@ function validOfficer(value: unknown): value is Officer {
     typeof officer.name === 'string' &&
     (officer.forceId === null || FORCE_IDS.includes(officer.forceId!)) &&
     typeof officer.cityId === 'string' &&
-    Boolean(officer.location) &&
-    typeof officer.location === 'object' &&
+    validOfficerLocation(officer.location) &&
     typeof officer.acted === 'boolean' &&
     Boolean(stats) &&
     exactKeys(stats!, ['leadership', 'war', 'intelligence', 'politics', 'charisma'] satisfies Array<keyof Stats>) &&
@@ -151,6 +162,18 @@ export function isGameState(value: unknown): value is GameState {
   const officers = Object.values(state.officers);
   const cityById = state.cities;
   const officerById = state.officers;
+  const validOfficerReferences = (officer: Officer) => {
+    if (!CITY_IDS.includes(officer.cityId)) return false;
+    if (officer.location.kind === 'unit') return Boolean(state.units![officer.location.unitId]);
+    if (officer.location.kind === 'transfer') {
+      return officer.forceId !== null &&
+        CITY_IDS.includes(officer.location.fromCityId) &&
+        CITY_IDS.includes(officer.location.targetCityId) &&
+        cityById[officer.location.fromCityId].ownerId === officer.forceId &&
+        cityById[officer.location.targetCityId].ownerId === officer.forceId;
+    }
+    return CITY_IDS.includes(officer.location.cityId);
+  };
   return (
     cities.every((city) => validCity(city) && cityById[city.id] === city &&
       (city.governorId === null || (
@@ -161,9 +184,7 @@ export function isGameState(value: unknown): value is GameState {
     officers.every((officer) => validOfficer(officer) && officerById[officer.id] === officer &&
       CITY_IDS.includes(officer.cityId) &&
       (officer.forceId === null || cityById[officer.cityId].ownerId === officer.forceId) &&
-      (officer.location.kind === 'unit'
-        ? Boolean(state.units![officer.location.unitId])
-        : CITY_IDS.includes(officer.location.cityId))) &&
+      validOfficerReferences(officer)) &&
     state.grid.every(validGridCell) &&
     Object.values(state.units).every((unit) => validUnit(unit) && state.units![unit.id] === unit &&
       Boolean(officerById[unit.leaderId])) &&

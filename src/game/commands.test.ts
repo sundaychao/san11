@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { executeCommand, transferDuration, validateCommand } from './commands';
 import { createGame } from './scenario/jingxiang208';
-import { executeCommand, validateCommand } from './commands';
 
 describe('command engine', () => {
   it('develops commerce and consumes resources and officer action', () => {
@@ -95,52 +95,60 @@ describe('command engine', () => {
     expect(next.logs.at(-1)?.message).toContain('未能登用');
   });
 
-  it('transfers resources and officers between owned cities', () => {
+  it('starts a personnel-only transfer with travel time based on city distance', () => {
     const state = createGame('liu', 1);
     const next = executeCommand(state, 'liu', {
-      type: 'transfer', cityId: 'jiangling', officerId: 'liu-bei', targetCityId: 'wuling',
-      gold: 600, food: 1200, troops: 800, officerIds: ['guan-yu'],
+      type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['guan-yu'],
     });
 
-    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 600);
-    expect(next.cities.wuling.gold).toBe(state.cities.wuling.gold + 600);
-    expect(next.cities.wuling.food).toBe(state.cities.wuling.food + 1200);
-    expect(next.cities.wuling.troops).toBe(state.cities.wuling.troops + 800);
-    expect(next.officers['guan-yu'].cityId).toBe('wuling');
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold);
+    expect(next.cities.wuling.gold).toBe(state.cities.wuling.gold);
+    expect(next.officers['guan-yu'].cityId).toBe('jiangling');
+    expect(next.officers['guan-yu'].location).toEqual({
+      kind: 'transfer',
+      fromCityId: 'jiangling',
+      targetCityId: 'wuling',
+      remainingTenDays: 3,
+    });
     expect(next.actionPoints.liu).toBe(70);
+    expect(next.logs.at(-1)?.message).toContain('3旬');
   });
 
-  it('rejects negative transfer values and enemy destinations', () => {
+  it('calculates transfer duration in ten-cell bands', () => {
     const state = createGame('liu', 1);
-    const negative = validateCommand(state, 'liu', {
-      type: 'transfer', cityId: 'jiangling', officerId: 'liu-bei', targetCityId: 'wuling',
-      gold: -1, food: 0, troops: 0, officerIds: [],
-    });
+    expect(transferDuration(state.cities.jiangling, { ...state.cities.jiangling, gridQ: state.cities.jiangling.gridQ + 10 })).toBe(1);
+    expect(transferDuration(state.cities.jiangling, { ...state.cities.jiangling, gridQ: state.cities.jiangling.gridQ + 11 })).toBe(2);
+    expect(transferDuration(state.cities.jiangling, { ...state.cities.jiangling, gridQ: state.cities.jiangling.gridQ + 30 })).toBe(3);
+  });
+
+  it('rejects enemy destinations and transfers without officers', () => {
+    const state = createGame('liu', 1);
     const enemy = validateCommand(state, 'liu', {
-      type: 'transfer', cityId: 'jiangling', officerId: 'liu-bei', targetCityId: 'wan',
-      gold: 0, food: 0, troops: 0, officerIds: [],
+      type: 'transfer', cityId: 'jiangling', targetCityId: 'wan', officerIds: ['guan-yu'],
+    });
+    const empty = validateCommand(state, 'liu', {
+      type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: [],
     });
 
-    expect(negative).toContain('调动数值不能为负数');
     expect(enemy).toContain('只能调往己方城市');
-  });
-
-  it('rejects an empty transfer', () => {
-    const state = createGame('liu', 1);
-
-    expect(validateCommand(state, 'liu', {
-      type: 'transfer', cityId: 'jiangling', officerId: 'liu-bei', targetCityId: 'wuling',
-      gold: 0, food: 0, troops: 0, officerIds: [],
-    })).toContain('至少调动物资或一名武将');
+    expect(empty).toContain('至少调动一名武将');
   });
 
   it('does not allow a city governor to be transferred', () => {
     const state = createGame('liu', 1);
 
     expect(validateCommand(state, 'liu', {
-      type: 'transfer', cityId: 'jiangling', officerId: 'guan-yu', targetCityId: 'wuling',
-      gold: 0, food: 0, troops: 0, officerIds: ['liu-bei'],
+      type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['liu-bei'],
     })).toContain('太守不可调离任所');
+  });
+
+  it('does not allow officers outside the source city to transfer', () => {
+    const state = createGame('liu', 1);
+    state.officers['guan-yu'].location = { kind: 'transfer', fromCityId: 'jiangling', targetCityId: 'wuling', remainingTenDays: 1 };
+
+    expect(validateCommand(state, 'liu', {
+      type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['guan-yu'],
+    })).toContain('只能调动出发城市内的己方武将');
   });
 
   it('rejects an officer who already acted', () => {

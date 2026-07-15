@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { executeCommand } from './commands';
 import { createGame } from './scenario/jingxiang208';
 import { settleMonth, settleTenDay } from './turn';
 
@@ -70,5 +71,22 @@ describe('ten-day settlement', () => {
     expect(next.month).toBe(2);
     expect(next.tenDay).toBe(1);
     expect(next.actionPoints.liu).toBe(100);
+  });
+
+  it('advances personnel transfers and arrives after the required ten-days', () => {
+    const state = createGame('liu', 1);
+    const transferred = executeCommand(state, 'liu', {
+      type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['guan-yu'],
+    });
+
+    const afterOne = settleTenDay(transferred);
+    const afterTwo = settleTenDay(afterOne);
+    const afterThree = settleTenDay(afterTwo);
+
+    expect(afterOne.officers['guan-yu'].location).toMatchObject({ kind: 'transfer', remainingTenDays: 2 });
+    expect(afterTwo.officers['guan-yu'].location).toMatchObject({ kind: 'transfer', remainingTenDays: 1 });
+    expect(afterThree.officers['guan-yu'].location).toEqual({ kind: 'city', cityId: 'wuling' });
+    expect(afterThree.officers['guan-yu'].cityId).toBe('wuling');
+    expect(afterThree.logs.some((log) => log.message.includes('关羽抵达武陵'))).toBe(true);
   });
 });
