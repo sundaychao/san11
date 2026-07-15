@@ -3,6 +3,7 @@ import { useRef, useState, type CSSProperties, type PointerEvent, type WheelEven
 import { sevenCellCityFootprint } from '../game/battle/grid';
 import { GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
 import { useGame } from '../game/store/GameProvider';
+import type { CityId } from '../game/types';
 
 interface MapView {
   x: number;
@@ -26,7 +27,11 @@ function clampScale(value: number) {
   return Math.min(2.4, Math.max(0.85, Math.round(value * 100) / 100));
 }
 
-export function StrategicMap() {
+interface StrategicMapProps {
+  onCityMenu?(cityId: CityId, position: { x: number; y: number }): void;
+}
+
+export function StrategicMap({ onCityMenu }: StrategicMapProps) {
   const { state, selectedCityId, selectCity } = useGame();
   const [view, setView] = useState<MapView>(INITIAL_VIEW);
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
@@ -144,7 +149,10 @@ export function StrategicMap() {
                 } as CSSProperties}
                 aria-label={`${city.name} ${force.name} ${city.troops.toLocaleString('en-US')}兵`}
                 data-testid="city-marker"
-                onClick={() => selectCity(city.id)}
+                onClick={(event) => {
+                  selectCity(city.id);
+                  onCityMenu?.(city.id, { x: event.clientX + 12, y: event.clientY });
+                }}
               >
                 <span className="city-fort" aria-hidden="true"><i /></span>
                 <span className="city-marker-copy">

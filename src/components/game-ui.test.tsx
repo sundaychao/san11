@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../app/App';
 import { createGame } from '../game/scenario/jingxiang208';
@@ -67,5 +67,35 @@ describe('game interface shell', () => {
     await user.click(screen.getByTestId('end-ten-day-button'));
 
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+  });
+
+  it('opens a nested city command menu next to a clicked city', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    const menu = screen.getByTestId('city-command-menu');
+
+    expect(within(menu).getByRole('button', { name: '都市' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '军事' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '人才' })).toBeVisible();
+
+    await user.click(within(menu).getByRole('button', { name: '都市' }));
+    expect(within(menu).getByRole('button', { name: '开发' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '巡查' })).toBeVisible();
+
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    expect(within(menu).getByRole('button', { name: '训练' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '出征' })).toBeVisible();
+
+    await user.click(within(menu).getByRole('button', { name: '人才' }));
+    expect(within(menu).getByRole('button', { name: '探索人才' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '调动' })).toBeVisible();
   });
 });
