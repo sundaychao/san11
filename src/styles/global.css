@@ -91,7 +91,8 @@ button { color: inherit; }
 .terrain-deepWater { fill: rgba(42, 92, 105, 0.28); }
 .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 24%, transparent); stroke: rgba(255, 244, 205, 0.42); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 .battle-unit-marker circle { fill: var(--force-color); stroke: #fff3c4; stroke-width: 3; filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.5)); vector-effect: non-scaling-stroke; }
-.battle-unit-marker text { fill: #171f1c; font-size: 14px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(255, 244, 205, 0.75); stroke-width: 2px; }
+.battle-unit-troops { fill: #171f1c; font-size: 14px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(255, 244, 205, 0.75); stroke-width: 2px; }
+.battle-unit-leader-name { fill: #fff6d6; font-size: 11px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 3px; vector-effect: non-scaling-stroke; }
 .city-marker-layer { position: absolute; inset: 0; }
 .city-marker-layer.is-editing { pointer-events: none; opacity: 0.8; }
 .city-marker {

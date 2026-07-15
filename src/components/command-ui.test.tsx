@@ -86,7 +86,9 @@ describe('command interface', () => {
     const deploymentCell = screen.getAllByTestId(/deploy-target-/)[0];
     fireEvent.pointerDown(deploymentCell, { button: 0, buttons: 1 });
 
-    expect(screen.getByTestId('battle-unit-marker')).toBeVisible();
+    const unitMarker = screen.getByTestId('battle-unit-marker');
+    expect(unitMarker).toBeVisible();
+    expect(within(unitMarker).getByText('刘备')).toBeVisible();
   });
 });
 

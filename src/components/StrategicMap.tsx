@@ -163,15 +163,23 @@ export function StrategicMap({
           ))}
           {Object.values(state.units).map((unit) => {
             const position = cellPosition(unit.q, unit.r);
+            const leaderName = state.officers[unit.leaderId]?.name ?? '';
             return (
               <g key={unit.id} data-testid="battle-unit-marker" className="battle-unit-marker">
+                <text
+                  className="battle-unit-leader-name"
+                  x={position.x + CELL_SIZE / 2}
+                  y={Math.max(12, position.y - 5)}
+                >
+                  {leaderName}
+                </text>
                 <circle
                   cx={position.x + CELL_SIZE / 2}
                   cy={position.y + CELL_SIZE / 2}
                   r={CELL_SIZE * 0.34}
                   style={{ '--force-color': state.forces[unit.forceId].color } as CSSProperties}
                 />
-                <text x={position.x + CELL_SIZE / 2} y={position.y + CELL_SIZE / 2 + 4}>{Math.floor(unit.troops / 1000)}</text>
+                <text className="battle-unit-troops" x={position.x + CELL_SIZE / 2} y={position.y + CELL_SIZE / 2 + 4}>{Math.floor(unit.troops / 1000)}</text>
               </g>
             );
           })}
