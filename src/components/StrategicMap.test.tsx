@@ -76,6 +76,15 @@ describe('StrategicMap', () => {
     expect(screen.queryByTestId('hover-coordinate')).not.toBeInTheDocument();
   });
 
+  it('shows coordinates and terrain while hovering the normal map grid', () => {
+    renderGame();
+
+    const mapCell = screen.getByTestId('map-cell-0-0');
+    fireEvent.pointerEnter(mapCell);
+
+    expect(screen.getByTestId('hover-coordinate')).toHaveTextContent('坐标：0,0 地形：平地');
+  });
+
   it('shows all six management commands for an owned city', () => {
     renderGame();
 

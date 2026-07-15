@@ -152,7 +152,7 @@ export function StrategicMap({
             return (
               <rect
                 key={`${cell.q},${cell.r}`}
-                data-testid={editorMode ? `editor-cell-${cell.q}-${cell.r}` : isDeployTarget ? `deploy-target-${cell.q}-${cell.r}` : isMoveTarget ? `move-target-${cell.q}-${cell.r}` : undefined}
+                data-testid={editorMode ? `editor-cell-${cell.q}-${cell.r}` : isDeployTarget ? `deploy-target-${cell.q}-${cell.r}` : isMoveTarget ? `move-target-${cell.q}-${cell.r}` : `map-cell-${cell.q}-${cell.r}`}
                 x={position.x}
                 y={position.y}
                 width={CELL_SIZE}
