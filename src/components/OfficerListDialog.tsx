@@ -1,20 +1,40 @@
 import { X } from 'lucide-react';
 import { useGame } from '../game/store/GameProvider';
-import type { Officer } from '../game/types';
+import type { GameState, Officer } from '../game/types';
 
 interface OfficerListDialogProps {
   onClose(): void;
 }
 
-function locationText(officer: Officer, state: NonNullable<ReturnType<typeof useGame>['state']>) {
+function locationText(officer: Officer, state: GameState) {
   if (officer.location.kind === 'city') return state.cities[officer.location.cityId].name;
   if (officer.location.kind === 'unit') return '部队';
   if (officer.location.kind === 'transfer') {
-    const from = state.cities[officer.location.fromCityId].name;
-    const target = state.cities[officer.location.targetCityId].name;
-    return `${from}→${target} ${officer.location.remainingTenDays}旬`;
+    return '在途';
   }
   return state.cities[officer.location.cityId].name;
+}
+
+function taskInfo(officer: Officer, state: GameState) {
+  if (officer.location.kind === 'transfer') {
+    const from = state.cities[officer.location.fromCityId].name;
+    const target = state.cities[officer.location.targetCityId].name;
+    return {
+      status: '执行中',
+      task: `调动 ${from}→${target}`,
+      time: `${officer.location.remainingTenDays}旬`,
+    };
+  }
+  if (officer.location.kind === 'unit') {
+    const unit = state.units[officer.location.unitId];
+    if (!unit) return { status: '', task: '', time: '' };
+    return {
+      status: '执行中',
+      task: unit.kind === 'transport' ? '输送' : '出征',
+      time: '进行中',
+    };
+  }
+  return { status: '', task: '', time: '' };
 }
 
 export function OfficerListDialog({ onClose }: OfficerListDialogProps) {
@@ -40,6 +60,9 @@ export function OfficerListDialog({ onClose }: OfficerListDialogProps) {
               <tr>
                 <th scope="col">武将</th>
                 <th scope="col">所在</th>
+                <th scope="col">状态</th>
+                <th scope="col">任务</th>
+                <th scope="col">时间</th>
                 <th scope="col">统帅</th>
                 <th scope="col">武力</th>
                 <th scope="col">智力</th>
@@ -48,17 +71,23 @@ export function OfficerListDialog({ onClose }: OfficerListDialogProps) {
               </tr>
             </thead>
             <tbody>
-              {officers.map((officer) => (
-                <tr key={officer.id}>
-                  <th scope="row">{officer.name}</th>
-                  <td>{locationText(officer, state)}</td>
-                  <td>{officer.stats.leadership}</td>
-                  <td>{officer.stats.war}</td>
-                  <td>{officer.stats.intelligence}</td>
-                  <td>{officer.stats.politics}</td>
-                  <td>{officer.stats.charisma}</td>
-                </tr>
-              ))}
+              {officers.map((officer) => {
+                const task = taskInfo(officer, state);
+                return (
+                  <tr key={officer.id}>
+                    <th scope="row">{officer.name}</th>
+                    <td>{locationText(officer, state)}</td>
+                    <td>{task.status}</td>
+                    <td>{task.task}</td>
+                    <td>{task.time}</td>
+                    <td>{officer.stats.leadership}</td>
+                    <td>{officer.stats.war}</td>
+                    <td>{officer.stats.intelligence}</td>
+                    <td>{officer.stats.politics}</td>
+                    <td>{officer.stats.charisma}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

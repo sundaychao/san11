@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import { deployTransportUnit } from '../game/battle/actions';
+import { executeCommand } from '../game/commands';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
 import { GameShell } from './GameShell';
@@ -42,6 +44,38 @@ describe('command interface', () => {
     expect(liuBeiRow).toHaveTextContent('78');
     expect(within(liuBeiRow).getByText('75')).toBeVisible();
     expect(within(liuBeiRow).getByText('99')).toBeVisible();
+  });
+
+  it('shows current officer task and time only when a task is active', async () => {
+    const user = userEvent.setup();
+    const transporting = deployTransportUnit(createGame('liu', 3), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'jian-yong',
+      troops: 1000,
+      gold: 500,
+      food: 500,
+    });
+    const state = executeCommand(transporting, 'liu', {
+      type: 'transfer',
+      cityId: 'jiangling',
+      targetCityId: 'wuling',
+      officerIds: ['guan-yu'],
+    });
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: '武将' }));
+
+    const dialog = screen.getByRole('dialog', { name: '武将一览' });
+    const guanYuRow = within(dialog).getByRole('row', { name: /关羽/ });
+    const jianYongRow = within(dialog).getByRole('row', { name: /简雍/ });
+    const liuBeiRow = within(dialog).getByRole('row', { name: /刘备/ });
+    expect(guanYuRow).toHaveTextContent('执行中');
+    expect(guanYuRow).toHaveTextContent('调动 江陵→武陵');
+    expect(guanYuRow).toHaveTextContent('3旬');
+    expect(jianYongRow).toHaveTextContent('输送');
+    expect(jianYongRow).toHaveTextContent('进行中');
+    expect(liuBeiRow).not.toHaveTextContent('执行中');
+    expect(liuBeiRow).not.toHaveTextContent('待命');
   });
 
   it('executes a patrol through the command dialog', async () => {
