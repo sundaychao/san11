@@ -7,6 +7,8 @@ describe('battle scenario state', () => {
   it('creates a schema v2 game with ten-day battle fields', () => {
     const game = createGame('liu', 20804);
 
+    expect(GRID_WIDTH).toBe(70);
+    expect(GRID_HEIGHT).toBe(40);
     expect(game.schemaVersion).toBe(2);
     expect(game.tenDay).toBe(1);
     expect(game.turnForceId).toBe('liu');

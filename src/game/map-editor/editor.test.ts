@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createBattleGrid } from '../battle/scenario';
+import { createBattleGrid, GRID_HEIGHT, GRID_WIDTH } from '../battle/scenario';
 import {
   clearEditor,
   createEditorState,
@@ -53,9 +53,9 @@ describe('map editor core', () => {
     const json = JSON.parse(exportEditorJson(edited));
 
     expect(json.schemaVersion).toBe(1);
-    expect(json.width).toBe(36);
-    expect(json.height).toBe(22);
-    expect(json.grid).toHaveLength(36 * 22);
+    expect(json.width).toBe(GRID_WIDTH);
+    expect(json.height).toBe(GRID_HEIGHT);
+    expect(json.grid).toHaveLength(GRID_WIDTH * GRID_HEIGHT);
     expect(json.grid.every((cell: { terrain: string }) => cell.terrain === 'plain')).toBe(true);
   });
 });

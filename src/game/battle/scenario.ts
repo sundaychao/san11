@@ -1,26 +1,26 @@
 import type { CityId, GridCell, TerrainType } from '../types';
 
-export const GRID_WIDTH = 36;
-export const GRID_HEIGHT = 22;
+export const GRID_WIDTH = 70;
+export const GRID_HEIGHT = 40;
 
 export const CITY_GRID_CENTERS: Record<CityId, { q: number; r: number }> = {
-  wan: { q: 9, r: 4 },
-  xiangyang: { q: 12, r: 10 },
-  jiangling: { q: 17, r: 12 },
-  wuling: { q: 7, r: 16 },
-  jiangxia: { q: 27, r: 5 },
-  changsha: { q: 28, r: 10 },
-  lingling: { q: 20, r: 18 },
-  guiyang: { q: 30, r: 16 },
+  wan: { q: 18, r: 7 },
+  xiangyang: { q: 24, r: 19 },
+  jiangling: { q: 34, r: 22 },
+  wuling: { q: 14, r: 30 },
+  jiangxia: { q: 53, r: 9 },
+  changsha: { q: 55, r: 19 },
+  lingling: { q: 39, r: 33 },
+  guiyang: { q: 59, r: 30 },
 };
 
 function terrainAt(q: number, r: number): TerrainType {
-  const riverBand = (q >= 13 && q <= 15 && r >= 2 && r <= 16) || (q >= 16 && q <= 33 && r >= 13 && r <= 14);
+  const riverBand = (q >= 28 && q <= 31 && r >= 4 && r <= 30) || (q >= 32 && q <= 66 && r >= 25 && r <= 26);
   if (riverBand) return 'deepWater';
-  if ((q >= 1 && q <= 5 && r >= 1 && r <= 6) || (q >= 22 && q <= 25 && r >= 2 && r <= 8)) return 'mountain';
-  if ((q >= 4 && q <= 11 && r >= 13 && r <= 20) || (q >= 24 && q <= 33 && r >= 15 && r <= 20)) return 'forest';
-  if ((q >= 17 && q <= 22 && r >= 4 && r <= 9) || (q >= 8 && q <= 13 && r >= 6 && r <= 9)) return 'hill';
-  if (r === 10 || q === 18 || (q >= 6 && q <= 31 && r === 12)) return 'road';
+  if ((q >= 2 && q <= 10 && r >= 1 && r <= 11) || (q >= 43 && q <= 50 && r >= 3 && r <= 15)) return 'mountain';
+  if ((q >= 8 && q <= 22 && r >= 24 && r <= 37) || (q >= 48 && q <= 66 && r >= 28 && r <= 37)) return 'forest';
+  if ((q >= 33 && q <= 44 && r >= 7 && r <= 16) || (q >= 16 && q <= 26 && r >= 11 && r <= 18)) return 'hill';
+  if (r === 19 || q === 35 || (q >= 12 && q <= 62 && r === 22) || (q >= 8 && q <= 58 && r === 30)) return 'road';
   return 'plain';
 }
 

@@ -32,6 +32,14 @@ function cellPosition(q: number, r: number) {
   };
 }
 
+function cellCenterPercent(q: number, r: number) {
+  const position = cellPosition(q, r);
+  return {
+    left: ((position.x + CELL_SIZE / 2) / WORLD_WIDTH) * 100,
+    top: ((position.y + CELL_SIZE / 2) / WORLD_HEIGHT) * 100,
+  };
+}
+
 function clampScale(value: number) {
   return Math.min(2.4, Math.max(0.85, Math.round(value * 100) / 100));
 }
@@ -247,14 +255,15 @@ export function StrategicMap({
           {Object.values(state.cities).map((city) => {
             const force = state.forces[city.ownerId];
             const selected = selectedCityId === city.id;
+            const markerPosition = cellCenterPercent(city.gridQ, city.gridR);
             return (
               <button
                 key={city.id}
                 type="button"
                 className={`city-marker${selected ? ' is-selected' : ''}`}
                 style={{
-                  left: `${city.mapX * 100}%`,
-                  top: `${city.mapY * 100}%`,
+                  left: `${markerPosition.left}%`,
+                  top: `${markerPosition.top}%`,
                   '--force-color': force.color,
                 } as CSSProperties}
                 aria-label={`${city.name} ${force.name} ${city.troops.toLocaleString('en-US')}兵`}

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import { CITY_GRID_CENTERS, GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
 import type { TerrainType } from '../game/types';
@@ -83,6 +84,19 @@ describe('StrategicMap', () => {
     fireEvent.pointerEnter(mapCell);
 
     expect(screen.getByTestId('hover-coordinate')).toHaveTextContent('坐标：0,0 地形：平地');
+  });
+
+  it('places city markers from their grid center instead of the old map percentage', () => {
+    renderGame();
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    const center = CITY_GRID_CENTERS.jiangling;
+    const expectedLeft = ((center.q + 0.5) / GRID_WIDTH) * 100;
+    const expectedTop = ((center.r + (center.q % 2 === 0 ? 0 : 0.5)) / GRID_HEIGHT) * 100;
+
+    expect(Number.parseFloat(jianglingMarker!.style.left)).toBeCloseTo(expectedLeft, 4);
+    expect(Number.parseFloat(jianglingMarker!.style.top)).toBeCloseTo(expectedTop, 4);
   });
 
   it('shows all six management commands for an owned city', () => {
