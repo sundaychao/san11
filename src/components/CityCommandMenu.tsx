@@ -1,5 +1,5 @@
 import { Building2, ChevronRight, Swords, Users } from 'lucide-react';
-import { useState, type CSSProperties, type MouseEvent } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import type { CityId, GameCommand } from '../game/types';
 
 type MenuSection = 'urban' | 'military' | 'talent';
@@ -42,15 +42,19 @@ export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy
     onClose();
   };
 
-  const handleContextMenu = (event: MouseEvent<HTMLElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (activeSection) {
-      setActiveSection(null);
-      return;
-    }
-    onClose();
-  };
+  useEffect(() => {
+    const handleContextMenu = (event: globalThis.MouseEvent) => {
+      event.preventDefault();
+      if (activeSection) {
+        setActiveSection(null);
+        return;
+      }
+      onClose();
+    };
+
+    document.addEventListener('contextmenu', handleContextMenu);
+    return () => document.removeEventListener('contextmenu', handleContextMenu);
+  }, [activeSection, onClose]);
 
   return (
     <nav
@@ -58,7 +62,6 @@ export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy
       data-testid="city-command-menu"
       style={{ left: position.x, top: position.y } as CSSProperties}
       aria-label="城池命令菜单"
-      onContextMenu={handleContextMenu}
     >
       <div className="city-command-primary">
         {SECTIONS.map(({ id, label, Icon }) => (

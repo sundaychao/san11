@@ -122,4 +122,22 @@ describe('game interface shell', () => {
     await user.pointer({ keys: '[MouseRight]', target: menu });
     expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
   });
+
+  it('closes the first-level city command menu from a right click anywhere', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    expect(screen.getByTestId('city-command-menu')).toBeVisible();
+
+    await user.pointer({ keys: '[MouseRight]', target: screen.getByTestId('map-viewport') });
+
+    expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
+  });
 });
