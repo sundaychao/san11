@@ -27,7 +27,7 @@ export function CityPanel({ onCommand }: CityPanelProps) {
 
   const city = state.cities[selectedCityId];
   const owner = state.forces[city.ownerId];
-  const governor = state.officers[city.governorId];
+  const governor = city.governorId ? state.officers[city.governorId] : null;
   const officers = Object.values(state.officers).filter((officer) => officer.forceId === city.ownerId && officer.cityId === city.id);
   const owned = city.ownerId === state.playerForceId;
 

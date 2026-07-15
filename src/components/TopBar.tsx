@@ -5,6 +5,7 @@ import { useGame } from '../game/store/GameProvider';
 import type { GameCommand, GameState } from '../game/types';
 
 const MONTH_NAMES = ['四月', '五月', '六月', '七月', '八月', '九月', '十月', '冬月', '腊月', '正月', '二月', '三月'];
+const TEN_DAY_LABELS = { 1: '上旬', 2: '中旬', 3: '下旬' } as const;
 
 function hasLegalActions(state: GameState) {
   const forceId = state.playerForceId;
@@ -27,7 +28,7 @@ function hasLegalActions(state: GameState) {
 }
 
 export function TopBar() {
-  const { state, endMonth, manualSave } = useGame();
+  const { state, endMonth, endTenDay, manualSave } = useGame();
   const [confirmEnd, setConfirmEnd] = useState(false);
   if (!state) return null;
   const force = state.forces[state.playerForceId];
@@ -49,10 +50,12 @@ export function TopBar() {
       <header className="top-bar">
         <div className="imperial-seal" aria-hidden="true">汉</div>
         <div className="date-block"><span>建安{year}年</span><strong>{monthName}</strong></div>
+        <div className="top-metric"><span>旬</span><strong data-testid="ten-day-label">{TEN_DAY_LABELS[state.tenDay]}</strong></div>
         <div className="top-metric"><span>势力</span><strong className="top-force-name" style={{ color: force.color }}>{force.name}</strong></div>
         <div className="top-metric"><span>行动力</span><strong data-testid="action-points">{state.actionPoints[state.playerForceId]}</strong></div>
         <div className="top-actions">
           <button className="icon-button" type="button" onClick={manualSave} title="手动存档" aria-label="手动存档"><Save aria-hidden="true" /></button>
+          <button className="next-month" data-testid="end-ten-day-button" type="button" onClick={endTenDay} disabled={state.phase === 'finished'}><SkipForward aria-hidden="true" />结束本旬</button>
           <button className="next-month" type="button" onClick={requestEndMonth} aria-label="进行到下月" disabled={state.phase === 'finished'}><SkipForward aria-hidden="true" />进行·下月</button>
         </div>
       </header>

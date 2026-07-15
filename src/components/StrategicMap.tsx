@@ -1,5 +1,7 @@
 import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
 import { useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from 'react';
+import { sevenCellCityFootprint } from '../game/battle/grid';
+import { GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
 import { useGame } from '../game/store/GameProvider';
 
 interface MapView {
@@ -9,6 +11,16 @@ interface MapView {
 }
 
 const INITIAL_VIEW: MapView = { x: 0, y: 0, scale: 1 };
+const CELL_SIZE = 43;
+const WORLD_WIDTH = GRID_WIDTH * CELL_SIZE;
+const WORLD_HEIGHT = GRID_HEIGHT * CELL_SIZE;
+
+function cellPosition(q: number, r: number) {
+  return {
+    x: q * CELL_SIZE,
+    y: r * CELL_SIZE + (q % 2 === 0 ? -CELL_SIZE / 2 : 0),
+  };
+}
 
 function clampScale(value: number) {
   return Math.min(2.4, Math.max(0.85, Math.round(value * 100) / 100));
@@ -71,6 +83,51 @@ export function StrategicMap() {
           alt="水墨画风格的荆襄山川地形图"
           draggable={false}
         />
+        <svg className="battle-grid-overlay" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
+          {state.grid.map((cell) => {
+            const position = cellPosition(cell.q, cell.r);
+            return (
+              <rect
+                key={`${cell.q},${cell.r}`}
+                x={position.x}
+                y={position.y}
+                width={CELL_SIZE}
+                height={CELL_SIZE}
+                className={`battle-cell terrain-${cell.terrain}`}
+              />
+            );
+          })}
+          {Object.values(state.cities).flatMap((city) => (
+            sevenCellCityFootprint({ q: city.gridQ, r: city.gridR }).map((coord) => {
+              const position = cellPosition(coord.q, coord.r);
+              return (
+                <rect
+                  key={`${city.id}-${coord.q},${coord.r}`}
+                  x={position.x + 2}
+                  y={position.y + 2}
+                  width={CELL_SIZE - 4}
+                  height={CELL_SIZE - 4}
+                  className="city-footprint-cell"
+                  style={{ '--force-color': state.forces[city.ownerId].color } as CSSProperties}
+                />
+              );
+            })
+          ))}
+          {Object.values(state.units).map((unit) => {
+            const position = cellPosition(unit.q, unit.r);
+            return (
+              <g key={unit.id} data-testid="battle-unit-marker" className="battle-unit-marker">
+                <circle
+                  cx={position.x + CELL_SIZE / 2}
+                  cy={position.y + CELL_SIZE / 2}
+                  r={CELL_SIZE * 0.34}
+                  style={{ '--force-color': state.forces[unit.forceId].color } as CSSProperties}
+                />
+                <text x={position.x + CELL_SIZE / 2} y={position.y + CELL_SIZE / 2 + 4}>{Math.floor(unit.troops / 1000)}</text>
+              </g>
+            );
+          })}
+        </svg>
         <div className="city-marker-layer" aria-label="荆襄城市">
           {Object.values(state.cities).map((city) => {
             const force = state.forces[city.ownerId];

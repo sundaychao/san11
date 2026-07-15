@@ -8,6 +8,13 @@ import {
   useState,
 } from 'react';
 import { runAiTurn } from '../ai';
+import {
+  attackCity as resolveAttackCity,
+  attackUnit as resolveAttackUnit,
+  deployUnit as resolveDeployUnit,
+  moveUnit as resolveMoveUnit,
+  waitUnit as resolveWaitUnit,
+} from '../battle/actions';
 import { executeCommand } from '../commands';
 import {
   clearSave,
@@ -19,7 +26,7 @@ import {
   writeSave,
 } from '../persistence';
 import { createGame, FORCE_IDS } from '../scenario/jingxiang208';
-import { settleMonth } from '../turn';
+import { settleMonth, settleTenDay } from '../turn';
 import type { CityId, ForceId, GameCommand, GameState } from '../types';
 
 interface GameContextValue {
@@ -32,7 +39,13 @@ interface GameContextValue {
   startGame(forceId: ForceId, seed?: number): void;
   loadGame(slot: SaveSlot): LoadResult;
   issueCommand(command: GameCommand): void;
+  deployUnit(input: { cityId: CityId; officerId: string; targetCityId: CityId; troops: number; food: number }): void;
+  moveUnit(unitId: string, destination: { q: number; r: number }): void;
+  attackUnit(attackerId: string, targetId: string): void;
+  attackCity(attackerId: string, cityId: CityId): void;
+  waitUnit(unitId: string): void;
   endMonth(): void;
+  endTenDay(): void;
   manualSave(): void;
   resetGame(): void;
   clearSave(slot: SaveSlot): void;
@@ -112,6 +125,40 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     }
   }, [persist, state]);
 
+  const applyBattleAction = useCallback((action: (current: GameState) => GameState) => {
+    if (!state) throw new Error('尚未开始游戏');
+    try {
+      const next = action(state);
+      dispatch({ type: 'replace', state: next });
+      setError(null);
+      persist('auto', next);
+    } catch (battleError) {
+      const message = battleError instanceof Error ? battleError.message : '战斗命令执行失败';
+      setError(message);
+      throw battleError;
+    }
+  }, [persist, state]);
+
+  const deployBattleUnit = useCallback((input: { cityId: CityId; officerId: string; targetCityId: CityId; troops: number; food: number }) => {
+    applyBattleAction((current) => resolveDeployUnit(current, current.playerForceId, input));
+  }, [applyBattleAction]);
+
+  const moveBattleUnit = useCallback((unitId: string, destination: { q: number; r: number }) => {
+    applyBattleAction((current) => resolveMoveUnit(current, current.playerForceId, unitId, destination));
+  }, [applyBattleAction]);
+
+  const attackBattleUnit = useCallback((attackerId: string, targetId: string) => {
+    applyBattleAction((current) => resolveAttackUnit(current, current.playerForceId, attackerId, targetId));
+  }, [applyBattleAction]);
+
+  const attackBattleCity = useCallback((attackerId: string, cityId: CityId) => {
+    applyBattleAction((current) => resolveAttackCity(current, current.playerForceId, attackerId, cityId));
+  }, [applyBattleAction]);
+
+  const waitBattleUnit = useCallback((unitId: string) => {
+    applyBattleAction((current) => resolveWaitUnit(current, current.playerForceId, unitId));
+  }, [applyBattleAction]);
+
   const endMonth = useCallback(() => {
     if (!state) return;
     let next = state;
@@ -119,6 +166,14 @@ export function GameProvider({ children, initialState = null, storage: storagePr
       if (forceId !== state.playerForceId) next = runAiTurn(next, forceId);
     }
     next = settleMonth(next);
+    dispatch({ type: 'replace', state: next });
+    setError(null);
+    persist('auto', next);
+  }, [persist, state]);
+
+  const endTenDay = useCallback(() => {
+    if (!state) return;
+    const next = settleTenDay(state);
     dispatch({ type: 'replace', state: next });
     setError(null);
     persist('auto', next);
@@ -163,13 +218,19 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     startGame,
     loadGame,
     issueCommand,
+    deployUnit: deployBattleUnit,
+    moveUnit: moveBattleUnit,
+    attackUnit: attackBattleUnit,
+    attackCity: attackBattleCity,
+    waitUnit: waitBattleUnit,
     endMonth,
+    endTenDay,
     manualSave,
     resetGame,
     clearSave: clearSaveSlot,
     selectCity: setSelectedCityId,
     clearError: () => setError(null),
-  }), [availability, clearSaveSlot, endMonth, error, issueCommand, loadGame, manualSave, resetGame, selectedCityId, startGame, state]);
+  }), [attackBattleCity, attackBattleUnit, availability, clearSaveSlot, deployBattleUnit, endMonth, endTenDay, error, issueCommand, loadGame, manualSave, moveBattleUnit, resetGame, selectedCityId, startGame, state, waitBattleUnit]);
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 }

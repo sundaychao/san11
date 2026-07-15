@@ -78,6 +78,12 @@ button { color: inherit; }
 .map-region:active { cursor: grabbing; }
 .map-content { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: center; will-change: transform; }
 .map-image { display: block; width: 100%; height: 100%; object-fit: cover; user-select: none; pointer-events: none; filter: saturate(0.92) contrast(1.03); }
+.battle-grid-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; mix-blend-mode: screen; }
+.battle-cell { fill: rgba(255, 255, 255, 0.015); stroke: rgba(236, 231, 211, 0.26); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.terrain-mountain, .terrain-deepWater { fill: rgba(20, 27, 26, 0.025); }
+.city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 24%, transparent); stroke: rgba(255, 244, 205, 0.42); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.battle-unit-marker circle { fill: var(--force-color); stroke: #fff3c4; stroke-width: 3; filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.5)); vector-effect: non-scaling-stroke; }
+.battle-unit-marker text { fill: #171f1c; font-size: 14px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(255, 244, 205, 0.75); stroke-width: 2px; }
 .city-marker-layer { position: absolute; inset: 0; }
 .city-marker {
   position: absolute;
@@ -110,6 +116,12 @@ button { color: inherit; }
 .mini-map > button.is-selected { width: 12px; height: 12px; outline: 2px solid #f2d778; }
 .tool-panel { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--panel-shadow); }
 .city-panel { z-index: 10; width: 320px; padding: 16px; overflow: auto; border-width: 0 0 0 1px; }
+.battle-panel { position: fixed; z-index: 14; right: 336px; top: 78px; display: grid; gap: 8px; width: 170px; padding: 10px; }
+.battle-panel header { display: flex; align-items: center; gap: 8px; }
+.battle-panel header svg { width: 18px; color: var(--gold); }
+.battle-panel header p { margin: 0; color: var(--muted); font-size: 11px; }
+.battle-panel header strong { font-size: 18px; }
+.battle-panel .primary-button { width: 100%; min-height: 36px; padding: 0 10px; font-size: 12px; }
 .city-panel h2, .event-log h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; letter-spacing: 0; }
 .city-heading { display: grid; grid-template-columns: 5px 1fr auto auto; gap: 10px; align-items: center; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
 .city-heading .force-line { align-self: stretch; min-height: 48px; }

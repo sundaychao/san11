@@ -3,7 +3,9 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../app/App';
 import { createGame } from '../game/scenario/jingxiang208';
+import { GameProvider } from '../game/store/GameProvider';
 import { writeSave } from '../game/persistence';
+import { GameShell } from './GameShell';
 
 describe('game interface shell', () => {
   beforeEach(() => window.localStorage.clear());
@@ -47,5 +49,23 @@ describe('game interface shell', () => {
     await user.click(screen.getByRole('button', { name: '清除损坏的自动存档' }));
     expect(window.localStorage.getItem('jingxiang-208-autosave-v1')).toBeNull();
     expect(window.localStorage.getItem('jingxiang-208-manual-v1')).not.toBeNull();
+  });
+
+  it('deploys a visible battle unit and advances the ten-day turn from the shell', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByTestId('quick-deploy-button'));
+
+    expect(screen.getByTestId('battle-unit-marker')).toBeVisible();
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+
+    await user.click(screen.getByTestId('end-ten-day-button'));
+
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
   });
 });

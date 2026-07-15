@@ -2,6 +2,7 @@ import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useGame } from '../game/store/GameProvider';
 import type { GameCommand } from '../game/types';
+import { BattlePanel } from './BattlePanel';
 import { CityPanel } from './CityPanel';
 import { CommandDialog } from './CommandDialog';
 import { EventLog } from './EventLog';
@@ -20,6 +21,7 @@ export function GameShell() {
       <TopBar />
       <StrategicMap />
       <CityPanel onCommand={setActiveCommand} />
+      <BattlePanel />
       <EventLog />
       {activeCommand && selectedCityId && <CommandDialog type={activeCommand} cityId={selectedCityId} onClose={closeCommand} />}
       {state?.phase === 'finished' && !viewFinalMap && <ResultOverlay onViewMap={() => setViewFinalMap(true)} />}
