@@ -76,6 +76,14 @@ function browserStorage(): SaveAdapter {
   return window.localStorage;
 }
 
+function runOpponentTurns(state: GameState) {
+  let next = state;
+  for (const forceId of FORCE_IDS) {
+    if (forceId !== state.playerForceId) next = runAiTurn(next, forceId);
+  }
+  return next;
+}
+
 export function GameProvider({ children, initialState = null, storage: storageProp }: GameProviderProps) {
   const storage = storageProp ?? browserStorage();
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -162,10 +170,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
 
   const endMonth = useCallback(() => {
     if (!state) return;
-    let next = state;
-    for (const forceId of FORCE_IDS) {
-      if (forceId !== state.playerForceId) next = runAiTurn(next, forceId);
-    }
+    let next = runOpponentTurns(state);
     next = settleMonth(next);
     dispatch({ type: 'replace', state: next });
     setError(null);
@@ -174,7 +179,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
 
   const endTenDay = useCallback(() => {
     if (!state) return;
-    const next = settleTenDay(state);
+    const next = settleTenDay(runOpponentTurns(state));
     dispatch({ type: 'replace', state: next });
     setError(null);
     persist('auto', next);

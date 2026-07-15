@@ -212,6 +212,12 @@ describe('game interface shell', () => {
 
     expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+    const eventLog = screen.getByRole('region', { name: '军情与政务' });
+    const aiForceColors = ['#4f9eae', '#c65e51', '#6ba35f', 'rgb(79, 158, 174)', 'rgb(198, 94, 81)', 'rgb(107, 163, 95)'];
+    expect(within(eventLog).getAllByRole('listitem').some((item) => {
+      const swatch = item.querySelector('i') as HTMLElement | null;
+      return swatch ? aiForceColors.includes(swatch.style.backgroundColor) || aiForceColors.includes(swatch.style.backgroundColor.toLowerCase()) : false;
+    })).toBe(true);
   });
 
   it('closes the map context menu from a left click outside the menu', () => {
