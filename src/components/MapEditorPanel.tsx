@@ -1,4 +1,4 @@
-import { Brush, Castle, FileJson, FileText, Mountain, RotateCcw, RotateCw, Trash2, Waves } from 'lucide-react';
+import { Brush, Castle, FileImage, FileJson, FileText, Mountain, RotateCcw, RotateCw, Trash2, Waves } from 'lucide-react';
 import type { MapEditorTool } from '../game/map-editor/editor';
 import type { TerrainType } from '../game/types';
 
@@ -11,6 +11,7 @@ interface MapEditorPanelProps {
   onClose(): void;
   onExportJson(): void;
   onExportSvg(): void;
+  onExportTerrainControl(): void;
   onRedo(): void;
   onSelectTool(tool: MapEditorTool): void;
   onUndo(): void;
@@ -34,6 +35,7 @@ export function MapEditorPanel({
   onClose,
   onExportJson,
   onExportSvg,
+  onExportTerrainControl,
   onRedo,
   onSelectTool,
   onUndo,
@@ -83,6 +85,7 @@ export function MapEditorPanel({
       <div className="map-editor-actions">
         <button type="button" className="primary-button" onClick={onExportJson}><FileJson />导出 JSON</button>
         <button type="button" className="secondary-button" onClick={onExportSvg}><FileText />导出 SVG</button>
+        <button type="button" className="secondary-button" onClick={onExportTerrainControl}><FileImage />导出地形图</button>
       </div>
 
       <p className="map-editor-status">当前工具：{activeLabel}</p>

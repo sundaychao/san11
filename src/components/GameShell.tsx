@@ -7,6 +7,7 @@ import {
   createEditorState,
   exportEditorJson,
   exportEditorSvg,
+  exportTerrainControlSvg,
   paintTerrain,
   placeCity,
   redoEditor,
@@ -252,6 +253,7 @@ export function GameShell() {
           onClose={() => setEditorState(null)}
           onExportJson={() => setEditorExport(exportEditorJson(editorState))}
           onExportSvg={() => setEditorExport(exportEditorSvg(editorState))}
+          onExportTerrainControl={() => setEditorExport(exportTerrainControlSvg(editorState))}
           onRedo={() => setEditorState((current) => (current ? redoEditor(current) : current))}
           onSelectTool={setEditorTool}
           onUndo={() => setEditorState((current) => (current ? undoEditor(current) : current))}

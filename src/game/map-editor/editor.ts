@@ -32,6 +32,15 @@ const TERRAIN_COLORS: Record<TerrainType, string> = {
   deepWater: '#2c6570',
 };
 
+const TERRAIN_CONTROL_COLORS: Record<TerrainType, string> = {
+  plain: '#6f7f62',
+  road: '#c3a663',
+  forest: '#245a34',
+  hill: '#7b744f',
+  mountain: '#2d3332',
+  deepWater: '#2c6f80',
+};
+
 const CELL_SIZE = 24;
 
 function cloneGrid(grid: GridCell[]) {
@@ -156,4 +165,24 @@ export function exportEditorSvg(state: MapEditorState): string {
   });
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">${[...cells, ...cities].join('')}</svg>`;
+}
+
+export function exportTerrainControlSvg(state: MapEditorState): string {
+  const width = GRID_WIDTH * CELL_SIZE;
+  const height = GRID_HEIGHT * CELL_SIZE;
+  const cells = state.grid.map((cell) => {
+    const position = cellPosition(cell.q, cell.r);
+    return `<rect data-q="${cell.q}" data-r="${cell.r}" data-terrain="${cell.terrain}" x="${position.x}" y="${position.y}" width="${CELL_SIZE}" height="${CELL_SIZE}" fill="${TERRAIN_CONTROL_COLORS[cell.terrain]}" stroke="rgba(255,255,255,0.5)" />`;
+  });
+  const cities = state.cities.flatMap((city) => sevenCellCityFootprint(city).map((coord) => {
+    const position = cellPosition(coord.q, coord.r);
+    return `<rect data-control-city="${city.id}:${coord.q},${coord.r}" x="${position.x + 1}" y="${position.y + 1}" width="${CELL_SIZE - 2}" height="${CELL_SIZE - 2}" fill="rgba(214,180,92,0.58)" stroke="#f2d778" />`;
+  }));
+  const metadata = [
+    '<desc>Terrain control map. Cell position formula: x=q*24; y=r*24; even columns move up by 12px.</desc>',
+    ...cells,
+    ...cities,
+  ];
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" data-export="terrain-control" data-grid-width="${GRID_WIDTH}" data-grid-height="${GRID_HEIGHT}" data-cell-size="${CELL_SIZE}" data-cell-shape="staggered-square-even-columns-up-half">${metadata.join('')}</svg>`;
 }

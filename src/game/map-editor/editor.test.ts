@@ -5,6 +5,7 @@ import {
   createEditorState,
   exportEditorJson,
   exportEditorSvg,
+  exportTerrainControlSvg,
   paintTerrain,
   placeCity,
   redoEditor,
@@ -57,5 +58,22 @@ describe('map editor core', () => {
     expect(json.height).toBe(GRID_HEIGHT);
     expect(json.grid).toHaveLength(GRID_WIDTH * GRID_HEIGHT);
     expect(json.grid.every((cell: { terrain: string }) => cell.terrain === 'plain')).toBe(true);
+  });
+
+  it('exports a terrain control svg with exact staggered grid metadata', () => {
+    const state = createEditorState(createBattleGrid(), [{ id: 'jiangling', label: '江陵', q: 34, r: 22 }]);
+
+    const svg = exportTerrainControlSvg(state);
+
+    expect(svg).toContain('data-export="terrain-control"');
+    expect(svg).toContain(`data-grid-width="${GRID_WIDTH}"`);
+    expect(svg).toContain(`data-grid-height="${GRID_HEIGHT}"`);
+    expect(svg).toContain('data-cell-shape="staggered-square-even-columns-up-half"');
+    expect(svg).toContain('data-q="0" data-r="0" data-terrain="plain" x="0" y="-12"');
+    expect(svg).toContain('data-q="1" data-r="0" data-terrain="plain" x="24" y="0"');
+    expect(svg).toContain('data-terrain="forest"');
+    expect(svg).toContain('fill="#245a34"');
+    expect(svg).toContain('data-control-city="jiangling:34,22"');
+    expect(svg).not.toContain('<text');
   });
 });

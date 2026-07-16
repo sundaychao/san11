@@ -320,5 +320,11 @@ describe('game interface shell', () => {
     expect(exportValue).toContain('"terrain": "mountain"');
     expect(exportValue).toContain('"cities"');
     expect(exportValue).toContain('"q": 4');
+
+    await user.click(screen.getByRole('button', { name: '导出地形图' }));
+    const terrainControlValue = (exportOutput as HTMLTextAreaElement).value;
+    expect(terrainControlValue).toContain('data-export="terrain-control"');
+    expect(terrainControlValue).toContain('data-cell-shape="staggered-square-even-columns-up-half"');
+    expect(terrainControlValue).toContain('data-q="0" data-r="0"');
   });
 });
