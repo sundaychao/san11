@@ -10,6 +10,7 @@ interface MapEditorPanelProps {
   onClear(): void;
   onClose(): void;
   onExportJson(): void;
+  onExportMasks(): void;
   onExportSvg(): void;
   onExportTerrainControl(): void;
   onRedo(): void;
@@ -34,6 +35,7 @@ export function MapEditorPanel({
   onClear,
   onClose,
   onExportJson,
+  onExportMasks,
   onExportSvg,
   onExportTerrainControl,
   onRedo,
@@ -86,6 +88,7 @@ export function MapEditorPanel({
         <button type="button" className="primary-button" onClick={onExportJson}><FileJson />导出 JSON</button>
         <button type="button" className="secondary-button" onClick={onExportSvg}><FileText />导出 SVG</button>
         <button type="button" className="secondary-button" onClick={onExportTerrainControl}><FileImage />导出地形图</button>
+        <button type="button" className="secondary-button" onClick={onExportMasks}><FileImage />导出分层遮罩</button>
       </div>
 
       <p className="map-editor-status">当前工具：{activeLabel}</p>

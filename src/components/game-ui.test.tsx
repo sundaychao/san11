@@ -7,6 +7,36 @@ import { GameProvider } from '../game/store/GameProvider';
 import { MANUAL_SAVE_KEY, writeSave } from '../game/persistence';
 import { GameShell } from './GameShell';
 
+function mockFileDownloads() {
+  const originalCreateObjectUrl = URL.createObjectURL;
+  const originalRevokeObjectUrl = URL.revokeObjectURL;
+  let blobIndex = 0;
+  const createObjectUrl = vi.fn((blob: Blob) => {
+    void blob;
+    const url = `blob:download-${blobIndex}`;
+    blobIndex += 1;
+    return url;
+  });
+  const revokeObjectUrl = vi.fn();
+  const downloadedNames: string[] = [];
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+  const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function clickDownload(this: HTMLAnchorElement) {
+    downloadedNames.push(this.download);
+  });
+
+  return {
+    createObjectUrl,
+    downloadedNames,
+    restore() {
+      clickSpy.mockRestore();
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectUrl });
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectUrl });
+    },
+    revokeObjectUrl,
+  };
+}
+
 describe('game interface shell', () => {
   beforeEach(() => window.localStorage.clear());
 
@@ -332,19 +362,7 @@ describe('game interface shell', () => {
 
   it('downloads the terrain control svg when exporting the terrain map', async () => {
     const user = userEvent.setup();
-    const originalCreateObjectUrl = URL.createObjectURL;
-    const originalRevokeObjectUrl = URL.revokeObjectURL;
-    const createObjectUrl = vi.fn((blob: Blob) => {
-      void blob;
-      return 'blob:terrain-control';
-    });
-    const revokeObjectUrl = vi.fn();
-    const downloadedNames: string[] = [];
-    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
-    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
-    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function clickDownload(this: HTMLAnchorElement) {
-      downloadedNames.push(this.download);
-    });
+    const downloads = mockFileDownloads();
 
     try {
       render(
@@ -356,15 +374,42 @@ describe('game interface shell', () => {
       await user.click(screen.getByRole('button', { name: '地图编辑' }));
       await user.click(screen.getByRole('button', { name: '导出地形图' }));
 
-      expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
-      const blob = createObjectUrl.mock.calls[0][0] as Blob;
+      expect(downloads.createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+      const blob = downloads.createObjectUrl.mock.calls[0][0] as Blob;
       await expect(blob.text()).resolves.toContain('data-export="terrain-control"');
-      expect(downloadedNames).toEqual(['terrain-control.svg']);
-      expect(revokeObjectUrl).toHaveBeenCalledWith('blob:terrain-control');
+      expect(downloads.downloadedNames).toEqual(['terrain-control.svg']);
+      expect(downloads.revokeObjectUrl).toHaveBeenCalledWith('blob:download-0');
     } finally {
-      clickSpy.mockRestore();
-      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectUrl });
-      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectUrl });
+      downloads.restore();
+    }
+  });
+
+  it('downloads layered terrain masks for generation control', async () => {
+    const user = userEvent.setup();
+    const downloads = mockFileDownloads();
+
+    try {
+      render(
+        <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+          <GameShell />
+        </GameProvider>,
+      );
+
+      await user.click(screen.getByRole('button', { name: '地图编辑' }));
+      await user.click(screen.getByRole('button', { name: '导出分层遮罩' }));
+
+      expect(downloads.downloadedNames).toEqual([
+        'mask-water.svg',
+        'mask-mountain.svg',
+        'mask-forest.svg',
+        'mask-road.svg',
+        'mask-city.svg',
+      ]);
+      expect(downloads.createObjectUrl).toHaveBeenCalledTimes(5);
+      const firstMask = downloads.createObjectUrl.mock.calls[0][0] as Blob;
+      await expect(firstMask.text()).resolves.toContain('data-mask-layer="water"');
+    } finally {
+      downloads.restore();
     }
   });
 });

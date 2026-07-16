@@ -7,6 +7,7 @@ import {
   createEditorState,
   exportEditorJson,
   exportEditorSvg,
+  exportTerrainMaskSvgs,
   exportTerrainControlSvg,
   paintTerrain,
   placeCity,
@@ -95,6 +96,15 @@ export function GameShell() {
     const svg = exportTerrainControlSvg(editorState);
     setEditorExport(svg);
     downloadTextFile('terrain-control.svg', svg);
+  }, [editorState]);
+
+  const exportTerrainMasks = useCallback(() => {
+    if (!editorState) return;
+    const masks = exportTerrainMaskSvgs(editorState);
+    for (const mask of Object.values(masks)) {
+      downloadTextFile(mask.filename, mask.content);
+    }
+    setEditorExport(Object.values(masks).map((mask) => mask.filename).join('\n'));
   }, [editorState]);
 
   const editCell = useCallback((coord: { q: number; r: number }) => {
@@ -271,6 +281,7 @@ export function GameShell() {
           onClear={() => setEditorState((current) => (current ? clearEditor(current, 'plain') : current))}
           onClose={() => setEditorState(null)}
           onExportJson={() => setEditorExport(exportEditorJson(editorState))}
+          onExportMasks={exportTerrainMasks}
           onExportSvg={() => setEditorExport(exportEditorSvg(editorState))}
           onExportTerrainControl={exportTerrainControl}
           onRedo={() => setEditorState((current) => (current ? redoEditor(current) : current))}

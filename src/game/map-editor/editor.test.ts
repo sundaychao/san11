@@ -5,6 +5,7 @@ import {
   createEditorState,
   exportEditorJson,
   exportEditorSvg,
+  exportTerrainMaskSvgs,
   exportTerrainControlSvg,
   paintTerrain,
   placeCity,
@@ -75,5 +76,23 @@ describe('map editor core', () => {
     expect(svg).toContain('fill="#245a34"');
     expect(svg).toContain('data-control-city="jiangling:34,22"');
     expect(svg).not.toContain('<text');
+  });
+
+  it('exports layered terrain mask svgs for generation control', () => {
+    const state = createEditorState(createBattleGrid(), [{ id: 'jiangling', label: '江陵', q: 34, r: 22 }]);
+
+    const masks = exportTerrainMaskSvgs(state);
+
+    expect(Object.keys(masks)).toEqual(['water', 'mountain', 'forest', 'road', 'city']);
+    expect(masks.water.filename).toBe('mask-water.svg');
+    expect(masks.water.content).toContain('data-export="terrain-mask"');
+    expect(masks.water.content).toContain('data-mask-layer="water"');
+    expect(masks.water.content).toContain('data-source-terrain="deepWater"');
+    expect(masks.mountain.content).toContain('data-source-terrain="mountain"');
+    expect(masks.forest.content).toContain('data-source-terrain="forest"');
+    expect(masks.road.content).toContain('data-source-terrain="road"');
+    expect(masks.city.content).toContain('data-mask-layer="city"');
+    expect(masks.city.content).toContain('data-control-city="jiangling:34,22"');
+    expect(masks.water.content).not.toContain('<text');
   });
 });
