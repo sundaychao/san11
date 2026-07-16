@@ -32,7 +32,7 @@ describe('command interface', () => {
     const user = userEvent.setup();
     renderState();
 
-    await user.click(screen.getByRole('button', { name: '武将' }));
+    await user.click(screen.getByTestId('open-officer-list-button'));
 
     const dialog = screen.getByRole('dialog', { name: '武将一览' });
     expect(within(dialog).getByRole('button', { name: '所属' })).toHaveClass('is-active');
@@ -88,7 +88,7 @@ describe('command interface', () => {
     });
     renderState(state);
 
-    await user.click(screen.getByRole('button', { name: '武将' }));
+    await user.click(screen.getByTestId('open-officer-list-button'));
 
     const dialog = screen.getByRole('dialog', { name: '武将一览' });
     await user.click(within(dialog).getByRole('button', { name: '状态' }));

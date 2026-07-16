@@ -22,6 +22,7 @@ import { CityPanel } from './CityPanel';
 import { CommandDialog } from './CommandDialog';
 import { DeployDialog, type DeployConfirmInput } from './DeployDialog';
 import { EventLog } from './EventLog';
+import { ForceOverviewPanel } from './ForceOverviewPanel';
 import { MapEditorPanel } from './MapEditorPanel';
 import { ResultOverlay } from './ResultOverlay';
 import { StrategicMap } from './StrategicMap';
@@ -237,6 +238,7 @@ export function GameShell() {
         </div>
       )}
       <button type="button" className="map-editor-toggle primary-button" onClick={openEditor}>地图编辑</button>
+      <ForceOverviewPanel />
       <CityPanel onCommand={launchCommand} />
       <BattlePanel />
       <EventLog />

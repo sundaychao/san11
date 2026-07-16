@@ -57,7 +57,7 @@ export function TopBar() {
         <div className="top-metric"><span>势力</span><strong className="top-force-name" style={{ color: force.color }}>{force.name}</strong></div>
         <div className="top-metric"><span>行动力</span><strong data-testid="action-points">{state.actionPoints[state.playerForceId]}</strong></div>
         <div className="top-actions">
-          <button className="next-month" type="button" onClick={() => setShowOfficers(true)}><Users aria-hidden="true" />武将</button>
+          <button className="next-month" data-testid="open-officer-list-button" type="button" onClick={() => setShowOfficers(true)}><Users aria-hidden="true" />武将</button>
           <button className="icon-button" type="button" onClick={manualSave} title="手动存档" aria-label="手动存档"><Save aria-hidden="true" /></button>
           <button className="next-month" data-testid="end-ten-day-button" type="button" onClick={endTenDay} disabled={state.phase === 'finished'}><SkipForward aria-hidden="true" />结束本旬</button>
           <button className="next-month" type="button" onClick={requestEndMonth} aria-label="进行到下月" disabled={state.phase === 'finished'}><SkipForward aria-hidden="true" />进行·下月</button>

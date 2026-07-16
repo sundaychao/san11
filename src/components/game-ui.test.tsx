@@ -80,6 +80,31 @@ describe('game interface shell', () => {
     expect(screen.getByTestId('battle-grid-overlay')).toBeVisible();
   });
 
+  it('shows a left force overview with player cities and officer action states', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    state.officers['liu-bei'].acted = true;
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const panel = screen.getByTestId('force-overview-panel');
+    expect(panel).toBeVisible();
+    expect(within(panel).getByRole('button', { name: '城池' })).toHaveClass('is-active');
+    expect(within(panel).getByText('江陵')).toBeVisible();
+    expect(within(panel).getByText('武陵')).toBeVisible();
+    expect(within(panel).queryByText('襄阳')).not.toBeInTheDocument();
+
+    await user.click(within(panel).getByRole('button', { name: '武将' }));
+
+    const liuBeiRow = within(panel).getByText('刘备').closest('li');
+    const guanYuRow = within(panel).getByText('关羽').closest('li');
+    expect(liuBeiRow).toHaveClass('has-acted');
+    expect(guanYuRow).toHaveClass('is-ready');
+  });
+
   it('opens a nested city command menu next to a clicked city', async () => {
     const user = userEvent.setup();
     render(
