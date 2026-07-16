@@ -39,6 +39,18 @@ const TERRAIN_LABELS: Record<TerrainType, string> = {
   deepWater: '水域',
 };
 
+function downloadTextFile(filename: string, content: string) {
+  const blob = new Blob([content], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function GameShell() {
   const { deployTransportUnit, deployUnit, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, moveUnit, state, selectedCityId, resetGame } = useGame();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
@@ -77,6 +89,13 @@ export function GameShell() {
     setShowIntel(false);
     setSelectedUnitId(null);
   }, [state]);
+
+  const exportTerrainControl = useCallback(() => {
+    if (!editorState) return;
+    const svg = exportTerrainControlSvg(editorState);
+    setEditorExport(svg);
+    downloadTextFile('terrain-control.svg', svg);
+  }, [editorState]);
 
   const editCell = useCallback((coord: { q: number; r: number }) => {
     setEditorState((current) => {
@@ -253,7 +272,7 @@ export function GameShell() {
           onClose={() => setEditorState(null)}
           onExportJson={() => setEditorExport(exportEditorJson(editorState))}
           onExportSvg={() => setEditorExport(exportEditorSvg(editorState))}
-          onExportTerrainControl={() => setEditorExport(exportTerrainControlSvg(editorState))}
+          onExportTerrainControl={exportTerrainControl}
           onRedo={() => setEditorState((current) => (current ? redoEditor(current) : current))}
           onSelectTool={setEditorTool}
           onUndo={() => setEditorState((current) => (current ? undoEditor(current) : current))}

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../app/App';
@@ -299,6 +299,7 @@ describe('game interface shell', () => {
 
   it('edits map cells and exports the edited grid from the map editor', async () => {
     const user = userEvent.setup();
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     render(
       <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
         <GameShell />
@@ -326,5 +327,44 @@ describe('game interface shell', () => {
     expect(terrainControlValue).toContain('data-export="terrain-control"');
     expect(terrainControlValue).toContain('data-cell-shape="staggered-square-even-columns-up-half"');
     expect(terrainControlValue).toContain('data-q="0" data-r="0"');
+    clickSpy.mockRestore();
+  });
+
+  it('downloads the terrain control svg when exporting the terrain map', async () => {
+    const user = userEvent.setup();
+    const originalCreateObjectUrl = URL.createObjectURL;
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    const createObjectUrl = vi.fn((blob: Blob) => {
+      void blob;
+      return 'blob:terrain-control';
+    });
+    const revokeObjectUrl = vi.fn();
+    const downloadedNames: string[] = [];
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectUrl });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function clickDownload(this: HTMLAnchorElement) {
+      downloadedNames.push(this.download);
+    });
+
+    try {
+      render(
+        <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+          <GameShell />
+        </GameProvider>,
+      );
+
+      await user.click(screen.getByRole('button', { name: '地图编辑' }));
+      await user.click(screen.getByRole('button', { name: '导出地形图' }));
+
+      expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+      const blob = createObjectUrl.mock.calls[0][0] as Blob;
+      await expect(blob.text()).resolves.toContain('data-export="terrain-control"');
+      expect(downloadedNames).toEqual(['terrain-control.svg']);
+      expect(revokeObjectUrl).toHaveBeenCalledWith('blob:terrain-control');
+    } finally {
+      clickSpy.mockRestore();
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectUrl });
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectUrl });
+    }
   });
 });
