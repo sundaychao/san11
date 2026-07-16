@@ -4,9 +4,13 @@ import type { TerrainType } from '../game/types';
 
 interface MapEditorPanelProps {
   activeTool: MapEditorTool;
+  backgroundImage: string;
   canRedo: boolean;
   canUndo: boolean;
+  calibrationMode: boolean;
   exportValue: string;
+  onBackgroundImageChange(value: string): void;
+  onCalibrationModeChange(value: boolean): void;
   onClear(): void;
   onClose(): void;
   onExportJson(): void;
@@ -29,9 +33,13 @@ const TERRAIN_TOOLS: Array<{ tool: TerrainType; label: string; icon: typeof Brus
 
 export function MapEditorPanel({
   activeTool,
+  backgroundImage,
   canRedo,
   canUndo,
+  calibrationMode,
   exportValue,
+  onBackgroundImageChange,
+  onCalibrationModeChange,
   onClear,
   onClose,
   onExportJson,
@@ -90,6 +98,27 @@ export function MapEditorPanel({
         <button type="button" className="secondary-button" onClick={onExportTerrainControl}><FileImage />导出地形图</button>
         <button type="button" className="secondary-button" onClick={onExportMasks}><FileImage />导出分层遮罩</button>
       </div>
+
+      <label className="map-editor-calibration">
+        <input
+          type="checkbox"
+          checked={calibrationMode}
+          onChange={(event) => onCalibrationModeChange(event.currentTarget.checked)}
+        />
+        <span>校准底图</span>
+      </label>
+
+      {calibrationMode && (
+        <label className="map-editor-background-field">
+          <span>底图地址</span>
+          <input
+            aria-label="底图地址"
+            value={backgroundImage}
+            onChange={(event) => onBackgroundImageChange(event.currentTarget.value)}
+            placeholder="exports/watercolor-map-realistic-preview.png"
+          />
+        </label>
+      )}
 
       <p className="map-editor-status">当前工具：{activeLabel}</p>
       <textarea data-testid="map-editor-export" readOnly value={exportValue} aria-label="地图编辑导出结果" />

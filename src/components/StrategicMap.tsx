@@ -46,6 +46,7 @@ function clampScale(value: number) {
 
 interface StrategicMapProps {
   onCityMenu?(cityId: CityId, position: { x: number; y: number }): void;
+  backgroundImage?: string;
   editorGrid?: GridCell[];
   editorCities?: EditableCityMarker[];
   editorMode?: boolean;
@@ -62,6 +63,7 @@ interface StrategicMapProps {
 }
 
 export function StrategicMap({
+  backgroundImage,
   deployTargets = [],
   editorCities,
   editorGrid,
@@ -150,6 +152,15 @@ export function StrategicMap({
         data-testid="map-content"
         style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
       >
+        {backgroundImage && (
+          <img
+            src={backgroundImage}
+            alt=""
+            className="map-image"
+            data-testid="map-image"
+            draggable={false}
+          />
+        )}
         <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}${moveMode ? ' is-moving' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-hidden="true">
           {displayGrid.map((cell) => {
             const position = cellPosition(cell.q, cell.r);

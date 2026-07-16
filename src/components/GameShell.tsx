@@ -12,6 +12,7 @@ import {
   paintTerrain,
   placeCity,
   redoEditor,
+  setEditorBackgroundImage,
   undoEditor,
   type MapEditorState,
   type MapEditorTool,
@@ -66,6 +67,7 @@ export function GameShell() {
   const [showIntel, setShowIntel] = useState(false);
   const [viewFinalMap, setViewFinalMap] = useState(false);
   const [editorState, setEditorState] = useState<MapEditorState | null>(null);
+  const [editorCalibrationMode, setEditorCalibrationMode] = useState(false);
   const [editorTool, setEditorTool] = useState<MapEditorTool>('plain');
   const [editorExport, setEditorExport] = useState('');
   const mapContextMenuRef = useRef<HTMLElement>(null);
@@ -84,6 +86,7 @@ export function GameShell() {
       state.grid,
       Object.values(state.cities).map((city) => ({ id: city.id, label: city.name, q: city.gridQ, r: city.gridR })),
     ));
+    setEditorCalibrationMode(false);
     setEditorExport('');
     setCityMenu(null);
     setMapContextMenu(null);
@@ -249,6 +252,7 @@ export function GameShell() {
           setMapContextMenu(null);
           setCityMenu({ cityId, position });
         }}
+        backgroundImage={editorCalibrationMode ? editorState?.backgroundImage : undefined}
         editorGrid={editorState?.grid}
         editorCities={editorState?.cities}
         editorMode={Boolean(editorState)}
@@ -275,9 +279,13 @@ export function GameShell() {
       {editorState && (
         <MapEditorPanel
           activeTool={editorTool}
+          backgroundImage={editorState.backgroundImage}
           canRedo={editorState.future.length > 0}
           canUndo={editorState.history.length > 0}
+          calibrationMode={editorCalibrationMode}
           exportValue={editorExport}
+          onBackgroundImageChange={(value) => setEditorState((current) => (current ? setEditorBackgroundImage(current, value) : current))}
+          onCalibrationModeChange={setEditorCalibrationMode}
           onClear={() => setEditorState((current) => (current ? clearEditor(current, 'plain') : current))}
           onClose={() => setEditorState(null)}
           onExportJson={() => setEditorExport(exportEditorJson(editorState))}

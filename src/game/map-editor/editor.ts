@@ -10,11 +10,13 @@ export interface EditableCityMarker {
 }
 
 interface EditorSnapshot {
+  backgroundImage: string;
   grid: GridCell[];
   cities: EditableCityMarker[];
 }
 
 export interface MapEditorState {
+  backgroundImage: string;
   grid: GridCell[];
   cities: EditableCityMarker[];
   history: EditorSnapshot[];
@@ -66,8 +68,9 @@ function cloneCities(cities: EditableCityMarker[]) {
   return cities.map((city) => ({ ...city }));
 }
 
-function snapshot(state: Pick<MapEditorState, 'grid' | 'cities'>): EditorSnapshot {
+function snapshot(state: Pick<MapEditorState, 'backgroundImage' | 'grid' | 'cities'>): EditorSnapshot {
   return {
+    backgroundImage: state.backgroundImage,
     grid: cloneGrid(state.grid),
     cities: cloneCities(state.cities),
   };
@@ -90,6 +93,7 @@ function cellPosition(q: number, r: number) {
 
 export function createEditorState(grid: GridCell[], cities: EditableCityMarker[] = []): MapEditorState {
   return {
+    backgroundImage: '',
     grid: cloneGrid(grid),
     cities: cloneCities(cities),
     history: [],
@@ -102,6 +106,7 @@ export function paintTerrain(state: MapEditorState, coord: { q: number; r: numbe
   if (!target || target.terrain === terrain) return state;
 
   return withHistory(state, {
+    backgroundImage: state.backgroundImage,
     grid: state.grid.map((cell) => (cell.q === coord.q && cell.r === coord.r ? { ...cell, terrain } : { ...cell })),
     cities: cloneCities(state.cities),
   });
@@ -109,6 +114,7 @@ export function paintTerrain(state: MapEditorState, coord: { q: number; r: numbe
 
 export function placeCity(state: MapEditorState, city: EditableCityMarker): MapEditorState {
   return withHistory(state, {
+    backgroundImage: state.backgroundImage,
     grid: cloneGrid(state.grid),
     cities: [...state.cities.filter((candidate) => candidate.id !== city.id).map((candidate) => ({ ...candidate })), { ...city }],
   });
@@ -119,6 +125,7 @@ export function undoEditor(state: MapEditorState): MapEditorState {
   if (!previous) return state;
 
   return {
+    backgroundImage: previous.backgroundImage,
     grid: cloneGrid(previous.grid),
     cities: cloneCities(previous.cities),
     history: state.history.slice(0, -1).map(snapshot),
@@ -131,6 +138,7 @@ export function redoEditor(state: MapEditorState): MapEditorState {
   if (!next) return state;
 
   return {
+    backgroundImage: next.backgroundImage,
     grid: cloneGrid(next.grid),
     cities: cloneCities(next.cities),
     history: [...state.history.map(snapshot), snapshot(state)],
@@ -140,8 +148,19 @@ export function redoEditor(state: MapEditorState): MapEditorState {
 
 export function clearEditor(state: MapEditorState, terrain: TerrainType = 'plain'): MapEditorState {
   return withHistory(state, {
+    backgroundImage: state.backgroundImage,
     grid: state.grid.map((cell) => ({ ...cell, terrain })),
     cities: [],
+  });
+}
+
+export function setEditorBackgroundImage(state: MapEditorState, backgroundImage: string): MapEditorState {
+  if (state.backgroundImage === backgroundImage) return state;
+
+  return withHistory(state, {
+    backgroundImage,
+    grid: cloneGrid(state.grid),
+    cities: cloneCities(state.cities),
   });
 }
 
@@ -151,6 +170,7 @@ export function exportEditorJson(state: MapEditorState): string {
       schemaVersion: 1,
       width: GRID_WIDTH,
       height: GRID_HEIGHT,
+      backgroundImage: state.backgroundImage,
       grid: state.grid,
       cities: state.cities,
     },

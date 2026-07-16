@@ -99,7 +99,7 @@ describe('game interface shell', () => {
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
   });
 
-  it('renders the battle map without a raster background image for now', () => {
+  it('renders the battle map without a raster background image by default', () => {
     render(
       <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
         <GameShell />
@@ -358,6 +358,30 @@ describe('game interface shell', () => {
     expect(terrainControlValue).toContain('data-cell-shape="staggered-square-even-columns-up-half"');
     expect(terrainControlValue).toContain('data-q="0" data-r="0"');
     clickSpy.mockRestore();
+  });
+
+  it('calibrates terrain markers against a generated map background', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: '地图编辑' }));
+    await user.click(screen.getByRole('checkbox', { name: '校准底图' }));
+    await user.type(screen.getByLabelText('底图地址'), 'exports/watercolor-map-realistic-preview.png');
+
+    const mapImage = screen.getByTestId('map-image');
+    expect(mapImage).toHaveAttribute('src', 'exports/watercolor-map-realistic-preview.png');
+
+    await user.click(screen.getByRole('button', { name: '森林' }));
+    fireEvent.pointerDown(screen.getByTestId('editor-cell-0-0'), { button: 0, buttons: 1 });
+    await user.click(screen.getByRole('button', { name: '导出 JSON' }));
+
+    const json = JSON.parse((screen.getByTestId('map-editor-export') as HTMLTextAreaElement).value);
+    expect(json.backgroundImage).toBe('exports/watercolor-map-realistic-preview.png');
+    expect(json.grid.find((cell: { q: number; r: number; terrain: string }) => cell.q === 0 && cell.r === 0)?.terrain).toBe('forest');
   });
 
   it('downloads the terrain control svg when exporting the terrain map', async () => {
