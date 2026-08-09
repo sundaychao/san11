@@ -4,6 +4,7 @@ import { validateCommand } from '../game/commands';
 import { useGame } from '../game/store/GameProvider';
 import type { GameCommand, GameState } from '../game/types';
 import { OfficerListDialog } from './OfficerListDialog';
+import { closePopupOnContextMenu } from './popupEvents';
 
 const MONTH_NAMES = ['四月', '五月', '六月', '七月', '八月', '九月', '十月', '冬月', '腊月', '正月', '二月', '三月'];
 const TEN_DAY_LABELS = { 1: '上旬', 2: '中旬', 3: '下旬' } as const;
@@ -30,13 +31,16 @@ function hasLegalActions(state: GameState) {
 }
 
 export function TopBar() {
-  const { state, endMonth, endTenDay, manualSave } = useGame();
+  const { state, disconnectOnline, endMonth, endTenDay, manualSave, online } = useGame();
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [showOfficers, setShowOfficers] = useState(false);
   if (!state) return null;
   const force = state.forces[state.playerForceId];
   const year = 13 + Math.floor((state.month + 2) / 12);
   const monthName = MONTH_NAMES[(state.month - 1) % 12];
+  const isOnline = online.mode === 'online';
+  const activePlayer = isOnline ? online.players.find((player) => player.id === online.activePlayerId) : undefined;
+  const isMyOnlineTurn = !isOnline || !online.activePlayerId || online.activePlayerId === online.playerId;
 
   const requestEndMonth = () => {
     if (hasLegalActions(state)) setConfirmEnd(true);
@@ -56,16 +60,28 @@ export function TopBar() {
         <div className="top-metric"><span>旬</span><strong data-testid="ten-day-label">{TEN_DAY_LABELS[state.tenDay]}</strong></div>
         <div className="top-metric"><span>势力</span><strong className="top-force-name" style={{ color: force.color }}>{force.name}</strong></div>
         <div className="top-metric"><span>行动力</span><strong data-testid="action-points">{state.actionPoints[state.playerForceId]}</strong></div>
+        {isOnline && (
+          <div className="top-metric online-top-status">
+            <span>{online.connected ? '联网' : '断线'}</span>
+            <strong>{online.roomId} · <span data-testid="online-active-player">{activePlayer?.name ?? '等待'}</span></strong>
+          </div>
+        )}
+        {isOnline && (
+          <div className={`turn-prompt ${isMyOnlineTurn ? 'is-active' : 'is-waiting'}`} role="status">
+            {isMyOnlineTurn ? '请你操作行动' : '等其他玩家操作中'}
+          </div>
+        )}
         <div className="top-actions">
           <button className="next-month" data-testid="open-officer-list-button" type="button" onClick={() => setShowOfficers(true)}><Users aria-hidden="true" />武将</button>
           <button className="icon-button" type="button" onClick={manualSave} title="手动存档" aria-label="手动存档"><Save aria-hidden="true" /></button>
-          <button className="next-month" data-testid="end-ten-day-button" type="button" onClick={endTenDay} disabled={state.phase === 'finished'}><SkipForward aria-hidden="true" />结束本旬</button>
-          <button className="next-month" type="button" onClick={requestEndMonth} aria-label="进行到下月" disabled={state.phase === 'finished'}><SkipForward aria-hidden="true" />进行·下月</button>
+          <button className="next-month" data-testid="end-ten-day-button" type="button" onClick={endTenDay} disabled={state.phase === 'finished' || (isOnline && !isMyOnlineTurn)}><SkipForward aria-hidden="true" />{isOnline ? '进行' : '结束本旬'}</button>
+          <button className="next-month" data-testid="end-month-button" type="button" onClick={requestEndMonth} aria-label="进行到下月" disabled={state.phase === 'finished'}><SkipForward aria-hidden="true" />进行·下月</button>
+          {isOnline && <button className="next-month" type="button" onClick={disconnectOnline}>断开</button>}
         </div>
       </header>
       {showOfficers && <OfficerListDialog onClose={() => setShowOfficers(false)} />}
       {confirmEnd && (
-        <div className="modal-backdrop">
+        <div className="modal-backdrop" onContextMenu={(event) => closePopupOnContextMenu(event, () => setConfirmEnd(false))}>
           <section className="confirm-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="end-month-title">
             <p>仍有武将和行动力可用</p>
             <h2 id="end-month-title">结束本月</h2>

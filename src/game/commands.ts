@@ -1,9 +1,11 @@
 import { nextRandom } from './random';
+import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, isDelayedArmament, produceArmamentYield, DELAYED_ARMAMENT_TEN_DAYS } from './armaments';
 import type { City, ForceId, GameCommand, GameState, Officer } from './types';
 
 export const COMMAND_AP = {
   develop: 20,
   recruit: 20,
+  produceArmament: 20,
   train: 15,
   patrol: 15,
   talent: 20,
@@ -13,6 +15,7 @@ export const COMMAND_AP = {
 export const COMMAND_LABELS: Record<GameCommand['type'], string> = {
   develop: '开发',
   recruit: '征兵',
+  produceArmament: '生产兵装',
   train: '训练',
   patrol: '巡察',
   talent: '人才',
@@ -35,6 +38,7 @@ function commandGoldCost(command: GameCommand) {
   switch (command.type) {
     case 'develop': return 500;
     case 'recruit': return 800;
+    case 'produceArmament': return ARMAMENT_GOLD_COST;
     case 'patrol': return 300;
     case 'talent': return 500;
     default: return 0;
@@ -97,6 +101,9 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     if (city.population < 500) errors.push('人口不足 500');
   }
   if (command.type === 'train' && city.food < 300) errors.push('兵粮不足 300');
+  if (command.type === 'produceArmament' && !ARMAMENT_TYPES.includes(command.armamentType)) {
+    errors.push('兵装类型无效');
+  }
   if (command.type === 'transfer') errors.push(...validateTransfer(state, forceId, command));
   return [...new Set(errors)];
 }
@@ -150,6 +157,8 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
   const next = structuredClone(state);
   const city = next.cities[command.cityId];
   let message = '';
+  next.battleDamageReports = [];
+  next.cityEffectReports = [];
 
   switch (command.type) {
     case 'develop': {
@@ -164,12 +173,56 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     }
     case 'recruit': {
       const officer = next.officers[command.officerId];
+      const gain = 300 + officer.stats.charisma * 10;
       city.gold -= 800;
       city.food -= 500;
       city.population -= 500;
-      city.troops += 300 + officer.stats.charisma * 10;
+      city.troops += gain;
       city.order = clamp(city.order - 2, 0, 100);
       message = `${officer.name}在${city.name}征募士兵`;
+      next.cityEffectReports = [{
+        id: `city-effect-${next.month}-${next.logs.length}`,
+        cityId: city.id,
+        q: city.gridQ,
+        r: city.gridR,
+        amount: gain,
+        label: '士兵',
+        kind: 'recruit',
+      }];
+      officer.acted = true;
+      break;
+    }
+    case 'produceArmament': {
+      const officer = next.officers[command.officerId];
+      const current = armamentsOf(city.armaments);
+      const gain = produceArmamentYield(officer, command.armamentType);
+      city.gold -= ARMAMENT_GOLD_COST;
+      if (isDelayedArmament(command.armamentType)) {
+        officer.location = {
+          kind: 'task',
+          cityId: city.id,
+          task: 'armament',
+          armamentType: command.armamentType,
+          amount: gain,
+          remainingTenDays: DELAYED_ARMAMENT_TEN_DAYS,
+        };
+        message = `${officer.name}开始生产${city.name}${ARMAMENT_LABELS[command.armamentType]}，预计1个月完成`;
+      } else {
+        city.armaments = {
+          ...current,
+          [command.armamentType]: current[command.armamentType] + gain,
+        };
+        message = `${officer.name}生产${city.name}${ARMAMENT_LABELS[command.armamentType]}，增加了${gain.toLocaleString('en-US')}`;
+        next.cityEffectReports = [{
+          id: `city-effect-${next.month}-${next.logs.length}`,
+          cityId: city.id,
+          q: city.gridQ,
+          r: city.gridR,
+          amount: gain,
+          label: ARMAMENT_LABELS[command.armamentType],
+          kind: 'armament',
+        }];
+      }
       officer.acted = true;
       break;
     }

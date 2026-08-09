@@ -1,5 +1,6 @@
 import { CITY_IDS, FORCE_IDS, OFFICER_IDS } from './scenario/jingxiang208';
-import type { ArmyUnit, City, Force, GameState, GridCell, Officer, Stats } from './types';
+import { ARMAMENT_TYPES } from './armaments';
+import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, Force, GameState, GridCell, Officer, Stats } from './types';
 
 export const AUTO_SAVE_KEY = 'jingxiang-208-autosave-v1';
 export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
@@ -43,6 +44,7 @@ function exactKeys(value: object, expected: readonly string[]) {
 function validCity(value: unknown): value is City {
   if (!value || typeof value !== 'object') return false;
   const city = value as Partial<City>;
+  const armaments = city.armaments as Record<string, unknown> | undefined;
   return (
     typeof city.id === 'string' &&
     typeof city.name === 'string' &&
@@ -62,7 +64,11 @@ function validCity(value: unknown): value is City {
     Number.isInteger(city.gridR) && city.gridR! >= 0 &&
     validResource(city.maxDurability) &&
     validResource(city.durability) &&
-    city.durability! <= city.maxDurability!
+    city.durability! <= city.maxDurability! &&
+    (armaments === undefined || (
+      exactKeys(armaments, ARMAMENT_TYPES) &&
+      ARMAMENT_TYPES.every((type) => validResource(armaments[type]) && Number.isInteger(armaments[type]))
+    ))
   );
 }
 
@@ -71,6 +77,11 @@ function validOfficerLocation(location: unknown) {
   const value = location as Record<string, unknown>;
   if (value.kind === 'unit') return typeof value.unitId === 'string';
   if (value.kind === 'city' || value.kind === 'unaffiliated') return CITY_IDS.includes(value.cityId as City['id']);
+  if (value.kind === 'task') return CITY_IDS.includes(value.cityId as City['id']) &&
+    ARMAMENT_TYPES.includes(value.armamentType as ArmamentType) &&
+    value.task === 'armament' &&
+    Number.isInteger(value.amount) && Number(value.amount) >= 0 &&
+    Number.isInteger(value.remainingTenDays) && Number(value.remainingTenDays) > 0;
   return value.kind === 'transfer' &&
     CITY_IDS.includes(value.fromCityId as City['id']) &&
     CITY_IDS.includes(value.targetCityId as City['id']) &&
@@ -117,7 +128,7 @@ function validGridCell(value: unknown): value is GridCell {
   const cell = value as Partial<GridCell>;
   return Number.isInteger(cell.q) && cell.q! >= 0 &&
     Number.isInteger(cell.r) && cell.r! >= 0 &&
-    ['road', 'plain', 'forest', 'hill', 'mountain', 'deepWater'].includes(cell.terrain!);
+    ['road', 'plain', 'forest', 'hill', 'mountain', 'shallowWater', 'deepWater'].includes(cell.terrain!);
 }
 
 function validUnit(value: unknown): value is ArmyUnit {
@@ -139,6 +150,33 @@ function validUnit(value: unknown): value is ArmyUnit {
     validResource(unit.movementRemaining) &&
     typeof unit.moved === 'boolean' &&
     typeof unit.acted === 'boolean';
+}
+
+function validBattleDamageReport(value: unknown): value is BattleDamageReport {
+  if (!value || typeof value !== 'object') return false;
+  const report = value as Partial<BattleDamageReport>;
+  return typeof report.id === 'string' &&
+    typeof report.unitId === 'string' &&
+    Number.isInteger(report.q) &&
+    Number.isInteger(report.r) &&
+    typeof report.amount === 'number' &&
+    Number.isInteger(report.amount) &&
+    report.amount >= 0 &&
+    (report.kind === 'attack' || report.kind === 'counter');
+}
+
+function validCityEffectReport(value: unknown): value is CityEffectReport {
+  if (!value || typeof value !== 'object') return false;
+  const report = value as Partial<CityEffectReport>;
+  return typeof report.id === 'string' &&
+    CITY_IDS.includes(report.cityId!) &&
+    Number.isInteger(report.q) &&
+    Number.isInteger(report.r) &&
+    typeof report.amount === 'number' &&
+    Number.isInteger(report.amount) &&
+    report.amount >= 0 &&
+    typeof report.label === 'string' &&
+    (report.kind === 'recruit' || report.kind === 'armament');
 }
 
 export function isGameState(value: unknown): value is GameState {
@@ -200,6 +238,14 @@ export function isGameState(value: unknown): value is GameState {
     state.grid.every(validGridCell) &&
     Object.values(state.units).every((unit) => validUnit(unit) && state.units![unit.id] === unit &&
       Boolean(officerById[unit.leaderId])) &&
+    (state.battleDamageReports === undefined || (
+      Array.isArray(state.battleDamageReports) &&
+      state.battleDamageReports.every(validBattleDamageReport)
+    )) &&
+    (state.cityEffectReports === undefined || (
+      Array.isArray(state.cityEffectReports) &&
+      state.cityEffectReports.every(validCityEffectReport)
+    )) &&
     FORCE_IDS.every((forceId) => Number.isInteger(state.actionPoints![forceId]) && validResource(state.actionPoints![forceId]) &&
       state.actionPoints![forceId] <= 160 && validForce(state.forces![forceId]) &&
       state.forces![forceId].id === forceId &&

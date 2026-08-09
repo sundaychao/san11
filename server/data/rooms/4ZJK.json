@@ -1,0 +1,23 @@
+{
+  "id": "4ZJK",
+  "hostPlayerId": "da6421a48f47474640d0f629",
+  "phase": "lobby",
+  "revision": 9,
+  "seed": 1786119572805,
+  "state": null,
+  "players": {
+    "da6421a48f47474640d0f629": {
+      "id": "da6421a48f47474640d0f629",
+      "name": "zhou",
+      "forceId": "sun",
+      "connected": false
+    },
+    "546bda85c5db7e92ea157511": {
+      "id": "546bda85c5db7e92ea157511",
+      "name": "chao",
+      "forceId": "cao",
+      "connected": false
+    }
+  },
+  "tenDayReadyForceIds": []
+}

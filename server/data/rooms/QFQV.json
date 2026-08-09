@@ -1,0 +1,23 @@
+{
+  "id": "QFQV",
+  "hostPlayerId": "527c93ded9712d3f58f0933a",
+  "phase": "lobby",
+  "revision": 1,
+  "seed": 1,
+  "state": null,
+  "players": {
+    "527c93ded9712d3f58f0933a": {
+      "id": "527c93ded9712d3f58f0933a",
+      "name": "host_empty_mskgef7m",
+      "forceId": null,
+      "connected": true
+    }
+  },
+  "playerOrder": [
+    "527c93ded9712d3f58f0933a"
+  ],
+  "turnPlayerIds": [],
+  "activePlayerId": null,
+  "completedTurnPlayerIds": [],
+  "tenDayReadyForceIds": []
+}

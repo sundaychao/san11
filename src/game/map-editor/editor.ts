@@ -25,11 +25,20 @@ export interface MapEditorState {
 
 export type MapEditorTool = TerrainType | 'city';
 
-export type TerrainMaskLayer = 'water' | 'mountain' | 'forest' | 'road' | 'city';
+export type TerrainMaskLayer = 'water' | 'shallowWater' | 'mountain' | 'forest' | 'road' | 'city';
 
 export interface TerrainMaskExport {
   filename: string;
   content: string;
+}
+
+interface EditorJsonPayload {
+  schemaVersion: 1;
+  width: number;
+  height: number;
+  backgroundImage: string;
+  grid: GridCell[];
+  cities: EditableCityMarker[];
 }
 
 const TERRAIN_COLORS: Record<TerrainType, string> = {
@@ -38,7 +47,8 @@ const TERRAIN_COLORS: Record<TerrainType, string> = {
   forest: '#2f5f3a',
   hill: '#696851',
   mountain: '#303837',
-  deepWater: '#2c6570',
+  shallowWater: '#2c6570',
+  deepWater: '#173947',
 };
 
 const TERRAIN_CONTROL_COLORS: Record<TerrainType, string> = {
@@ -47,13 +57,15 @@ const TERRAIN_CONTROL_COLORS: Record<TerrainType, string> = {
   forest: '#245a34',
   hill: '#7b744f',
   mountain: '#2d3332',
-  deepWater: '#2c6f80',
+  shallowWater: '#2c6f80',
+  deepWater: '#12394d',
 };
 
 const CELL_SIZE = 24;
 
 const TERRAIN_MASK_LAYERS: Array<{ layer: TerrainMaskLayer; filename: string; terrain?: TerrainType }> = [
   { layer: 'water', filename: 'mask-water.svg', terrain: 'deepWater' },
+  { layer: 'shallowWater', filename: 'mask-shallow-water.svg', terrain: 'shallowWater' },
   { layer: 'mountain', filename: 'mask-mountain.svg', terrain: 'mountain' },
   { layer: 'forest', filename: 'mask-forest.svg', terrain: 'forest' },
   { layer: 'road', filename: 'mask-road.svg', terrain: 'road' },
@@ -88,6 +100,79 @@ function cellPosition(q: number, r: number) {
   return {
     x: q * CELL_SIZE,
     y: r * CELL_SIZE + (q % 2 === 0 ? -CELL_SIZE / 2 : 0),
+  };
+}
+
+function isTerrain(value: unknown): value is TerrainType {
+  return value === 'road' || value === 'plain' || value === 'forest' || value === 'hill' || value === 'mountain' || value === 'shallowWater' || value === 'deepWater';
+}
+
+function isGridCell(value: unknown): value is GridCell {
+  if (!value || typeof value !== 'object') return false;
+  const cell = value as Partial<GridCell>;
+  return Number.isInteger(cell.q) &&
+    Number.isInteger(cell.r) &&
+    cell.q! >= 0 &&
+    cell.q! < GRID_WIDTH &&
+    cell.r! >= 0 &&
+    cell.r! < GRID_HEIGHT &&
+    isTerrain(cell.terrain);
+}
+
+function isEditableCityMarker(value: unknown): value is EditableCityMarker {
+  if (!value || typeof value !== 'object') return false;
+  const city = value as Partial<EditableCityMarker>;
+  return typeof city.id === 'string' &&
+    city.id.length > 0 &&
+    typeof city.label === 'string' &&
+    Number.isInteger(city.q) &&
+    Number.isInteger(city.r) &&
+    city.q! >= 0 &&
+    city.q! < GRID_WIDTH &&
+    city.r! >= 0 &&
+    city.r! < GRID_HEIGHT;
+}
+
+function parseEditorJsonPayload(json: string): EditorJsonPayload {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(json);
+  } catch {
+    throw new Error('地图 JSON 无效');
+  }
+
+  if (!payload || typeof payload !== 'object') throw new Error('地图 JSON 无效');
+  const value = payload as Partial<EditorJsonPayload>;
+  const expectedCellCount = GRID_WIDTH * GRID_HEIGHT;
+  const seen = new Set<string>();
+  if (
+    value.schemaVersion !== 1 ||
+    value.width !== GRID_WIDTH ||
+    value.height !== GRID_HEIGHT ||
+    typeof value.backgroundImage !== 'string' ||
+    !Array.isArray(value.grid) ||
+    value.grid.length !== expectedCellCount ||
+    !Array.isArray(value.cities) ||
+    !value.grid.every((cell) => {
+      if (!isGridCell(cell)) return false;
+      const key = `${cell.q},${cell.r}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }) ||
+    seen.size !== expectedCellCount ||
+    !value.cities.every(isEditableCityMarker)
+  ) {
+    throw new Error('地图 JSON 无效');
+  }
+
+  return {
+    schemaVersion: 1,
+    width: GRID_WIDTH,
+    height: GRID_HEIGHT,
+    backgroundImage: value.backgroundImage,
+    grid: cloneGrid(value.grid),
+    cities: cloneCities(value.cities),
   };
 }
 
@@ -177,6 +262,15 @@ export function exportEditorJson(state: MapEditorState): string {
     null,
     2,
   );
+}
+
+export function importEditorJson(state: MapEditorState, json: string): MapEditorState {
+  const payload = parseEditorJsonPayload(json);
+  return withHistory(state, {
+    backgroundImage: payload.backgroundImage,
+    grid: payload.grid,
+    cities: payload.cities,
+  });
 }
 
 export function exportEditorSvg(state: MapEditorState): string {

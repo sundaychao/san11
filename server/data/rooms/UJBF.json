@@ -1,0 +1,23 @@
+{
+  "id": "UJBF",
+  "hostPlayerId": "661d5747c2f66820b8476413",
+  "phase": "lobby",
+  "revision": 1,
+  "seed": 1,
+  "state": null,
+  "players": {
+    "661d5747c2f66820b8476413": {
+      "id": "661d5747c2f66820b8476413",
+      "name": "hs_kggh8v",
+      "forceId": null,
+      "connected": true
+    }
+  },
+  "playerOrder": [
+    "661d5747c2f66820b8476413"
+  ],
+  "turnPlayerIds": [],
+  "activePlayerId": null,
+  "completedTurnPlayerIds": [],
+  "tenDayReadyForceIds": []
+}

@@ -4,7 +4,7 @@ import { sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
 import type { EditableCityMarker } from '../game/map-editor/editor';
 import { useGame } from '../game/store/GameProvider';
-import type { CityId, GridCell, TroopType } from '../game/types';
+import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, GridCell, TroopType } from '../game/types';
 
 interface MapView {
   x: number;
@@ -55,11 +55,23 @@ interface StrategicMapProps {
   selectedDeployTarget?: GridCoord | null;
   onDeployTargetSelect?(coord: GridCoord): void;
   moveTargets?: GridCoord[];
+  attackTargetCityIds?: CityId[];
+  attackTargetUnitIds?: string[];
+  damageReports?: BattleDamageReport[];
+  cityEffectReports?: CityEffectReport[];
   selectedUnitId?: string | null;
   onCellHover?(cell: GridCell | null): void;
-  onMoveTargetSelect?(coord: GridCoord): void;
-  onUnitSelect?(unitId: string): void;
+  onMoveTargetSelect?(coord: GridCoord, position: { x: number; y: number }): void;
+  onUnitSelect?(unitId: string, position: { x: number; y: number }): void;
+  onUnitContextMenu?(unitId: string, position: { x: number; y: number }): void;
+  onUnitHover?(unitId: string, position: { x: number; y: number }): void;
+  onUnitLeave?(): void;
+  onCityHover?(cityId: CityId, position: { x: number; y: number }): void;
+  onCityLeave?(): void;
+  onAttackTargetSelect?(unitId: string): void;
+  onAttackCityTargetSelect?(cityId: CityId): void;
   onMapContextMenu?(position: { x: number; y: number }): void;
+  onMapContextClose?(): void;
 }
 
 export function StrategicMap({
@@ -69,13 +81,25 @@ export function StrategicMap({
   editorGrid,
   editorMode = false,
   moveTargets = [],
+  attackTargetCityIds = [],
+  attackTargetUnitIds = [],
+  damageReports = [],
+  cityEffectReports = [],
   onCityMenu,
   onCellHover,
   onDeployTargetSelect,
   onEditorCellPaint,
+  onMapContextClose,
   onMapContextMenu,
   onMoveTargetSelect,
   onUnitSelect,
+  onUnitContextMenu,
+  onUnitHover,
+  onUnitLeave,
+  onCityHover,
+  onCityLeave,
+  onAttackTargetSelect,
+  onAttackCityTargetSelect,
   selectedDeployTarget,
   selectedUnitId,
 }: StrategicMapProps) {
@@ -102,6 +126,7 @@ export function StrategicMap({
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('button')) return;
+    if (event.button !== 0) return;
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
@@ -131,12 +156,99 @@ export function StrategicMap({
   const deployTargetKeys = new Set(deployTargets.map((coord) => `${coord.q},${coord.r}`));
   const deployMode = deployTargetKeys.size > 0;
   const moveTargetKeys = new Set(moveTargets.map((coord) => `${coord.q},${coord.r}`));
+  const attackTargetCityIdSet = new Set(attackTargetCityIds);
+  const attackTargetUnitIdSet = new Set(attackTargetUnitIds);
   const moveMode = moveTargetKeys.size > 0;
   const selectedDeployKey = selectedDeployTarget ? `${selectedDeployTarget.q},${selectedDeployTarget.r}` : null;
+  const dismissUnitHover = () => onUnitLeave?.();
+  const dismissCityHover = () => onCityLeave?.();
+  const renderUnitMarker = (unit: ArmyUnit) => {
+    const position = cellPosition(unit.q, unit.r);
+    const leaderName = state.officers[unit.leaderId]?.name ?? '';
+    const troopType = unit.troopType ?? 'sword';
+    const unitKind = unit.kind ?? 'combat';
+    const texture = unitKind === 'transport' ? { glyph: '输', label: '输送队' } : TROOP_TEXTURES[troopType];
+    const centerX = position.x + CELL_SIZE / 2;
+    const centerY = position.y + CELL_SIZE / 2;
+    const canActThisTurn = unit.forceId === state.turnForceId && !unit.moved && !unit.acted && unit.movementRemaining > 0;
+    const isAttackTarget = attackTargetUnitIdSet.has(unit.id);
+    return (
+      <g
+        key={unit.id}
+        data-testid="battle-unit-marker"
+        data-grid-position={`${unit.q},${unit.r}`}
+        data-troop-type={troopType}
+        data-unit-kind={unitKind}
+        className={`battle-unit-marker troop-${troopType} unit-${unitKind}${selectedUnitId === unit.id ? ' is-selected' : ''}`}
+        aria-label={`${leaderName} ${texture.label}`}
+        onPointerDown={(event) => {
+          if (event.button === 0 || event.button === 2) dismissUnitHover();
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          if (isAttackTarget) {
+            onAttackTargetSelect?.(unit.id);
+            return;
+          }
+          onUnitSelect?.(unit.id, { x: event.clientX + 12, y: event.clientY + 4 });
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          dismissUnitHover();
+          onUnitContextMenu?.(unit.id, { x: event.clientX + 10, y: event.clientY + 4 });
+        }}
+        onPointerEnter={(event) => onUnitHover?.(unit.id, { x: event.clientX + 14, y: event.clientY + 4 })}
+        onPointerLeave={() => onUnitLeave?.()}
+      >
+        <text
+          className="battle-unit-leader-name"
+          x={centerX}
+          y={Math.max(12, position.y - 5)}
+        >
+          {leaderName}
+        </text>
+        <g className="battle-unit-model" style={{ '--force-color': state.forces[unit.forceId].color } as CSSProperties}>
+          <ellipse className="battle-unit-shadow" cx={centerX} cy={centerY + 15} rx={CELL_SIZE * 0.28} ry={CELL_SIZE * 0.08} />
+          <path
+            className="battle-unit-body"
+            d={`M ${centerX - 15} ${centerY - 10} L ${centerX + 7} ${centerY - 15} L ${centerX + 17} ${centerY + 6} L ${centerX - 7} ${centerY + 16} L ${centerX - 18} ${centerY + 2} Z`}
+          />
+          <path
+            className="battle-unit-crest"
+            d={`M ${centerX - 8} ${centerY - 13} L ${centerX + 10} ${centerY - 16} L ${centerX + 4} ${centerY - 5} L ${centerX - 13} ${centerY - 1} Z`}
+          />
+          <text className="battle-unit-model-glyph" x={centerX} y={centerY + 4}>{texture.glyph}</text>
+        </g>
+        <text className="battle-unit-troops" x={centerX} y={centerY + 24}>{unit.troops.toLocaleString('en-US')}</text>
+        {canActThisTurn && (
+          <text className="battle-unit-ready-badge" data-testid="battle-unit-ready-badge" x={centerX + 17} y={centerY - 15}>未</text>
+        )}
+        {isAttackTarget && (
+          <text className="attack-target-arrow" data-testid="attack-target-arrow" x={centerX} y={Math.max(12, position.y - 20)}>▼</text>
+        )}
+      </g>
+    );
+  };
+
+  const renderDamageNumber = (report: BattleDamageReport) => {
+    const position = cellPosition(report.q, report.r);
+    const centerX = position.x + CELL_SIZE / 2;
+    return (
+      <text
+        key={report.id}
+        className={`battle-damage-number is-${report.kind}`}
+        data-testid="battle-damage-number"
+        x={centerX}
+        y={Math.max(12, position.y - 31)}
+      >
+        -{report.amount.toLocaleString('en-US')}
+      </text>
+    );
+  };
 
   return (
     <section
-      className="map-region"
+      className={`map-region${editorMode ? ' is-editing' : ''}`}
       aria-label="战略地图区域"
       data-testid="map-viewport"
       onWheel={handleWheel}
@@ -178,6 +290,7 @@ export function StrategicMap({
                 height={CELL_SIZE}
                 className={`battle-cell terrain-${cell.terrain}${isDeployTarget ? ' is-deploy-target' : ''}${isMoveTarget ? ' is-move-target' : ''}${isSelectedDeployTarget ? ' is-selected-deploy-target' : ''}`}
                 onPointerDown={(event) => {
+                  if (event.button !== 0) return;
                   if (isDeployTarget) {
                     event.stopPropagation();
                     onDeployTargetSelect?.({ q: cell.q, r: cell.r });
@@ -185,10 +298,10 @@ export function StrategicMap({
                   }
                   if (isMoveTarget) {
                     event.stopPropagation();
-                    onMoveTargetSelect?.({ q: cell.q, r: cell.r });
+                    onMoveTargetSelect?.({ q: cell.q, r: cell.r }, { x: event.clientX + 12, y: event.clientY + 4 });
                     return;
                   }
-                  if (!editorMode || event.button !== 0) return;
+                  if (!editorMode) return;
                   event.stopPropagation();
                   onEditorCellPaint?.({ q: cell.q, r: cell.r });
                 }}
@@ -217,63 +330,19 @@ export function StrategicMap({
               );
             })
           ))}
-          {Object.values(state.units).map((unit) => {
-            const position = cellPosition(unit.q, unit.r);
-            const leaderName = state.officers[unit.leaderId]?.name ?? '';
-            const troopType = unit.troopType ?? 'sword';
-            const unitKind = unit.kind ?? 'combat';
-            const texture = unitKind === 'transport' ? { glyph: '输', label: '输送队' } : TROOP_TEXTURES[troopType];
-            const centerX = position.x + CELL_SIZE / 2;
-            const centerY = position.y + CELL_SIZE / 2;
-            return (
-              <g
-                key={unit.id}
-                data-testid="battle-unit-marker"
-                data-grid-position={`${unit.q},${unit.r}`}
-                data-troop-type={troopType}
-                data-unit-kind={unitKind}
-                className={`battle-unit-marker troop-${troopType} unit-${unitKind}${selectedUnitId === unit.id ? ' is-selected' : ''}`}
-                aria-label={`${leaderName} ${texture.label}`}
-                onPointerDown={(event) => {
-                  if (event.button !== 0) return;
-                  event.stopPropagation();
-                  onUnitSelect?.(unit.id);
-                }}
-              >
-                <text
-                  className="battle-unit-leader-name"
-                  x={centerX}
-                  y={Math.max(12, position.y - 5)}
-                >
-                  {leaderName}
-                </text>
-                <g className="battle-unit-model" style={{ '--force-color': state.forces[unit.forceId].color } as CSSProperties}>
-                  <ellipse className="battle-unit-shadow" cx={centerX} cy={centerY + 15} rx={CELL_SIZE * 0.28} ry={CELL_SIZE * 0.08} />
-                  <path
-                    className="battle-unit-body"
-                    d={`M ${centerX - 15} ${centerY - 10} L ${centerX + 7} ${centerY - 15} L ${centerX + 17} ${centerY + 6} L ${centerX - 7} ${centerY + 16} L ${centerX - 18} ${centerY + 2} Z`}
-                  />
-                  <path
-                    className="battle-unit-crest"
-                    d={`M ${centerX - 8} ${centerY - 13} L ${centerX + 10} ${centerY - 16} L ${centerX + 4} ${centerY - 5} L ${centerX - 13} ${centerY - 1} Z`}
-                  />
-                  <text className="battle-unit-model-glyph" x={centerX} y={centerY + 4}>{texture.glyph}</text>
-                </g>
-                <text className="battle-unit-troops" x={centerX} y={centerY + 24}>{unit.troops.toLocaleString('en-US')}</text>
-              </g>
-            );
-          })}
         </svg>
         <div className={`city-marker-layer${editorMode || deployMode || moveMode ? ' is-editing' : ''}`} aria-label="荆襄城市">
           {Object.values(state.cities).map((city) => {
             const force = state.forces[city.ownerId];
             const selected = selectedCityId === city.id;
+            const isAttackTarget = attackTargetCityIdSet.has(city.id);
             const markerPosition = cellCenterPercent(city.gridQ, city.gridR);
+            const cityEffect = cityEffectReports.find((report) => report.cityId === city.id);
             return (
               <button
                 key={city.id}
                 type="button"
-                className={`city-marker${selected ? ' is-selected' : ''}`}
+                className={`city-marker${selected ? ' is-selected' : ''}${isAttackTarget ? ' is-attack-target' : ''}`}
                 style={{
                   left: `${markerPosition.left}%`,
                   top: `${markerPosition.top}%`,
@@ -281,13 +350,34 @@ export function StrategicMap({
                 } as CSSProperties}
                 aria-label={`${city.name} ${force.name} ${city.troops.toLocaleString('en-US')}兵 ${city.population.toLocaleString('en-US')}人`}
                 data-testid="city-marker"
+                onContextMenu={(event) => {
+                  dismissCityHover();
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onMapContextClose?.();
+                }}
                 onClick={(event) => {
+                  dismissCityHover();
+                  if (isAttackTarget) {
+                    onAttackCityTargetSelect?.(city.id);
+                    return;
+                  }
                   selectCity(city.id);
                   if (city.ownerId === state.playerForceId) {
                     onCityMenu?.(city.id, { x: event.clientX + 12, y: event.clientY });
                   }
                 }}
+                onPointerEnter={(event) => onCityHover?.(city.id, { x: event.clientX + 14, y: event.clientY + 4 })}
+                onPointerLeave={() => onCityLeave?.()}
+                onMouseEnter={(event) => onCityHover?.(city.id, { x: event.clientX + 14, y: event.clientY + 4 })}
+                onMouseLeave={() => onCityLeave?.()}
               >
+                {cityEffect && (
+                  <span className={`city-effect-number is-${cityEffect.kind}`} data-testid="city-effect-number">
+                    {cityEffect.label} +{cityEffect.amount.toLocaleString('en-US')}
+                  </span>
+                )}
+                {isAttackTarget && <span className="city-attack-target-arrow" data-testid="attack-city-target-arrow">▼</span>}
                 <span className="city-fort" aria-hidden="true"><i /></span>
                 <span className="city-marker-copy">
                   <strong>{city.name}</strong>
@@ -301,6 +391,10 @@ export function StrategicMap({
             );
           })}
         </div>
+        <svg className="battle-unit-layer" data-testid="battle-unit-layer" viewBox={`0 0 ${WORLD_WIDTH} ${WORLD_HEIGHT}`} aria-label="战场部队">
+          {Object.values(state.units).map(renderUnitMarker)}
+          {damageReports.map(renderDamageNumber)}
+        </svg>
       </div>
 
       <div className="map-tools tool-panel" aria-label="地图工具">

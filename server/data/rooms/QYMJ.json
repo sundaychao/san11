@@ -1,0 +1,23 @@
+{
+  "id": "QYMJ",
+  "hostPlayerId": "da6421a48f47474640d0f629",
+  "phase": "lobby",
+  "revision": 2,
+  "seed": 1786187675852,
+  "state": null,
+  "players": {
+    "da6421a48f47474640d0f629": {
+      "id": "da6421a48f47474640d0f629",
+      "name": "zhou",
+      "forceId": null,
+      "connected": false
+    }
+  },
+  "playerOrder": [
+    "da6421a48f47474640d0f629"
+  ],
+  "turnPlayerIds": [],
+  "activePlayerId": null,
+  "completedTurnPlayerIds": [],
+  "tenDayReadyForceIds": []
+}

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
+import { ChevronDown, ChevronUp, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
 import { useState } from 'react';
 import { useGame } from '../game/store/GameProvider';
 import type { GameCommand } from '../game/types';
@@ -12,6 +12,7 @@ interface CityPanelProps {
 const COMMANDS: Array<{ type: CommandType; label: string; Icon: typeof Landmark }> = [
   { type: 'develop', label: '开发', Icon: Landmark },
   { type: 'recruit', label: '征兵', Icon: Users },
+  { type: 'produceArmament', label: '生产兵装', Icon: Hammer },
   { type: 'train', label: '训练', Icon: Swords },
   { type: 'patrol', label: '巡察', Icon: ShieldCheck },
   { type: 'talent', label: '人才', Icon: UserSearch },
@@ -88,7 +89,7 @@ export function CityPanel({ onCommand }: CityPanelProps) {
       {owned && state.phase === 'playing' ? (
         <section className="command-grid" aria-label="城市指令">
           {COMMANDS.map(({ type, label, Icon }) => (
-            <button key={type} type="button" onClick={() => onCommand?.(type)}>
+            <button key={type} type="button" data-testid={`command-${type}-button`} onClick={() => onCommand?.(type)}>
               <Icon aria-hidden="true" /><span>{label}</span>
             </button>
           ))}

@@ -1,0 +1,73 @@
+import { X } from 'lucide-react';
+import { TROOP_LABELS } from '../game/armaments';
+import type { ArmyUnit, GameState } from '../game/types';
+import { closePopupOnContextMenu } from './popupEvents';
+
+interface UnitDetailDialogProps {
+  unit: ArmyUnit;
+  state: GameState;
+  onClose(): void;
+}
+
+function unitName(unit: ArmyUnit, state: GameState) {
+  const leader = state.officers[unit.leaderId];
+  return `${leader?.name ?? '部队'}队`;
+}
+
+function unitKind(unit: ArmyUnit) {
+  if (unit.kind === 'transport') return '输送队';
+  return TROOP_LABELS[unit.troopType ?? 'sword'];
+}
+
+function unitStatus(unit: ArmyUnit) {
+  if (unit.acted) return '已行动';
+  if (unit.moved) return '已移动';
+  return '普通';
+}
+
+export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps) {
+  const officerIds = unit.officerIds ?? [unit.leaderId];
+  const officers = officerIds.map((id) => state.officers[id]).filter(Boolean);
+  const leader = officers[0];
+  const deputies = officers.slice(1);
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
+      <section className="unit-detail-dialog tool-panel" data-testid="unit-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="unit-detail-title">
+        <header>
+          <div>
+            <p>部队情报</p>
+            <h2 id="unit-detail-title">{unitName(unit, state)}</h2>
+          </div>
+          <button type="button" className="icon-button" aria-label="关闭部队情报" title="关闭" onClick={onClose}><X /></button>
+        </header>
+
+        <section className="unit-detail-commanders" aria-label="所属武将">
+          <article>
+            <span>主将</span>
+            <strong>{leader?.name ?? '未知'}</strong>
+            <small>{leader ? `统率 ${leader.stats.leadership} 武力 ${leader.stats.war}` : '-'}</small>
+          </article>
+          <article>
+            <span>副将</span>
+            <strong>{deputies.map((officer) => officer.name).join(' / ') || '-'}</strong>
+            <small>{deputies.length > 0 ? `${deputies.length} 人` : '无'}</small>
+          </article>
+        </section>
+
+        <dl className="unit-detail-grid">
+          <div><dt>势力</dt><dd>{state.forces[unit.forceId].name}</dd></div>
+          <div><dt>军团</dt><dd>{state.cities[unit.homeCityId].name}</dd></div>
+          <div><dt>兵种</dt><dd>{unitKind(unit)}</dd></div>
+          <div><dt>坐标</dt><dd>{unit.q},{unit.r}</dd></div>
+          <div><dt>士兵</dt><dd>{unit.troops.toLocaleString('en-US')}</dd></div>
+          <div><dt>士气</dt><dd>{unit.energy}</dd></div>
+          <div><dt>资金</dt><dd>{(unit.gold ?? 0).toLocaleString('en-US')}</dd></div>
+          <div><dt>兵粮</dt><dd>{unit.food.toLocaleString('en-US')}</dd></div>
+          <div><dt>行动</dt><dd>{unit.movementRemaining}</dd></div>
+          <div><dt>状态</dt><dd>{unitStatus(unit)}</dd></div>
+        </dl>
+      </section>
+    </div>
+  );
+}

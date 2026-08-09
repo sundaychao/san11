@@ -1,0 +1,24 @@
+{
+  "id": "WB6H",
+  "hostPlayerId": "host",
+  "phase": "lobby",
+  "revision": 1,
+  "seed": 1,
+  "state": null,
+  "players": {
+    "host": {
+      "id": "host",
+      "name": "Host",
+      "forceId": null,
+      "connected": true
+    }
+  },
+  "tenDayReadyForceIds": []
+}t",
+      "name": "Guest",
+      "forceId": null,
+      "connected": true
+    }
+  },
+  "tenDayReadyForceIds": []
+}

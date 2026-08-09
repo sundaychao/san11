@@ -45,7 +45,8 @@ export type OfficerLocation =
   | { kind: 'city'; cityId: CityId }
   | { kind: 'unit'; unitId: string }
   | { kind: 'unaffiliated'; cityId: CityId }
-  | { kind: 'transfer'; fromCityId: CityId; targetCityId: CityId; remainingTenDays: number };
+  | { kind: 'transfer'; fromCityId: CityId; targetCityId: CityId; remainingTenDays: number }
+  | { kind: 'task'; cityId: CityId; task: 'armament'; armamentType: ArmamentType; amount: number; remainingTenDays: number };
 
 export interface City {
   id: CityId;
@@ -66,6 +67,7 @@ export interface City {
   gridR: number;
   durability: number;
   maxDurability: number;
+  armaments?: CityArmaments;
 }
 
 export interface Force {
@@ -81,6 +83,25 @@ export interface GameLog {
   month: number;
   forceId: ForceId | null;
   message: string;
+}
+
+export interface BattleDamageReport {
+  id: string;
+  unitId: string;
+  q: number;
+  r: number;
+  amount: number;
+  kind: 'attack' | 'counter';
+}
+
+export interface CityEffectReport {
+  id: string;
+  cityId: CityId;
+  q: number;
+  r: number;
+  amount: number;
+  label: string;
+  kind: 'recruit' | 'armament';
 }
 
 export interface GameState {
@@ -99,13 +120,17 @@ export interface GameState {
   officers: Record<string, Officer>;
   grid: GridCell[];
   units: Record<string, ArmyUnit>;
+  battleDamageReports?: BattleDamageReport[];
+  cityEffectReports?: CityEffectReport[];
   logs: GameLog[];
 }
 
 export type TenDay = 1 | 2 | 3;
 
-export type TerrainType = 'road' | 'plain' | 'forest' | 'hill' | 'mountain' | 'deepWater';
+export type TerrainType = 'road' | 'plain' | 'forest' | 'hill' | 'mountain' | 'shallowWater' | 'deepWater';
 export type TroopType = 'sword' | 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'siege';
+export type ArmamentType = 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'ram' | 'tower' | 'ship';
+export type CityArmaments = Record<ArmamentType, number>;
 
 export interface GridCell {
   q: number;
@@ -118,6 +143,7 @@ export interface ArmyUnit {
   kind?: 'combat' | 'transport';
   forceId: ForceId;
   leaderId: string;
+  officerIds?: string[];
   homeCityId: CityId;
   troopType?: TroopType;
   gold?: number;
@@ -127,6 +153,8 @@ export interface ArmyUnit {
   food: number;
   energy: number;
   movementRemaining: number;
+  confusedTenDays?: number;
+  burningTenDays?: number;
   moved: boolean;
   acted: boolean;
 }
@@ -134,6 +162,7 @@ export interface ArmyUnit {
 export type GameCommand =
   | { type: 'develop'; cityId: CityId; officerId: string; focus: 'commerce' | 'agriculture' }
   | { type: 'recruit'; cityId: CityId; officerId: string }
+  | { type: 'produceArmament'; cityId: CityId; officerId: string; armamentType: ArmamentType }
   | { type: 'train'; cityId: CityId; officerId: string }
   | { type: 'patrol'; cityId: CityId; officerId: string }
   | { type: 'talent'; cityId: CityId; officerId: string }

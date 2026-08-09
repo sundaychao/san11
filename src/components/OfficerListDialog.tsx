@@ -1,13 +1,33 @@
 import { X } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useGame } from '../game/store/GameProvider';
-import type { GameState, Officer, OfficerAptitudes } from '../game/types';
+import { ARMAMENT_LABELS } from '../game/armaments';
+import type { GameState, Officer, OfficerAptitudes, Stats } from '../game/types';
+import { closePopupOnContextMenu } from './popupEvents';
 
 interface OfficerListDialogProps {
+  scope?: 'player' | 'all';
+  officerIds?: string[];
   onClose(): void;
 }
 
 type OfficerListTab = '所属' | '能力' | '特技' | '适性' | '状态';
+type SortDirection = 'desc' | 'asc';
+type SortKey =
+  | 'name'
+  | 'owner'
+  | 'location'
+  | keyof Stats
+  | 'skill'
+  | keyof OfficerAptitudes
+  | 'status'
+  | 'task'
+  | 'time';
+
+interface OfficerColumn {
+  label: string;
+  sortKey: SortKey;
+}
 
 const officerListTabs: OfficerListTab[] = ['所属', '能力', '特技', '适性', '状态'];
 const fallbackAptitudes: OfficerAptitudes = {
@@ -17,6 +37,12 @@ const fallbackAptitudes: OfficerAptitudes = {
   cavalry: 'B',
   siege: 'C',
   navy: 'C',
+};
+const aptitudeRank: Record<OfficerAptitudes[keyof OfficerAptitudes], number> = {
+  S: 4,
+  A: 3,
+  B: 2,
+  C: 1,
 };
 
 function locationText(officer: Officer, state: GameState) {
@@ -49,15 +75,49 @@ function taskInfo(officer: Officer, state: GameState) {
       time: '进行中',
     };
   }
+  if (officer.location.kind === 'task') {
+    return {
+      status: '执行中',
+      task: `生产${ARMAMENT_LABELS[officer.location.armamentType]}`,
+      time: `${officer.location.remainingTenDays}旬`,
+    };
+  }
   return { status: '', task: '', time: '' };
 }
 
-function renderHeader(activeTab: OfficerListTab) {
-  if (activeTab === '所属') return ['武将', '所属', '所在'];
-  if (activeTab === '能力') return ['武将', '统帅', '武力', '智力', '政治', '魅力'];
-  if (activeTab === '特技') return ['武将', '特技'];
-  if (activeTab === '适性') return ['武将', '枪', '戟', '弩', '骑', '兵器', '水军'];
-  return ['武将', '状态', '任务', '时间'];
+function columnsForTab(activeTab: OfficerListTab): OfficerColumn[] {
+  if (activeTab === '所属') return [
+    { label: '武将', sortKey: 'name' },
+    { label: '所属', sortKey: 'owner' },
+    { label: '所在', sortKey: 'location' },
+  ];
+  if (activeTab === '能力') return [
+    { label: '武将', sortKey: 'name' },
+    { label: '统帅', sortKey: 'leadership' },
+    { label: '武力', sortKey: 'war' },
+    { label: '智力', sortKey: 'intelligence' },
+    { label: '政治', sortKey: 'politics' },
+    { label: '魅力', sortKey: 'charisma' },
+  ];
+  if (activeTab === '特技') return [
+    { label: '武将', sortKey: 'name' },
+    { label: '特技', sortKey: 'skill' },
+  ];
+  if (activeTab === '适性') return [
+    { label: '武将', sortKey: 'name' },
+    { label: '枪', sortKey: 'spear' },
+    { label: '戟', sortKey: 'halberd' },
+    { label: '弩', sortKey: 'crossbow' },
+    { label: '骑', sortKey: 'cavalry' },
+    { label: '兵器', sortKey: 'siege' },
+    { label: '水军', sortKey: 'navy' },
+  ];
+  return [
+    { label: '武将', sortKey: 'name' },
+    { label: '状态', sortKey: 'status' },
+    { label: '任务', sortKey: 'task' },
+    { label: '时间', sortKey: 'time' },
+  ];
 }
 
 function renderOfficerCells(officer: Officer, state: GameState, activeTab: OfficerListTab) {
@@ -107,21 +167,70 @@ function renderOfficerCells(officer: Officer, state: GameState, activeTab: Offic
   );
 }
 
-export function OfficerListDialog({ onClose }: OfficerListDialogProps) {
+function defaultOfficerCompare(left: Officer, right: Officer) {
+  return left.cityId.localeCompare(right.cityId) ||
+    right.stats.leadership - left.stats.leadership ||
+    left.name.localeCompare(right.name) ||
+    left.id.localeCompare(right.id);
+}
+
+function sortValue(officer: Officer, state: GameState, sortKey: SortKey) {
+  if (sortKey === 'name') return officer.name;
+  if (sortKey === 'owner') return ownershipText(officer, state);
+  if (sortKey === 'location') return locationText(officer, state);
+  if (sortKey === 'skill') return officer.skill ?? '无';
+  if (sortKey === 'status' || sortKey === 'task' || sortKey === 'time') return taskInfo(officer, state)[sortKey];
+  if (sortKey in fallbackAptitudes) {
+    const aptitudes = officer.aptitudes ?? fallbackAptitudes;
+    return aptitudeRank[aptitudes[sortKey as keyof OfficerAptitudes]];
+  }
+  return officer.stats[sortKey as keyof Stats];
+}
+
+function compareSortValues(left: string | number, right: string | number, direction: SortDirection) {
+  const result = typeof left === 'number' && typeof right === 'number'
+    ? left - right
+    : String(left).localeCompare(String(right));
+  return direction === 'desc' ? -result : result;
+}
+
+export function OfficerListDialog({ scope = 'player', officerIds, onClose }: OfficerListDialogProps) {
   const { state } = useGame();
-  const [activeTab, setActiveTab] = useState<OfficerListTab>('所属');
+  const [activeTab, setActiveTab] = useState<OfficerListTab>(() => (officerIds?.length ? officerListTabs[1] : officerListTabs[0]));
+  const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null);
+  const officers = useMemo(() => {
+    if (!state) return [];
+    const base = officerIds?.length
+      ? officerIds.map((id) => state.officers[id]).filter((officer): officer is Officer => Boolean(officer))
+      : Object.values(state.officers).filter((officer) => scope === 'all' || officer.forceId === state.playerForceId);
+    if (officerIds?.length && !sort) return base;
+    return [...base].sort((left, right) => {
+      if (!sort) return defaultOfficerCompare(left, right);
+      return compareSortValues(sortValue(left, state, sort.key), sortValue(right, state, sort.key), sort.direction) ||
+        left.name.localeCompare(right.name) ||
+        left.id.localeCompare(right.id);
+    });
+  }, [officerIds, scope, sort, state]);
+  const columns = columnsForTab(activeTab);
+  const changeTab = (tab: OfficerListTab) => {
+    setActiveTab(tab);
+    setSort(null);
+  };
+  const sortBy = (sortKey: SortKey) => {
+    setSort((current) => (
+      current?.key === sortKey
+        ? { key: sortKey, direction: current.direction === 'desc' ? 'asc' : 'desc' }
+        : { key: sortKey, direction: 'desc' }
+    ));
+  };
   if (!state) return null;
-  const officers = Object.values(state.officers)
-    .filter((officer) => officer.forceId === state.playerForceId)
-    .sort((left, right) => left.cityId.localeCompare(right.cityId) || right.stats.leadership - left.stats.leadership);
-  const headers = renderHeader(activeTab);
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="officer-list-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="officer-list-title">
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
+      <section className="officer-list-dialog tool-panel" data-testid={officerIds?.length ? 'unit-officer-list-dialog' : undefined} role="dialog" aria-modal="true" aria-labelledby="officer-list-title">
         <header>
           <div>
-            <p>{state.forces[state.playerForceId].name}军</p>
+            <p>{officerIds?.length ? '所属部队' : scope === 'all' ? '全势力' : `${state.forces[state.playerForceId].name}军`}</p>
             <h2 id="officer-list-title">武将一览</h2>
           </div>
           <button type="button" className="icon-button" aria-label="关闭武将一览" title="关闭" onClick={onClose}><X /></button>
@@ -132,7 +241,7 @@ export function OfficerListDialog({ onClose }: OfficerListDialogProps) {
               key={tab}
               type="button"
               className={tab === activeTab ? 'is-active' : undefined}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => changeTab(tab)}
             >
               {tab}
             </button>
@@ -142,7 +251,21 @@ export function OfficerListDialog({ onClose }: OfficerListDialogProps) {
           <table className="officer-table">
             <thead>
               <tr>
-                {headers.map((header) => <th key={header} scope="col">{header}</th>)}
+                {columns.map((column) => {
+                  const active = sort?.key === column.sortKey;
+                  return (
+                    <th key={column.sortKey} scope="col" aria-sort={active ? (sort.direction === 'desc' ? 'descending' : 'ascending') : undefined}>
+                      <button
+                        type="button"
+                        aria-label={`按${column.label}排序`}
+                        className={active ? 'is-active' : undefined}
+                        onClick={() => sortBy(column.sortKey)}
+                      >
+                        {column.label}{active ? (sort.direction === 'desc' ? ' ↓' : ' ↑') : ''}
+                      </button>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>

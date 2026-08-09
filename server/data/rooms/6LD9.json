@@ -1,0 +1,23 @@
+{
+  "id": "6LD9",
+  "hostPlayerId": "da6421a48f47474640d0f629",
+  "phase": "lobby",
+  "revision": 3,
+  "seed": 1786198121094,
+  "state": null,
+  "players": {
+    "da6421a48f47474640d0f629": {
+      "id": "da6421a48f47474640d0f629",
+      "name": "zhou",
+      "forceId": "cao",
+      "connected": false
+    }
+  },
+  "playerOrder": [
+    "da6421a48f47474640d0f629"
+  ],
+  "turnPlayerIds": [],
+  "activePlayerId": null,
+  "completedTurnPlayerIds": [],
+  "tenDayReadyForceIds": []
+}

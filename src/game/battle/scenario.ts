@@ -16,7 +16,9 @@ export const CITY_GRID_CENTERS: Record<CityId, { q: number; r: number }> = {
 
 function terrainAt(q: number, r: number): TerrainType {
   const riverBand = (q >= 28 && q <= 31 && r >= 4 && r <= 30) || (q >= 32 && q <= 66 && r >= 25 && r <= 26);
+  const shallowRiverBand = (q >= 27 && q <= 32 && r >= 4 && r <= 30) || (q >= 32 && q <= 66 && r >= 24 && r <= 27);
   if (riverBand) return 'deepWater';
+  if (shallowRiverBand) return 'shallowWater';
   if ((q >= 2 && q <= 10 && r >= 1 && r <= 11) || (q >= 43 && q <= 50 && r >= 3 && r <= 15)) return 'mountain';
   if ((q >= 8 && q <= 22 && r >= 24 && r <= 37) || (q >= 48 && q <= 66 && r >= 28 && r <= 37)) return 'forest';
   if ((q >= 33 && q <= 44 && r >= 7 && r <= 16) || (q >= 16 && q <= 26 && r >= 11 && r <= 18)) return 'hill';

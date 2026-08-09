@@ -1,0 +1,23 @@
+{
+  "id": "LHZQ",
+  "hostPlayerId": "059517f40d8e13a945f27b0e",
+  "phase": "lobby",
+  "revision": 1,
+  "seed": 1,
+  "state": null,
+  "players": {
+    "059517f40d8e13a945f27b0e": {
+      "id": "059517f40d8e13a945f27b0e",
+      "name": "host_empty_mskgf918",
+      "forceId": null,
+      "connected": true
+    }
+  },
+  "playerOrder": [
+    "059517f40d8e13a945f27b0e"
+  ],
+  "turnPlayerIds": [],
+  "activePlayerId": null,
+  "completedTurnPlayerIds": [],
+  "tenDayReadyForceIds": []
+}

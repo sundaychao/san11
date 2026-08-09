@@ -50,6 +50,70 @@ describe('command engine', () => {
     expect(next.cities.jiangling.food).toBe(state.cities.jiangling.food - 500);
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 800);
     expect(next.cities.jiangling.order).toBe(state.cities.jiangling.order - 2);
+    expect(next.cityEffectReports).toEqual([expect.objectContaining({
+      cityId: 'jiangling',
+      amount: 1290,
+      label: '士兵',
+      kind: 'recruit',
+    })]);
+  });
+
+  it('clears stale battle damage reports when executing a city command', () => {
+    const state = createGame('liu', 1);
+    state.battleDamageReports = [{
+      id: 'old-damage',
+      unitId: 'old-target',
+      q: 10,
+      r: 10,
+      amount: 900,
+      kind: 'attack',
+    }];
+
+    const next = executeCommand(state, 'liu', {
+      type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
+    });
+
+    expect(next.battleDamageReports).toEqual([]);
+  });
+
+  it('produces selected armaments with gold and officer action costs', () => {
+    const state = createGame('liu', 1);
+    const currentCrossbows = state.cities.jiangling.armaments?.crossbow ?? 0;
+    const next = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'crossbow',
+    });
+
+    expect(next.cities.jiangling.armaments?.crossbow).toBe(currentCrossbows + 1840);
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 1000);
+    expect(next.actionPoints.liu).toBe(60);
+    expect(next.officers['liu-bei'].acted).toBe(true);
+    expect(next.logs.at(-1)?.message).toContain('弩');
+    expect(next.cityEffectReports).toEqual([expect.objectContaining({
+      cityId: 'jiangling',
+      amount: 1840,
+      label: '弩',
+      kind: 'armament',
+    })]);
+  });
+
+  it('starts a one-month special armament production task with two units', () => {
+    const state = createGame('liu', 1);
+    const currentRams = state.cities.jiangling.armaments?.ram ?? 0;
+    const next = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'ram',
+    });
+
+    expect(next.cities.jiangling.armaments?.ram).toBe(currentRams);
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 1000);
+    expect(next.officers['liu-bei'].location).toEqual({
+      kind: 'task',
+      cityId: 'jiangling',
+      task: 'armament',
+      armamentType: 'ram',
+      amount: 2,
+      remainingTenDays: 3,
+    });
+    expect(next.officers['liu-bei'].acted).toBe(true);
   });
 
   it('trains troops from leadership', () => {

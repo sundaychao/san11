@@ -1,8 +1,10 @@
 import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
 import { COMMAND_AP, COMMAND_LABELS, transferDuration, validateCommand } from '../game/commands';
 import { useGame } from '../game/store/GameProvider';
-import type { CityId, GameCommand } from '../game/types';
+import type { ArmamentType, CityId, GameCommand } from '../game/types';
+import { closePopupOnContextMenu } from './popupEvents';
 
 interface CommandDialogProps {
   type: GameCommand['type'];
@@ -14,6 +16,7 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
   const { state, issueCommand } = useGame();
   const [officerId, setOfficerId] = useState('');
   const [focus, setFocus] = useState<'commerce' | 'agriculture'>('commerce');
+  const [armamentType, setArmamentType] = useState<ArmamentType>('spear');
   const [targetCityId, setTargetCityId] = useState<CityId | ''>('');
   const [officerIds, setOfficerIds] = useState<string[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -40,6 +43,9 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
   const activeTargetId = targetCityId || targetCities[0]?.id || '';
   const activeTargetCity = activeTargetId ? state.cities[activeTargetId] : undefined;
   const activeTransferDuration = activeTargetCity ? transferDuration(city, activeTargetCity) : null;
+  const activeOfficer = activeOfficerId ? state.officers[activeOfficerId] : undefined;
+  const cityArmaments = armamentsOf(city.armaments);
+  const productionGain = activeOfficer ? produceArmamentYield(activeOfficer, armamentType) : 0;
 
   const command = useMemo<GameCommand>(() => {
     if (type === 'transfer') {
@@ -47,8 +53,9 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
     }
     const base = { cityId, officerId: activeOfficerId };
     if (type === 'develop') return { ...base, type, focus };
+    if (type === 'produceArmament') return { ...base, type, armamentType };
     return { ...base, type } as GameCommand;
-  }, [activeOfficerId, activeTargetId, cityId, focus, officerIds, type]);
+  }, [activeOfficerId, activeTargetId, armamentType, cityId, focus, officerIds, type]);
 
   const errors = validateCommand(state, state.playerForceId, command);
   const label = COMMAND_LABELS[type];
@@ -94,14 +101,16 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
       ? '资金 800 · 兵粮 500'
       : type === 'train'
         ? '兵粮 300'
-        : type === 'patrol'
-          ? '资金 300'
-          : activeTransferDuration
-            ? `人员调动 · ${activeTransferDuration}旬`
-            : '人员调动';
+        : type === 'produceArmament'
+          ? `资金 ${ARMAMENT_GOLD_COST} · ${ARMAMENT_LABELS[armamentType]} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType) ? '1个月' : '即时'}`
+          : type === 'patrol'
+            ? '资金 300'
+            : activeTransferDuration
+              ? `人员调动 · ${activeTransferDuration}旬`
+              : '人员调动';
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
       <form ref={dialogRef} className="command-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="command-title" onSubmit={submit} onKeyDown={handleDialogKeyDown}>
         <header>
           <div><p>{city.name}政务 · 行动力 {COMMAND_AP[type]}</p><h2 id="command-title">{label}</h2></div>
@@ -129,6 +138,35 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
               <label><input type="radio" name="focus" checked={focus === 'agriculture'} onChange={() => setFocus('agriculture')} /><span>农业</span></label>
             </div>
           </fieldset>
+        )}
+
+        {type === 'produceArmament' && (
+          <section className="produce-armament-panel" aria-label="生产兵装选择">
+            <div className="produce-armament-grid">
+              {ARMAMENT_TYPES.map((item) => {
+                const selected = armamentType === item;
+                const stock = cityArmaments[item];
+                const nextStock = selected ? stock + productionGain : stock;
+                return (
+                  <button
+                    key={item}
+                    type="button"
+                    aria-label={ARMAMENT_LABELS[item]}
+                    className={selected ? 'is-active' : ''}
+                    onClick={() => setArmamentType(item)}
+                  >
+                    <strong>{ARMAMENT_LABELS[item]}</strong>
+                    <span>{selected ? `${stock.toLocaleString('en-US')} → ${nextStock.toLocaleString('en-US')}` : stock.toLocaleString('en-US')}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <dl className="produce-stock">
+              <div><dt>资金</dt><dd>{city.gold.toLocaleString('en-US')} → {Math.max(0, city.gold - ARMAMENT_GOLD_COST).toLocaleString('en-US')}</dd></div>
+              <div><dt>期间</dt><dd>{isDelayedArmament(armamentType) ? '1个月' : '即时'}</dd></div>
+              <div><dt>效果</dt><dd>有利于对应兵种出征</dd></div>
+            </dl>
+          </section>
         )}
 
         {type === 'transfer' && (

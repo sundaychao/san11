@@ -1,0 +1,17 @@
+{
+  "id": "ZGG3",
+  "hostPlayerId": "da6421a48f47474640d0f629",
+  "phase": "lobby",
+  "revision": 1,
+  "seed": 1786117861203,
+  "state": null,
+  "players": {
+    "da6421a48f47474640d0f629": {
+      "id": "da6421a48f47474640d0f629",
+      "name": "zhou",
+      "forceId": null,
+      "connected": true
+    }
+  },
+  "tenDayReadyForceIds": []
+}

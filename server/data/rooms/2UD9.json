@@ -1,0 +1,23 @@
+{
+  "id": "2UD9",
+  "hostPlayerId": "host",
+  "phase": "lobby",
+  "revision": 3,
+  "seed": 1,
+  "state": null,
+  "players": {
+    "host": {
+      "id": "host",
+      "name": "Host",
+      "forceId": "liu",
+      "connected": true
+    },
+    "guest": {
+      "id": "guest",
+      "name": "Guest",
+      "forceId": null,
+      "connected": true
+    }
+  },
+  "tenDayReadyForceIds": []
+}

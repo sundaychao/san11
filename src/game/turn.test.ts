@@ -4,19 +4,33 @@ import { createGame } from './scenario/jingxiang208';
 import { settleMonth, settleTenDay } from './turn';
 
 describe('monthly settlement', () => {
-  it('settles revenue and restores monthly actions', () => {
-    const state = createGame('liu', 1);
+  it('settles monthly gold and restores monthly actions without monthly food income', () => {
+    const state = createGame('liu', 4394);
     state.actionPoints.liu = 0;
     state.officers['liu-bei'].acted = true;
+    const before = state.cities.jiangling;
+    const expectedGold = before.gold + Math.round(before.commerce * 20 + before.population / 100);
 
     const next = settleMonth(state);
 
     expect(next.month).toBe(2);
     expect(next.actionPoints.liu).toBe(80);
     expect(next.officers['liu-bei'].acted).toBe(false);
-    expect(next.cities.jiangling.gold).toBeGreaterThan(state.cities.jiangling.gold);
-    expect(next.cities.jiangling.food).toBeGreaterThan(state.cities.jiangling.food);
+    expect(next.cities.jiangling.gold).toBe(expectedGold);
+    expect(next.cities.jiangling.food).toBe(before.food);
     expect(next.cities.jiangling.population).toBeGreaterThan(state.cities.jiangling.population);
+  });
+
+  it('adds city food only when entering a quarter-start month', () => {
+    const state = createGame('liu', 4394);
+    state.month = 3;
+    const before = state.cities.jiangling;
+    const expectedFood = before.food + Math.round(before.agriculture * 60 + before.population / 40);
+
+    const next = settleMonth(state);
+
+    expect(next.month).toBe(4);
+    expect(next.cities.jiangling.food).toBe(expectedFood);
   });
 
   it('replays the same events from the same game state', () => {
@@ -46,9 +60,107 @@ describe('monthly settlement', () => {
 
     expect(state).toEqual(snapshot);
   });
+
+  it('clears previous battle damage reports when advancing the month', () => {
+    const state = createGame('liu', 1);
+    state.battleDamageReports = [{
+      id: 'old-damage',
+      unitId: 'old-target',
+      q: 35,
+      r: 20,
+      amount: 500,
+      kind: 'attack',
+    }];
+
+    const next = settleMonth(state);
+
+    expect(next.battleDamageReports).toEqual([]);
+  });
 });
 
 describe('ten-day settlement', () => {
+  it('clears previous battle damage reports when advancing the ten-day turn', () => {
+    const state = createGame('liu', 1);
+    state.battleDamageReports = [{
+      id: 'old-damage',
+      unitId: 'old-target',
+      q: 35,
+      r: 20,
+      amount: 500,
+      kind: 'attack',
+    }];
+
+    const next = settleTenDay(state);
+
+    expect(next.battleDamageReports).toEqual([]);
+  });
+
+  it('consumes city food in proportion to garrison size', () => {
+    const state = createGame('liu', 1);
+    state.tenDay = 1;
+    state.cities.jiangling.troops = 10000;
+    state.cities.jiangling.food = 10000;
+
+    const next = settleTenDay(state);
+
+    expect(next.cities.jiangling.food).toBe(9500);
+  });
+
+  it('consumes field unit food in proportion to unit size', () => {
+    const state = createGame('liu', 1);
+    state.tenDay = 1;
+    state.units['supply-test'] = {
+      id: 'supply-test',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      officerIds: ['liu-bei'],
+      homeCityId: 'jiangling',
+      troopType: 'sword',
+      q: 35,
+      r: 20,
+      troops: 4000,
+      food: 5000,
+      energy: 70,
+      movementRemaining: 0,
+      moved: true,
+      acted: true,
+    };
+
+    const next = settleTenDay(state);
+
+    expect(next.units['supply-test'].food).toBe(4600);
+  });
+
+  it('completes special armament production after one month', () => {
+    const state = createGame('liu', 1);
+    const currentRams = state.cities.jiangling.armaments?.ram ?? 0;
+    const producing = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'ram',
+    });
+
+    const afterOne = settleTenDay(producing);
+    const afterTwo = settleTenDay(afterOne);
+    const afterThree = settleTenDay(afterTwo);
+
+    expect(afterOne.cities.jiangling.armaments?.ram).toBe(currentRams);
+    expect(afterTwo.cities.jiangling.armaments?.ram).toBe(currentRams);
+    expect(afterThree.cities.jiangling.armaments?.ram).toBe(currentRams + 2);
+    expect(afterThree.officers['liu-bei'].location).toEqual({ kind: 'city', cityId: 'jiangling' });
+    expect(afterThree.officers['liu-bei'].acted).toBe(false);
+  });
+
+  it('never lets city food become negative during supply consumption', () => {
+    const state = createGame('liu', 1);
+    state.tenDay = 1;
+    state.cities.jiangling.troops = 15000;
+    state.cities.jiangling.food = 100;
+
+    const next = settleTenDay(state);
+
+    expect(next.cities.jiangling.food).toBe(0);
+  });
+
   it('restores action points each ten-day and carries over half of the unused points', () => {
     const state = createGame('liu', 1);
     state.tenDay = 1;

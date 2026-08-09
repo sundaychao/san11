@@ -1,4 +1,6 @@
 import { clamp } from './commands';
+import { ARMAMENT_LABELS, armamentsOf } from './armaments';
+import { movementAllowanceForUnit } from './battle/actions';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
 import type { ArmyUnit, City, GameState } from './types';
@@ -18,6 +20,16 @@ const EVENTS: CityEvent[] = [
 ];
 
 const BASE_TEN_DAY_ACTION_POINTS = 80;
+const CITY_FOOD_PER_TEN_THOUSAND_TROOPS = 500;
+const UNIT_FOOD_PER_TEN_THOUSAND_TROOPS = 1000;
+
+function isQuarterStartMonth(month: number) {
+  return (month - 1) % 3 === 0;
+}
+
+function clearTransientBattleReports(state: GameState) {
+  state.battleDamageReports = [];
+}
 
 function applyPossibleEvent(state: GameState, city: City) {
   const roll = nextRandom(state.seed, state.rngCursor);
@@ -38,9 +50,13 @@ function applyPossibleEvent(state: GameState, city: City) {
 
 export function settleMonth(state: GameState): GameState {
   const next = structuredClone(state);
+  clearTransientBattleReports(next);
+  const enteringMonth = next.month === 24 ? next.month : next.month + 1;
+  const shouldSettleQuarterFood = isQuarterStartMonth(enteringMonth);
+
   for (const city of Object.values(next.cities)) {
     city.gold += Math.round(city.commerce * 20 + city.population / 100);
-    city.food += Math.round(city.agriculture * 60 + city.population / 40);
+    if (shouldSettleQuarterFood) city.food += Math.round(city.agriculture * 60 + city.population / 40);
     city.population += Math.floor((city.population * 0.005 * city.order) / 100);
     applyPossibleEvent(next, city);
   }
@@ -64,16 +80,25 @@ function restoreTenDayActionPoints(next: GameState, previous: GameState) {
 }
 
 function removeUnit(next: GameState, unit: ArmyUnit) {
-  const officer = next.officers[unit.leaderId];
+  const officerIds = unit.officerIds ?? [unit.leaderId];
   delete next.units[unit.id];
   const retreatCity = Object.values(next.cities).find((city) => city.ownerId === unit.forceId);
-  officer.location = retreatCity ? { kind: 'city', cityId: retreatCity.id } : { kind: 'unaffiliated', cityId: unit.homeCityId };
-  officer.cityId = officer.location.cityId;
-  officer.acted = false;
+  for (const officerId of officerIds) {
+    const officer = next.officers[officerId];
+    if (!officer) continue;
+    officer.location = retreatCity ? { kind: 'city', cityId: retreatCity.id } : { kind: 'unaffiliated', cityId: unit.homeCityId };
+    officer.cityId = officer.location.cityId;
+    officer.acted = false;
+  }
+}
+
+function settleCitySupply(city: City) {
+  const foodCost = Math.max(0, Math.ceil((city.troops * CITY_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
+  city.food = Math.max(0, city.food - foodCost);
 }
 
 function settleUnitSupply(next: GameState, unit: ArmyUnit) {
-  const foodCost = Math.max(100, Math.ceil(unit.troops / 20));
+  const foodCost = Math.max(0, Math.ceil((unit.troops * UNIT_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
   if (unit.food >= foodCost) {
     unit.food -= foodCost;
     unit.energy = Math.min(100, unit.energy + 5);
@@ -88,7 +113,7 @@ function settleUnitSupply(next: GameState, unit: ArmyUnit) {
     return;
   }
 
-  unit.movementRemaining = 5;
+  unit.movementRemaining = movementAllowanceForUnit(unit);
   unit.moved = false;
   unit.acted = false;
 }
@@ -113,10 +138,47 @@ function settleOfficerTransfers(next: GameState) {
   }
 }
 
+function settleOfficerTasks(next: GameState) {
+  for (const officer of Object.values(next.officers)) {
+    if (officer.location.kind !== 'task') continue;
+    officer.location.remainingTenDays -= 1;
+    if (officer.location.remainingTenDays > 0) continue;
+
+    const task = officer.location;
+    const city = next.cities[task.cityId];
+    const current = armamentsOf(city.armaments);
+    city.armaments = {
+      ...current,
+      [task.armamentType]: current[task.armamentType] + task.amount,
+    };
+    next.cityEffectReports = [{
+      id: `city-effect-${next.month}-${next.logs.length}`,
+      cityId: city.id,
+      q: city.gridQ,
+      r: city.gridR,
+      amount: task.amount,
+      label: ARMAMENT_LABELS[task.armamentType],
+      kind: 'armament',
+    }];
+    officer.location = { kind: 'city', cityId: city.id };
+    officer.cityId = city.id;
+    officer.acted = false;
+    next.logs.push({
+      id: `armament-complete-${next.month}-${officer.id}-${next.logs.length}`,
+      month: next.month,
+      forceId: officer.forceId,
+      message: `${officer.name}完成${city.name}${ARMAMENT_LABELS[task.armamentType]}生产，增加了${task.amount}`,
+    });
+  }
+}
+
 export function settleTenDay(state: GameState): GameState {
   let next = structuredClone(state);
+  clearTransientBattleReports(next);
+  for (const city of Object.values(next.cities)) settleCitySupply(city);
   for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
   settleOfficerTransfers(next);
+  settleOfficerTasks(next);
 
   if (next.tenDay === 3) {
     next = settleMonth(next);

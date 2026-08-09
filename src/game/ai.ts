@@ -1,4 +1,5 @@
 import { executeCommand, validateCommand } from './commands';
+import { dispatchTerritoryDefenseForForce } from './battle/actions';
 import { nextRandom } from './random';
 import type { City, ForceId, GameCommand, GameState, Officer } from './types';
 
@@ -106,7 +107,7 @@ export function chooseAiCommand(state: GameState, forceId: ForceId): GameCommand
 }
 
 export function runAiTurn(initial: GameState, forceId: ForceId): GameState {
-  let state = initial;
+  let state = dispatchTerritoryDefenseForForce(initial, forceId);
   let guard = 0;
   while (state.actionPoints[forceId] >= 10 && guard < 12) {
     const decision = chooseAiDecision(state, forceId);

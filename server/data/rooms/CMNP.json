@@ -1,0 +1,23 @@
+{
+  "id": "CMNP",
+  "hostPlayerId": "134d21e78e91152ec0832637",
+  "phase": "lobby",
+  "revision": 2,
+  "seed": 1,
+  "state": null,
+  "players": {
+    "134d21e78e91152ec0832637": {
+      "id": "134d21e78e91152ec0832637",
+      "name": "host_live_msk9zt31",
+      "forceId": null,
+      "connected": false
+    }
+  },
+  "playerOrder": [
+    "134d21e78e91152ec0832637"
+  ],
+  "turnPlayerIds": [],
+  "activePlayerId": null,
+  "completedTurnPlayerIds": [],
+  "tenDayReadyForceIds": []
+}

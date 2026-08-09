@@ -1,6 +1,7 @@
 import { Building2, ChevronRight, Swords, Users } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { CityId, GameCommand } from '../game/types';
+import { closePopupOnContextMenu } from './popupEvents';
 
 type MenuSection = 'urban' | 'military' | 'talent';
 
@@ -13,6 +14,8 @@ const SECTIONS: Array<{ id: MenuSection; label: string; Icon: typeof Building2 }
 const SUB_COMMANDS: Record<MenuSection, Array<{ label: string; command?: GameCommand['type']; action?: 'deploy' | 'transport' }>> = {
   urban: [
     { label: '开发', command: 'develop' },
+    { label: '征兵', command: 'recruit' },
+    { label: '生产兵装', command: 'produceArmament' },
     { label: '巡查', command: 'patrol' },
   ],
   military: [
@@ -49,10 +52,6 @@ export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy
   useEffect(() => {
     const handleContextMenu = (event: globalThis.MouseEvent) => {
       event.preventDefault();
-      if (activeSection) {
-        setActiveSection(null);
-        return;
-      }
       onClose();
     };
 
@@ -82,12 +81,14 @@ export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy
       data-testid="city-command-menu"
       style={{ left: position.x, top: position.y } as CSSProperties}
       aria-label="城池命令菜单"
+      onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}
     >
       <div className="city-command-primary">
         {SECTIONS.map(({ id, label, Icon }) => (
           <button
             key={id}
             type="button"
+            data-testid={`city-command-section-${id}`}
             className={activeSection === id ? 'is-active' : ''}
             onClick={() => setActiveSection(id)}
           >
@@ -101,7 +102,12 @@ export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy
       {activeSection && (
         <div className="city-command-secondary">
           {SUB_COMMANDS[activeSection].map((item) => (
-            <button key={item.label} type="button" onClick={() => runCommand(item)}>
+            <button
+              key={item.label}
+              type="button"
+              data-testid={item.action ? `city-command-action-${item.action}` : item.command ? `city-command-command-${item.command}` : undefined}
+              onClick={() => runCommand(item)}
+            >
               {item.label}
             </button>
           ))}

@@ -2,6 +2,7 @@ import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useGame } from '../game/store/GameProvider';
 import type { CityId } from '../game/types';
+import { closePopupOnContextMenu } from './popupEvents';
 
 export interface TransportConfirmInput {
   cityId: CityId;
@@ -77,7 +78,7 @@ export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogP
   };
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
       <form ref={dialogRef} className="deploy-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="transport-title" onSubmit={submit}>
         <header>
           <div>

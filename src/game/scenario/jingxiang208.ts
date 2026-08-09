@@ -1,4 +1,5 @@
 import { CITY_GRID_CENTERS, createBattleGrid } from '../battle/scenario';
+import { initialArmaments } from '../armaments';
 import type { City, CityId, Force, ForceId, GameState, Officer, OfficerAptitudes, Stats } from '../types';
 
 type CitySeed = Omit<City, 'durability' | 'gridQ' | 'gridR' | 'id' | 'maxDurability'> & { id: CityId };
@@ -167,6 +168,7 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
       gridR: center.r,
       maxDurability: 3000,
       durability: 3000,
+      armaments: initialArmaments(),
     };
   })) as Record<CityId, City>;
   const officers = toRecord(officerSeeds.map((officer) => {
@@ -197,6 +199,8 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
     officers,
     grid: createBattleGrid(),
     units: {},
+    battleDamageReports: [],
+    cityEffectReports: [],
     logs: [
       {
         id: 'opening',
