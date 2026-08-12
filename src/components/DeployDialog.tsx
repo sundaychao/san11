@@ -1,6 +1,7 @@
 import { AlertCircle, Swords, X } from 'lucide-react';
 import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { armamentsOf, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT } from '../game/armaments';
+import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { useGame } from '../game/store/GameProvider';
 import type { CityId, Officer, OfficerAptitudes, Stats, TroopType } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
@@ -10,6 +11,7 @@ export interface DeployConfirmInput {
   officerIds: string[];
   troopType: TroopType;
   troops: number;
+  gold: number;
   food: number;
 }
 
@@ -46,6 +48,7 @@ const aptitudeRank: Record<OfficerAptitudes[keyof OfficerAptitudes], number> = {
   B: 2,
   C: 1,
 };
+type DeployAptitudeTroop = Extract<TroopType, 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'siege'>;
 
 function toAmount(value: string) {
   const amount = Number(value);
@@ -62,6 +65,29 @@ function officerAbility(officer: Officer | undefined, troopType: TroopType) {
     construction: officer.stats.politics,
     movement: TROOP_MOVEMENT[troopType],
   };
+}
+
+function aptitudeScoreForTroop(officer: Officer, troopType: TroopType) {
+  if (troopType === 'sword') return 0;
+  const aptitudes = officer.aptitudes ?? fallbackAptitudes;
+  return aptitudeRank[aptitudes[troopType as DeployAptitudeTroop]];
+}
+
+function compareDeployRecommendation(left: Officer, right: Officer, troopType: TroopType) {
+  return (
+    aptitudeScoreForTroop(right, troopType) - aptitudeScoreForTroop(left, troopType) ||
+    right.stats.leadership - left.stats.leadership ||
+    right.stats.war - left.stats.war ||
+    right.stats.intelligence - left.stats.intelligence ||
+    right.stats.politics - left.stats.politics ||
+    left.name.localeCompare(right.name) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function recommendedOfficerIdsForTroop(officers: Officer[], troopType: TroopType) {
+  const recommended = [...officers].sort((left, right) => compareDeployRecommendation(left, right, troopType))[0];
+  return recommended ? [recommended.id] : [];
 }
 
 function columnsForOfficerPicker(activeView: OfficerPickerView): OfficerPickerColumn[] {
@@ -253,6 +279,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const [officerIds, setOfficerIds] = useState<string[]>([]);
   const [troopType, setTroopType] = useState<TroopType>('sword');
   const [troops, setTroops] = useState('');
+  const [gold, setGold] = useState('');
   const [food, setFood] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [officerPickerOpen, setOfficerPickerOpen] = useState(false);
@@ -266,23 +293,30 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
     officer.location.cityId === cityId
   ));
   const availableOfficers = officers.filter((officer) => !officer.acted);
+  const recommendedOfficerIds = recommendedOfficerIdsForTroop(availableOfficers, troopType);
   const selectedAvailableIds = officerIds.filter((id) => availableOfficers.some((officer) => officer.id === id));
-  const activeOfficerId = selectedAvailableIds[0] ?? '';
+  const activeOfficerIds = selectedAvailableIds.length > 0 ? selectedAvailableIds : recommendedOfficerIds;
+  const activeOfficerId = activeOfficerIds[0] ?? '';
   const activeOfficer = state.officers[activeOfficerId];
   const armamentType = TROOP_ARMAMENT[troopType];
   const cityArmaments = armamentsOf(city.armaments);
   const armamentStock = armamentType ? cityArmaments[armamentType] : null;
   const troopMax = Math.min(10000, Math.max(0, city.troops - 500), armamentStock ?? Number.POSITIVE_INFINITY);
   const activeTroops = String(Math.min(troopMax, Math.max(0, toAmount(troops || String(Math.min(4000, troopMax))))));
+  const goldMax = Math.max(0, city.gold);
+  const activeGold = String(Math.min(goldMax, Math.max(0, toAmount(gold || String(Math.min(1000, goldMax))))));
   const foodMax = Math.max(0, city.food);
   const activeFood = String(Math.min(foodMax, Math.max(0, toAmount(food || String(Math.min(6000, foodMax))))));
   const troopAmount = toAmount(activeTroops);
+  const goldAmount = toAmount(activeGold);
   const foodAmount = toAmount(activeFood);
   const ability = useMemo(() => officerAbility(activeOfficer, troopType), [activeOfficer, troopType]);
   const errors = [
+    state.actionPoints[state.playerForceId] < DEPLOY_AP_COST ? `行动力不足 ${DEPLOY_AP_COST}` : '',
     !activeOfficerId ? '没有可出征武将' : '',
     !Number.isInteger(troopAmount) || troopAmount < 1000 || troopAmount > 10000 ? '士兵必须为 1000-10000' : '',
     city.troops - troopAmount < 500 ? '城市至少保留 500 兵力' : '',
+    !Number.isInteger(goldAmount) || goldAmount < 0 || goldAmount > city.gold ? '资金不足' : '',
     !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > city.food ? '兵粮不足' : '',
     armamentType && armamentStock !== null && armamentStock < troopAmount ? `${TROOP_LABELS[troopType]}兵装不足` : '',
   ].filter(Boolean);
@@ -293,9 +327,10 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
     try {
       onConfirm({
         cityId,
-        officerIds: selectedAvailableIds.length > 0 ? selectedAvailableIds : [activeOfficerId],
+        officerIds: activeOfficerIds,
         troopType,
         troops: troopAmount,
+        gold: goldAmount,
         food: foodAmount,
       });
       onClose();
@@ -308,7 +343,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
     return (
       <OfficerPicker
         officers={officers}
-        selectedIds={selectedAvailableIds}
+        selectedIds={activeOfficerIds}
         onLeader={(id) => setOfficerIds((current) => [id, ...current.slice(1).filter((candidate) => candidate !== id)])}
         onDeputy={(id) => setOfficerIds((current) => current.includes(id) ? current.filter((candidate) => candidate !== id) : [...current, id].slice(0, 3))}
         onConfirm={() => setOfficerPickerOpen(false)}
@@ -332,21 +367,30 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
           <label className="officer-picker-field">
             <span>主将</span>
             <button type="button" aria-label="选择武将" className="officer-picker-trigger" onClick={() => setOfficerPickerOpen(true)}>
-              <strong data-testid="deploy-officer-summary">{selectedAvailableIds.map((id) => state.officers[id]?.name).filter(Boolean).join(' / ') || '未选择'}</strong>
+              <strong data-testid="deploy-officer-summary">{activeOfficerIds.map((id) => state.officers[id]?.name).filter(Boolean).join(' / ') || '未选择'}</strong>
               <small>点击选择 1 名主将、最多 2 名副将</small>
             </button>
           </label>
 
           <label className="field-row">
             <span>兵种</span>
-            <select aria-label="兵种" value={troopType} onChange={(event) => setTroopType(event.target.value as TroopType)}>
+            <select aria-label="兵种" value={troopType} onChange={(event) => {
+              const nextTroopType = event.target.value as TroopType;
+              setTroopType(nextTroopType);
+              setOfficerIds(recommendedOfficerIdsForTroop(availableOfficers, nextTroopType));
+              setSubmitError(null);
+            }}>
               {TROOP_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
             </select>
           </label>
 
           <div className="deploy-troop-grid" aria-label="兵装选择">
             {TROOP_TYPES.map((type) => (
-              <button key={type.id} type="button" aria-label={type.label} className={troopType === type.id ? 'is-active' : ''} onClick={() => setTroopType(type.id)}>
+              <button key={type.id} type="button" aria-label={type.label} className={troopType === type.id ? 'is-active' : ''} onClick={() => {
+                setTroopType(type.id);
+                setOfficerIds(recommendedOfficerIdsForTroop(availableOfficers, type.id));
+                setSubmitError(null);
+              }}>
                 <Swords aria-hidden="true" />
                 <span>{type.label}</span>
                 <small>{TROOP_ARMAMENT[type.id] ? `${cityArmaments[TROOP_ARMAMENT[type.id]!]}` : '不限'}</small>
@@ -365,6 +409,11 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
               <input id="deploy-food" aria-label="出征兵粮" type="range" min="0" max={foodMax} step="100" value={activeFood} onChange={(event) => setFood(event.target.value)} />
               <output htmlFor="deploy-food" data-testid="deploy-food-value">{Number(activeFood).toLocaleString('en-US')} / {foodMax.toLocaleString('en-US')}</output>
             </label>
+            <label className="range-field">
+              <span>资金</span>
+              <input id="deploy-gold" aria-label="出征资金" type="range" min="0" max={goldMax} step="100" value={activeGold} onChange={(event) => setGold(event.target.value)} />
+              <output htmlFor="deploy-gold" data-testid="deploy-gold-value">{Number(activeGold).toLocaleString('en-US')} / {goldMax.toLocaleString('en-US')}</output>
+            </label>
           </div>
         </section>
 
@@ -382,7 +431,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
             <div><dt>士兵</dt><dd>{city.troops.toLocaleString('en-US')} → {Math.max(0, city.troops - Math.max(0, troopAmount)).toLocaleString('en-US')}</dd></div>
             <div><dt>兵粮</dt><dd>{city.food.toLocaleString('en-US')} → {Math.max(0, city.food - Math.max(0, foodAmount)).toLocaleString('en-US')}</dd></div>
             <div><dt>兵装</dt><dd>{armamentStock === null ? '剑兵不限' : `${armamentStock.toLocaleString('en-US')} → ${Math.max(0, armamentStock - Math.max(0, troopAmount)).toLocaleString('en-US')}`}</dd></div>
-            <div><dt>资金</dt><dd>{city.gold.toLocaleString('en-US')}</dd></div>
+            <div><dt>资金</dt><dd>{city.gold.toLocaleString('en-US')} → {Math.max(0, city.gold - Math.max(0, goldAmount)).toLocaleString('en-US')}</dd></div>
           </dl>
         </aside>
 

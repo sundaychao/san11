@@ -1,0 +1,23 @@
+{
+  "id": "S9NU",
+  "hostPlayerId": "546bda85c5db7e92ea157511",
+  "phase": "lobby",
+  "revision": 2,
+  "seed": 1786353328332,
+  "state": null,
+  "players": {
+    "546bda85c5db7e92ea157511": {
+      "id": "546bda85c5db7e92ea157511",
+      "name": "chao",
+      "forceId": "sun",
+      "connected": true
+    }
+  },
+  "playerOrder": [
+    "546bda85c5db7e92ea157511"
+  ],
+  "turnPlayerIds": [],
+  "activePlayerId": null,
+  "completedTurnPlayerIds": [],
+  "tenDayReadyForceIds": []
+}

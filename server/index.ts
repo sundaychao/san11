@@ -1,4 +1,5 @@
 import http from 'node:http';
+import path from 'node:path';
 import { Server } from 'socket.io';
 import { FORCE_IDS } from '../src/game/scenario/jingxiang208';
 import type {
@@ -11,18 +12,21 @@ import type {
   JoinRoomPayload,
   OnlineAck,
   OnlineSnapshot,
+  ResumeRoomPayload,
   RoomListAck,
   SelectForcePayload,
   StartRoomPayload,
 } from '../src/game/network/protocol';
 import type { ForceId } from '../src/game/types';
 import { AuthManager } from './auth';
+import { GameDatabase } from './database';
 import { RoomManager, snapshotFor } from './roomManager';
 
 const port = Number(process.env.PORT ?? 8787);
 const corsOrigin = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
-const manager = new RoomManager();
-const auth = new AuthManager();
+const db = new GameDatabase();
+const manager = new RoomManager({ db, legacyRoomDir: path.resolve(process.cwd(), 'server/data/rooms') });
+const auth = new AuthManager({ db });
 const httpServer = http.createServer();
 const LOBBY_ROOM = 'online-lobby';
 const io = new Server(httpServer, {
@@ -152,6 +156,22 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('room:resume', async (payload: ResumeRoomPayload, ack: (response: OnlineAck) => void) => {
+    try {
+      const session = await requireSession(payload.token);
+      const snapshot = manager.resumeRoom({
+        playerId: session.userId,
+        roomId: payload.roomId?.trim().toUpperCase(),
+      });
+      manager.bindSocket(socket, snapshot);
+      ack({ ok: true, snapshot });
+      emitRoomUpdate(snapshot.room.id);
+      emitLobbyRoomList();
+    } catch (error) {
+      ack(ackError(error));
+    }
+  });
+
   socket.on('room:selectForce', async (payload: SelectForcePayload, ack: (response: OnlineAck) => void) => {
     try {
       const session = await requireSession(payload.token);
@@ -194,7 +214,7 @@ io.on('connection', (socket) => {
         ack({ ok: false, reason: result.reason, snapshot });
         return;
       }
-      ack({ ok: true });
+      ack({ ok: true, snapshot: snapshotFor(result.room, session.userId) });
       emitRoomUpdate(result.room.id);
     } catch (error) {
       ack({ ok: false, reason: error instanceof Error ? error.message : '联网操作失败' });

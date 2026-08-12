@@ -1,11 +1,12 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { deployUnit, deploymentCells, movementCells, type TacticId } from '../battle/actions';
+import { buildFacility, deployUnit, deploymentCells, firePlotCells, movementCells, type TacticId } from '../battle/actions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from '../battle/grid';
 import { AUTO_SAVE_KEY, MANUAL_SAVE_KEY, type SaveAdapter } from '../persistence';
 import { createGame } from '../scenario/jingxiang208';
 import { settleTenDay } from '../turn';
+import { GameShell } from '../../components/GameShell';
 import { GameProvider, useGame } from './GameProvider';
 
 const socketHolder = vi.hoisted(() => ({ socket: null as FakeOnlineSocket | null }));
@@ -33,6 +34,17 @@ function Probe() {
       <button onClick={() => game.endMonth()}>end</button>
       <button onClick={() => game.manualSave()}>save</button>
       <button onClick={() => game.resetGame()}>reset</button>
+    </div>
+  );
+}
+
+function LocalTenDayProbe({ targetId }: { targetId: string }) {
+  const game = useGame();
+  return (
+    <div>
+      <output aria-label="target-troops">{game.state?.units[targetId]?.troops ?? 0}</output>
+      <output aria-label="damage-reports">{game.state?.battleDamageReports?.map((report) => report.unitId).join(',') ?? 'none'}</output>
+      <button onClick={() => game.endTenDay()}>end ten day</button>
     </div>
   );
 }
@@ -75,18 +87,52 @@ function TacticProbe({ attackerId, targetId, tacticId }: { attackerId: string; t
   return <button onClick={() => game.useUnitTactic(attackerId, targetId, tacticId)}>use tactic</button>;
 }
 
+function FirePlotProbe({ unitId, target }: { unitId: string; target: { q: number; r: number } }) {
+  const game = useGame();
+  return <button onClick={() => game.useFirePlot(unitId, target)}>use fire plot</button>;
+}
+
+function FireStrategyProbe({ unitId, target }: { unitId: string; target: { q: number; r: number } }) {
+  const game = useGame();
+  return <button onClick={() => game.useUnitStrategy(unitId, 'fire', { coord: target })}>use fire strategy</button>;
+}
+
+function FacilityProbe({ unitId, target }: { unitId: string; target: { q: number; r: number } }) {
+  const game = useGame();
+  return <button onClick={() => game.buildFacility(unitId, 'arrowTower', target)}>build arrow tower</button>;
+}
+
+function RepairFacilityProbe({ unitId, facilityId }: { unitId: string; facilityId: string }) {
+  const game = useGame();
+  return <button onClick={() => game.repairFacility(unitId, facilityId)}>repair facility</button>;
+}
+
 function OnlineProbe() {
   const game = useGame();
   return (
     <div>
       <output aria-label="phase">{game.online.phase}</output>
       <output aria-label="room">{game.online.roomId ?? 'none'}</output>
+      <output aria-label="resuming">{game.online.resumingRoom ? 'yes' : 'no'}</output>
       <output aria-label="rooms">{game.online.rooms.map((room) => room.id).join(',') || 'none'}</output>
       <output aria-label="state">{game.state ? game.state.playerForceId : 'none'}</output>
+      <output aria-label="facilities">{Object.keys(game.state?.facilities ?? {}).length}</output>
       <button onClick={() => void game.loadOnlineRooms({ serverUrl: 'http://server.test' })}>load rooms</button>
       <button onClick={() => void game.createOnlineRoom({ serverUrl: 'http://server.test', seed: 1 }).catch(() => undefined)}>create room</button>
+      <button onClick={() => void (game as any).resumeOnlineRoom({ serverUrl: 'http://server.test' }).catch(() => undefined)}>resume room</button>
       <button onClick={() => void game.selectOnlineForce('liu')}>select liu</button>
       <button onClick={() => void game.startOnlineGame()}>start online</button>
+    </div>
+  );
+}
+
+function LoginProbe() {
+  const game = useGame();
+  return (
+    <div>
+      <output aria-label="room">{game.online.roomId ?? 'none'}</output>
+      <output aria-label="state">{game.state ? game.state.playerForceId : 'none'}</output>
+      <button onClick={() => void game.loginAccount({ username: 'Host', password: 'secret1', serverUrl: 'http://server.test' })}>login</button>
     </div>
   );
 }
@@ -95,9 +141,12 @@ class FakeOnlineSocket {
   readonly emitted: Array<{ event: string; payload: unknown }> = [];
 
   rejectCreateWithAuthError = false;
+  delayRoomResume = false;
   startGameState = createGame('liu', 1);
+  intentAckSnapshot: unknown = null;
 
   private readonly handlers = new Map<string, Array<(...args: unknown[]) => void>>();
+  private pendingRoomResumeAck: (() => void) | null = null;
 
   on(event: string, handler: (...args: unknown[]) => void) {
     this.handlers.set(event, [...(this.handlers.get(event) ?? []), handler]);
@@ -115,6 +164,12 @@ class FakeOnlineSocket {
 
   disconnect() {
     // no-op for tests
+  }
+
+  flushRoomResume() {
+    const ack = this.pendingRoomResumeAck;
+    this.pendingRoomResumeAck = null;
+    ack?.();
   }
 
   emit(event: string, payload: Record<string, unknown>, ack?: (response: unknown) => void) {
@@ -154,6 +209,54 @@ class FakeOnlineSocket {
           selectedForceIds: ['liu'],
         }],
       });
+    }
+    if (event === 'auth:session') {
+      ack?.({
+        ok: true,
+        session: {
+          token: 'token',
+          userId: 'host',
+          username: 'Host',
+        },
+      });
+    }
+    if (event === 'auth:login') {
+      ack?.({
+        ok: true,
+        session: {
+          token: 'token',
+          userId: 'host',
+          username: 'Host',
+        },
+      });
+    }
+    if (event === 'room:resume') {
+      const sendAck = () => ack?.({
+        ok: true,
+        snapshot: {
+          playerId: 'host',
+          room: {
+            id: 'ABCD',
+            revision: 4,
+            hostPlayerId: 'host',
+            phase: 'playing',
+            players: [
+              { id: 'host', name: 'Host', forceId: 'liu', connected: true },
+              { id: 'guest', name: 'Guest', forceId: 'cao', connected: false },
+            ],
+            turnPlayerIds: ['host', 'guest'],
+            activePlayerId: 'host',
+            completedTurnPlayerIds: [],
+            tenDayReadyForceIds: [],
+          },
+          state: this.startGameState,
+        },
+      });
+      if (this.delayRoomResume) {
+        this.pendingRoomResumeAck = sendAck;
+      } else {
+        sendAck();
+      }
     }
     if (event === 'room:selectForce') {
       ack?.({
@@ -199,7 +302,7 @@ class FakeOnlineSocket {
       });
     }
     if (event === 'game:intent') {
-      ack?.({ ok: true });
+      ack?.(this.intentAckSnapshot ? { ok: true, snapshot: this.intentAckSnapshot } : { ok: true });
     }
   }
 
@@ -289,6 +392,41 @@ describe('GameProvider', () => {
     expect(screen.getByLabelText('month')).toHaveTextContent('2');
     expect(Number(screen.getByLabelText('logs').textContent)).toBeGreaterThan(3);
     expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
+  });
+
+  it('fires completed player arrow towers when the local player turn starts after ending a ten-day turn', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    state.units['arrow-target'] = {
+      id: 'arrow-target',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 12,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    state.facilities = {
+      arrow: { id: 'arrow', type: 'arrowTower', forceId: 'liu', q: 10, r: 10, durability: 700, completed: true },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={new MemoryStorage()}>
+        <LocalTenDayProbe targetId="arrow-target" />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'end ten day' }));
+
+    expect(screen.getByLabelText('target-troops')).toHaveTextContent('2700');
+    expect(screen.getByLabelText('damage-reports')).toHaveTextContent('arrow-target');
   });
 
   it('writes manual save and resets both slots', async () => {
@@ -473,6 +611,7 @@ describe('GameProvider', () => {
       officerIds: ['guan-yu'],
       troopType: 'spear',
       troops: 4000,
+      gold: 1000,
       food: 6000,
     });
     const attackerId = Object.keys(state.units)[0];
@@ -487,6 +626,141 @@ describe('GameProvider', () => {
     await user.click(screen.getByRole('button', { name: 'use tactic' }));
 
     expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/troops/tuchi.mp3'));
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('plays the fire sound after fire plot succeeds', async () => {
+    const user = userEvent.setup();
+    const play = vi.fn().mockResolvedValue(undefined);
+    const AudioMock = vi.fn(function AudioMock(this: { play: typeof play; volume: number }) {
+      this.play = play;
+      this.volume = 1;
+    });
+    vi.stubGlobal('Audio', AudioMock);
+
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      gold: 1000,
+      food: 6000,
+    });
+    const state = settleTenDay(deployed);
+    const unitId = Object.keys(state.units)[0];
+    const target = firePlotCells(state, unitId)[0];
+
+    render(
+      <GameProvider initialState={state} storage={new MemoryStorage()}>
+        <FirePlotProbe unitId={unitId} target={target} />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'use fire plot' }));
+
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/troops/fireEverythings.mp3'));
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('plays the fire sound after the fire strategy succeeds', async () => {
+    const user = userEvent.setup();
+    const play = vi.fn().mockResolvedValue(undefined);
+    const AudioMock = vi.fn(function AudioMock(this: { play: typeof play; volume: number }) {
+      this.play = play;
+      this.volume = 1;
+    });
+    vi.stubGlobal('Audio', AudioMock);
+
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      gold: 1000,
+      food: 6000,
+    });
+    const state = settleTenDay(deployed);
+    const unitId = Object.keys(state.units)[0];
+    const target = firePlotCells(state, unitId)[0];
+
+    render(
+      <GameProvider initialState={state} storage={new MemoryStorage()}>
+        <FireStrategyProbe unitId={unitId} target={target} />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'use fire strategy' }));
+
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/troops/fireEverythings.mp3'));
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('plays the start-project sound after facility construction succeeds', async () => {
+    const user = userEvent.setup();
+    const play = vi.fn().mockResolvedValue(undefined);
+    const AudioMock = vi.fn(function AudioMock(this: { play: typeof play; volume: number }) {
+      this.play = play;
+      this.volume = 1;
+    });
+    vi.stubGlobal('Audio', AudioMock);
+
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      gold: 1000,
+      food: 6000,
+    });
+    const state = settleTenDay(deployed);
+    const unitId = Object.keys(state.units)[0];
+    const target = neighborsOf(state.units[unitId].q, state.units[unitId].r)[0];
+
+    render(
+      <GameProvider initialState={state} storage={new MemoryStorage()}>
+        <FacilityProbe unitId={unitId} target={target} />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'build arrow tower' }));
+
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/troops/startProject.mp3'));
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('plays the start-project sound after facility repair succeeds', async () => {
+    const user = userEvent.setup();
+    const play = vi.fn().mockResolvedValue(undefined);
+    const AudioMock = vi.fn(function AudioMock(this: { play: typeof play; volume: number }) {
+      this.play = play;
+      this.volume = 1;
+    });
+    vi.stubGlobal('Audio', AudioMock);
+
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      gold: 1000,
+      food: 6000,
+    });
+    const state = settleTenDay(deployed);
+    const unitId = Object.keys(state.units)[0];
+    const target = neighborsOf(state.units[unitId].q, state.units[unitId].r)[0];
+    state.facilities = {
+      building: { id: 'building', type: 'arrowTower', forceId: 'liu', q: target.q, r: target.r, durability: 150, completed: false },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={new MemoryStorage()}>
+        <RepairFacilityProbe unitId={unitId} facilityId="building" />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'repair facility' }));
+
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/troops/startProject.mp3'));
     expect(play).toHaveBeenCalledTimes(1);
   });
 
@@ -537,6 +811,219 @@ describe('GameProvider', () => {
     expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/troops/kill.mp3'));
     expect(AudioMock).not.toHaveBeenCalledWith(expect.stringContaining('/assets/sound/troops/followme.mp3'));
     expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends online arrow tower build intents without throwing', async () => {
+    const user = userEvent.setup();
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      gold: 1000,
+      food: 6000,
+    });
+    const state = settleTenDay(deployed);
+    const unitId = Object.keys(state.units)[0];
+    const target = neighborsOf(state.units[unitId].q, state.units[unitId].r)[0];
+    socket.startGameState = state;
+
+    render(
+      <GameProvider storage={new MemoryStorage()}>
+        <OnlineProbe />
+        <FacilityProbe unitId={unitId} target={target} />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'create room' }));
+    await user.click(screen.getByRole('button', { name: 'start online' }));
+    await user.click(screen.getByRole('button', { name: 'build arrow tower' }));
+
+    expect(socket.emitted.at(-1)).toMatchObject({
+      event: 'game:intent',
+      payload: { intent: { type: 'buildFacility', unitId, facilityType: 'arrowTower', target } },
+    });
+  });
+
+  it('renders online arrow tower snapshots after a build intent update', async () => {
+    const user = userEvent.setup();
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      gold: 1000,
+      food: 6000,
+    });
+    const state = settleTenDay(deployed);
+    const unitId = Object.keys(state.units)[0];
+    const target = neighborsOf(state.units[unitId].q, state.units[unitId].r)[0];
+    socket.startGameState = state;
+
+    render(
+      <GameProvider storage={new MemoryStorage()}>
+        <OnlineProbe />
+        <FacilityProbe unitId={unitId} target={target} />
+        <GameShell />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'create room' }));
+    await user.click(screen.getByRole('button', { name: 'start online' }));
+    await user.click(screen.getByRole('button', { name: 'build arrow tower' }));
+
+    const nextState = buildFacility(state, 'liu', unitId, 'arrowTower', target);
+    act(() => {
+      socket.emitServer('room:update', {
+        playerId: 'host',
+        room: {
+          id: 'ABCD',
+          revision: 4,
+          hostPlayerId: 'host',
+          phase: 'playing',
+          players: [
+            { id: 'host', name: 'Host', forceId: 'liu', connected: true },
+            { id: 'guest', name: 'Guest', forceId: 'cao', connected: true },
+          ],
+          turnPlayerIds: ['host', 'guest'],
+          activePlayerId: 'host',
+          completedTurnPlayerIds: [],
+          tenDayReadyForceIds: [],
+        },
+        state: nextState,
+      });
+    });
+
+    expect(screen.getByLabelText('facilities')).toHaveTextContent('1');
+    expect(screen.getByTestId('battle-facility-marker')).toHaveAttribute('data-facility-type', 'arrowTower');
+  });
+
+  it('applies a successful online arrow tower snapshot returned by the intent ack', async () => {
+    const user = userEvent.setup();
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      gold: 1000,
+      food: 6000,
+    });
+    const state = settleTenDay(deployed);
+    const unitId = Object.keys(state.units)[0];
+    const target = neighborsOf(state.units[unitId].q, state.units[unitId].r)[0];
+    const nextState = buildFacility(state, 'liu', unitId, 'arrowTower', target);
+    socket.startGameState = state;
+    socket.intentAckSnapshot = {
+      playerId: 'host',
+      room: {
+        id: 'ABCD',
+        revision: 4,
+        hostPlayerId: 'host',
+        phase: 'playing',
+        players: [
+          { id: 'host', name: 'Host', forceId: 'liu', connected: true },
+          { id: 'guest', name: 'Guest', forceId: 'cao', connected: true },
+        ],
+        turnPlayerIds: ['host', 'guest'],
+        activePlayerId: 'host',
+        completedTurnPlayerIds: [],
+        tenDayReadyForceIds: [],
+      },
+      state: nextState,
+    };
+
+    render(
+      <GameProvider storage={new MemoryStorage()}>
+        <OnlineProbe />
+        <FacilityProbe unitId={unitId} target={target} />
+        <GameShell />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'create room' }));
+    await user.click(screen.getByRole('button', { name: 'start online' }));
+    await user.click(screen.getByRole('button', { name: 'build arrow tower' }));
+
+    expect(screen.getByLabelText('facilities')).toHaveTextContent('1');
+    expect(screen.getByTestId('battle-facility-marker')).toHaveAttribute('data-facility-type', 'arrowTower');
+  });
+
+  it('sends an online arrow tower build intent from the unit setting menu after choosing a move destination', async () => {
+    const user = userEvent.setup();
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      gold: 1000,
+      food: 6000,
+    });
+    const state = settleTenDay(deployed);
+    const unitId = Object.keys(state.units)[0];
+    socket.startGameState = state;
+
+    render(
+      <GameProvider storage={new MemoryStorage()}>
+        <OnlineProbe />
+        <GameShell />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'create room' }));
+    await user.click(screen.getByRole('button', { name: 'start online' }));
+
+    const unitMarker = screen.getByTestId('battle-unit-marker');
+    fireEvent.pointerDown(unitMarker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    const moveTarget = screen.getAllByTestId(/move-target-/)[0];
+    const [, q, r] = moveTarget.getAttribute('data-testid')!.match(/move-target-(\d+)-(\d+)/)!;
+    fireEvent.pointerDown(moveTarget, { button: 0, buttons: 1, clientX: 320, clientY: 220 });
+
+    const commandButtons = within(screen.getByTestId('unit-command-menu')).getAllByRole('button');
+    await user.click(commandButtons[6]);
+    const facilityButtons = within(screen.getByTestId('unit-facility-menu')).getAllByRole('button');
+    await user.click(facilityButtons[1]);
+    const target = screen.getAllByTestId(/strategy-target-/)[0];
+    fireEvent.pointerDown(target, { button: 0, buttons: 1 });
+
+    expect(socket.emitted.at(-1)).toMatchObject({
+      event: 'game:intent',
+      payload: {
+        intent: {
+          type: 'buildFacility',
+          unitId,
+          facilityType: 'arrowTower',
+          destination: { q: Number(q), r: Number(r) },
+        },
+      },
+    });
   });
 
   it('keeps online rooms in a lobby until the host starts the game', async () => {
@@ -638,5 +1125,109 @@ describe('GameProvider', () => {
 
     expect(window.localStorage.getItem('jingxiang-208-auth-session-v1')).toBeNull();
     expect(screen.getByLabelText('phase')).toHaveTextContent('');
+  });
+
+  it('resumes the last online room after reopening with a stored session', async () => {
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    const storage = new MemoryStorage();
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+    storage.setItem('jingxiang-208-last-online-room-v1', JSON.stringify({
+      serverUrl: 'http://server.test',
+      roomId: 'ABCD',
+    }));
+
+    render(<GameProvider storage={storage}><OnlineProbe /></GameProvider>);
+    await screen.findByText('liu');
+
+    expect(socket.emitted.map((entry) => entry.event)).toContain('auth:session');
+    expect(socket.emitted.at(-1)).toMatchObject({
+      event: 'room:resume',
+      payload: { token: 'token', roomId: 'ABCD' },
+    });
+    expect(screen.getByLabelText('room')).toHaveTextContent('ABCD');
+    expect(screen.getByLabelText('phase')).toHaveTextContent('playing');
+    expect(screen.getByLabelText('state')).toHaveTextContent('liu');
+  });
+
+  it('keeps the reopened page in resuming state until the stored room snapshot arrives', async () => {
+    const socket = new FakeOnlineSocket();
+    socket.delayRoomResume = true;
+    socketHolder.socket = socket;
+    const storage = new MemoryStorage();
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+    storage.setItem('jingxiang-208-last-online-room-v1', JSON.stringify({
+      serverUrl: 'http://server.test',
+      roomId: 'ABCD',
+    }));
+
+    render(<GameProvider storage={storage}><OnlineProbe /></GameProvider>);
+
+    await screen.findByText('yes');
+    expect(socket.emitted.map((entry) => entry.event)).toEqual(['auth:session', 'room:resume']);
+    expect(screen.getByLabelText('room')).toHaveTextContent('none');
+
+    act(() => {
+      socket.flushRoomResume();
+    });
+
+    await screen.findByText('liu');
+    expect(screen.getByLabelText('resuming')).toHaveTextContent('no');
+    expect(screen.getByLabelText('room')).toHaveTextContent('ABCD');
+  });
+
+  it('manually resumes the current account room without a stored room id', async () => {
+    const user = userEvent.setup();
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+
+    render(<GameProvider storage={new MemoryStorage()}><OnlineProbe /></GameProvider>);
+
+    await user.click(screen.getByRole('button', { name: 'resume room' }));
+
+    expect(socket.emitted.at(-1)).toMatchObject({
+      event: 'room:resume',
+      payload: { token: 'token' },
+    });
+    expect(screen.getByLabelText('room')).toHaveTextContent('ABCD');
+    expect(screen.getByLabelText('phase')).toHaveTextContent('playing');
+    expect(screen.getByLabelText('state')).toHaveTextContent('liu');
+  });
+
+  it('resumes the stored room after logging in on a reopened page', async () => {
+    const user = userEvent.setup();
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    const storage = new MemoryStorage();
+    storage.setItem('jingxiang-208-last-online-room-v1', JSON.stringify({
+      serverUrl: 'http://server.test',
+      roomId: 'ABCD',
+    }));
+
+    render(<GameProvider storage={storage}><LoginProbe /></GameProvider>);
+
+    await user.click(screen.getByRole('button', { name: 'login' }));
+    await screen.findByText('liu');
+
+    expect(socket.emitted.map((entry) => entry.event)).toEqual([
+      'auth:login',
+      'auth:session',
+      'room:resume',
+    ]);
+    expect(screen.getByLabelText('room')).toHaveTextContent('ABCD');
+    expect(screen.getByLabelText('state')).toHaveTextContent('liu');
   });
 });

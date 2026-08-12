@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
 import { useState } from 'react';
+import { COMMAND_AP } from '../game/commands';
 import { useGame } from '../game/store/GameProvider';
 import type { GameCommand } from '../game/types';
 
@@ -88,11 +89,14 @@ export function CityPanel({ onCommand }: CityPanelProps) {
 
       {owned && state.phase === 'playing' ? (
         <section className="command-grid" aria-label="城市指令">
-          {COMMANDS.map(({ type, label, Icon }) => (
-            <button key={type} type="button" data-testid={`command-${type}-button`} onClick={() => onCommand?.(type)}>
-              <Icon aria-hidden="true" /><span>{label}</span>
-            </button>
-          ))}
+          {COMMANDS.map(({ type, label, Icon }) => {
+            const disabled = state.actionPoints[state.playerForceId] < COMMAND_AP[type];
+            return (
+              <button key={type} type="button" data-testid={`command-${type}-button`} disabled={disabled} onClick={() => onCommand?.(type)}>
+                <Icon aria-hidden="true" /><span>{label}</span>
+              </button>
+            );
+          })}
         </section>
       ) : (
         <p className="readonly-note">{state.phase === 'finished' ? '经营期已经结束' : '仅可查看他势力城市情报'}</p>

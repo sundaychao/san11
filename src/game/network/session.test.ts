@@ -7,6 +7,7 @@ import {
   selectPlayerForce,
   startOnlineRoom,
 } from './session';
+import { neighborsOf } from '../battle/grid';
 
 describe('online room session', () => {
   function readyStartedRoom() {
@@ -28,6 +29,13 @@ describe('online room session', () => {
     expect(joined.players.host.forceId).toBeNull();
     expect(joined.players.guest.forceId).toBeNull();
     expect(playerState(joined, 'host')).toBeNull();
+  });
+
+  it('limits mobile duel lobby rooms to two players', () => {
+    const created = createOnlineRoom({ roomId: 'ABCD', hostPlayerId: 'host', hostName: 'Host', seed: 1 });
+    const joined = joinOnlineRoom(created, { playerId: 'guest', playerName: 'Guest' });
+
+    expect(() => joinOnlineRoom(joined, { playerId: 'third', playerName: 'Third' })).toThrow(/2/);
   });
 
   it('lets lobby players choose unique forces before the host starts the game', () => {
@@ -58,6 +66,10 @@ describe('online room session', () => {
 
     expect(started.phase).toBe('playing');
     expect(started.state?.playerForceId).toBe('liu');
+    expect(started.state?.scenarioId).toBe('mobile-duel');
+    expect(started.state?.gridWidth).toBe(16);
+    expect(started.state?.gridHeight).toBe(33);
+    expect(Object.keys(started.state?.cities ?? {}).sort()).toEqual(['jiangling', 'xiangyang']);
     expect(playerState(started, 'guest')?.playerForceId).toBe('cao');
   });
 
@@ -114,6 +126,126 @@ describe('online room session', () => {
     expect(guestReady.room.state?.tenDay).toBe(2);
   });
 
+  it('applies fire plot intents in a mobile duel room', () => {
+    const room = structuredClone(readyStartedRoom());
+    if (!room.state) throw new Error('room state should exist');
+    room.state.units['host-fire-unit'] = {
+      id: 'host-fire-unit',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      homeCityId: 'jiangling',
+      troopType: 'spear',
+      q: 8,
+      r: 25,
+      troops: 3000,
+      gold: 1000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    const hostState = playerState(room, 'host');
+    if (!hostState) throw new Error('host state should exist');
+    const unit = hostState.units['host-fire-unit'];
+    const target = neighborsOf(unit.q, unit.r)[0];
+
+    const result = reduceOnlineIntent(room, 'host', room.revision, {
+      type: 'useFirePlot',
+      unitId: unit.id,
+      target,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.room.state?.firePlots).toEqual([target]);
+    expect(playerState(result.room, 'guest')?.firePlots).toEqual([target]);
+  });
+
+  it('applies unit strategy intents in a mobile duel room', () => {
+    const room = structuredClone(readyStartedRoom());
+    if (!room.state) throw new Error('room state should exist');
+    room.state.units['host-strategy-unit'] = {
+      id: 'host-strategy-unit',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      homeCityId: 'jiangling',
+      troopType: 'spear',
+      q: 8,
+      r: 25,
+      troops: 3000,
+      gold: 1000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    room.state.units['guest-strategy-target'] = {
+      id: 'guest-strategy-target',
+      forceId: 'cao',
+      leaderId: 'cao-cao',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 9,
+      r: 25,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+
+    const result = reduceOnlineIntent(room, 'host', room.revision, {
+      type: 'useUnitStrategy',
+      unitId: 'host-strategy-unit',
+      strategyId: 'disturb',
+      selection: { targetUnitId: 'guest-strategy-target' },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.room.state?.units['host-strategy-unit']).toMatchObject({ energy: 85, acted: true });
+    expect(result.room.state?.units['guest-strategy-target'].confusedTenDays).toBe(1);
+    expect(playerState(result.room, 'guest')?.units['guest-strategy-target'].confusedTenDays).toBe(1);
+  });
+
+  it('applies facility build intents in a mobile duel room', () => {
+    const room = structuredClone(readyStartedRoom());
+    if (!room.state) throw new Error('room state should exist');
+    room.state.units['host-build-unit'] = {
+      id: 'host-build-unit',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      homeCityId: 'jiangling',
+      troopType: 'spear',
+      q: 8,
+      r: 25,
+      troops: 3000,
+      gold: 1000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    const target = neighborsOf(8, 25)[0];
+
+    const result = reduceOnlineIntent(room, 'host', room.revision, {
+      type: 'buildFacility',
+      unitId: 'host-build-unit',
+      facilityType: 'arrowTower',
+      target,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const facility = Object.values(result.room.state?.facilities ?? {})[0];
+    expect(facility).toMatchObject({ type: 'arrowTower', forceId: 'liu', q: target.q, r: target.r });
+    expect(playerState(result.room, 'guest')?.facilities?.[facility.id]).toMatchObject({ type: 'arrowTower' });
+  });
+
   it('lets online players act one by one and advances the ten-day turn after the last player', () => {
     const room = readyStartedRoom();
 
@@ -144,5 +276,54 @@ describe('online room session', () => {
     expect(guestDone.room.activePlayerId).toBe('host');
     expect(guestDone.room.completedTurnPlayerIds).toEqual([]);
     expect(guestDone.room.state?.tenDay).toBe(2);
+  });
+
+  it('fires only the next active player arrow towers when online control passes to them', () => {
+    const room = readyStartedRoom();
+    room.state!.units['liu-target'] = {
+      id: 'liu-target',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      homeCityId: 'jiangling',
+      troopType: 'sword',
+      q: 12,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    room.state!.units['cao-target'] = {
+      id: 'cao-target',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 4,
+      r: 4,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    room.state!.facilities = {
+      liuArrow: { id: 'liuArrow', type: 'arrowTower', forceId: 'liu', q: 2, r: 4, durability: 700 },
+      caoArrow: { id: 'caoArrow', type: 'arrowTower', forceId: 'cao', q: 10, r: 10, durability: 700 },
+    };
+
+    const hostDone = reduceOnlineIntent(room, 'host', room.revision, { type: 'endTenDay' });
+
+    expect(hostDone.ok).toBe(true);
+    if (!hostDone.ok) return;
+    expect(hostDone.room.activePlayerId).toBe('guest');
+    expect(hostDone.room.state?.units['liu-target'].troops).toBe(2700);
+    expect(hostDone.room.state?.units['cao-target'].troops).toBe(3000);
+    expect((hostDone.room.state?.battleDamageReports ?? []).map((report) => report.unitId)).toEqual(['liu-target']);
   });
 });

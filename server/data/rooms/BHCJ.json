@@ -1,0 +1,29 @@
+{
+  "id": "BHCJ",
+  "hostPlayerId": "host",
+  "phase": "lobby",
+  "revision": 3,
+  "seed": 1,
+  "state": null,
+  "players": {
+    "host": {
+      "id": "host",
+      "name": "Host",
+      "forceId": null,
+      "connected": true
+    }
+  },
+  "playerOrder": [
+    "host"
+  ],
+  "turnPlayerIds": [],
+  "activePlayerId": null,
+  "completedTurnPlayerIds": [],
+  "tenDayReadyForceIds": []
+}   "guest"
+  ],
+  "turnPlayerIds": [],
+  "activePlayerId": null,
+  "completedTurnPlayerIds": [],
+  "tenDayReadyForceIds": []
+}

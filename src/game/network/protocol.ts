@@ -53,6 +53,11 @@ export interface JoinRoomPayload {
   roomId: string;
 }
 
+export interface ResumeRoomPayload {
+  token: string;
+  roomId?: string;
+}
+
 export interface SelectForcePayload {
   token: string;
   roomId: string;
@@ -89,5 +94,5 @@ export type AuthAck =
   | { ok: false; reason: string };
 
 export type IntentAck =
-  | { ok: true }
+  | { ok: true; snapshot?: OnlineSnapshot }
   | { ok: false; reason: string; snapshot?: OnlineSnapshot };

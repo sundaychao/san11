@@ -1,5 +1,8 @@
 import { Building2, ChevronRight, Swords, Users } from 'lucide-react';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { playClickOnSound, playRightMouseSound } from '../audio/soundEffects';
+import { DEPLOY_AP_COST } from '../game/battle/actions';
+import { COMMAND_AP } from '../game/commands';
 import type { CityId, GameCommand } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -31,6 +34,7 @@ const SUB_COMMANDS: Record<MenuSection, Array<{ label: string; command?: GameCom
 
 interface CityCommandMenuProps {
   cityId: CityId;
+  actionPoints: number;
   position: { x: number; y: number };
   onCommand(type: GameCommand['type']): void;
   onDeploy(cityId: CityId): void;
@@ -38,11 +42,26 @@ interface CityCommandMenuProps {
   onClose(): void;
 }
 
-export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy, onTransport }: CityCommandMenuProps) {
+export function CityCommandMenu({ cityId, actionPoints, position, onClose, onCommand, onDeploy, onTransport }: CityCommandMenuProps) {
   const [activeSection, setActiveSection] = useState<MenuSection | null>(null);
   const menuRef = useRef<HTMLElement>(null);
 
+  const closeCurrentLevel = useCallback(() => {
+    if (activeSection) {
+      setActiveSection(null);
+      return;
+    }
+    onClose();
+  }, [activeSection, onClose]);
+
+  const isDisabled = (item: { command?: GameCommand['type']; action?: 'deploy' | 'transport' }) => {
+    if (item.command) return actionPoints < COMMAND_AP[item.command];
+    if (item.action === 'deploy' || item.action === 'transport') return actionPoints < DEPLOY_AP_COST;
+    return false;
+  };
+
   const runCommand = (item: { command?: GameCommand['type']; action?: 'deploy' | 'transport' }) => {
+    if (isDisabled(item)) return;
     if (item.action === 'deploy') onDeploy(cityId);
     if (item.action === 'transport') onTransport(cityId);
     if (item.command) onCommand(item.command);
@@ -52,12 +71,14 @@ export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy
   useEffect(() => {
     const handleContextMenu = (event: globalThis.MouseEvent) => {
       event.preventDefault();
-      onClose();
+      event.stopPropagation();
+      playRightMouseSound();
+      closeCurrentLevel();
     };
 
-    document.addEventListener('contextmenu', handleContextMenu);
-    return () => document.removeEventListener('contextmenu', handleContextMenu);
-  }, [activeSection, onClose]);
+    document.addEventListener('contextmenu', handleContextMenu, true);
+    return () => document.removeEventListener('contextmenu', handleContextMenu, true);
+  }, [closeCurrentLevel]);
 
   useEffect(() => {
     const handleMouseDown = (event: globalThis.MouseEvent) => {
@@ -81,7 +102,7 @@ export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy
       data-testid="city-command-menu"
       style={{ left: position.x, top: position.y } as CSSProperties}
       aria-label="城池命令菜单"
-      onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}
+      onContextMenu={(event) => closePopupOnContextMenu(event, closeCurrentLevel)}
     >
       <div className="city-command-primary">
         {SECTIONS.map(({ id, label, Icon }) => (
@@ -90,7 +111,10 @@ export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy
             type="button"
             data-testid={`city-command-section-${id}`}
             className={activeSection === id ? 'is-active' : ''}
-            onClick={() => setActiveSection(id)}
+            onClick={() => {
+              playClickOnSound();
+              setActiveSection(id);
+            }}
           >
             <Icon aria-hidden="true" />
             <span>{label}</span>
@@ -106,6 +130,8 @@ export function CityCommandMenu({ cityId, position, onClose, onCommand, onDeploy
               key={item.label}
               type="button"
               data-testid={item.action ? `city-command-action-${item.action}` : item.command ? `city-command-command-${item.command}` : undefined}
+              className={isDisabled(item) ? 'is-disabled' : undefined}
+              disabled={isDisabled(item)}
               onClick={() => runCommand(item)}
             >
               {item.label}

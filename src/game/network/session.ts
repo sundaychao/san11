@@ -1,18 +1,29 @@
 import { runAiTurn } from '../ai';
 import {
+  attackFacility,
   attackCity,
   attackUnit,
+  buildFacility,
   deployTransportUnit,
   deployUnit,
+  deployUnitWithId,
+  dismantleFacility,
   moveUnit,
+  repairFacility,
+  settleBattleFacilities,
+  useFirePlot,
+  useUnitStrategy,
   useUnitTactic,
   waitUnit,
 } from '../battle/actions';
 import { executeCommand } from '../commands';
-import { createGame, FORCE_IDS } from '../scenario/jingxiang208';
+import { FORCE_IDS } from '../scenario/jingxiang208';
+import { createMobileDuelGame } from '../scenario/mobileDuel';
 import { settleTenDay } from '../turn';
 import type { ForceId, GameState } from '../types';
 import type { GameIntent } from './intents';
+
+export const ONLINE_DUEL_MAX_PLAYERS = 2;
 
 export interface OnlinePlayer {
   id: string;
@@ -92,6 +103,10 @@ export function createOnlineRoom(input: CreateOnlineRoomInput): OnlineRoom {
 }
 
 export function joinOnlineRoom(room: OnlineRoom, input: JoinOnlineRoomInput): OnlineRoom {
+  const isNewPlayer = !room.players[input.playerId];
+  if (isNewPlayer && Object.keys(room.players).length >= ONLINE_DUEL_MAX_PLAYERS) {
+    throw new Error('手机双人对战房间只支持 2 名玩家');
+  }
   if (room.phase !== 'lobby') throw new Error('游戏已经开始');
   return {
     ...room,
@@ -136,20 +151,26 @@ export function startOnlineRoom(room: OnlineRoom, input: StartOnlineRoomInput): 
   if (room.phase !== 'lobby') throw new Error('游戏已经开始');
 
   const players = Object.values(room.players);
+  if (players.length > ONLINE_DUEL_MAX_PLAYERS) throw new Error('手机双人对战房间只支持 2 名玩家');
   if (players.length < 2) throw new Error('至少需要 2 名玩家');
   if (players.some((player) => !player.forceId)) throw new Error('所有玩家都需要选择势力');
 
   const hostForceId = room.players[room.hostPlayerId]?.forceId;
+  const turnPlayerIds = room.playerOrder.filter((playerId) => Boolean(room.players[playerId]?.forceId));
+  const guestForceId = turnPlayerIds
+    .map((playerId) => room.players[playerId]?.forceId)
+    .find((forceId): forceId is ForceId => Boolean(forceId && forceId !== hostForceId));
+  if (!guestForceId) throw new Error('手机双人地图需要第二名玩家选择势力');
   if (!hostForceId) throw new Error('房主需要选择势力');
 
   return {
     ...room,
     phase: 'playing',
     revision: room.revision + 1,
-    turnPlayerIds: room.playerOrder.filter((playerId) => Boolean(room.players[playerId]?.forceId)),
-    activePlayerId: room.playerOrder.find((playerId) => Boolean(room.players[playerId]?.forceId)) ?? null,
+    turnPlayerIds,
+    activePlayerId: turnPlayerIds[0] ?? null,
     completedTurnPlayerIds: [],
-    state: createGame(hostForceId, room.seed),
+    state: createMobileDuelGame(hostForceId, guestForceId, room.seed),
   };
 }
 
@@ -218,6 +239,27 @@ function applyGameIntent(room: OnlineRoom, forceId: ForceId, intent: Exclude<Gam
       return executeCommand(state, forceId, intent.command);
     case 'deployUnit':
       return deployUnit(state, forceId, intent.input);
+    case 'deployUnitAction': {
+      const deployed = deployUnitWithId(state, forceId, intent.input);
+      switch (intent.action.type) {
+        case 'wait':
+          return deployed.state;
+        case 'attackUnit':
+          return attackUnit(deployed.state, forceId, deployed.unitId, intent.action.targetId);
+        case 'attackFacility':
+          return attackFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityId);
+        case 'attackCity':
+          return attackCity(deployed.state, forceId, deployed.unitId, intent.action.cityId);
+        case 'useUnitTactic':
+          return useUnitTactic(deployed.state, forceId, deployed.unitId, intent.action.targetId, intent.action.tacticId);
+        case 'useUnitStrategy':
+          return useUnitStrategy(deployed.state, forceId, deployed.unitId, intent.action.strategyId, intent.action.selection);
+        case 'buildFacility':
+          return buildFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityType, intent.action.target);
+        case 'repairFacility':
+          return repairFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityId);
+      }
+    }
     case 'deployTransportUnit':
       return deployTransportUnit(state, forceId, intent.input);
     case 'moveUnit':
@@ -228,10 +270,32 @@ function applyGameIntent(room: OnlineRoom, forceId: ForceId, intent: Exclude<Gam
       const moved = intent.destination ? moveUnit(state, forceId, intent.attackerId, intent.destination) : state;
       return attackUnit(moved, forceId, intent.attackerId, intent.targetId);
     }
+    case 'attackFacility': {
+      const moved = intent.destination ? moveUnit(state, forceId, intent.attackerId, intent.destination) : state;
+      return attackFacility(moved, forceId, intent.attackerId, intent.facilityId);
+    }
     case 'useUnitTactic': {
       const moved = intent.destination ? moveUnit(state, forceId, intent.attackerId, intent.destination) : state;
       return useUnitTactic(moved, forceId, intent.attackerId, intent.targetId, intent.tacticId);
     }
+    case 'useUnitStrategy': {
+      const moved = intent.destination ? moveUnit(state, forceId, intent.unitId, intent.destination) : state;
+      return useUnitStrategy(moved, forceId, intent.unitId, intent.strategyId, intent.selection);
+    }
+    case 'useFirePlot': {
+      const moved = intent.destination ? moveUnit(state, forceId, intent.unitId, intent.destination) : state;
+      return useFirePlot(moved, forceId, intent.unitId, intent.target);
+    }
+    case 'buildFacility': {
+      const moved = intent.destination ? moveUnit(state, forceId, intent.unitId, intent.destination) : state;
+      return buildFacility(moved, forceId, intent.unitId, intent.facilityType, intent.target);
+    }
+    case 'repairFacility': {
+      const moved = intent.destination ? moveUnit(state, forceId, intent.unitId, intent.destination) : state;
+      return repairFacility(moved, forceId, intent.unitId, intent.facilityId);
+    }
+    case 'dismantleFacility':
+      return dismantleFacility(state, forceId, intent.facilityId);
     case 'attackCity': {
       const moved = intent.destination ? moveUnit(state, forceId, intent.attackerId, intent.destination) : state;
       return attackCity(moved, forceId, intent.attackerId, intent.cityId);
@@ -247,6 +311,17 @@ function advanceTenDay(room: OnlineRoom): GameState {
     if (!occupied.has(forceId)) state = runAiTurn(personalizeState(state, forceId), forceId);
   }
   return settleTenDay(canonicalState(state, hostForceId(room)));
+}
+
+function settleActivePlayerTurnStart(room: OnlineRoom, activePlayerId: string | null): GameState | null {
+  if (!room.state || !activePlayerId) return room.state;
+  const activeForceId = room.players[activePlayerId]?.forceId;
+  if (!activeForceId) return room.state;
+  const next = structuredClone(room.state);
+  next.battleDamageReports = [];
+  next.facilityRepairReports = [];
+  settleBattleFacilities(next, activeForceId);
+  return canonicalState(next, hostForceId(room));
 }
 
 function nextActivePlayerId(room: OnlineRoom, completedTurnPlayerIds: string[]) {
@@ -276,6 +351,7 @@ export function reduceOnlineIntent(room: OnlineRoom, playerId: string, baseRevis
         : {
           ...room,
           revision: room.revision + 1,
+          state: settleActivePlayerTurnStart(room, activePlayerId),
           activePlayerId,
           completedTurnPlayerIds,
           tenDayReadyForceIds: occupiedForceIds(room).filter((occupiedForceId) => {

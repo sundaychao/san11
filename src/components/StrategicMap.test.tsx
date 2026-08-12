@@ -3,7 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { CITY_GRID_CENTERS, GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
 import { deployUnit } from '../game/battle/actions';
+import { sevenCellCityFootprint } from '../game/battle/grid';
 import { createGame } from '../game/scenario/jingxiang208';
+import { createMobileDuelGame } from '../game/scenario/mobileDuel';
 import { GameProvider } from '../game/store/GameProvider';
 import { settleTenDay } from '../game/turn';
 import type { TerrainType } from '../game/types';
@@ -45,6 +47,42 @@ describe('StrategicMap', () => {
 
     expect(screen.getByRole('heading', { name: '江陵' })).toBeVisible();
     expect(screen.getAllByText('13,500').length).toBeGreaterThan(0);
+  });
+
+  it('selects a city and opens the same menu from any cell in its seven-cell footprint', () => {
+    const state = createGame('liu', 1);
+    renderGame(state);
+
+    const city = state.cities.jiangling;
+    const footprintCell = screen.getByTestId(`city-footprint-${city.id}-${city.gridQ + 1}-${city.gridR}`);
+    fireEvent.pointerDown(footprintCell, { button: 0, buttons: 1, clientX: 260, clientY: 190 });
+
+    expect(screen.getByRole('heading', { name: city.name })).toBeVisible();
+    expect(screen.getByTestId('city-command-menu')).toBeVisible();
+  });
+
+  it('opens a city menu when the underlying map cell is clicked inside its seven-cell footprint', () => {
+    const state = createGame('liu', 1);
+    renderGame(state);
+
+    const city = state.cities.jiangling;
+    const mapCell = screen.getByTestId(`map-cell-${city.gridQ + 1}-${city.gridR}`);
+    fireEvent.pointerDown(mapCell, { button: 0, buttons: 1, clientX: 260, clientY: 190 });
+
+    expect(screen.getByRole('heading', { name: city.name })).toBeVisible();
+    expect(screen.getByTestId('city-command-menu')).toBeVisible();
+  });
+
+  it('renders a top-level click target for every city footprint cell', () => {
+    const state = createGame('liu', 1);
+    renderGame(state);
+
+    const city = state.cities.jiangling;
+    for (const coord of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) {
+      const hitTarget = screen.getByTestId(`city-hit-cell-${city.id}-${coord.q}-${coord.r}`);
+      fireEvent.pointerDown(hitTarget, { button: 0, buttons: 1, clientX: 260, clientY: 190 });
+      expect(screen.getByTestId('city-command-menu')).toBeVisible();
+    }
   });
 
   it('zooms the image and city layer together', () => {
@@ -101,6 +139,125 @@ describe('StrategicMap', () => {
     expect(screen.getByTestId('hover-coordinate')).toBeInTheDocument();
   });
 
+  it('marks unfinished facilities as under construction without showing their effect range', () => {
+    const state = createGame('liu', 1);
+    state.facilities = {
+      unfinishedTower: {
+        id: 'unfinishedTower',
+        type: 'arrowTower',
+        forceId: 'liu',
+        q: 10,
+        r: 10,
+        durability: 150,
+        completed: false,
+      },
+    };
+    renderGame(state);
+
+    const marker = screen.getByTestId('battle-facility-marker');
+
+    expect(screen.getByTestId('facility-construction-label')).toBeInTheDocument();
+
+    fireEvent.pointerEnter(marker);
+
+    expect(screen.queryByTestId('facility-range-cell')).not.toBeInTheDocument();
+  });
+
+  it('darkens map cells occupied by facilities', () => {
+    const state = createGame('liu', 1);
+    state.facilities = {
+      tower: { id: 'tower', type: 'arrowTower', forceId: 'liu', q: 10, r: 10, durability: 700 },
+    };
+
+    renderGame(state);
+
+    expect(screen.getByTestId('map-cell-10-10')).toHaveClass('is-facility-occupied');
+    expect(screen.getByTestId('map-cell-10-11')).not.toHaveClass('is-facility-occupied');
+  });
+
+  it('shows arrow tower automatic damage numbers from battle reports', () => {
+    const state = createGame('liu', 1);
+    state.units['arrow-target'] = {
+      id: 'arrow-target',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 12,
+      r: 10,
+      troops: 2700,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    state.battleDamageReports = [{
+      id: 'arrow-tower-damage',
+      unitId: 'arrow-target',
+      q: 12,
+      r: 10,
+      amount: 300,
+      kind: 'attack',
+    }];
+
+    renderGame(state);
+
+    expect(screen.getByTestId('battle-damage-number')).toHaveTextContent('-300');
+  });
+
+  it('shows facility status while hovering a facility marker', () => {
+    const state = createGame('liu', 1);
+    state.facilities = {
+      unfinishedTower: {
+        id: 'unfinishedTower',
+        type: 'arrowTower',
+        forceId: 'liu',
+        q: 10,
+        r: 10,
+        durability: 150,
+        completed: false,
+      },
+    };
+    renderGame(state);
+
+    fireEvent.pointerEnter(screen.getByTestId('battle-facility-marker'), { clientX: 300, clientY: 180 });
+
+    expect(screen.getByTestId('facility-info-panel')).toBeVisible();
+    expect(screen.getByTestId('facility-info-status')).toHaveTextContent('建设中');
+    expect(screen.getByTestId('facility-info-durability')).toHaveTextContent('150/700');
+
+    fireEvent.pointerLeave(screen.getByTestId('battle-facility-marker'));
+
+    expect(screen.queryByTestId('facility-info-panel')).not.toBeInTheDocument();
+  });
+
+  it('opens a right-click menu for own facilities and dismantles them', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    state.facilities = {
+      ownWall: {
+        id: 'ownWall',
+        type: 'earthwork',
+        forceId: 'liu',
+        q: 10,
+        r: 10,
+        durability: 400,
+        completed: true,
+      },
+    };
+    renderGame(state);
+
+    fireEvent.contextMenu(screen.getByTestId('battle-facility-marker'), { clientX: 320, clientY: 180 });
+
+    expect(screen.getByTestId('facility-context-menu')).toBeVisible();
+
+    await user.click(screen.getByTestId('facility-dismantle-button'));
+
+    expect(screen.queryByTestId('battle-facility-marker')).not.toBeInTheDocument();
+  });
+
   it('marks a player unit with remaining movement as not acted until it moves', async () => {
     const user = userEvent.setup();
     const deployed = deployUnit(createGame('liu', 1), 'liu', {
@@ -145,6 +302,40 @@ describe('StrategicMap', () => {
 
     await user.click(screen.getByTestId('battle-unit-marker'));
     expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
+  });
+
+  it('shows the map proceed command as disabled while another player is active', () => {
+    const state = createGame('liu', 1);
+    state.turnForceId = 'cao';
+    renderGame(state);
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
+
+    const proceedButton = screen.getByTestId('map-context-proceed-button');
+    expect(proceedButton).toBeDisabled();
+    expect(proceedButton).toHaveClass('is-disabled');
+  });
+
+  it('does not mark or open commands for a confused player unit', async () => {
+    const user = userEvent.setup();
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const waiting = settleTenDay(deployed);
+    const unit = Object.values(waiting.units)[0];
+    waiting.units[unit.id].confusedTenDays = 1;
+    renderGame(waiting);
+
+    expect(screen.queryByTestId('battle-unit-ready-badge')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('battle-unit-marker'));
+    expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId(/move-target-/)).not.toBeInTheDocument();
   });
 
   it('shows the active opponent unit ready badge while another player is active', async () => {
@@ -193,6 +384,78 @@ describe('StrategicMap', () => {
     fireEvent.pointerLeave(unitMarker);
 
     expect(screen.queryByTestId('unit-info-panel')).not.toBeInTheDocument();
+  });
+
+  it('marks units with distinct force ids and force colors', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const playerUnit = Object.values(state.units)[0];
+    state.units[playerUnit.id].q = 10;
+    state.units[playerUnit.id].r = 10;
+    state.units['enemy-color-check'] = {
+      id: 'enemy-color-check',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'spear',
+      q: 11,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 22,
+      moved: false,
+      acted: false,
+    };
+    renderGame(state);
+
+    const markers = screen.getAllByTestId('battle-unit-marker');
+    const liuMarker = markers.find((marker) => marker.getAttribute('data-force-id') === 'liu');
+    const caoMarker = markers.find((marker) => marker.getAttribute('data-force-id') === 'cao');
+
+    expect(liuMarker).toBeTruthy();
+    expect(caoMarker).toBeTruthy();
+    expect(liuMarker).toHaveStyle({ '--force-color': state.forces.liu.color });
+    expect(caoMarker).toHaveStyle({ '--force-color': state.forces.cao.color });
+    expect(state.forces.liu.color).not.toBe(state.forces.cao.color);
+  });
+
+  it('shows range overlays while hovering arrow towers, drums, music towers, or fortresses', () => {
+    const state = createGame('liu', 1);
+    state.facilities = {
+      tower: { id: 'tower', type: 'arrowTower', forceId: 'liu', q: 10, r: 10, durability: 700 },
+      fortress: { id: 'fortress', type: 'fortress', forceId: 'liu', q: 16, r: 10, durability: 1200 },
+      wall: { id: 'wall', type: 'earthwork', forceId: 'liu', q: 14, r: 10, durability: 400 },
+    };
+    renderGame(state);
+
+    const tower = screen.getAllByTestId('battle-facility-marker')
+      .find((marker) => marker.getAttribute('data-facility-id') === 'tower')!;
+    fireEvent.pointerEnter(tower);
+
+    expect(screen.getAllByTestId('facility-range-cell').length).toBeGreaterThan(6);
+    expect(document.querySelector('[data-range-position="10,9"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-range-position="10,8"]')).toBeInTheDocument();
+
+    fireEvent.pointerLeave(tower);
+    expect(screen.queryAllByTestId('facility-range-cell')).toHaveLength(0);
+
+    const wall = screen.getAllByTestId('battle-facility-marker')
+      .find((marker) => marker.getAttribute('data-facility-id') === 'wall')!;
+    fireEvent.pointerEnter(wall);
+    expect(screen.queryAllByTestId('facility-range-cell')).toHaveLength(0);
+
+    const fortress = screen.getAllByTestId('battle-facility-marker')
+      .find((marker) => marker.getAttribute('data-facility-id') === 'fortress')!;
+    fireEvent.pointerLeave(wall);
+    fireEvent.pointerEnter(fortress);
+    expect(document.querySelector('[data-range-position="16,7"]')).toBeInTheDocument();
   });
 
   it('hides unit information when the hovered unit marker is clicked', () => {
@@ -309,6 +572,28 @@ describe('StrategicMap', () => {
 
     expect(Number.parseFloat(jianglingMarker!.style.left)).toBeCloseTo(expectedLeft, 4);
     expect(Number.parseFloat(jianglingMarker!.style.top)).toBeCloseTo(expectedTop, 4);
+  });
+
+  it('renders the mobile duel map with its own 16 by 33 grid dimensions', () => {
+    const state = createMobileDuelGame('liu', 'cao', 1);
+    renderGame(state);
+
+    expect(screen.getByTestId('battle-grid-overlay')).toHaveAttribute('viewBox', '0 0 688 1419');
+    expect(screen.getByTestId('battle-unit-layer')).toHaveAttribute('viewBox', '0 0 688 1419');
+
+    const bottomMarker = screen.getAllByTestId('city-marker').find((marker) =>
+      marker.textContent?.includes(state.cities.jiangling.name),
+    );
+    const topMarker = screen.getAllByTestId('city-marker').find((marker) =>
+      marker.textContent?.includes(state.cities.xiangyang.name),
+    );
+
+    expect(bottomMarker).toBeTruthy();
+    expect(topMarker).toBeTruthy();
+    expect(Number.parseFloat(bottomMarker!.style.left)).toBeCloseTo((8.5 / 16) * 100, 4);
+    expect(Number.parseFloat(bottomMarker!.style.top)).toBeCloseTo((29 / 33) * 100, 4);
+    expect(Number.parseFloat(topMarker!.style.left)).toBeCloseTo((8.5 / 16) * 100, 4);
+    expect(Number.parseFloat(topMarker!.style.top)).toBeCloseTo((3 / 33) * 100, 4);
   });
 
   it('shows troop and population values next to the city name on map markers', () => {

@@ -21,6 +21,7 @@ describe('StartScreen online rooms', () => {
       online: {
         mode: 'online',
         connecting: false,
+        resumingRoom: false,
         connected: true,
         serverUrl: 'http://server.test',
         roomId: null,
@@ -52,6 +53,7 @@ describe('StartScreen online rooms', () => {
       loadGame: vi.fn(),
       loadOnlineRooms: vi.fn().mockResolvedValue(undefined),
       logoutAccount: vi.fn(),
+      resumeOnlineRoom: vi.fn().mockResolvedValue(undefined),
       startGame: vi.fn(),
       error: null,
     };
@@ -82,6 +84,16 @@ describe('StartScreen online rooms', () => {
     expect(gameValue.current?.loadOnlineRooms).toHaveBeenCalledTimes(1);
   });
 
+  it('does not auto-load the room list while the previous room is resuming', async () => {
+    gameValue.current!.online.resumingRoom = true;
+
+    render(<StartScreen />);
+
+    await waitFor(() => {
+      expect(gameValue.current?.loadOnlineRooms).not.toHaveBeenCalled();
+    });
+  });
+
   it('creates a new lobby room from the primary online action', async () => {
     const user = userEvent.setup();
     render(<StartScreen />);
@@ -98,5 +110,14 @@ describe('StartScreen online rooms', () => {
     await user.click(screen.getByRole('button', { name: '刷新房间' }));
 
     expect(gameValue.current?.loadOnlineRooms).toHaveBeenCalledWith({ serverUrl: 'http://server.test' });
+  });
+
+  it('resumes the last playing room from the current server', async () => {
+    const user = userEvent.setup();
+    render(<StartScreen />);
+
+    await user.click(screen.getByRole('button', { name: '继续上次对战' }));
+
+    expect(gameValue.current?.resumeOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test' });
   });
 });

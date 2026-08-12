@@ -104,9 +104,37 @@ export interface CityEffectReport {
   kind: 'recruit' | 'armament';
 }
 
+export interface FacilityRepairReport {
+  id: string;
+  facilityId: string;
+  q: number;
+  r: number;
+  amount: number;
+  kind: 'build' | 'repair';
+}
+
+export interface FirePlot {
+  q: number;
+  r: number;
+}
+
+export type FacilityType = 'drum' | 'arrowTower' | 'musicTower' | 'fortress' | 'earthwork' | 'fireSeed' | 'fireBall';
+
+export interface Facility {
+  id: string;
+  type: FacilityType;
+  forceId: ForceId;
+  q: number;
+  r: number;
+  durability: number;
+  completed?: boolean;
+}
+
 export interface GameState {
   schemaVersion: 2;
-  scenarioId: 'jingxiang-208';
+  scenarioId: 'jingxiang-208' | 'mobile-duel';
+  gridWidth?: number;
+  gridHeight?: number;
   seed: number;
   rngCursor: number;
   month: number;
@@ -122,6 +150,9 @@ export interface GameState {
   units: Record<string, ArmyUnit>;
   battleDamageReports?: BattleDamageReport[];
   cityEffectReports?: CityEffectReport[];
+  facilityRepairReports?: FacilityRepairReport[];
+  firePlots?: FirePlot[];
+  facilities?: Record<string, Facility>;
   logs: GameLog[];
 }
 
@@ -155,6 +186,7 @@ export interface ArmyUnit {
   movementRemaining: number;
   confusedTenDays?: number;
   burningTenDays?: number;
+  falseReportedTenDays?: number;
   moved: boolean;
   acted: boolean;
 }

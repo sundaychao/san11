@@ -1,5 +1,6 @@
 import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { useGame } from '../game/store/GameProvider';
 import type { CityId } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
@@ -52,6 +53,7 @@ export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogP
   const goldAmount = toAmount(activeGold);
   const foodAmount = toAmount(activeFood);
   const errors = [
+    state.actionPoints[state.playerForceId] < DEPLOY_AP_COST ? `行动力不足 ${DEPLOY_AP_COST}` : '',
     !activeOfficerId ? '没有可执行输送的武将' : '',
     !Number.isInteger(troopAmount) || troopAmount < 0 || troopAmount > 10000 ? '输送士兵必须为 0-10000' : '',
     city.troops - troopAmount < 500 ? '城市至少保留 500 兵力' : '',

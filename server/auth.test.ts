@@ -1,17 +1,22 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AuthManager } from './auth';
 
 let tempDir: string | null = null;
+const authManagers: AuthManager[] = [];
 
 async function authWithTempFile() {
   tempDir = await mkdtemp(path.join(tmpdir(), 'san11-auth-'));
-  return new AuthManager({ filePath: path.join(tempDir, 'users.json') });
+  const auth = new AuthManager({ dbPath: path.join(tempDir, 'game.db') });
+  authManagers.push(auth);
+  return auth;
 }
 
 afterEach(async () => {
+  for (const auth of authManagers.splice(0)) auth.close();
   if (tempDir) await rm(tempDir, { recursive: true, force: true });
   tempDir = null;
 });
@@ -24,11 +29,14 @@ describe('AuthManager', () => {
     expect(registered.username).toBe('liubei');
     expect(registered.token).toHaveLength(64);
 
-    const raw = await readFile(path.join(tempDir!, 'users.json'), 'utf8');
-    expect(raw).not.toContain('secret123');
-    expect(raw).toContain('passwordHash');
+    const db = new DatabaseSync(path.join(tempDir!, 'game.db'));
+    const stored = db.prepare('SELECT username, password_hash FROM users WHERE username = ?').get('liubei') as { username: string; password_hash: string };
+    expect(stored.username).toBe('liubei');
+    expect(stored.password_hash).not.toBe('secret123');
+    db.close();
 
-    const reloaded = new AuthManager({ filePath: path.join(tempDir!, 'users.json') });
+    const reloaded = new AuthManager({ dbPath: path.join(tempDir!, 'game.db') });
+    authManagers.push(reloaded);
     expect(await reloaded.authenticate(registered.token)).toMatchObject({ username: 'liubei' });
 
     const loggedIn = await reloaded.login({ username: 'liubei', password: 'secret123' });

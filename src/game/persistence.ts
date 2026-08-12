@@ -1,6 +1,6 @@
 import { CITY_IDS, FORCE_IDS, OFFICER_IDS } from './scenario/jingxiang208';
 import { ARMAMENT_TYPES } from './armaments';
-import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, Force, GameState, GridCell, Officer, Stats } from './types';
+import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Stats } from './types';
 
 export const AUTO_SAVE_KEY = 'jingxiang-208-autosave-v1';
 export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
@@ -8,7 +8,9 @@ export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
 export type SaveSlot = 'auto' | 'manual';
 
 const TROOP_TYPES = ['sword', 'spear', 'halberd', 'crossbow', 'cavalry', 'siege'];
+const FACILITY_TYPES = ['drum', 'arrowTower', 'musicTower', 'fortress', 'earthwork', 'fireSeed', 'fireBall'];
 const APTITUDE_GRADES = ['S', 'A', 'B', 'C'];
+const MOBILE_DUEL_CITY_IDS = ['xiangyang', 'jiangling'];
 
 export interface SaveAdapter {
   getItem(key: string): string | null;
@@ -134,6 +136,7 @@ function validGridCell(value: unknown): value is GridCell {
 function validUnit(value: unknown): value is ArmyUnit {
   if (!value || typeof value !== 'object') return false;
   const unit = value as Partial<ArmyUnit>;
+  const validStatus = (status: unknown) => status === undefined || (Number.isInteger(status) && Number(status) > 0);
   return typeof unit.id === 'string' &&
     FORCE_IDS.includes(unit.forceId!) &&
     (unit.kind === undefined || unit.kind === 'combat' || unit.kind === 'transport') &&
@@ -148,6 +151,9 @@ function validUnit(value: unknown): value is ArmyUnit {
     validResource(unit.energy) &&
     unit.energy! <= 100 &&
     validResource(unit.movementRemaining) &&
+    validStatus(unit.confusedTenDays) &&
+    validStatus(unit.falseReportedTenDays) &&
+    validStatus(unit.burningTenDays) &&
     typeof unit.moved === 'boolean' &&
     typeof unit.acted === 'boolean';
 }
@@ -179,12 +185,45 @@ function validCityEffectReport(value: unknown): value is CityEffectReport {
     (report.kind === 'recruit' || report.kind === 'armament');
 }
 
+function validFacilityRepairReport(value: unknown): value is FacilityRepairReport {
+  if (!value || typeof value !== 'object') return false;
+  const report = value as Partial<FacilityRepairReport>;
+  return typeof report.id === 'string' &&
+    typeof report.facilityId === 'string' &&
+    Number.isInteger(report.q) &&
+    Number.isInteger(report.r) &&
+    typeof report.amount === 'number' &&
+    Number.isInteger(report.amount) &&
+    report.amount >= 0 &&
+    (report.kind === 'build' || report.kind === 'repair');
+}
+
+function validFirePlot(value: unknown): value is FirePlot {
+  if (!value || typeof value !== 'object') return false;
+  const plot = value as Partial<FirePlot>;
+  return Number.isInteger(plot.q) && plot.q! >= 0 &&
+    Number.isInteger(plot.r) && plot.r! >= 0;
+}
+
+function validFacility(value: unknown): value is Facility {
+  if (!value || typeof value !== 'object') return false;
+  const facility = value as Partial<Facility>;
+  return typeof facility.id === 'string' &&
+    FACILITY_TYPES.includes(facility.type!) &&
+    FORCE_IDS.includes(facility.forceId!) &&
+    Number.isInteger(facility.q) && facility.q! >= 0 &&
+    Number.isInteger(facility.r) && facility.r! >= 0 &&
+    validResource(facility.durability) &&
+    (facility.completed === undefined || typeof facility.completed === 'boolean');
+}
+
 export function isGameState(value: unknown): value is GameState {
   if (!value || typeof value !== 'object') return false;
   const state = value as Partial<GameState>;
+  const validScenario = state.scenarioId === 'jingxiang-208' || state.scenarioId === 'mobile-duel';
   if (
     state.schemaVersion !== 2 ||
-    state.scenarioId !== 'jingxiang-208' ||
+    !validScenario ||
     !Number.isInteger(state.month) ||
     state.month! < 1 ||
     state.month! > 24 ||
@@ -205,25 +244,32 @@ export function isGameState(value: unknown): value is GameState {
     (state.phase === 'finished' && state.month !== 24)
   ) return false;
 
-  if (!exactKeys(state.cities, CITY_IDS) || !exactKeys(state.officers, OFFICER_IDS) ||
+  const expectedCityIds = state.scenarioId === 'mobile-duel' ? MOBILE_DUEL_CITY_IDS : CITY_IDS;
+  if (!exactKeys(state.cities, expectedCityIds) ||
       !exactKeys(state.actionPoints, FORCE_IDS) || !exactKeys(state.forces, FORCE_IDS)) return false;
+  if (state.scenarioId === 'jingxiang-208') {
+    if (!exactKeys(state.officers, OFFICER_IDS)) return false;
+  } else if (!Object.keys(state.officers).every((officerId) => OFFICER_IDS.includes(officerId as (typeof OFFICER_IDS)[number]))) {
+    return false;
+  }
 
   const cities = Object.values(state.cities);
   const officers = Object.values(state.officers);
   const cityById = state.cities;
   const officerById = state.officers;
   const validOfficerReferences = (officer: Officer) => {
-    if (!CITY_IDS.includes(officer.cityId)) return false;
+    if (!cityById[officer.cityId]) return false;
     if (officer.location.kind === 'unit') return Boolean(state.units![officer.location.unitId]);
     if (officer.location.kind === 'transfer') {
       return officer.forceId !== null &&
-        CITY_IDS.includes(officer.location.fromCityId) &&
-        CITY_IDS.includes(officer.location.targetCityId) &&
+        Boolean(cityById[officer.location.fromCityId]) &&
+        Boolean(cityById[officer.location.targetCityId]) &&
         cityById[officer.location.fromCityId].ownerId === officer.forceId &&
         cityById[officer.location.targetCityId].ownerId === officer.forceId;
     }
-    return CITY_IDS.includes(officer.location.cityId);
+    return Boolean(cityById[officer.location.cityId]);
   };
+  const participatingForceIds = new Set(cities.map((city) => city.ownerId));
   return (
     cities.every((city) => validCity(city) && cityById[city.id] === city &&
       (city.governorId === null || (
@@ -232,7 +278,7 @@ export function isGameState(value: unknown): value is GameState {
         officerById[city.governorId].cityId === city.id
       ))) &&
     officers.every((officer) => validOfficer(officer) && officerById[officer.id] === officer &&
-      CITY_IDS.includes(officer.cityId) &&
+      Boolean(cityById[officer.cityId]) &&
       (officer.forceId === null || cityById[officer.cityId].ownerId === officer.forceId) &&
       validOfficerReferences(officer)) &&
     state.grid.every(validGridCell) &&
@@ -246,10 +292,21 @@ export function isGameState(value: unknown): value is GameState {
       Array.isArray(state.cityEffectReports) &&
       state.cityEffectReports.every(validCityEffectReport)
     )) &&
+    (state.facilityRepairReports === undefined || (
+      Array.isArray(state.facilityRepairReports) &&
+      state.facilityRepairReports.every(validFacilityRepairReport)
+    )) &&
+    (state.firePlots === undefined || (
+      Array.isArray(state.firePlots) &&
+      state.firePlots.every(validFirePlot)
+    )) &&
+    (state.facilities === undefined || (
+      Object.values(state.facilities).every((facility) => validFacility(facility) && state.facilities![facility.id] === facility)
+    )) &&
     FORCE_IDS.every((forceId) => Number.isInteger(state.actionPoints![forceId]) && validResource(state.actionPoints![forceId]) &&
       state.actionPoints![forceId] <= 160 && validForce(state.forces![forceId]) &&
       state.forces![forceId].id === forceId &&
-      officerById[state.forces![forceId].leaderId]?.forceId === forceId) &&
+      (!participatingForceIds.has(forceId) || officerById[state.forces![forceId].leaderId]?.forceId === forceId)) &&
     state.logs.every((log) => Boolean(log) && typeof log.id === 'string' && typeof log.message === 'string' &&
       Number.isInteger(log.month) && log.month >= 1 && log.month <= 24 &&
       (log.forceId === null || FORCE_IDS.includes(log.forceId)))

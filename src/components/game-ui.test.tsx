@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../app/App';
+import { deployUnit } from '../game/battle/actions';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
 import { MANUAL_SAVE_KEY, writeSave } from '../game/persistence';
+import { settleTenDay } from '../game/turn';
 import { GameShell } from './GameShell';
 
 function mockFileDownloads() {
@@ -63,8 +65,21 @@ function signInForStartScreen() {
   }));
 }
 
+function mockAudioPlayback() {
+  const play = vi.fn().mockResolvedValue(undefined);
+  const AudioMock = vi.fn(function AudioMock(this: { play: typeof play; volume: number }) {
+    this.play = play;
+    this.volume = 1;
+  });
+  vi.stubGlobal('Audio', AudioMock);
+  return { AudioMock, play };
+}
+
 describe('game interface shell', () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+  });
 
   it('offers all four playable forces', () => {
     signInForStartScreen();
@@ -198,6 +213,96 @@ describe('game interface shell', () => {
     expect(within(menu).getByRole('button', { name: '调动' })).toBeVisible();
   });
 
+  it('plays the left mouse menu sound when clicking an owned city opens the first command menu', async () => {
+    const user = userEvent.setup();
+    const { AudioMock, play } = mockAudioPlayback();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('13500'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+
+    expect(screen.getByTestId('city-command-menu')).toBeVisible();
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/menu/leftMouse.mp3'));
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('plays the click-on menu sound when clicking a city command section opens the second menu', async () => {
+    const user = userEvent.setup();
+    const { AudioMock } = mockAudioPlayback();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('13500'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    AudioMock.mockClear();
+
+    await user.click(screen.getByTestId('city-command-section-military'));
+
+    expect(within(screen.getByTestId('city-command-menu')).getByTestId('city-command-action-deploy')).toBeVisible();
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/menu/clickOn.mp3'));
+  });
+
+  it('plays the right mouse menu sound when right clicking cancels a popup', async () => {
+    const user = userEvent.setup();
+    const { AudioMock } = mockAudioPlayback();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('13500'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    await user.click(screen.getByTestId('city-command-section-military'));
+    AudioMock.mockClear();
+    const menu = screen.getByTestId('city-command-menu');
+
+    fireEvent.contextMenu(menu);
+
+    expect(screen.getByTestId('city-command-menu')).toBeVisible();
+    expect(within(menu).queryByTestId('city-command-action-deploy')).not.toBeInTheDocument();
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/menu/rightMouse.mp3'));
+
+    AudioMock.mockClear();
+    fireEvent.contextMenu(menu);
+
+    expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/menu/rightMouse.mp3'));
+  });
+
+  it('plays the waiting-for-target sound when clicking a deployed unit', async () => {
+    const user = userEvent.setup();
+    const { AudioMock, play } = mockAudioPlayback();
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+
+    render(
+      <GameProvider initialState={settleTenDay(deployed)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByTestId('battle-unit-marker'));
+
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/menu/waitingForTarget.mp3'));
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
   it('opens a recruit officer selection dialog from the urban city menu', async () => {
     const user = userEvent.setup();
     render(
@@ -278,7 +383,7 @@ describe('game interface shell', () => {
     expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
   });
 
-  it('closes the whole city command menu on any right click', async () => {
+  it('closes the city command menu one level per right click', async () => {
     const user = userEvent.setup();
     render(
       <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
@@ -291,18 +396,47 @@ describe('game interface shell', () => {
     await user.click(jianglingMarker!);
     const menu = screen.getByTestId('city-command-menu');
 
-    await user.click(within(menu).getByRole('button', { name: '军事' }));
-    expect(within(menu).getByRole('button', { name: '出征' })).toBeVisible();
+    await user.click(screen.getByTestId('city-command-section-military'));
+    expect(within(menu).getByTestId('city-command-action-deploy')).toBeVisible();
 
     const defaultWasAllowed = fireEvent.contextMenu(menu);
     expect(defaultWasAllowed).toBe(false);
-    expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
-    return;
-    expect(within(menu).queryByRole('button', { name: '出征' })).not.toBeInTheDocument();
+    expect(within(menu).queryByTestId('city-command-action-deploy')).not.toBeInTheDocument();
     expect(screen.getByTestId('city-command-menu')).toBeVisible();
 
-    await user.pointer({ keys: '[MouseRight]', target: menu });
+    fireEvent.contextMenu(menu);
     expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
+  });
+
+  it('treats right clicking empty map space like right clicking the open city command menu', async () => {
+    const user = userEvent.setup();
+    const { AudioMock } = mockAudioPlayback();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('13500'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    await user.click(screen.getByTestId('city-command-section-military'));
+    AudioMock.mockClear();
+    const menu = screen.getByTestId('city-command-menu');
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 360, clientY: 260 });
+
+    expect(screen.getByTestId('city-command-menu')).toBeVisible();
+    expect(within(menu).queryByTestId('city-command-action-deploy')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/menu/rightMouse.mp3'));
+
+    AudioMock.mockClear();
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 360, clientY: 260 });
+
+    expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
+    expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/menu/rightMouse.mp3'));
   });
 
   it('closes the current city command menu level on each outside left click', async () => {
@@ -369,7 +503,7 @@ describe('game interface shell', () => {
     expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
     const eventLog = screen.getByRole('region', { name: '军情与政务' });
-    const aiForceColors = ['#4f9eae', '#c65e51', '#6ba35f', 'rgb(79, 158, 174)', 'rgb(198, 94, 81)', 'rgb(107, 163, 95)'];
+    const aiForceColors = ['#2088ff', '#e23d34', '#30b45a', 'rgb(32, 136, 255)', 'rgb(226, 61, 52)', 'rgb(48, 180, 90)'];
     expect(within(eventLog).getAllByRole('listitem').some((item) => {
       const swatch = item.querySelector('i') as HTMLElement | null;
       return swatch ? aiForceColors.includes(swatch.style.backgroundColor) || aiForceColors.includes(swatch.style.backgroundColor.toLowerCase()) : false;

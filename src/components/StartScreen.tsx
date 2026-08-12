@@ -4,18 +4,19 @@ import { FORCE_IDS, SCENARIO_FORCES } from '../game/scenario/jingxiang208';
 import { useGame } from '../game/store/GameProvider';
 
 export function StartScreen() {
-  const { auth, createOnlineRoom, hasAutosave, hasManualSave, invalidSaves, joinOnlineRoom, loadGame, loadOnlineRooms, logoutAccount, online, startGame, clearSave, error, clearError } = useGame();
+  const { auth, createOnlineRoom, hasAutosave, hasManualSave, invalidSaves, joinOnlineRoom, loadGame, loadOnlineRooms, logoutAccount, online, resumeOnlineRoom, startGame, clearSave, error, clearError } = useGame();
   const [roomId, setRoomId] = useState('');
   const [serverUrl, setServerUrl] = useState(online.serverUrl);
   const [hasRequestedRooms, setHasRequestedRooms] = useState(false);
+  const onlineBusy = online.connecting || online.resumingRoom;
 
   useEffect(() => {
-    if (!auth.token || hasRequestedRooms) return;
+    if (!auth.token || hasRequestedRooms || online.resumingRoom || online.roomId) return;
     setHasRequestedRooms(true);
     void loadOnlineRooms({ serverUrl }).catch(() => {
       // GameProvider exposes the server error through online.error.
     });
-  }, [auth.token, hasRequestedRooms, loadOnlineRooms, serverUrl]);
+  }, [auth.token, hasRequestedRooms, loadOnlineRooms, online.resumingRoom, online.roomId, serverUrl]);
 
   const createRoom = async () => {
     try {
@@ -36,6 +37,14 @@ export function StartScreen() {
   const refreshRooms = async () => {
     try {
       await loadOnlineRooms({ serverUrl });
+    } catch {
+      // GameProvider exposes the server error through online.error.
+    }
+  };
+
+  const resumeRoom = async () => {
+    try {
+      await resumeOnlineRoom({ serverUrl });
     } catch {
       // GameProvider exposes the server error through online.error.
     }
@@ -95,10 +104,11 @@ export function StartScreen() {
             <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} placeholder="http://localhost:8787" />
           </label>
         </div>
-        <button className="online-create-primary" type="button" onClick={() => void createRoom()} disabled={online.connecting}>创建新房间</button>
+        <button type="button" onClick={() => void resumeRoom()} disabled={onlineBusy}>继续上次对战</button>
+        <button className="online-create-primary" type="button" onClick={() => void createRoom()} disabled={onlineBusy}>创建新房间</button>
         <div className="online-room-toolbar">
           <span>等待房间</span>
-          <button type="button" onClick={() => void refreshRooms()} disabled={online.connecting}>刷新房间</button>
+          <button type="button" onClick={() => void refreshRooms()} disabled={onlineBusy}>刷新房间</button>
         </div>
         <div className="online-room-list" aria-label="房间列表">
           {online.rooms.length > 0 ? online.rooms.map((room) => (
@@ -118,7 +128,7 @@ export function StartScreen() {
           </label>
         </div>
         <div className="online-actions">
-          <button type="button" onClick={() => void joinRoom()} disabled={online.connecting}>加入房间</button>
+          <button type="button" onClick={() => void joinRoom()} disabled={onlineBusy}>加入房间</button>
         </div>
         {online.error && <button className="start-error" type="button" onClick={clearError}>{online.error}</button>}
       </section>

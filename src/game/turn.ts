@@ -1,6 +1,6 @@
 import { clamp } from './commands';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
-import { movementAllowanceForUnit } from './battle/actions';
+import { movementAllowanceForUnit, settleBattleFacilities, unitSupplyMultiplier } from './battle/actions';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
 import type { ArmyUnit, City, GameState } from './types';
@@ -29,6 +29,7 @@ function isQuarterStartMonth(month: number) {
 
 function clearTransientBattleReports(state: GameState) {
   state.battleDamageReports = [];
+  state.facilityRepairReports = [];
 }
 
 function applyPossibleEvent(state: GameState, city: City) {
@@ -98,7 +99,8 @@ function settleCitySupply(city: City) {
 }
 
 function settleUnitSupply(next: GameState, unit: ArmyUnit) {
-  const foodCost = Math.max(0, Math.ceil((unit.troops * UNIT_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
+  const baseFoodCost = Math.max(0, Math.ceil((unit.troops * UNIT_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
+  const foodCost = Math.ceil(baseFoodCost * unitSupplyMultiplier(next, unit));
   if (unit.food >= foodCost) {
     unit.food -= foodCost;
     unit.energy = Math.min(100, unit.energy + 5);
@@ -116,6 +118,17 @@ function settleUnitSupply(next: GameState, unit: ArmyUnit) {
   unit.movementRemaining = movementAllowanceForUnit(unit);
   unit.moved = false;
   unit.acted = false;
+  tickUnitStatus(unit, 'confusedTenDays');
+  tickUnitStatus(unit, 'falseReportedTenDays');
+  tickUnitStatus(unit, 'burningTenDays');
+}
+
+function tickUnitStatus(unit: ArmyUnit, key: 'confusedTenDays' | 'falseReportedTenDays' | 'burningTenDays') {
+  const value = unit[key];
+  if (!value) return;
+  const nextValue = value - 1;
+  if (nextValue > 0) unit[key] = nextValue;
+  else delete unit[key];
 }
 
 function settleOfficerTransfers(next: GameState) {
@@ -177,6 +190,7 @@ export function settleTenDay(state: GameState): GameState {
   clearTransientBattleReports(next);
   for (const city of Object.values(next.cities)) settleCitySupply(city);
   for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
+  settleBattleFacilities(next, state.playerForceId);
   settleOfficerTransfers(next);
   settleOfficerTasks(next);
 

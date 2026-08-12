@@ -297,7 +297,7 @@ describe('command interface', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('disables deploy confirmation until an officer is selected', async () => {
+  it('selects the recommended officer by default when opening deployment', async () => {
     const user = userEvent.setup();
     renderState();
 
@@ -306,8 +306,27 @@ describe('command interface', () => {
     await user.click(screen.getByTestId('city-command-action-deploy'));
     const dialog = screen.getByRole('dialog', { name: '出征编制' });
 
-    expect(within(dialog).getByTestId('deploy-officer-summary')).toHaveTextContent('未选择');
-    expect(within(dialog).getByRole('button', { name: '确定出征' })).toBeDisabled();
+    expect(within(dialog).getByTestId('deploy-officer-summary')).toHaveTextContent('关羽');
+    expect(within(dialog).getByRole('button', { name: '确定出征' })).toBeEnabled();
+  });
+
+  it('updates the recommended deployment officer when the troop type changes', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    state.officers['zhuge-liang'].location = { kind: 'city', cityId: 'jiangling' };
+    state.officers['zhuge-liang'].cityId = 'jiangling';
+    renderState(state);
+
+    await user.click(screen.getAllByTestId('city-marker')[2]);
+    await user.click(screen.getByTestId('city-command-section-military'));
+    await user.click(screen.getByTestId('city-command-action-deploy'));
+    const dialog = screen.getByRole('dialog', { name: '出征编制' });
+
+    expect(within(dialog).getByTestId('deploy-officer-summary')).toHaveTextContent(state.officers['guan-yu'].name);
+
+    await user.selectOptions(within(dialog).getByLabelText('兵种'), 'siege');
+
+    expect(within(dialog).getByTestId('deploy-officer-summary')).toHaveTextContent(state.officers['zhuge-liang'].name);
   });
 
   it('opens a deployment dialog from the city menu and deploys the selected troop type', async () => {
@@ -332,6 +351,7 @@ describe('command interface', () => {
     expect(screen.queryByTestId('battle-unit-marker')).not.toBeInTheDocument();
     const deploymentCell = screen.getAllByTestId(/deploy-target-/)[0];
     fireEvent.pointerDown(deploymentCell, { button: 0, buttons: 1 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
     const unitMarker = screen.getByTestId('battle-unit-marker');
     expect(unitMarker).toBeVisible();
@@ -489,6 +509,67 @@ describe('command interface', () => {
     expect(within(dialog).getByTestId('deploy-food-value')).toHaveTextContent('2,000');
   });
 
+  it('uses a gold slider for combat deployment and carries that gold on the unit', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    state.cities.jiangling.gold = 5000;
+    renderState(state);
+
+    const jianglingMarker = screen.getByRole('button', { name: /^江陵 刘备/ });
+    await user.click(jianglingMarker);
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-military'));
+    await user.click(within(menu).getByTestId('city-command-action-deploy'));
+    const dialog = screen.getByRole('dialog', { name: '出征编制' });
+    const goldSlider = within(dialog).getByRole('slider', { name: '出征资金' });
+
+    expect(goldSlider).toHaveAttribute('max', '5000');
+    expect(goldSlider).toHaveValue('1000');
+    fireEvent.change(goldSlider, { target: { value: '900' } });
+    expect(within(dialog).getByTestId('deploy-gold-value')).toHaveTextContent('900');
+
+    await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
+    fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
+
+    expect(screen.getByTestId('battle-unit-marker')).toBeVisible();
+    expect(window.localStorage.getItem('jingxiang-208-autosave-v1')).toContain('"gold":900');
+  });
+
+  it('shows deployed unit gold in the UI and spends it when building a facility', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    state.cities.jiangling.gold = 5000;
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-military'));
+    await user.click(within(menu).getByTestId('city-command-action-deploy'));
+    const dialog = screen.getByRole('dialog', { name: '出征编制' });
+    fireEvent.change(within(dialog).getByRole('slider', { name: '出征资金' }), { target: { value: '900' } });
+    await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
+
+    fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1, clientX: 320, clientY: 220 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
+
+    expect(screen.getByLabelText('城市经营面板')).toHaveTextContent('4,100');
+    const unitMarker = screen.getByTestId('battle-unit-marker');
+    fireEvent.pointerEnter(unitMarker, { clientX: 300, clientY: 180 });
+    expect(screen.getByTestId('unit-info-panel')).toHaveTextContent('900');
+    fireEvent.pointerLeave(unitMarker);
+
+    await user.click(screen.getByTestId('end-ten-day-button'));
+    fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1, clientX: 300, clientY: 180 });
+    fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1, clientX: 300, clientY: 180 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '设置' }));
+    await user.click(within(screen.getByTestId('unit-facility-menu')).getByRole('button', { name: /箭楼/ }));
+    fireEvent.pointerDown(screen.getAllByTestId(/strategy-target-/)[0], { button: 0, buttons: 1 });
+
+    fireEvent.pointerEnter(screen.getByTestId('battle-unit-marker'), { clientX: 300, clientY: 180 });
+    expect(screen.getByTestId('unit-info-panel')).toHaveTextContent('300');
+  });
+
   it('caps weapon troop slider at available armament stock', async () => {
     const user = userEvent.setup();
     const state = createGame('liu', 3);
@@ -569,6 +650,7 @@ describe('command interface', () => {
     const confirmedDialog = await chooseDeployLeader(user, '刘备');
     await user.click(within(confirmedDialog).getByRole('button', { name: '确定出征' }));
     fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
     await user.click(screen.getByTestId('end-ten-day-button'));
     const unitMarker = screen.getByTestId('battle-unit-marker');
@@ -735,6 +817,7 @@ describe('command interface', () => {
     state.units[attacker.id].moved = false;
     state.units[attacker.id].acted = false;
     state.units[attacker.id].energy = 100;
+    state.units[attacker.id].movementRemaining = 22;
     state.units['enemy-tactic-target'] = {
       id: 'enemy-tactic-target',
       forceId: 'cao',
@@ -1055,6 +1138,39 @@ describe('command interface', () => {
     expect(dialog).toHaveTextContent(unit.food.toLocaleString('en-US'));
     expect(dialog).toHaveTextContent(String(unit.energy));
     expect(dialog).toHaveTextContent(String(unit.movementRemaining));
+    expect(screen.queryByTestId('unit-intel-context-menu')).not.toBeInTheDocument();
+  });
+
+  it('closes the unit right-click intel menu when left clicking another friendly unit', () => {
+    let state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'spear',
+      troops: 3600,
+      food: 6100,
+    });
+    state = deployUnit(state, 'liu', {
+      cityId: 'wuling',
+      officerId: 'zhang-fei',
+      troopType: 'sword',
+      troops: 3200,
+      food: 5000,
+    });
+    state = settleTenDay(state);
+    const units = Object.values(state.units);
+    state.units[units[0].id].q = 10;
+    state.units[units[0].id].r = 10;
+    state.units[units[1].id].q = 11;
+    state.units[units[1].id].r = 10;
+    renderState(state);
+
+    const markers = screen.getAllByTestId('battle-unit-marker');
+    fireEvent.contextMenu(markers[0], { clientX: 260, clientY: 190 });
+
+    expect(screen.getByTestId('unit-intel-context-menu')).toBeVisible();
+
+    fireEvent.pointerDown(markers[1], { button: 0, buttons: 1, clientX: 300, clientY: 190 });
+
     expect(screen.queryByTestId('unit-intel-context-menu')).not.toBeInTheDocument();
   });
 

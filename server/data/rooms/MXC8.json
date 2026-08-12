@@ -1,0 +1,2787 @@
+{
+  "id": "MXC8",
+  "hostPlayerId": "da6421a48f47474640d0f629",
+  "phase": "playing",
+  "revision": 30,
+  "seed": 1786285625100,
+  "state": {
+    "schemaVersion": 2,
+    "scenarioId": "mobile-duel",
+    "seed": 3874197260,
+    "rngCursor": 8,
+    "month": 1,
+    "tenDay": 3,
+    "turnForceId": "liu",
+    "playerForceId": "liu",
+    "phase": "playing",
+    "actionPoints": {
+      "cao": 140,
+      "liu": 120,
+      "sun": 125,
+      "biao": 140
+    },
+    "forces": {
+      "cao": {
+        "id": "cao",
+        "name": "曹操",
+        "leaderId": "cao-cao",
+        "color": "#4f9eae",
+        "description": "据守北境重镇，政务与统率均衡。"
+      },
+      "liu": {
+        "id": "liu",
+        "name": "刘备",
+        "leaderId": "liu-bei",
+        "color": "#d1b943",
+        "description": "人才出众，以民心和武将能力见长。"
+      },
+      "sun": {
+        "id": "sun",
+        "name": "孙权",
+        "leaderId": "sun-quan",
+        "color": "#c65e51",
+        "description": "立足江东水网，城市资源较为充裕。"
+      },
+      "biao": {
+        "id": "biao",
+        "name": "刘表",
+        "leaderId": "liu-biao",
+        "color": "#6ba35f",
+        "description": "深耕荆南，治安稳定且人才待发掘。"
+      }
+    },
+    "cities": {
+      "jiangling": {
+        "id": "jiangling",
+        "name": "江陵",
+        "ownerId": "liu",
+        "governorId": "liu-bei",
+        "gold": 10000,
+        "food": 25450,
+        "population": 100000,
+        "troops": 5500,
+        "commerce": 60,
+        "agriculture": 60,
+        "order": 85,
+        "training": 75,
+        "mapX": 0.53125,
+        "mapY": 0.8333333333333334,
+        "gridQ": 8,
+        "gridR": 20,
+        "maxDurability": 3000,
+        "durability": 3000,
+        "armaments": {
+          "spear": 0,
+          "halberd": 0,
+          "crossbow": 2000,
+          "cavalry": 3000,
+          "ram": 0,
+          "tower": 0,
+          "ship": 0
+        }
+      },
+      "xiangyang": {
+        "id": "xiangyang",
+        "name": "襄阳",
+        "ownerId": "sun",
+        "governorId": "sun-quan",
+        "gold": 10000,
+        "food": 31000,
+        "population": 100000,
+        "troops": 10000,
+        "commerce": 60,
+        "agriculture": 60,
+        "order": 85,
+        "training": 75,
+        "mapX": 0.53125,
+        "mapY": 0.125,
+        "gridQ": 8,
+        "gridR": 3,
+        "maxDurability": 3000,
+        "durability": 3000,
+        "armaments": {
+          "spear": 0,
+          "halberd": 2500,
+          "crossbow": 0,
+          "cavalry": 3000,
+          "ram": 0,
+          "tower": 0,
+          "ship": 0
+        }
+      }
+    },
+    "officers": {
+      "liu-bei": {
+        "id": "liu-bei",
+        "name": "刘备",
+        "forceId": "liu",
+        "cityId": "jiangling",
+        "stats": {
+          "leadership": 78,
+          "war": 75,
+          "intelligence": 78,
+          "politics": 80,
+          "charisma": 99
+        },
+        "location": {
+          "kind": "unit",
+          "unitId": "unit-1-1-liu-bei-2"
+        },
+        "skill": "仁德",
+        "aptitudes": {
+          "spear": "A",
+          "halberd": "A",
+          "crossbow": "B",
+          "cavalry": "B",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": true
+      },
+      "guan-yu": {
+        "id": "guan-yu",
+        "name": "关羽",
+        "forceId": "liu",
+        "cityId": "jiangling",
+        "stats": {
+          "leadership": 95,
+          "war": 97,
+          "intelligence": 76,
+          "politics": 62,
+          "charisma": 94
+        },
+        "location": {
+          "kind": "unit",
+          "unitId": "unit-1-1-guan-yu-3"
+        },
+        "skill": "神将",
+        "aptitudes": {
+          "spear": "S",
+          "halberd": "S",
+          "crossbow": "B",
+          "cavalry": "A",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": true
+      },
+      "zhang-fei": {
+        "id": "zhang-fei",
+        "name": "张飞",
+        "forceId": "liu",
+        "cityId": "jiangling",
+        "stats": {
+          "leadership": 85,
+          "war": 98,
+          "intelligence": 35,
+          "politics": 22,
+          "charisma": 45
+        },
+        "location": {
+          "kind": "unit",
+          "unitId": "unit-1-1-zhang-fei-1"
+        },
+        "skill": "斗神",
+        "aptitudes": {
+          "spear": "S",
+          "halberd": "A",
+          "crossbow": "B",
+          "cavalry": "A",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": true
+      },
+      "zhuge-liang": {
+        "id": "zhuge-liang",
+        "name": "诸葛亮",
+        "forceId": "liu",
+        "cityId": "jiangling",
+        "stats": {
+          "leadership": 92,
+          "war": 38,
+          "intelligence": 100,
+          "politics": 98,
+          "charisma": 92
+        },
+        "location": {
+          "kind": "unit",
+          "unitId": "unit-1-1-zhuge-liang-4"
+        },
+        "skill": "神算",
+        "aptitudes": {
+          "spear": "B",
+          "halberd": "B",
+          "crossbow": "A",
+          "cavalry": "C",
+          "siege": "S",
+          "navy": "B"
+        },
+        "acted": true
+      },
+      "jian-yong": {
+        "id": "jian-yong",
+        "name": "简雍",
+        "forceId": "liu",
+        "cityId": "jiangling",
+        "stats": {
+          "leadership": 35,
+          "war": 24,
+          "intelligence": 76,
+          "politics": 72,
+          "charisma": 86
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "jiangling"
+        },
+        "skill": "论客",
+        "aptitudes": {
+          "spear": "C",
+          "halberd": "C",
+          "crossbow": "B",
+          "cavalry": "C",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": false
+      },
+      "sun-qian": {
+        "id": "sun-qian",
+        "name": "孙乾",
+        "forceId": "liu",
+        "cityId": "jiangling",
+        "stats": {
+          "leadership": 38,
+          "war": 26,
+          "intelligence": 78,
+          "politics": 75,
+          "charisma": 84
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "jiangling"
+        },
+        "skill": "能吏",
+        "aptitudes": {
+          "spear": "C",
+          "halberd": "C",
+          "crossbow": "B",
+          "cavalry": "C",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": false
+      },
+      "mi-fang": {
+        "id": "mi-fang",
+        "name": "糜芳",
+        "forceId": "liu",
+        "cityId": "jiangling",
+        "stats": {
+          "leadership": 62,
+          "war": 64,
+          "intelligence": 45,
+          "politics": 48,
+          "charisma": 55
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "jiangling"
+        },
+        "skill": "无",
+        "aptitudes": {
+          "spear": "B",
+          "halberd": "B",
+          "crossbow": "B",
+          "cavalry": "B",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": false
+      },
+      "chen-dao": {
+        "id": "chen-dao",
+        "name": "陈到",
+        "forceId": "liu",
+        "cityId": "jiangling",
+        "stats": {
+          "leadership": 82,
+          "war": 86,
+          "intelligence": 62,
+          "politics": 48,
+          "charisma": 70
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "jiangling"
+        },
+        "skill": "白毦",
+        "aptitudes": {
+          "spear": "A",
+          "halberd": "A",
+          "crossbow": "B",
+          "cavalry": "A",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": false
+      },
+      "liao-hua": {
+        "id": "liao-hua",
+        "name": "廖化",
+        "forceId": "liu",
+        "cityId": "jiangling",
+        "stats": {
+          "leadership": 74,
+          "war": 78,
+          "intelligence": 58,
+          "politics": 45,
+          "charisma": 64
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "jiangling"
+        },
+        "skill": "踏破",
+        "aptitudes": {
+          "spear": "B",
+          "halberd": "A",
+          "crossbow": "B",
+          "cavalry": "B",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": false
+      },
+      "ma-su": {
+        "id": "ma-su",
+        "name": "马谡",
+        "forceId": "liu",
+        "cityId": "jiangling",
+        "stats": {
+          "leadership": 68,
+          "war": 55,
+          "intelligence": 88,
+          "politics": 72,
+          "charisma": 62
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "jiangling"
+        },
+        "skill": "百出",
+        "aptitudes": {
+          "spear": "B",
+          "halberd": "C",
+          "crossbow": "A",
+          "cavalry": "B",
+          "siege": "A",
+          "navy": "C"
+        },
+        "acted": false
+      },
+      "sun-quan": {
+        "id": "sun-quan",
+        "name": "孙权",
+        "forceId": "sun",
+        "cityId": "xiangyang",
+        "stats": {
+          "leadership": 78,
+          "war": 67,
+          "intelligence": 83,
+          "politics": 89,
+          "charisma": 94
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "xiangyang"
+        },
+        "skill": "明君",
+        "aptitudes": {
+          "spear": "B",
+          "halberd": "B",
+          "crossbow": "A",
+          "cavalry": "B",
+          "siege": "B",
+          "navy": "A"
+        },
+        "acted": false
+      },
+      "zhou-yu": {
+        "id": "zhou-yu",
+        "name": "周瑜",
+        "forceId": "sun",
+        "cityId": "xiangyang",
+        "stats": {
+          "leadership": 97,
+          "war": 71,
+          "intelligence": 96,
+          "politics": 86,
+          "charisma": 93
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "xiangyang"
+        },
+        "skill": "火神",
+        "aptitudes": {
+          "spear": "A",
+          "halberd": "B",
+          "crossbow": "A",
+          "cavalry": "B",
+          "siege": "S",
+          "navy": "S"
+        },
+        "acted": false
+      },
+      "lu-su": {
+        "id": "lu-su",
+        "name": "鲁肃",
+        "forceId": "sun",
+        "cityId": "xiangyang",
+        "stats": {
+          "leadership": 78,
+          "war": 56,
+          "intelligence": 92,
+          "politics": 94,
+          "charisma": 91
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "xiangyang"
+        },
+        "skill": "富豪",
+        "aptitudes": {
+          "spear": "B",
+          "halberd": "B",
+          "crossbow": "A",
+          "cavalry": "C",
+          "siege": "A",
+          "navy": "S"
+        },
+        "acted": false
+      },
+      "gan-ning": {
+        "id": "gan-ning",
+        "name": "甘宁",
+        "forceId": "sun",
+        "cityId": "xiangyang",
+        "stats": {
+          "leadership": 86,
+          "war": 94,
+          "intelligence": 76,
+          "politics": 55,
+          "charisma": 81
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "xiangyang"
+        },
+        "skill": "威风",
+        "aptitudes": {
+          "spear": "A",
+          "halberd": "A",
+          "crossbow": "A",
+          "cavalry": "B",
+          "siege": "C",
+          "navy": "S"
+        },
+        "acted": false
+      },
+      "cheng-pu": {
+        "id": "cheng-pu",
+        "name": "程普",
+        "forceId": "sun",
+        "cityId": "xiangyang",
+        "stats": {
+          "leadership": 84,
+          "war": 82,
+          "intelligence": 72,
+          "politics": 66,
+          "charisma": 78
+        },
+        "location": {
+          "kind": "unit",
+          "unitId": "unit-1-1-cheng-pu-6"
+        },
+        "skill": "无",
+        "aptitudes": {
+          "spear": "B",
+          "halberd": "B",
+          "crossbow": "B",
+          "cavalry": "B",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": true
+      },
+      "huang-gai": {
+        "id": "huang-gai",
+        "name": "黄盖",
+        "forceId": "sun",
+        "cityId": "xiangyang",
+        "stats": {
+          "leadership": 82,
+          "war": 85,
+          "intelligence": 69,
+          "politics": 58,
+          "charisma": 75
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "xiangyang"
+        },
+        "skill": "无",
+        "aptitudes": {
+          "spear": "B",
+          "halberd": "B",
+          "crossbow": "B",
+          "cavalry": "B",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": false
+      },
+      "han-dang": {
+        "id": "han-dang",
+        "name": "韩当",
+        "forceId": "sun",
+        "cityId": "xiangyang",
+        "stats": {
+          "leadership": 79,
+          "war": 82,
+          "intelligence": 61,
+          "politics": 46,
+          "charisma": 68
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "xiangyang"
+        },
+        "skill": "无",
+        "aptitudes": {
+          "spear": "B",
+          "halberd": "B",
+          "crossbow": "B",
+          "cavalry": "B",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": false
+      },
+      "taishi-ci": {
+        "id": "taishi-ci",
+        "name": "太史慈",
+        "forceId": "sun",
+        "cityId": "xiangyang",
+        "stats": {
+          "leadership": 88,
+          "war": 93,
+          "intelligence": 70,
+          "politics": 50,
+          "charisma": 82
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "xiangyang"
+        },
+        "skill": "弓神",
+        "aptitudes": {
+          "spear": "A",
+          "halberd": "B",
+          "crossbow": "S",
+          "cavalry": "A",
+          "siege": "C",
+          "navy": "A"
+        },
+        "acted": false
+      },
+      "lu-meng": {
+        "id": "lu-meng",
+        "name": "吕蒙",
+        "forceId": "sun",
+        "cityId": "xiangyang",
+        "stats": {
+          "leadership": 86,
+          "war": 81,
+          "intelligence": 89,
+          "politics": 74,
+          "charisma": 78
+        },
+        "location": {
+          "kind": "unit",
+          "unitId": "unit-1-1-lu-meng-7"
+        },
+        "skill": "攻心",
+        "aptitudes": {
+          "spear": "A",
+          "halberd": "A",
+          "crossbow": "A",
+          "cavalry": "B",
+          "siege": "A",
+          "navy": "S"
+        },
+        "acted": true
+      },
+      "ling-tong": {
+        "id": "ling-tong",
+        "name": "凌统",
+        "forceId": "sun",
+        "cityId": "xiangyang",
+        "stats": {
+          "leadership": 78,
+          "war": 86,
+          "intelligence": 58,
+          "politics": 44,
+          "charisma": 70
+        },
+        "location": {
+          "kind": "city",
+          "cityId": "xiangyang"
+        },
+        "skill": "无",
+        "aptitudes": {
+          "spear": "B",
+          "halberd": "B",
+          "crossbow": "B",
+          "cavalry": "B",
+          "siege": "C",
+          "navy": "C"
+        },
+        "acted": false
+      }
+    },
+    "grid": [
+      {
+        "q": 0,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 0,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 0,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 1,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 1,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 2,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 2,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 3,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 3,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 4,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 4,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 5,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 5,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 6,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 6,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 7,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 7,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 8,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 8,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 9,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 9,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 10,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 10,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 11,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 11,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 11,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 11,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 11,
+        "terrain": "road"
+      },
+      {
+        "q": 5,
+        "r": 11,
+        "terrain": "road"
+      },
+      {
+        "q": 6,
+        "r": 11,
+        "terrain": "road"
+      },
+      {
+        "q": 7,
+        "r": 11,
+        "terrain": "road"
+      },
+      {
+        "q": 8,
+        "r": 11,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 11,
+        "terrain": "road"
+      },
+      {
+        "q": 10,
+        "r": 11,
+        "terrain": "road"
+      },
+      {
+        "q": 11,
+        "r": 11,
+        "terrain": "road"
+      },
+      {
+        "q": 12,
+        "r": 11,
+        "terrain": "road"
+      },
+      {
+        "q": 13,
+        "r": 11,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 11,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 11,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 12,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 12,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 13,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 13,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 14,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 14,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 15,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 15,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 16,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 16,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 17,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 17,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 18,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 18,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 19,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 19,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 20,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 20,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 21,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 21,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 22,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 22,
+        "terrain": "plain"
+      },
+      {
+        "q": 0,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 1,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 2,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 3,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 4,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 5,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 6,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 7,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 8,
+        "r": 23,
+        "terrain": "road"
+      },
+      {
+        "q": 9,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 10,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 11,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 12,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 13,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 14,
+        "r": 23,
+        "terrain": "plain"
+      },
+      {
+        "q": 15,
+        "r": 23,
+        "terrain": "plain"
+      }
+    ],
+    "units": {
+      "unit-1-1-zhang-fei-1": {
+        "id": "unit-1-1-zhang-fei-1",
+        "kind": "combat",
+        "forceId": "liu",
+        "leaderId": "zhang-fei",
+        "officerIds": [
+          "zhang-fei"
+        ],
+        "homeCityId": "jiangling",
+        "troopType": "spear",
+        "q": 10,
+        "r": 10,
+        "troops": 4000,
+        "food": 5200,
+        "energy": 80,
+        "movementRemaining": 0,
+        "moved": true,
+        "acted": true
+      },
+      "unit-1-1-liu-bei-2": {
+        "id": "unit-1-1-liu-bei-2",
+        "kind": "combat",
+        "forceId": "liu",
+        "leaderId": "liu-bei",
+        "officerIds": [
+          "liu-bei"
+        ],
+        "homeCityId": "jiangling",
+        "troopType": "halberd",
+        "q": 11,
+        "r": 8,
+        "troops": 2500,
+        "food": 5500,
+        "energy": 85,
+        "movementRemaining": 0,
+        "moved": true,
+        "acted": true
+      },
+      "unit-1-1-guan-yu-3": {
+        "id": "unit-1-1-guan-yu-3",
+        "kind": "combat",
+        "forceId": "liu",
+        "leaderId": "guan-yu",
+        "officerIds": [
+          "guan-yu"
+        ],
+        "homeCityId": "jiangling",
+        "troopType": "cavalry",
+        "q": 10,
+        "r": 8,
+        "troops": 1851,
+        "food": 5414,
+        "energy": 70,
+        "movementRemaining": 0,
+        "moved": true,
+        "acted": true,
+        "burningTenDays": 1
+      },
+      "unit-1-1-zhuge-liang-4": {
+        "id": "unit-1-1-zhuge-liang-4",
+        "kind": "combat",
+        "forceId": "liu",
+        "leaderId": "zhuge-liang",
+        "officerIds": [
+          "zhuge-liang"
+        ],
+        "homeCityId": "jiangling",
+        "troopType": "siege",
+        "q": 7,
+        "r": 9,
+        "troops": 4000,
+        "food": 5200,
+        "energy": 100,
+        "movementRemaining": 0,
+        "moved": true,
+        "acted": false
+      },
+      "unit-1-1-cheng-pu-6": {
+        "id": "unit-1-1-cheng-pu-6",
+        "kind": "combat",
+        "forceId": "sun",
+        "leaderId": "cheng-pu",
+        "officerIds": [
+          "cheng-pu"
+        ],
+        "homeCityId": "xiangyang",
+        "troopType": "cavalry",
+        "q": 12,
+        "r": 8,
+        "troops": 2418,
+        "food": 5358,
+        "energy": 95,
+        "movementRemaining": 30,
+        "moved": false,
+        "acted": false
+      },
+      "unit-1-1-lu-meng-7": {
+        "id": "unit-1-1-lu-meng-7",
+        "kind": "combat",
+        "forceId": "sun",
+        "leaderId": "lu-meng",
+        "officerIds": [
+          "lu-meng"
+        ],
+        "homeCityId": "xiangyang",
+        "troopType": "spear",
+        "q": 10,
+        "r": 6,
+        "troops": 4000,
+        "food": 5200,
+        "energy": 90,
+        "movementRemaining": 22,
+        "moved": false,
+        "acted": false
+      }
+    },
+    "battleDamageReports": [
+      {
+        "id": "tactic-spear-spiral-1-3-8-unit-1-1-taishi-ci-5",
+        "unitId": "unit-1-1-taishi-ci-5",
+        "q": 10,
+        "r": 9,
+        "amount": 505,
+        "kind": "attack"
+      }
+    ],
+    "cityEffectReports": [],
+    "logs": [
+      {
+        "id": "mobile-duel-opening",
+        "month": 1,
+        "forceId": null,
+        "message": "手机双人对战开始，双方城池隔图相望。"
+      },
+      {
+        "id": "deploy-unit-1-1-zhang-fei-1",
+        "month": 1,
+        "forceId": "liu",
+        "message": "张飞率军从江陵出征"
+      },
+      {
+        "id": "deploy-unit-1-1-liu-bei-2",
+        "month": 1,
+        "forceId": "liu",
+        "message": "刘备率军从江陵出征"
+      },
+      {
+        "id": "deploy-unit-1-1-guan-yu-3",
+        "month": 1,
+        "forceId": "liu",
+        "message": "关羽率军从江陵出征"
+      },
+      {
+        "id": "deploy-unit-1-1-zhuge-liang-4",
+        "month": 1,
+        "forceId": "liu",
+        "message": "诸葛亮率军从江陵出征"
+      },
+      {
+        "id": "deploy-unit-1-1-taishi-ci-5",
+        "month": 1,
+        "forceId": "sun",
+        "message": "太史慈率军从襄阳出征"
+      },
+      {
+        "id": "deploy-unit-1-1-cheng-pu-6",
+        "month": 1,
+        "forceId": "sun",
+        "message": "程普率军从襄阳出征"
+      },
+      {
+        "id": "deploy-unit-1-1-lu-meng-7",
+        "month": 1,
+        "forceId": "sun",
+        "message": "吕蒙率军从襄阳出征"
+      }
+    ],
+    "gridWidth": 16,
+    "gridHeight": 24
+  },
+  "players": {
+    "da6421a48f47474640d0f629": {
+      "id": "da6421a48f47474640d0f629",
+      "name": "zhou",
+      "forceId": "liu",
+      "connected": false
+    },
+    "546bda85c5db7e92ea157511": {
+      "id": "546bda85c5db7e92ea157511",
+      "name": "chao",
+      "forceId": "sun",
+      "connected": false
+    }
+  },
+  "playerOrder": [
+    "da6421a48f47474640d0f629",
+    "546bda85c5db7e92ea157511"
+  ],
+  "turnPlayerIds": [
+    "da6421a48f47474640d0f629",
+    "546bda85c5db7e92ea157511"
+  ],
+  "activePlayerId": "546bda85c5db7e92ea157511",
+  "completedTurnPlayerIds": [
+    "da6421a48f47474640d0f629"
+  ],
+  "tenDayReadyForceIds": [
+    "liu"
+  ]
+}

@@ -3,25 +3,35 @@ import {
   type PropsWithChildren,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
 } from 'react';
-import { playSpearThrustSound, playTroopAttackSound, playTroopMoveSound } from '../../audio/soundEffects';
+import { playFireEverythingSound, playSpearThrustSound, playStartProjectSound, playTroopAttackSound, playTroopMoveSound } from '../../audio/soundEffects';
 import { runAiTurn } from '../ai';
 import {
+  attackFacility as resolveAttackFacility,
   attackCity as resolveAttackCity,
   attackUnit as resolveAttackUnit,
+  buildFacility as resolveBuildFacility,
   deployTransportUnit as resolveDeployTransportUnit,
   deployUnit as resolveDeployUnit,
+  deployUnitWithId as resolveDeployUnitWithId,
+  dismantleFacility as resolveDismantleFacility,
   moveUnit as resolveMoveUnit,
+  repairFacility as resolveRepairFacility,
+  useFirePlot as resolveUseFirePlot,
+  useUnitStrategy as resolveUseUnitStrategy,
   useUnitTactic as resolveUseUnitTactic,
   waitUnit as resolveWaitUnit,
+  type StrategyId,
+  type StrategySelection,
   type TacticId,
 } from '../battle/actions';
 import { executeCommand } from '../commands';
-import type { GameIntent } from '../network/intents';
+import type { DeployFollowupAction, GameIntent } from '../network/intents';
 import type { AuthSessionView, OnlineRoomListItem, OnlineRoomView, OnlineSnapshot } from '../network/protocol';
 import {
   clearSave,
@@ -36,15 +46,17 @@ import type { GridCoord } from '../battle/grid';
 import { createGame, FORCE_IDS } from '../scenario/jingxiang208';
 import { settleMonth, settleTenDay } from '../turn';
 import type { EditableCityMarker } from '../map-editor/editor';
-import type { City, CityId, ForceId, GameCommand, GameState, GridCell, TroopType } from '../types';
+import type { City, CityId, FacilityType, ForceId, GameCommand, GameState, GridCell, TroopType } from '../types';
 import { createOnlineSocket, DEFAULT_ONLINE_SERVER_URL, type OnlineSocket } from '../../network/socketClient';
 
 const AUTH_TOKEN_KEY = 'jingxiang-208-auth-token-v1';
 const AUTH_SESSION_KEY = 'jingxiang-208-auth-session-v1';
+const LAST_ONLINE_ROOM_KEY = 'jingxiang-208-last-online-room-v1';
 
 export interface OnlineClientState {
   mode: 'local' | 'online';
   connecting: boolean;
+  resumingRoom: boolean;
   connected: boolean;
   serverUrl: string;
   roomId: string | null;
@@ -85,16 +97,24 @@ interface GameContextValue {
   loadOnlineRooms(input?: { serverUrl?: string }): Promise<void>;
   createOnlineRoom(input: { serverUrl?: string; seed?: number }): Promise<void>;
   joinOnlineRoom(input: { roomId: string; serverUrl?: string }): Promise<void>;
+  resumeOnlineRoom(input?: { serverUrl?: string; roomId?: string }): Promise<void>;
   selectOnlineForce(forceId: ForceId): Promise<void>;
   startOnlineGame(): Promise<void>;
   disconnectOnline(): void;
   loadGame(slot: SaveSlot): LoadResult;
   issueCommand(command: GameCommand): void;
-  deployUnit(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; food: number }): void;
+  deployUnit(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; gold?: number; food: number }): void;
+  deployUnitAction(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction): void;
   deployTransportUnit(input: { cityId: CityId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }): void;
   moveUnit(unitId: string, destination: { q: number; r: number }): void;
   attackUnit(attackerId: string, targetId: string, destination?: GridCoord): void;
+  attackFacility(attackerId: string, facilityId: string, destination?: GridCoord): void;
   useUnitTactic(attackerId: string, targetId: string, tacticId: TacticId, destination?: GridCoord): void;
+  useUnitStrategy(unitId: string, strategyId: StrategyId, selection: StrategySelection, destination?: GridCoord): void;
+  useFirePlot(unitId: string, target: GridCoord, destination?: GridCoord): void;
+  buildFacility(unitId: string, facilityType: FacilityType, target: GridCoord, destination?: GridCoord): void;
+  repairFacility(unitId: string, facilityId: string, destination?: GridCoord): void;
+  dismantleFacility(facilityId: string): void;
   attackCity(attackerId: string, cityId: CityId, destination?: GridCoord): void;
   waitUnit(unitId: string): void;
   applyMapEditorMap(map: { grid: GridCell[]; cities: EditableCityMarker[] }): void;
@@ -165,6 +185,28 @@ function clearStoredAuthSession() {
   window.localStorage.removeItem(AUTH_SESSION_KEY);
 }
 
+function storedLastOnlineRoom(storage: SaveAdapter): { serverUrl: string; roomId: string } | null {
+  const raw = storage.getItem(LAST_ONLINE_ROOM_KEY);
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<{ serverUrl: string; roomId: string }>;
+    if (typeof value.serverUrl === 'string' && typeof value.roomId === 'string') {
+      return { serverUrl: value.serverUrl, roomId: value.roomId };
+    }
+  } catch {
+    storage.removeItem(LAST_ONLINE_ROOM_KEY);
+  }
+  return null;
+}
+
+function writeLastOnlineRoom(storage: SaveAdapter, input: { serverUrl: string; roomId: string }) {
+  storage.setItem(LAST_ONLINE_ROOM_KEY, JSON.stringify(input));
+}
+
+function clearLastOnlineRoom(storage: SaveAdapter) {
+  storage.removeItem(LAST_ONLINE_ROOM_KEY);
+}
+
 function isAuthExpired(reason: string) {
   return reason.includes('请先登录') || reason.includes('登录') || reason.includes('鐧诲綍');
 }
@@ -204,6 +246,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
   const [online, setOnline] = useState<OnlineClientState>({
     mode: 'local',
     connecting: false,
+    resumingRoom: Boolean(storedAuthSession().token && storedLastOnlineRoom(storage)),
     connected: false,
     serverUrl: DEFAULT_ONLINE_SERVER_URL,
     roomId: null,
@@ -225,6 +268,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     error: null,
   }));
   const socketRef = useRef<OnlineSocket | null>(null);
+  const attemptedResumeRef = useRef(false);
   const onlineRef = useRef(online);
   const authRef = useRef(auth);
   onlineRef.current = online;
@@ -245,6 +289,10 @@ export function GameProvider({ children, initialState = null, storage: storagePr
   }, []);
 
   const applyOnlineSnapshot = useCallback((snapshot: OnlineSnapshot) => {
+    writeLastOnlineRoom(storage, {
+      serverUrl: onlineRef.current.serverUrl,
+      roomId: snapshot.room.id,
+    });
     if (snapshot.state) {
       dispatch({ type: 'replace', state: snapshot.state });
       setSelectedCityId(Object.values(snapshot.state.cities).find((city) => city.ownerId === snapshot.state?.playerForceId)?.id ?? null);
@@ -257,6 +305,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
       ...current,
       mode: 'online',
       connecting: false,
+      resumingRoom: false,
       connected: true,
       roomId: snapshot.room.id,
       phase: snapshot.room.phase,
@@ -271,14 +320,16 @@ export function GameProvider({ children, initialState = null, storage: storagePr
       tenDayReadyForceIds: snapshot.room.tenDayReadyForceIds,
       error: null,
     }));
-  }, []);
+  }, [storage]);
 
   const disconnectOnline = useCallback(() => {
     socketRef.current?.disconnect();
     socketRef.current = null;
+    clearLastOnlineRoom(storage);
     setOnline({
       mode: 'local',
       connecting: false,
+      resumingRoom: false,
       connected: false,
       serverUrl: DEFAULT_ONLINE_SERVER_URL,
       roomId: null,
@@ -294,16 +345,18 @@ export function GameProvider({ children, initialState = null, storage: storagePr
       tenDayReadyForceIds: [],
       error: null,
     });
-  }, []);
+  }, [storage]);
 
   const expireAuthSession = useCallback((message: string) => {
     clearStoredAuthSession();
+    clearLastOnlineRoom(storage);
     socketRef.current?.disconnect();
     socketRef.current = null;
     setAuth({ token: null, userId: null, username: null, loading: false, error: message });
     setOnline({
       mode: 'local',
       connecting: false,
+      resumingRoom: false,
       connected: false,
       serverUrl: DEFAULT_ONLINE_SERVER_URL,
       roomId: null,
@@ -319,7 +372,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
       tenDayReadyForceIds: [],
       error: message,
     });
-  }, []);
+  }, [storage]);
 
   const connectOnlineSocket = useCallback((serverUrl: string) => new Promise<OnlineSocket>((resolve, reject) => {
     socketRef.current?.disconnect();
@@ -359,6 +412,52 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     socket.on('room:update', applyOnlineSnapshot);
     socket.connect();
   }), [applyOnlineSnapshot]);
+
+  useEffect(() => {
+    const token = auth.token;
+    if (!token || attemptedResumeRef.current) return;
+    attemptedResumeRef.current = true;
+    const lastRoom = storedLastOnlineRoom(storage);
+    if (!lastRoom) return;
+
+    void (async () => {
+      try {
+        setOnline((current) => ({
+          ...current,
+          mode: 'online',
+          connecting: true,
+          resumingRoom: true,
+          serverUrl: lastRoom.serverUrl,
+          error: null,
+        }));
+        const socket = await connectOnlineSocket(lastRoom.serverUrl);
+        await new Promise<void>((resolve, reject) => {
+          socket.emit('auth:session', { token }, (response) => {
+            if (!response.ok) {
+              expireAuthSession(response.reason);
+              reject(new Error(response.reason));
+              return;
+            }
+            applyAuthSession(response.session);
+            resolve();
+          });
+        });
+        await new Promise<void>((resolve, reject) => {
+          socket.emit('room:resume', { token, roomId: lastRoom.roomId }, (response) => {
+            if (!response.ok) {
+              setOnline((current) => ({ ...current, error: response.reason }));
+              reject(new Error(response.reason));
+              return;
+            }
+            applyOnlineSnapshot(response.snapshot);
+            resolve();
+          });
+        });
+      } catch {
+        setOnline((current) => ({ ...current, connecting: false, resumingRoom: false }));
+      }
+    })();
+  }, [applyAuthSession, applyOnlineSnapshot, auth.token, connectOnlineSocket, expireAuthSession, storage]);
 
   const registerAccount = useCallback(async (input: { username: string; password: string; serverUrl?: string }) => {
     setAuth((current) => ({ ...current, loading: true, error: null }));
@@ -413,6 +512,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
   }, [disconnectOnline]);
 
   const loadOnlineRooms = useCallback(async (input: { serverUrl?: string } = {}) => {
+    if (onlineRef.current.resumingRoom) return;
     const token = authRef.current.token;
     if (!token) {
       const message = '请先登录';
@@ -488,6 +588,37 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     });
   }, [applyOnlineSnapshot, connectOnlineSocket, expireAuthSession]);
 
+  const resumeOnlineRoom = useCallback(async (input: { serverUrl?: string; roomId?: string } = {}) => {
+    const token = authRef.current.token;
+    if (!token) {
+      const message = '请先登录';
+      setAuth((current) => ({ ...current, error: message }));
+      throw new Error(message);
+    }
+    setOnline((current) => ({ ...current, resumingRoom: true }));
+    try {
+      const socket = await connectOnlineSocket(input.serverUrl ?? onlineRef.current.serverUrl);
+      await new Promise<void>((resolve, reject) => {
+        socket.emit('room:resume', {
+          token,
+          ...(input.roomId ? { roomId: input.roomId.trim().toUpperCase() } : {}),
+        }, (response) => {
+          if (!response.ok) {
+            if (isAuthExpired(response.reason)) expireAuthSession(response.reason);
+            setOnline((current) => ({ ...current, connecting: false, resumingRoom: false, error: response.reason }));
+            reject(new Error(response.reason));
+            return;
+          }
+          applyOnlineSnapshot(response.snapshot);
+          resolve();
+        });
+      });
+    } catch (resumeError) {
+      setOnline((current) => ({ ...current, connecting: false, resumingRoom: false }));
+      throw resumeError;
+    }
+  }, [applyOnlineSnapshot, connectOnlineSocket, expireAuthSession]);
+
   const selectOnlineForce = useCallback(async (forceId: ForceId) => {
     const socket = socketRef.current;
     const current = onlineRef.current;
@@ -559,6 +690,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
       intent,
     }, (response) => {
       if (response.ok) {
+        if (response.snapshot) applyOnlineSnapshot(response.snapshot);
         afterSuccess?.();
         return;
       }
@@ -627,13 +759,50 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     }
   }, [persist, state]);
 
-  const deployBattleUnit = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; food: number }) => {
+  const deployBattleUnit = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; gold?: number; food: number }) => {
     if (onlineRef.current.mode === 'online') {
       sendOnlineIntent({ type: 'deployUnit', input }, playTroopMoveSound);
       return;
     }
     applyBattleAction((current) => resolveDeployUnit(current, current.playerForceId, input), playTroopMoveSound);
   }, [applyBattleAction, sendOnlineIntent]);
+
+  const afterDeployActionSound = useCallback((action: DeployFollowupAction) => {
+    if (action.type === 'wait') playTroopMoveSound();
+    if (action.type === 'attackUnit' || action.type === 'attackFacility' || action.type === 'attackCity') playTroopAttackSound();
+    if (action.type === 'useUnitTactic' && action.tacticId === 'spear-thrust') playSpearThrustSound();
+    if (action.type === 'useUnitStrategy' && action.strategyId === 'fire') playFireEverythingSound();
+    if (action.type === 'buildFacility' || action.type === 'repairFacility') playStartProjectSound();
+  }, []);
+
+  const deployBattleUnitAction = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction) => {
+    const afterSuccess = () => afterDeployActionSound(action);
+    if (onlineRef.current.mode === 'online') {
+      sendOnlineIntent({ type: 'deployUnitAction', input, action }, afterSuccess);
+      return;
+    }
+    applyBattleAction((current) => {
+      const deployed = resolveDeployUnitWithId(current, current.playerForceId, input);
+      switch (action.type) {
+        case 'wait':
+          return deployed.state;
+        case 'attackUnit':
+          return resolveAttackUnit(deployed.state, deployed.state.playerForceId, deployed.unitId, action.targetId);
+        case 'attackFacility':
+          return resolveAttackFacility(deployed.state, deployed.state.playerForceId, deployed.unitId, action.facilityId);
+        case 'attackCity':
+          return resolveAttackCity(deployed.state, deployed.state.playerForceId, deployed.unitId, action.cityId);
+        case 'useUnitTactic':
+          return resolveUseUnitTactic(deployed.state, deployed.state.playerForceId, deployed.unitId, action.targetId, action.tacticId);
+        case 'useUnitStrategy':
+          return resolveUseUnitStrategy(deployed.state, deployed.state.playerForceId, deployed.unitId, action.strategyId, action.selection);
+        case 'buildFacility':
+          return resolveBuildFacility(deployed.state, deployed.state.playerForceId, deployed.unitId, action.facilityType, action.target);
+        case 'repairFacility':
+          return resolveRepairFacility(deployed.state, deployed.state.playerForceId, deployed.unitId, action.facilityId);
+      }
+    }, afterSuccess);
+  }, [afterDeployActionSound, applyBattleAction, sendOnlineIntent]);
 
   const deployTransport = useCallback((input: { cityId: CityId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }) => {
     if (onlineRef.current.mode === 'online') {
@@ -668,6 +837,23 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     });
   }, [applyBattleAction, sendOnlineIntent]);
 
+  const attackBattleFacility = useCallback((attackerId: string, facilityId: string, destination?: GridCoord) => {
+    if (onlineRef.current.mode === 'online') {
+      sendOnlineIntent({ type: 'attackFacility', attackerId, facilityId, destination }, () => {
+        playTroopAttackSound();
+      });
+      return;
+    }
+    applyBattleAction((current) => {
+      const attacker = current.units[attackerId];
+      const needsMove = destination && attacker && (attacker.q !== destination.q || attacker.r !== destination.r);
+      const moved = needsMove ? resolveMoveUnit(current, current.playerForceId, attackerId, destination) : current;
+      return resolveAttackFacility(moved, moved.playerForceId, attackerId, facilityId);
+    }, () => {
+      playTroopAttackSound();
+    });
+  }, [applyBattleAction, sendOnlineIntent]);
+
   const useBattleTactic = useCallback((attackerId: string, targetId: string, tacticId: TacticId, destination?: GridCoord) => {
     if (onlineRef.current.mode === 'online') {
       sendOnlineIntent({ type: 'useUnitTactic', attackerId, targetId, tacticId, destination }, () => {
@@ -683,6 +869,67 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     }, () => {
       if (tacticId === 'spear-thrust') playSpearThrustSound();
     });
+  }, [applyBattleAction, sendOnlineIntent]);
+
+  const useBattleStrategy = useCallback((unitId: string, strategyId: StrategyId, selection: StrategySelection, destination?: GridCoord) => {
+    const afterSuccess = strategyId === 'fire' ? playFireEverythingSound : undefined;
+    if (onlineRef.current.mode === 'online') {
+      sendOnlineIntent({ type: 'useUnitStrategy', unitId, strategyId, selection, destination }, afterSuccess);
+      return;
+    }
+    applyBattleAction((current) => {
+      const unit = current.units[unitId];
+      const needsMove = destination && unit && (unit.q !== destination.q || unit.r !== destination.r);
+      const moved = needsMove ? resolveMoveUnit(current, current.playerForceId, unitId, destination) : current;
+      return resolveUseUnitStrategy(moved, moved.playerForceId, unitId, strategyId, selection);
+    }, afterSuccess);
+  }, [applyBattleAction, sendOnlineIntent]);
+
+  const useBattleFirePlot = useCallback((unitId: string, target: GridCoord, destination?: GridCoord) => {
+    if (onlineRef.current.mode === 'online') {
+      sendOnlineIntent({ type: 'useFirePlot', unitId, target, destination }, playFireEverythingSound);
+      return;
+    }
+    applyBattleAction((current) => {
+      const unit = current.units[unitId];
+      const needsMove = destination && unit && (unit.q !== destination.q || unit.r !== destination.r);
+      const moved = needsMove ? resolveMoveUnit(current, current.playerForceId, unitId, destination) : current;
+      return resolveUseFirePlot(moved, moved.playerForceId, unitId, target);
+    }, playFireEverythingSound);
+  }, [applyBattleAction, sendOnlineIntent]);
+
+  const buildBattleFacility = useCallback((unitId: string, facilityType: FacilityType, target: GridCoord, destination?: GridCoord) => {
+    if (onlineRef.current.mode === 'online') {
+      sendOnlineIntent({ type: 'buildFacility', unitId, facilityType, target, destination }, playStartProjectSound);
+      return;
+    }
+    applyBattleAction((current) => {
+      const unit = current.units[unitId];
+      const needsMove = destination && unit && (unit.q !== destination.q || unit.r !== destination.r);
+      const moved = needsMove ? resolveMoveUnit(current, current.playerForceId, unitId, destination) : current;
+      return resolveBuildFacility(moved, moved.playerForceId, unitId, facilityType, target);
+    }, playStartProjectSound);
+  }, [applyBattleAction, sendOnlineIntent]);
+
+  const repairBattleFacility = useCallback((unitId: string, facilityId: string, destination?: GridCoord) => {
+    if (onlineRef.current.mode === 'online') {
+      sendOnlineIntent({ type: 'repairFacility', unitId, facilityId, destination }, playStartProjectSound);
+      return;
+    }
+    applyBattleAction((current) => {
+      const unit = current.units[unitId];
+      const needsMove = destination && unit && (unit.q !== destination.q || unit.r !== destination.r);
+      const moved = needsMove ? resolveMoveUnit(current, current.playerForceId, unitId, destination) : current;
+      return resolveRepairFacility(moved, moved.playerForceId, unitId, facilityId);
+    }, playStartProjectSound);
+  }, [applyBattleAction, sendOnlineIntent]);
+
+  const dismantleBattleFacility = useCallback((facilityId: string) => {
+    if (onlineRef.current.mode === 'online') {
+      sendOnlineIntent({ type: 'dismantleFacility', facilityId });
+      return;
+    }
+    applyBattleAction((current) => resolveDismantleFacility(current, current.playerForceId, facilityId));
   }, [applyBattleAction, sendOnlineIntent]);
 
   const attackBattleCity = useCallback((attackerId: string, cityId: CityId, destination?: GridCoord) => {
@@ -795,16 +1042,24 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     loadOnlineRooms,
     createOnlineRoom,
     joinOnlineRoom,
+    resumeOnlineRoom,
     selectOnlineForce,
     startOnlineGame,
     disconnectOnline,
     loadGame,
     issueCommand,
     deployUnit: deployBattleUnit,
+    deployUnitAction: deployBattleUnitAction,
     deployTransportUnit: deployTransport,
     moveUnit: moveBattleUnit,
     attackUnit: attackBattleUnit,
+    attackFacility: attackBattleFacility,
     useUnitTactic: useBattleTactic,
+    useUnitStrategy: useBattleStrategy,
+    useFirePlot: useBattleFirePlot,
+    buildFacility: buildBattleFacility,
+    repairFacility: repairBattleFacility,
+    dismantleFacility: dismantleBattleFacility,
     attackCity: attackBattleCity,
     waitUnit: waitBattleUnit,
     applyMapEditorMap,
@@ -815,7 +1070,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     clearSave: clearSaveSlot,
     selectCity: setSelectedCityId,
     clearError: () => setError(null),
-  }), [applyMapEditorMap, attackBattleCity, attackBattleUnit, auth, availability, clearSaveSlot, createOnlineRoom, deployBattleUnit, deployTransport, disconnectOnline, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, registerAccount, resetGame, selectedCityId, selectOnlineForce, startGame, startOnlineGame, state, useBattleTactic, waitBattleUnit]);
+  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattleUnit, auth, availability, buildBattleFacility, clearSaveSlot, createOnlineRoom, deployBattleUnit, deployBattleUnitAction, deployTransport, disconnectOnline, dismantleBattleFacility, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, selectedCityId, selectOnlineForce, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 }

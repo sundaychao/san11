@@ -1,13 +1,22 @@
 import { armamentsOf, TRANSPORT_MOVEMENT, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT } from '../armaments';
-import type { ArmyUnit, City, CityId, ForceId, GameState, GridCell, TerrainType, TroopType } from '../types';
+import type { ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, GridCell, TerrainType, TroopType } from '../types';
 import { nextRandom } from '../random';
 import { territoryCityAt } from '../territory';
-import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
+import { coordsWithinRange, gridKey, isSameCoord, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 
-const DEPLOY_AP_COST = 20;
+export const DEPLOY_AP_COST = 20;
 export const BASE_MOVEMENT = TROOP_MOVEMENT.sword;
 const DEFENSE_MIN_TROOPS = 1000;
 const DEFENSE_MAX_TROOPS = 3000;
+const DRUM_DAMAGE_MULTIPLIER = 1.15;
+const FORTRESS_DAMAGE_MULTIPLIER = 0.7;
+const FORTRESS_SUPPLY_MULTIPLIER = 0.7;
+const FORTRESS_RANGE = 3;
+const ARROW_TOWER_DAMAGE = 300;
+const FIRE_PLOT_DAMAGE = 500;
+const FIRE_SEED_DAMAGE = 700;
+const FIRE_BALL_DAMAGE = 700;
+const FACILITY_BUILD_DURABILITY_PER_TEN_THOUSAND = 500;
 
 export type MovementProfile = TroopType | 'transport';
 
@@ -62,6 +71,7 @@ export interface DeployInput {
   troopType?: TroopType;
   destination?: GridCoord;
   troops: number;
+  gold?: number;
   food: number;
 }
 
@@ -97,6 +107,25 @@ export interface UnitTactic {
   power: number;
 }
 
+export type StrategyId = 'fire' | 'extinguish' | 'false-report' | 'disturb' | 'calm' | 'inspire' | 'discord';
+
+export interface UnitStrategy {
+  id: StrategyId;
+  name: string;
+  cost: number;
+  target: 'cell' | 'unit';
+}
+
+export interface UnitFacility {
+  type: FacilityType;
+  name: string;
+  durability: number;
+}
+
+export type StrategySelection =
+  | { coord: GridCoord; targetUnitId?: never }
+  | { targetUnitId: string; coord?: never };
+
 const TACTICS: Record<TacticId, UnitTactic> = {
   'spear-thrust': { id: 'spear-thrust', name: '突刺', troopType: 'spear', cost: 15, range: 1, power: 1.18 },
   'spear-spiral': { id: 'spear-spiral', name: '螺旋突刺', troopType: 'spear', cost: 20, range: 1, power: 1.23 },
@@ -118,6 +147,38 @@ const TACTICS_BY_TROOP: Partial<Record<TroopType, TacticId[]>> = {
   crossbow: ['crossbow-fire', 'crossbow-pierce', 'crossbow-volley'],
   cavalry: ['cavalry-charge', 'cavalry-breakthrough', 'cavalry-rush'],
 };
+
+const STRATEGIES: Record<StrategyId, UnitStrategy> = {
+  fire: { id: 'fire', name: '火计', cost: 10, target: 'cell' },
+  extinguish: { id: 'extinguish', name: '灭火', cost: 10, target: 'cell' },
+  'false-report': { id: 'false-report', name: '伪报', cost: 15, target: 'unit' },
+  disturb: { id: 'disturb', name: '扰乱', cost: 15, target: 'unit' },
+  calm: { id: 'calm', name: '镇定', cost: 10, target: 'unit' },
+  inspire: { id: 'inspire', name: '鼓舞', cost: 10, target: 'unit' },
+  discord: { id: 'discord', name: '内讧', cost: 20, target: 'unit' },
+};
+
+export const FACILITY_BUILD_COSTS: Record<FacilityType, number> = {
+  fortress: 900,
+  arrowTower: 600,
+  earthwork: 400,
+  drum: 800,
+  musicTower: 800,
+  fireSeed: 400,
+  fireBall: 400,
+};
+
+const FACILITIES: Partial<Record<FacilityType, UnitFacility>> = {
+  drum: { type: 'drum', name: '太鼓台', durability: 800 },
+  arrowTower: { type: 'arrowTower', name: '箭楼', durability: 700 },
+  musicTower: { type: 'musicTower', name: '军乐台', durability: 800 },
+  earthwork: { type: 'earthwork', name: '土垒', durability: 400 },
+  fireSeed: { type: 'fireSeed', name: '火种', durability: 200 },
+  fireBall: { type: 'fireBall', name: '火球', durability: 200 },
+};
+FACILITIES.fortress = { type: 'fortress', name: '城塞', durability: 1200 };
+const SPACING_LIMITED_FACILITY_TYPES = new Set<FacilityType>(['arrowTower', 'drum', 'musicTower', 'fortress']);
+const ZOC_FACILITY_TYPES = new Set<FacilityType>(['arrowTower', 'drum', 'musicTower', 'fortress']);
 
 function cellAt(state: GameState, coord: GridCoord): GridCell | undefined {
   return state.grid.find((cell) => cell.q === coord.q && cell.r === coord.r);
@@ -158,10 +219,109 @@ function occupiedUnitKeys(state: GameState, ignoredUnitId?: string) {
   return keys;
 }
 
+function occupiedFacilityKeys(state: GameState, ignoredFacilityId?: string) {
+  const keys = new Set<string>();
+  for (const facility of Object.values(state.facilities ?? {})) {
+    if (facility.id !== ignoredFacilityId) keys.add(gridKey(facility));
+  }
+  return keys;
+}
+
+function facilityAt(state: GameState, coord: GridCoord): Facility | undefined {
+  return Object.values(state.facilities ?? {}).find((facility) => facility.q === coord.q && facility.r === coord.r);
+}
+
+function facilityDefinition(type: FacilityType) {
+  return FACILITIES[type];
+}
+
+export function facilityIsCompleted(facility: Facility) {
+  return facility.completed !== false;
+}
+
+function facilityBuildPower(unit: Pick<ArmyUnit, 'troops'>) {
+  return Math.max(1, Math.ceil((unit.troops / 10000) * FACILITY_BUILD_DURABILITY_PER_TEN_THOUSAND));
+}
+
+function repairFacilityDurability(facility: Facility, amount: number) {
+  const definition = facilityDefinition(facility.type);
+  if (!definition) return facility;
+  const durability = Math.min(definition.durability, facility.durability + amount);
+  return {
+    ...facility,
+    durability,
+    completed: durability >= definition.durability,
+  };
+}
+
+function repairedDurabilityAmount(facility: Facility, amount: number) {
+  const definition = facilityDefinition(facility.type);
+  if (!definition) return 0;
+  return Math.max(0, Math.min(definition.durability, facility.durability + amount) - facility.durability);
+}
+
+function addFacilityRepairReport(next: GameState, facility: Facility, amount: number, kind: FacilityRepairReport['kind']) {
+  next.facilityRepairReports = [{
+    id: `facility-repair-${next.month}-${next.tenDay}-${facility.id}`,
+    facilityId: facility.id,
+    q: facility.q,
+    r: facility.r,
+    amount,
+    kind,
+  }];
+}
+
+function controlledZoneKeysForForce(state: GameState, forceId: ForceId) {
+  const keys = new Set<string>();
+  const addNeighbors = (coord: GridCoord) => {
+    for (const neighbor of neighborsOf(coord.q, coord.r)) keys.add(gridKey(neighbor));
+  };
+
+  for (const unit of Object.values(state.units)) {
+    if (unit.forceId === forceId || unit.kind === 'transport' || unitIsIncapacitated(unit)) continue;
+    addNeighbors(unit);
+  }
+
+  for (const city of Object.values(state.cities)) {
+    if (city.ownerId === forceId) continue;
+    for (const coord of sevenCellCityFootprint(cityCenter(city))) addNeighbors(coord);
+  }
+
+  for (const facility of Object.values(state.facilities ?? {})) {
+    if (facility.forceId === forceId || !facilityIsCompleted(facility) || !ZOC_FACILITY_TYPES.has(facility.type)) continue;
+    addNeighbors(facility);
+  }
+
+  return keys;
+}
+
 function isLegalUnitCell(state: GameState, coord: GridCoord, ignoredUnitId?: string, profile: MovementProfile = 'sword') {
   return Number.isFinite(movementCost(state, coord, profile)) &&
     !allCityKeys(state).has(gridKey(coord)) &&
-    !occupiedUnitKeys(state, ignoredUnitId).has(gridKey(coord));
+    !occupiedUnitKeys(state, ignoredUnitId).has(gridKey(coord)) &&
+    !occupiedFacilityKeys(state).has(gridKey(coord));
+}
+
+function isSpacingLimitedFacility(type: FacilityType) {
+  return SPACING_LIMITED_FACILITY_TYPES.has(type);
+}
+
+function isInLimitedFacilitySpacing(state: GameState, coord: GridCoord, facilityType: FacilityType) {
+  if (!isSpacingLimitedFacility(facilityType)) return false;
+  return Object.values(state.facilities ?? {}).some((facility) => (
+    isSpacingLimitedFacility(facility.type) &&
+    coordsWithinRange(facility, 2).some((cell) => cell.q === coord.q && cell.r === coord.r)
+  ));
+}
+
+function isBuildableFacilityCell(state: GameState, coord: GridCoord, facilityType?: FacilityType) {
+  const cell = cellAt(state, coord);
+  if (!cell || ['mountain', 'deepWater'].includes(cell.terrain)) return false;
+  const key = gridKey(coord);
+  return !allCityKeys(state).has(key) &&
+    !occupiedUnitKeys(state).has(key) &&
+    !occupiedFacilityKeys(state).has(key) &&
+    (!facilityType || !isInLimitedFacilitySpacing(state, coord, facilityType));
 }
 
 function distance(a: GridCoord, b: GridCoord) {
@@ -209,8 +369,16 @@ function isCityInAttackRange(attacker: ArmyUnit, city: City) {
   ));
 }
 
+function isFacilityInAttackRange(attacker: ArmyUnit, facility: Facility) {
+  return gridDistanceWithin(attacker, facility, unitAttackRange(attacker)) <= unitAttackRange(attacker);
+}
+
+export function unitIsIncapacitated(unit: Pick<ArmyUnit, 'confusedTenDays' | 'falseReportedTenDays'>) {
+  return Boolean(unit.confusedTenDays || unit.falseReportedTenDays);
+}
+
 function isActionableFriendlyUnit(unit: ArmyUnit, forceId: ForceId) {
-  return unit.forceId === forceId && unit.kind !== 'transport' && !unit.moved && !unit.acted && unit.movementRemaining > 0;
+  return unit.forceId === forceId && unit.kind !== 'transport' && !unit.moved && !unit.acted && !unitIsIncapacitated(unit) && unit.movementRemaining > 0;
 }
 
 function cityCenter(city: City): GridCoord {
@@ -327,33 +495,17 @@ export function deploymentCells(state: GameState, cityId: CityId, movement?: num
   const start = cityCenter(city);
   const ownCityKeys = new Set(sevenCellCityFootprint(start).map(gridKey));
   const cityKeys = allCityKeys(state);
-  const unitKeys = occupiedUnitKeys(state);
-  const costs = new Map<string, number>([[gridKey(start), 0]]);
-  const coords = new Map<string, GridCoord>([[gridKey(start), start]]);
-  const frontier: GridCoord[] = [start];
+  const costs = reachableCostsFrom(state, start, movementBudget, profile, {
+    allowedCityTransitKeys: ownCityKeys,
+    movingForceId: city.ownerId,
+  });
 
-  while (frontier.length > 0) {
-    const current = frontier.shift()!;
-    const currentCost = costs.get(gridKey(current))!;
-    for (const neighbor of neighborsOf(current.q, current.r)) {
-      const key = gridKey(neighbor);
-      const insideOwnCity = ownCityKeys.has(key);
-      const terrainCost = movementCost(state, neighbor, profile);
-      if (!Number.isFinite(terrainCost)) continue;
-      if (!insideOwnCity && cityKeys.has(key)) continue;
-      if (unitKeys.has(key)) continue;
-      const nextCost = currentCost + terrainCost;
-      if (nextCost > movementBudget) continue;
-      if (costs.has(key) && costs.get(key)! <= nextCost) continue;
-      costs.set(key, nextCost);
-      coords.set(key, neighbor);
-      frontier.push(neighbor);
-    }
-  }
-
-  return [...coords.entries()]
+  return [...costs.entries()]
     .filter(([key]) => key !== gridKey(start) && !cityKeys.has(key))
-    .map(([, coord]) => coord)
+    .map(([key]) => {
+      const [q, r] = key.split(',').map(Number);
+      return { q, r };
+    })
     .sort((a, b) => a.q - b.q || a.r - b.r);
 }
 
@@ -362,7 +514,37 @@ function assertUnitTurn(state: GameState, forceId: ForceId, unitId: string): Arm
   if (!unit) throw new Error('部队不存在');
   if (unit.forceId !== forceId) throw new Error('只能操作己方部队');
   if (unit.acted) throw new Error('部队已经行动');
+  if (unit.confusedTenDays) throw new Error('部队混乱中，无法行动');
+  if (unit.falseReportedTenDays) throw new Error('部队伪报中，无法行动');
   return unit;
+}
+
+function facilityDamageMultiplier(state: GameState, attacker: ArmyUnit) {
+  const boosted = Object.values(state.facilities ?? {}).some((facility) => (
+    facility.type === 'drum' &&
+    facilityIsCompleted(facility) &&
+    facility.forceId === attacker.forceId &&
+    gridDistanceWithin(facility, attacker, 3) <= 3
+  ));
+  return boosted ? DRUM_DAMAGE_MULTIPLIER : 1;
+}
+
+export function unitIsProtectedByFortress(state: GameState, unit: ArmyUnit) {
+  return Object.values(state.facilities ?? {}).some((facility) => (
+    facility.type === 'fortress' &&
+    facilityIsCompleted(facility) &&
+    facility.forceId === unit.forceId &&
+    gridDistanceWithin(facility, unit, FORTRESS_RANGE) <= FORTRESS_RANGE
+  ));
+}
+
+export function unitSupplyMultiplier(state: GameState, unit: ArmyUnit) {
+  return unitIsProtectedByFortress(state, unit) ? FORTRESS_SUPPLY_MULTIPLIER : 1;
+}
+
+function reduceUnitDamageByFortress(state: GameState, target: ArmyUnit, damage: number) {
+  const multiplier = unitIsProtectedByFortress(state, target) ? FORTRESS_DAMAGE_MULTIPLIER : 1;
+  return Math.min(target.troops, Math.max(0, Math.round(damage * multiplier)));
 }
 
 function damageRoll(state: GameState, attacker: ArmyUnit, defenderTerrain: TerrainType, counter = false) {
@@ -372,7 +554,7 @@ function damageRoll(state: GameState, attacker: ArmyUnit, defenderTerrain: Terra
   const attackScore = attacker.troops * (0.08 + officer.stats.leadership / 2000 + officer.stats.war / 3000);
   const rawDamage = 240 + attackScore;
   const randomModifier = 0.92 + roll.value * 0.16;
-  const damage = Math.round(rawDamage * TERRAIN_DEFENSE[defenderTerrain] * randomModifier * (counter ? 0.6 : 1));
+  const damage = Math.round(rawDamage * TERRAIN_DEFENSE[defenderTerrain] * randomModifier * facilityDamageMultiplier(state, attacker) * (counter ? 0.6 : 1));
   return Math.min(2200, Math.max(120, damage));
 }
 
@@ -393,20 +575,36 @@ function removeUnit(next: GameState, unit: ArmyUnit) {
   }
 }
 
-function reachableCosts(state: GameState, unit: ArmyUnit) {
-  const startKey = gridKey(unit);
-  const profile = movementProfileForUnit(unit);
+function reachableCostsFrom(
+  state: GameState,
+  start: GridCoord,
+  movementBudget: number,
+  profile: MovementProfile,
+  options: { ignoredUnitId?: string; allowedCityTransitKeys?: Set<string>; movingForceId?: ForceId } = {},
+) {
+  const startKey = gridKey(start);
   const costs = new Map<string, number>([[startKey, 0]]);
-  const frontier: GridCoord[] = [{ q: unit.q, r: unit.r }];
+  const frontier: GridCoord[] = [{ q: start.q, r: start.r }];
+  const cityKeys = allCityKeys(state);
+  const unitKeys = occupiedUnitKeys(state, options.ignoredUnitId);
+  const facilityKeys = occupiedFacilityKeys(state);
+  const zocKeys = options.movingForceId ? controlledZoneKeysForForce(state, options.movingForceId) : new Set<string>();
 
   while (frontier.length > 0) {
     const current = frontier.shift()!;
-    const currentCost = costs.get(gridKey(current))!;
+    const currentKey = gridKey(current);
+    if (currentKey !== startKey && zocKeys.has(currentKey)) continue;
+    const currentCost = costs.get(currentKey)!;
     for (const neighbor of neighborsOf(current.q, current.r)) {
-      if (!isLegalUnitCell(state, neighbor, unit.id, profile)) continue;
-      const nextCost = currentCost + movementCost(state, neighbor, profile);
       const key = gridKey(neighbor);
-      if (nextCost > unit.movementRemaining) continue;
+      const canTransitCity = options.allowedCityTransitKeys?.has(key) ?? false;
+      const terrainCost = movementCost(state, neighbor, profile);
+      if (!Number.isFinite(terrainCost)) continue;
+      if (!canTransitCity && cityKeys.has(key)) continue;
+      if (unitKeys.has(key)) continue;
+      if (facilityKeys.has(key)) continue;
+      const nextCost = currentCost + terrainCost;
+      if (nextCost > movementBudget) continue;
       if (costs.has(key) && costs.get(key)! <= nextCost) continue;
       costs.set(key, nextCost);
       frontier.push(neighbor);
@@ -416,9 +614,16 @@ function reachableCosts(state: GameState, unit: ArmyUnit) {
   return costs;
 }
 
+function reachableCosts(state: GameState, unit: ArmyUnit) {
+  return reachableCostsFrom(state, unit, unit.movementRemaining, movementProfileForUnit(unit), {
+    ignoredUnitId: unit.id,
+    movingForceId: unit.forceId,
+  });
+}
+
 export function movementCells(state: GameState, unitId: string): GridCoord[] {
   const unit = state.units[unitId];
-  if (!unit || unit.moved || unit.movementRemaining <= 0) return [];
+  if (!unit || unit.moved || unitIsIncapacitated(unit) || unit.movementRemaining <= 0) return [];
   return [...reachableCosts(state, unit).entries()]
     .filter(([key]) => key !== gridKey(unit))
     .map(([key]) => {
@@ -449,6 +654,18 @@ export function attackableCities(state: GameState, attackerId: string, origin?: 
     .sort((a, b) => (
       Math.min(...sevenCellCityFootprint(cityCenter(a)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, unitAttackRange(attackerAtOrigin)))) -
       Math.min(...sevenCellCityFootprint(cityCenter(b)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, unitAttackRange(attackerAtOrigin)))) ||
+      a.id.localeCompare(b.id)
+    ));
+}
+
+export function attackableFacilities(state: GameState, attackerId: string, origin?: GridCoord): Facility[] {
+  const attacker = state.units[attackerId];
+  if (!attacker || attacker.kind === 'transport') return [];
+  const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
+  return Object.values(state.facilities ?? {})
+    .filter((facility) => facility.forceId !== attacker.forceId && isFacilityInAttackRange(attackerAtOrigin, facility))
+    .sort((a, b) => (
+      gridDistanceWithin(attackerAtOrigin, a, unitAttackRange(attackerAtOrigin)) - gridDistanceWithin(attackerAtOrigin, b, unitAttackRange(attackerAtOrigin)) ||
       a.id.localeCompare(b.id)
     ));
 }
@@ -484,14 +701,107 @@ export function tacticTargetUnits(state: GameState, attackerId: string, tacticId
   const tactic = TACTICS[tacticId];
   if (!attacker || attacker.kind === 'transport' || !tactic || tactic.troopType !== (attacker.troopType ?? 'sword')) return [];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
+  const minRange = tacticId === 'crossbow-fire' ? 2 : 1;
   return Object.values(state.units)
-    .filter((unit) => (
-      unit.id !== attacker.id &&
-      unit.forceId !== attacker.forceId &&
-      gridDistanceWithin(attackerAtOrigin, unit, tactic.range) <= tactic.range
-    ))
+    .filter((unit) => {
+      if (unit.id === attacker.id || unit.forceId === attacker.forceId) return false;
+      const range = gridDistanceWithin(attackerAtOrigin, unit, tactic.range);
+      return range >= minRange && range <= tactic.range;
+    })
     .sort((a, b) => (
       gridDistanceWithin(attackerAtOrigin, a, tactic.range) - gridDistanceWithin(attackerAtOrigin, b, tactic.range) ||
+      a.id.localeCompare(b.id)
+    ));
+}
+
+export function firePlotCells(state: GameState, unitId: string, origin?: GridCoord): GridCoord[] {
+  const unit = state.units[unitId];
+  if (!unit) return [];
+  const source = origin ?? unit;
+  const gridKeys = new Set(state.grid.map(gridKey));
+  return neighborsOf(source.q, source.r)
+    .filter((coord) => gridKeys.has(gridKey(coord)))
+    .sort((a, b) => a.q - b.q || a.r - b.r);
+}
+
+export function unitFacilities(): UnitFacility[] {
+  return Object.values(FACILITIES).filter((facility): facility is UnitFacility => Boolean(facility));
+}
+
+export function facilityBuildTargets(state: GameState, unitId: string, origin?: GridCoord, facilityType?: FacilityType): GridCoord[] {
+  const unit = state.units[unitId];
+  if (!unit) return [];
+  if (facilityType && (unit.gold ?? 0) < FACILITY_BUILD_COSTS[facilityType]) return [];
+  const source = origin ?? unit;
+  return neighborsOf(source.q, source.r)
+    .filter((coord) => isBuildableFacilityCell(state, coord, facilityType))
+    .sort((a, b) => a.q - b.q || a.r - b.r);
+}
+
+export function repairableFacilities(state: GameState, unitId: string, origin?: GridCoord): Facility[] {
+  const unit = state.units[unitId];
+  if (!unit || unit.kind === 'transport') return [];
+  const source = origin ? { ...unit, q: origin.q, r: origin.r } : unit;
+  return Object.values(state.facilities ?? {})
+    .filter((facility) => {
+      if (facility.forceId !== unit.forceId || facilityIsCompleted(facility) || gridDistanceWithin(source, facility, 1) > 1) return false;
+      const definition = facilityDefinition(facility.type);
+      return Boolean(definition && facility.durability < definition.durability);
+    })
+    .sort((a, b) => (
+      gridDistanceWithin(source, a, 1) - gridDistanceWithin(source, b, 1) ||
+      a.id.localeCompare(b.id)
+    ));
+}
+
+function hasSameForceNeighbor(state: GameState, source: ArmyUnit) {
+  return Object.values(state.units).some((unit) => (
+    unit.id !== source.id &&
+    unit.forceId === source.forceId &&
+    areAdjacent(source, unit)
+  ));
+}
+
+function friendlyAbnormal(unit: ArmyUnit) {
+  return Boolean(unit.confusedTenDays || unit.falseReportedTenDays);
+}
+
+export function unitStrategies(): UnitStrategy[] {
+  return Object.values(STRATEGIES);
+}
+
+export function strategyTargetCells(state: GameState, unitId: string, strategyId: StrategyId, origin?: GridCoord): GridCoord[] {
+  const unit = state.units[unitId];
+  if (!unit || unit.kind === 'transport') return [];
+  const source = origin ? { ...unit, q: origin.q, r: origin.r } : unit;
+  if (strategyId === 'fire') return firePlotCells(state, unitId, origin);
+  if (strategyId !== 'extinguish') return [];
+
+  const gridKeys = new Set(state.grid.map(gridKey));
+  return (state.firePlots ?? [])
+    .filter((plot) => gridKeys.has(gridKey(plot)) && gridDistanceWithin(source, plot, 2) <= 2)
+    .sort((a, b) => gridDistanceWithin(source, a, 2) - gridDistanceWithin(source, b, 2) || a.q - b.q || a.r - b.r);
+}
+
+export function strategyTargetUnits(state: GameState, unitId: string, strategyId: StrategyId, origin?: GridCoord): ArmyUnit[] {
+  const unit = state.units[unitId];
+  if (!unit || unit.kind === 'transport') return [];
+  const source = origin ? { ...unit, q: origin.q, r: origin.r } : unit;
+  const range = strategyId === 'discord' ? 1 : 2;
+  return Object.values(state.units)
+    .filter((target) => {
+      if (target.kind === 'transport') return false;
+      if (gridDistanceWithin(source, target, range) > range) return false;
+      if (strategyId === 'false-report' || strategyId === 'disturb') return target.forceId !== unit.forceId;
+      if (strategyId === 'calm') return target.forceId === unit.forceId && friendlyAbnormal(target);
+      if (strategyId === 'inspire') return target.forceId === unit.forceId && target.energy < 100;
+      if (strategyId === 'discord') {
+        return target.forceId !== unit.forceId && (target.troopType ?? 'sword') !== 'siege' && hasSameForceNeighbor(state, target);
+      }
+      return false;
+    })
+    .sort((a, b) => (
+      gridDistanceWithin(source, a, range) - gridDistanceWithin(source, b, range) ||
       a.id.localeCompare(b.id)
     ));
 }
@@ -512,6 +822,28 @@ function projectBeyond(from: GridCoord, through: GridCoord, scale = 1): GridCoor
   return r === null ? null : { q, r };
 }
 
+function crossbowPierceMiddleUnit(state: GameState, attacker: ArmyUnit, target: ArmyUnit): ArmyUnit | null {
+  if (areAdjacent(attacker, target)) return null;
+  const straightCells = neighborsOf(attacker.q, attacker.r).filter((neighbor) => {
+    const projected = projectBeyond(attacker, neighbor);
+    return projected?.q === target.q && projected.r === target.r;
+  });
+  const targetNeighborKeys = new Set(neighborsOf(target.q, target.r).map(gridKey));
+  const sharedCells = neighborsOf(attacker.q, attacker.r).filter((neighbor) => targetNeighborKeys.has(gridKey(neighbor)));
+  const candidates = [...straightCells, ...sharedCells.filter((cell) => !straightCells.some((straight) => isSameCoord(straight, cell)))];
+
+  for (const cell of candidates) {
+    const middle = Object.values(state.units).find((unit) => (
+      unit.id !== attacker.id &&
+      unit.id !== target.id &&
+      unit.q === cell.q &&
+      unit.r === cell.r
+    ));
+    if (middle) return middle;
+  }
+  return null;
+}
+
 function tryMoveUnit(next: GameState, unitId: string, destination: GridCoord) {
   if (!isLegalUnitCell(next, destination, unitId)) return false;
   next.units[unitId].q = destination.q;
@@ -519,19 +851,36 @@ function tryMoveUnit(next: GameState, unitId: string, destination: GridCoord) {
   return true;
 }
 
+function unitAtCoord(state: GameState, coord: GridCoord, excludedIds: string[] = []) {
+  const excluded = new Set(excludedIds);
+  return Object.values(state.units).find((unit) => (
+    !excluded.has(unit.id) &&
+    unit.q === coord.q &&
+    unit.r === coord.r
+  ));
+}
+
 function tacticAffectedUnits(next: GameState, attacker: ArmyUnit, target: ArmyUnit, tactic: UnitTactic): ArmyUnit[] {
+  if (tactic.id === 'spear-thrust' || tactic.id === 'spear-double') {
+    const rearCoord = projectBeyond(attacker, target);
+    const rearUnit = rearCoord ? unitAtCoord(next, rearCoord, [attacker.id, target.id]) : undefined;
+    return rearUnit ? [target, rearUnit] : [target];
+  }
   if (tactic.id === 'halberd-whirlwind') {
     return Object.values(next.units).filter((unit) => unit.forceId !== attacker.forceId && areAdjacent(attacker, unit));
   }
   if (tactic.id === 'halberd-sweep') {
     return Object.values(next.units)
-      .filter((unit) => unit.forceId !== attacker.forceId && (unit.id === target.id || areAdjacent(target, unit)))
+      .filter((unit) => (
+        unit.id === target.id ||
+        (unit.forceId === target.forceId && areAdjacent(target, unit) && areAdjacent(attacker, unit))
+      ))
       .slice(0, 3);
   }
   if (tactic.id === 'crossbow-pierce') {
-    const behind = projectBeyond(attacker, target);
+    const middle = crossbowPierceMiddleUnit(next, attacker, target);
     return Object.values(next.units)
-      .filter((unit) => unit.id === target.id || (behind && unit.q === behind.q && unit.r === behind.r));
+      .filter((unit) => unit.id === target.id || unit.id === middle?.id);
   }
   if (tactic.id === 'crossbow-volley') {
     return Object.values(next.units).filter((unit) => unit.id === target.id || gridDistanceWithin(target, unit, 1) <= 1);
@@ -543,7 +892,7 @@ function applyTacticDamage(next: GameState, attacker: ArmyUnit, target: ArmyUnit
   const nextAttacker = next.units[attacker.id];
   const nextTarget = next.units[target.id];
   if (!nextAttacker || !nextTarget) return;
-  const damage = Math.min(nextTarget.troops, Math.round(damageRoll(next, nextAttacker, unitTerrain(next, nextTarget)) * tactic.power));
+  const damage = reduceUnitDamageByFortress(next, nextTarget, Math.round(damageRoll(next, nextAttacker, unitTerrain(next, nextTarget)) * tactic.power));
   nextTarget.troops -= damage;
   next.battleDamageReports ??= [];
   next.battleDamageReports.push({
@@ -568,12 +917,11 @@ function applyTacticPositionEffect(next: GameState, attackerId: string, targetId
   } else if (tactic.id === 'spear-double') {
     const farDestination = projectBeyond(attacker, target, 2);
     const nearDestination = projectBeyond(attacker, target);
+    if (!nearDestination || !isLegalUnitCell(next, nearDestination, targetId)) return;
     if (farDestination && tryMoveUnit(next, targetId, farDestination)) return;
-    if (nearDestination) tryMoveUnit(next, targetId, nearDestination);
+    tryMoveUnit(next, targetId, nearDestination);
   } else if (tactic.id === 'spear-spiral') {
     next.units[targetId].confusedTenDays = 1;
-  } else if (tactic.id === 'crossbow-fire') {
-    next.units[targetId].burningTenDays = 1;
   } else if (tactic.id === 'cavalry-charge') {
     const oldTarget = { q: target.q, r: target.r };
     const destination = projectBeyond(attacker, target);
@@ -609,13 +957,261 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
   const nextAttacker = next.units[attackerId];
   const nextTarget = next.units[targetId];
   const affected = tacticAffectedUnits(next, nextAttacker, nextTarget, tactic);
+  const fireArrowCells = tactic.id === 'crossbow-fire'
+    ? affected.map((unit) => ({ q: unit.q, r: unit.r }))
+    : [];
   for (const affectedUnit of affected) applyTacticDamage(next, nextAttacker, affectedUnit, tactic);
+  if (fireArrowCells.length > 0) igniteGroundFire(next, fireArrowCells);
   if (next.units[targetId]) applyTacticPositionEffect(next, attackerId, targetId, tactic);
   if (next.units[attackerId]) {
     next.units[attackerId].energy -= tactic.cost;
     next.units[attackerId].acted = true;
   }
   return next;
+}
+
+function spendStrategyCost(next: GameState, unitId: string, strategy: UnitStrategy) {
+  const unit = next.units[unitId];
+  if (!unit) return;
+  unit.energy -= strategy.cost;
+  unit.acted = true;
+}
+
+function discordVictim(next: GameState, target: ArmyUnit) {
+  return Object.values(next.units)
+    .filter((unit) => unit.id !== target.id && unit.forceId === target.forceId && areAdjacent(target, unit))
+    .sort((a, b) => a.troops - b.troops || a.id.localeCompare(b.id))[0];
+}
+
+function addDamageReport(next: GameState, unit: ArmyUnit, amount: number, prefix: string) {
+  next.battleDamageReports ??= [];
+  next.battleDamageReports.push({
+    id: `${prefix}-${next.month}-${next.tenDay}-${next.rngCursor}-${unit.id}-${next.battleDamageReports.length}`,
+    unitId: unit.id,
+    q: unit.q,
+    r: unit.r,
+    amount,
+    kind: 'attack',
+  });
+}
+
+function damageUnitsAt(next: GameState, coords: GridCoord[], amount: number, prefix: string) {
+  const keys = new Set(coords.map(gridKey));
+  for (const unit of [...Object.values(next.units)]) {
+    if (!keys.has(gridKey(unit))) continue;
+    const nextUnit = next.units[unit.id];
+    if (!nextUnit) continue;
+    const damage = reduceUnitDamageByFortress(next, nextUnit, amount);
+    nextUnit.troops -= damage;
+    addDamageReport(next, nextUnit, damage, prefix);
+    if (nextUnit.troops <= 0) removeUnit(next, nextUnit);
+  }
+}
+
+function fireBallCells(state: GameState, source: GridCoord, trap: GridCoord) {
+  const gridKeys = new Set(state.grid.map(gridKey));
+  return [trap, projectBeyond(source, trap), projectBeyond(source, trap, 2)]
+    .filter((coord): coord is GridCoord => Boolean(coord && gridKeys.has(gridKey(coord))));
+}
+
+function addFirePlots(next: GameState, coords: GridCoord[]) {
+  const gridKeys = new Set(next.grid.map(gridKey));
+  next.firePlots ??= [];
+  const existing = new Set(next.firePlots.map(gridKey));
+  for (const coord of coords) {
+    const key = gridKey(coord);
+    if (!gridKeys.has(key) || existing.has(key)) continue;
+    next.firePlots.push({ q: coord.q, r: coord.r });
+    existing.add(key);
+  }
+}
+
+function igniteGroundFire(next: GameState, coords: GridCoord[]) {
+  addFirePlots(next, coords);
+  damageUnitsAt(next, coords, FIRE_PLOT_DAMAGE, 'fire-plot');
+}
+
+function igniteFacility(next: GameState, source: GridCoord, facility: Facility) {
+  if (!facilityIsCompleted(facility)) return false;
+  if (facility.type === 'fireSeed') {
+    const cells = [facility, ...neighborsOf(facility.q, facility.r)];
+    addFirePlots(next, cells);
+    damageUnitsAt(next, cells, FIRE_SEED_DAMAGE, 'fire-seed');
+    delete next.facilities?.[facility.id];
+    return true;
+  }
+  if (facility.type === 'fireBall') {
+    const cells = fireBallCells(next, source, facility);
+    addFirePlots(next, cells);
+    damageUnitsAt(next, cells, FIRE_BALL_DAMAGE, 'fire-ball');
+    delete next.facilities?.[facility.id];
+    return true;
+  }
+  return false;
+}
+
+export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: string, strategyId: StrategyId, selection: StrategySelection): GameState {
+  const unit = assertUnitTurn(state, forceId, unitId);
+  const strategy = STRATEGIES[strategyId];
+  if (!strategy) throw new Error('部队不能使用该计略');
+  if (unit.kind === 'transport') throw new Error('运输队不能使用计略');
+  if (unit.energy < strategy.cost) throw new Error('气力不足');
+
+  if (strategy.target === 'cell') {
+    if (!selection.coord) throw new Error('计略目标不存在');
+    if (!strategyTargetCells(state, unitId, strategyId).some((coord) => coord.q === selection.coord.q && coord.r === selection.coord.r)) {
+      throw new Error('目标不在计略范围');
+    }
+
+    const next = structuredClone(state);
+    next.firePlots ??= [];
+    if (strategyId === 'fire') {
+      const facility = facilityAt(next, selection.coord);
+      if (facility && igniteFacility(next, next.units[unitId], facility)) {
+        next.battleDamageReports ??= [];
+      } else {
+        igniteGroundFire(next, [selection.coord]);
+      }
+    } else if (strategyId === 'extinguish') {
+      next.firePlots = next.firePlots.filter((plot) => plot.q !== selection.coord.q || plot.r !== selection.coord.r);
+    }
+    spendStrategyCost(next, unitId, strategy);
+    return next;
+  }
+
+  if (!selection.targetUnitId) throw new Error('计略目标不存在');
+  if (!strategyTargetUnits(state, unitId, strategyId).some((target) => target.id === selection.targetUnitId)) {
+    throw new Error('目标不在计略范围');
+  }
+
+  const next = structuredClone(state);
+  const target = next.units[selection.targetUnitId];
+  if (!target) throw new Error('计略目标不存在');
+
+  if (strategyId === 'false-report') {
+    target.falseReportedTenDays = 1;
+  } else if (strategyId === 'disturb') {
+    target.confusedTenDays = 1;
+  } else if (strategyId === 'calm') {
+    delete target.confusedTenDays;
+    delete target.falseReportedTenDays;
+  } else if (strategyId === 'inspire') {
+    target.energy = Math.min(100, target.energy + 20);
+  } else if (strategyId === 'discord') {
+    const victim = discordVictim(next, target);
+    if (!victim) throw new Error('目标不在计略范围');
+    const damage = reduceUnitDamageByFortress(next, victim, damageRoll(next, target, unitTerrain(next, victim)));
+    victim.troops -= damage;
+    next.battleDamageReports = [{
+      id: `strategy-${strategyId}-${next.month}-${next.tenDay}-${next.rngCursor}-${victim.id}`,
+      unitId: victim.id,
+      q: victim.q,
+      r: victim.r,
+      amount: damage,
+      kind: 'attack',
+    }];
+    if (victim.troops <= 0) removeUnit(next, victim);
+  }
+
+  spendStrategyCost(next, unitId, strategy);
+  return next;
+}
+
+export function useFirePlot(state: GameState, forceId: ForceId, unitId: string, target: GridCoord): GameState {
+  assertUnitTurn(state, forceId, unitId);
+  if (!firePlotCells(state, unitId).some((coord) => coord.q === target.q && coord.r === target.r)) {
+    throw new Error('目标不在火计范围');
+  }
+
+  const next = structuredClone(state);
+  next.firePlots ??= [];
+  if (!next.firePlots.some((plot) => plot.q === target.q && plot.r === target.r)) {
+    next.firePlots.push({ q: target.q, r: target.r });
+  }
+  return next;
+}
+
+export function buildFacility(state: GameState, forceId: ForceId, unitId: string, facilityType: FacilityType, target: GridCoord): GameState {
+  const unit = assertUnitTurn(state, forceId, unitId);
+  const facility = FACILITIES[facilityType];
+  if (!facility) throw new Error('设施不存在');
+  if (unit.kind === 'transport') throw new Error('运输队不能设置设施');
+  const buildCost = FACILITY_BUILD_COSTS[facilityType];
+  if ((unit.gold ?? 0) < buildCost) throw new Error(`资金不足 ${buildCost}`);
+  if (!facilityBuildTargets(state, unitId, undefined, facilityType).some((coord) => coord.q === target.q && coord.r === target.r)) {
+    throw new Error('设置位置不可用');
+  }
+
+  const next = structuredClone(state);
+  next.facilities ??= {};
+  const id = `facility-${facilityType}-${next.month}-${next.tenDay}-${unitId}-${Object.keys(next.facilities).length + 1}`;
+  const buildAmount = facilityBuildPower(unit);
+  const durability = Math.min(facility.durability, buildAmount);
+  next.facilities[id] = {
+    id,
+    type: facilityType,
+    forceId,
+    q: target.q,
+    r: target.r,
+    durability,
+    completed: durability >= facility.durability,
+  };
+  addFacilityRepairReport(next, next.facilities[id], durability, 'build');
+  next.battleDamageReports = [];
+  next.units[unitId].gold = (next.units[unitId].gold ?? 0) - buildCost;
+  next.units[unitId].acted = true;
+  return next;
+}
+
+export function repairFacility(state: GameState, forceId: ForceId, unitId: string, facilityId: string): GameState {
+  const unit = assertUnitTurn(state, forceId, unitId);
+  const facility = state.facilities?.[facilityId];
+  if (!facility) throw new Error('设施不存在');
+  if (facility.forceId !== forceId) throw new Error('只能修补己方设施');
+  if (unit.kind === 'transport') throw new Error('运输队不能修补设施');
+  if (!repairableFacilities(state, unitId).some((target) => target.id === facilityId)) throw new Error('设施不在修补范围');
+
+  const next = structuredClone(state);
+  const amount = repairedDurabilityAmount(next.facilities![facilityId], facilityBuildPower(unit));
+  next.facilities![facilityId] = repairFacilityDurability(next.facilities![facilityId], amount);
+  addFacilityRepairReport(next, next.facilities![facilityId], amount, 'repair');
+  next.battleDamageReports = [];
+  next.units[unitId].acted = true;
+  return next;
+}
+
+export function dismantleFacility(state: GameState, forceId: ForceId, facilityId: string): GameState {
+  const facility = state.facilities?.[facilityId];
+  if (!facility) throw new Error('设施不存在');
+  if (facility.forceId !== forceId) throw new Error('只能撤销己方设施');
+
+  const next = structuredClone(state);
+  delete next.facilities?.[facilityId];
+  return next;
+}
+
+export function settleBattleFacilities(next: GameState, activeForceId?: ForceId) {
+  for (const facility of Object.values(next.facilities ?? {})) {
+    if (!facilityIsCompleted(facility)) continue;
+    if (facility.type === 'musicTower') {
+      for (const unit of Object.values(next.units)) {
+        if (unit.forceId === facility.forceId && gridDistanceWithin(facility, unit, 2) <= 2) {
+          unit.energy = Math.min(100, unit.energy + 10);
+        }
+      }
+    } else if (facility.type === 'arrowTower') {
+      if (activeForceId && facility.forceId !== activeForceId) continue;
+      for (const unit of [...Object.values(next.units)]) {
+        if (unit.forceId === facility.forceId || gridDistanceWithin(facility, unit, 2) > 2) continue;
+        const target = next.units[unit.id];
+        if (!target) continue;
+        const damage = reduceUnitDamageByFortress(next, target, ARROW_TOWER_DAMAGE);
+        target.troops -= damage;
+        addDamageReport(next, target, damage, 'arrow-tower');
+        if (target.troops <= 0) removeUnit(next, target);
+      }
+    }
+  }
 }
 
 export function deployUnit(state: GameState, forceId: ForceId, input: DeployInput): GameState {
@@ -626,6 +1222,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   const officers = officerIds.map((officerId) => state.officers[officerId]);
   const officer = leaderId ? state.officers[leaderId] : undefined;
   const troopType = input.troopType ?? 'sword';
+  const gold = input.gold ?? 0;
   const armamentType = TROOP_ARMAMENT[troopType];
   const cityArmaments = armamentsOf(city?.armaments);
   if (state.phase !== 'playing') throw new Error('游戏已经结束');
@@ -641,6 +1238,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   if (officers.some((candidate) => candidate.acted)) throw new Error('选择的武将已经行动');
   if (state.actionPoints[forceId] < DEPLOY_AP_COST) throw new Error('行动力不足 20');
   if (!Number.isInteger(input.troops) || input.troops < 1000 || input.troops > 10000) throw new Error('出征兵力必须为 1000-10000');
+  if (!Number.isInteger(gold) || gold < 0 || gold > city.gold) throw new Error('资金不足');
   if (!Number.isInteger(input.food) || input.food < 0 || input.food > city.food) throw new Error('粮草不足');
   if (city.troops - input.troops < 500) throw new Error('城市至少保留 500 兵力');
   if (armamentType && cityArmaments[armamentType] < input.troops) {
@@ -656,6 +1254,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   const next = structuredClone(state);
   const unitId = `unit-${next.month}-${next.tenDay}-${leaderId}-${Object.keys(next.units).length + 1}`;
   next.cities[input.cityId].troops -= input.troops;
+  next.cities[input.cityId].gold -= gold;
   next.cities[input.cityId].food -= input.food;
   if (armamentType) {
     next.cities[input.cityId].armaments = {
@@ -679,9 +1278,10 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
     q: spawn.q,
     r: spawn.r,
     troops: input.troops,
+    gold,
     food: input.food,
     energy: 100,
-    movementRemaining: movementAllowanceForProfile(troopType),
+    movementRemaining: 0,
     moved: true,
     acted: false,
   };
@@ -692,6 +1292,45 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
     message: `${officer.name}率军从${city.name}出征`,
   });
   return next;
+}
+
+export function deployUnitWithId(state: GameState, forceId: ForceId, input: DeployInput): { state: GameState; unitId: string } {
+  const existingUnitIds = new Set(Object.keys(state.units));
+  const next = deployUnit(state, forceId, input);
+  const unitId = Object.keys(next.units).find((id) => !existingUnitIds.has(id));
+  if (!unitId) throw new Error('出征部队创建失败');
+  return { state: next, unitId };
+}
+
+export function deployUnitPreviewWithId(state: GameState, forceId: ForceId, input: DeployInput): { state: GameState; unitId: string } {
+  const city = state.cities[input.cityId];
+  const officerIds = input.officerIds?.length ? input.officerIds : input.officerId ? [input.officerId] : [];
+  const leaderId = officerIds[0];
+  const troopType = input.troopType ?? 'sword';
+  const gold = input.gold ?? 0;
+  const spawn = input.destination ?? deploymentCells(state, input.cityId, undefined, troopType)[0];
+  if (!city || !leaderId || !spawn) throw new Error('无法创建出征预览');
+  const next = structuredClone(state);
+  const unitId = `preview-deploy-${leaderId}`;
+  next.units[unitId] = {
+    id: unitId,
+    kind: 'combat',
+    forceId,
+    leaderId,
+    officerIds: [...officerIds],
+    homeCityId: input.cityId,
+    troopType,
+    q: spawn.q,
+    r: spawn.r,
+    troops: input.troops,
+    gold,
+    food: input.food,
+    energy: 100,
+    movementRemaining: 0,
+    moved: true,
+    acted: false,
+  };
+  return { state: next, unitId };
 }
 
 export function deployTransportUnit(state: GameState, forceId: ForceId, input: TransportInput): GameState {
@@ -737,7 +1376,7 @@ export function deployTransportUnit(state: GameState, forceId: ForceId, input: T
     troops: input.troops,
     food: input.food,
     energy: 100,
-    movementRemaining: movementAllowanceForProfile('transport'),
+    movementRemaining: 0,
     moved: true,
     acted: false,
   };
@@ -762,6 +1401,8 @@ export function moveUnit(state: GameState, forceId: ForceId, unitId: string, des
   next.units[unitId].r = destination.r;
   next.units[unitId].movementRemaining = 0;
   next.units[unitId].moved = true;
+  next.battleDamageReports = [];
+  next.facilityRepairReports = [];
   return next;
 }
 
@@ -769,6 +1410,7 @@ export function waitUnit(state: GameState, forceId: ForceId, unitId: string): Ga
   assertUnitTurn(state, forceId, unitId);
   const next = structuredClone(state);
   next.units[unitId].acted = true;
+  next.facilityRepairReports = [];
   return next;
 }
 
@@ -783,7 +1425,7 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];
   const nextTarget = next.units[targetId];
-  const damage = Math.min(nextTarget.troops, damageRoll(next, nextAttacker, unitTerrain(next, nextTarget)));
+  const damage = reduceUnitDamageByFortress(next, nextTarget, damageRoll(next, nextAttacker, unitTerrain(next, nextTarget)));
   const reports = [{
     id: `damage-${next.month}-${next.tenDay}-${next.rngCursor}-${targetId}`,
     unitId: targetId,
@@ -796,6 +1438,7 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
   nextAttacker.energy -= 10;
   nextAttacker.acted = true;
   next.battleDamageReports = reports;
+  next.facilityRepairReports = [];
 
   if (nextTarget.troops <= 0) {
     removeUnit(next, nextTarget);
@@ -803,7 +1446,7 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
   }
 
   if (areAdjacent(nextTarget, nextAttacker)) {
-    const counterDamage = Math.min(nextAttacker.troops, damageRoll(next, nextTarget, unitTerrain(next, nextAttacker), true));
+    const counterDamage = reduceUnitDamageByFortress(next, nextAttacker, damageRoll(next, nextTarget, unitTerrain(next, nextAttacker), true));
     next.battleDamageReports.push({
       id: `damage-${next.month}-${next.tenDay}-${next.rngCursor}-${attackerId}`,
       unitId: attackerId,
@@ -814,6 +1457,31 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
     });
     nextAttacker.troops -= counterDamage;
     if (nextAttacker.troops <= 0) removeUnit(next, nextAttacker);
+  }
+
+  return next;
+}
+
+export function attackFacility(state: GameState, forceId: ForceId, attackerId: string, facilityId: string): GameState {
+  const attacker = assertUnitTurn(state, forceId, attackerId);
+  const facility = state.facilities?.[facilityId];
+  if (!facility) throw new Error('设施不存在');
+  if (facility.forceId === forceId) throw new Error('不能攻击己方设施');
+  if (attacker.energy < 10) throw new Error('气力不足');
+  if (!attackableFacilities(state, attackerId).some((target) => target.id === facilityId)) throw new Error('设施不在攻击范围');
+
+  const next = structuredClone(state);
+  const nextAttacker = next.units[attackerId];
+  const nextFacility = next.facilities![facilityId];
+  const durabilityMultiplier = (nextAttacker.troopType ?? 'sword') === 'siege' ? 1.3 : 0.55;
+  const damage = Math.max(80, Math.round(damageRoll(next, nextAttacker, 'plain') * durabilityMultiplier));
+  nextFacility.durability = Math.max(0, nextFacility.durability - damage);
+  nextAttacker.energy -= 10;
+  nextAttacker.acted = true;
+  next.facilityRepairReports = [];
+
+  if (nextFacility.durability <= 0) {
+    delete next.facilities?.[facilityId];
   }
 
   return next;
@@ -836,6 +1504,7 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   nextCity.durability = Math.max(0, nextCity.durability - Math.round(damage * durabilityMultiplier));
   nextAttacker.energy -= 10;
   nextAttacker.acted = true;
+  next.facilityRepairReports = [];
 
   if (nextCity.troops === 0 || nextCity.durability === 0) {
     const oldOwner = nextCity.ownerId;

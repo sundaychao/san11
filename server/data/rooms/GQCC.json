@@ -1,0 +1,23 @@
+{
+  "id": "GQCC",
+  "hostPlayerId": "546bda85c5db7e92ea157511",
+  "phase": "lobby",
+  "revision": 1,
+  "seed": 1786358873017,
+  "state": null,
+  "players": {
+    "546bda85c5db7e92ea157511": {
+      "id": "546bda85c5db7e92ea157511",
+      "name": "chao",
+      "forceId": null,
+      "connected": true
+    }
+  },
+  "playerOrder": [
+    "546bda85c5db7e92ea157511"
+  ],
+  "turnPlayerIds": [],
+  "activePlayerId": null,
+  "completedTurnPlayerIds": [],
+  "tenDayReadyForceIds": []
+}

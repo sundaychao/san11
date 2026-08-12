@@ -132,6 +132,117 @@ describe('ten-day settlement', () => {
     expect(next.units['supply-test'].food).toBe(4600);
   });
 
+  it('ticks down unit plot statuses each ten-day', () => {
+    const state = createGame('liu', 1);
+    state.units['plot-status-unit'] = {
+      id: 'plot-status-unit',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 10,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      confusedTenDays: 1,
+      falseReportedTenDays: 1,
+      burningTenDays: 1,
+      moved: false,
+      acted: false,
+    };
+
+    const next = settleTenDay(state);
+
+    expect(next.units['plot-status-unit'].confusedTenDays).toBeUndefined();
+    expect(next.units['plot-status-unit'].falseReportedTenDays).toBeUndefined();
+    expect(next.units['plot-status-unit'].burningTenDays).toBeUndefined();
+  });
+
+  it('records arrow tower automatic damage reports when entering a new ten-day turn', () => {
+    const state = createGame('liu', 1);
+    state.units['arrow-target'] = {
+      id: 'arrow-target',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 12,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    state.facilities = {
+      arrow: { id: 'arrow', type: 'arrowTower', forceId: 'liu', q: 10, r: 10, durability: 700 },
+    };
+
+    const next = settleTenDay(state);
+
+    expect(next.units['arrow-target'].troops).toBe(2700);
+    expect(next.battleDamageReports).toEqual([
+      expect.objectContaining({
+        unitId: 'arrow-target',
+        q: 12,
+        r: 10,
+        amount: 300,
+        kind: 'attack',
+      }),
+    ]);
+  });
+
+  it('only fires arrow towers owned by the force whose turn is starting', () => {
+    const state = createGame('liu', 1);
+    state.units['liu-target'] = {
+      id: 'liu-target',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'guan-yu',
+      homeCityId: 'jiangling',
+      troopType: 'sword',
+      q: 12,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    state.units['cao-target'] = {
+      id: 'cao-target',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 4,
+      r: 4,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    state.facilities = {
+      liuArrow: { id: 'liuArrow', type: 'arrowTower', forceId: 'liu', q: 2, r: 4, durability: 700 },
+      caoArrow: { id: 'caoArrow', type: 'arrowTower', forceId: 'cao', q: 10, r: 10, durability: 700 },
+    };
+
+    const next = settleTenDay(state);
+
+    expect(next.units['cao-target'].troops).toBe(2700);
+    expect(next.units['liu-target'].troops).toBe(3000);
+    expect((next.battleDamageReports ?? []).map((report) => report.unitId)).toEqual(['cao-target']);
+  });
+
   it('completes special armament production after one month', () => {
     const state = createGame('liu', 1);
     const currentRams = state.cities.jiangling.armaments?.ram ?? 0;

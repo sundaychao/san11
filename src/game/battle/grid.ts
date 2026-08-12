@@ -33,6 +33,28 @@ export function neighborsOf(q: number, r: number): GridCoord[] {
   ];
 }
 
+export function coordsWithinRange(center: GridCoord, range: number): GridCoord[] {
+  const seen = new Set<string>([gridKey(center)]);
+  const coords: GridCoord[] = [center];
+  let frontier: GridCoord[] = [center];
+
+  for (let distance = 1; distance <= range; distance += 1) {
+    const nextFrontier: GridCoord[] = [];
+    for (const current of frontier) {
+      for (const neighbor of neighborsOf(current.q, current.r)) {
+        const key = gridKey(neighbor);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        coords.push(neighbor);
+        nextFrontier.push(neighbor);
+      }
+    }
+    frontier = nextFrontier;
+  }
+
+  return coords;
+}
+
 export function sevenCellCityFootprint(center: GridCoord): GridCoord[] {
   return [center, ...neighborsOf(center.q, center.r)];
 }

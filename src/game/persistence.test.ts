@@ -8,6 +8,7 @@ import {
   writeSave,
 } from './persistence';
 import { createGame } from './scenario/jingxiang208';
+import { createMobileDuelGame } from './scenario/mobileDuel';
 
 class MemoryStorage implements SaveAdapter {
   readonly values = new Map<string, string>();
@@ -52,6 +53,15 @@ describe('persistence', () => {
     const state = executeCommand(createGame('liu', 9), 'liu', {
       type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['guan-yu'],
     });
+
+    writeSave(storage, 'auto', state);
+
+    expect(loadSave(storage, 'auto')).toEqual({ ok: true, state });
+  });
+
+  it('round-trips a mobile duel state with fire plot markers', () => {
+    const state = createMobileDuelGame('liu', 'cao', 9);
+    state.firePlots = [{ q: 8, r: 12 }];
 
     writeSave(storage, 'auto', state);
 

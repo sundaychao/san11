@@ -1,9 +1,11 @@
 import type { Socket } from 'socket.io';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import type { ForceId } from '../src/game/types';
 import type { GameIntentPayload, OnlineRoomListItem, OnlineRoomView, OnlineSnapshot } from '../src/game/network/protocol';
 import {
   createOnlineRoom,
   joinOnlineRoom,
+  ONLINE_DUEL_MAX_PLAYERS,
   playerState,
   reduceOnlineIntent,
   selectPlayerForce,
@@ -11,7 +13,7 @@ import {
   startOnlineRoom,
   type OnlineRoom,
 } from '../src/game/network/session';
-import { saveRoomSnapshot } from './storage';
+import type { GameDatabase } from './database';
 
 type AuthenticatedGameIntentPayload = GameIntentPayload & { playerId: string };
 
@@ -26,6 +28,26 @@ function createRoomCode(existing: Set<string>) {
     if (!existing.has(code)) return code;
   }
   throw new Error('无法创建房间号');
+}
+
+function loadLegacyRooms(roomDir: string | undefined): OnlineRoom[] {
+  if (!roomDir || !existsSync(roomDir)) return [];
+  return readdirSync(roomDir)
+    .filter((filename) => filename.endsWith('.json'))
+    .flatMap((filename) => {
+      try {
+        const room = JSON.parse(readFileSync(`${roomDir}/${filename}`, 'utf8')) as Partial<OnlineRoom>;
+        return typeof room.id === 'string' && room.players && typeof room.players === 'object'
+          ? [room as OnlineRoom]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+}
+
+function connectedPlayerCount(room: OnlineRoom) {
+  return Object.values(room.players).filter((player) => player.connected).length;
 }
 
 export function roomView(room: OnlineRoom): OnlineRoomView {
@@ -55,6 +77,46 @@ export class RoomManager {
 
   private readonly playerRooms = new Map<string, string>();
 
+  private readonly db: GameDatabase | null;
+
+  constructor(options: { db?: GameDatabase; legacyRoomDir?: string } = {}) {
+    this.db = options.db ?? null;
+    const loadedRooms = new Map<string, OnlineRoom>();
+    for (const room of this.db?.loadRooms() ?? []) {
+      if (room.phase === 'lobby') {
+        this.deleteRoom(room.id);
+        continue;
+      }
+      loadedRooms.set(room.id, room);
+    }
+    for (const room of loadLegacyRooms(options.legacyRoomDir)) {
+      if (room.phase === 'lobby') continue;
+      if (!loadedRooms.has(room.id)) {
+        loadedRooms.set(room.id, room);
+        this.saveRoom(room);
+      }
+    }
+    for (const room of loadedRooms.values()) {
+      const offlineRoom = {
+        ...room,
+        players: Object.fromEntries(Object.entries(room.players).map(([playerId, player]) => [
+          playerId,
+          { ...player, connected: false },
+        ])),
+      };
+      this.rooms.set(offlineRoom.id, offlineRoom);
+      for (const playerId of Object.keys(offlineRoom.players)) this.playerRooms.set(playerId, offlineRoom.id);
+    }
+  }
+
+  private saveRoom(room: OnlineRoom) {
+    this.db?.saveRoom(room);
+  }
+
+  private deleteRoom(roomId: string) {
+    this.db?.deleteRoom(roomId);
+  }
+
   createRoom(input: { playerId: string; playerName: string; seed?: number }) {
     const roomId = createRoomCode(new Set(this.rooms.keys()));
     const room = createOnlineRoom({
@@ -65,7 +127,7 @@ export class RoomManager {
     });
     this.rooms.set(room.id, room);
     this.playerRooms.set(input.playerId, room.id);
-    void saveRoomSnapshot(room);
+    this.saveRoom(room);
     return snapshotFor(room, input.playerId);
   }
 
@@ -75,7 +137,7 @@ export class RoomManager {
     const room = joinOnlineRoom(current, { playerId: input.playerId, playerName: input.playerName });
     this.rooms.set(room.id, room);
     this.playerRooms.set(input.playerId, room.id);
-    void saveRoomSnapshot(room);
+    this.saveRoom(room);
     return snapshotFor(room, input.playerId);
   }
 
@@ -84,7 +146,7 @@ export class RoomManager {
     if (!current) throw new Error('房间不存在');
     const room = selectPlayerForce(current, { playerId: input.playerId, forceId: input.forceId });
     this.rooms.set(room.id, room);
-    void saveRoomSnapshot(room);
+    this.saveRoom(room);
     return snapshotFor(room, input.playerId);
   }
 
@@ -93,18 +155,18 @@ export class RoomManager {
     if (!current) throw new Error('房间不存在');
     const room = startOnlineRoom(current, { playerId: input.playerId });
     this.rooms.set(room.id, room);
-    void saveRoomSnapshot(room);
+    this.saveRoom(room);
     return snapshotFor(room, input.playerId);
   }
 
   listLobbyRooms(): OnlineRoomListItem[] {
     return [...this.rooms.values()]
-      .filter((room) => room.phase === 'lobby')
+      .filter((room) => room.phase === 'lobby' && connectedPlayerCount(room) > 0)
       .map((room) => ({
         id: room.id,
         hostName: room.players[room.hostPlayerId]?.name ?? '房主',
         playerCount: Object.keys(room.players).length,
-        maxPlayers: 4,
+        maxPlayers: ONLINE_DUEL_MAX_PLAYERS,
         selectedForceIds: [...new Set(Object.values(room.players).flatMap((player) => (
           player.forceId ? [player.forceId] : []
         )))],
@@ -116,6 +178,19 @@ export class RoomManager {
     return roomId ? this.rooms.get(roomId) ?? null : null;
   }
 
+  resumeRoom(input: { playerId: string; roomId?: string }) {
+    const room = input.roomId
+      ? this.rooms.get(input.roomId.toUpperCase()) ?? null
+      : this.roomForPlayer(input.playerId);
+    if (!room) throw new Error('房间不存在');
+    if (!room.players[input.playerId]) throw new Error('玩家不在房间中');
+    const next = setPlayerConnected(room, input.playerId, true);
+    this.rooms.set(next.id, next);
+    this.playerRooms.set(input.playerId, next.id);
+    this.saveRoom(next);
+    return snapshotFor(next, input.playerId);
+  }
+
   disconnectPlayer(playerId: string) {
     const room = this.roomForPlayer(playerId);
     if (!room) return null;
@@ -124,6 +199,7 @@ export class RoomManager {
       if (playerId === room.hostPlayerId || Object.keys(room.players).length <= 1) {
         for (const memberId of Object.keys(room.players)) this.playerRooms.delete(memberId);
         this.rooms.delete(room.id);
+        this.deleteRoom(room.id);
         return { room, removed: true };
       }
 
@@ -137,13 +213,13 @@ export class RoomManager {
       };
       this.playerRooms.delete(playerId);
       this.rooms.set(next.id, next);
-      void saveRoomSnapshot(next);
+      this.saveRoom(next);
       return { room: next, removed: false };
     }
 
     const next = setPlayerConnected(room, playerId, false);
     this.rooms.set(next.id, next);
-    void saveRoomSnapshot(next);
+    this.saveRoom(next);
     return { room: next, removed: false };
   }
 
@@ -152,7 +228,7 @@ export class RoomManager {
     if (!room) return null;
     const next = setPlayerConnected(room, playerId, connected);
     this.rooms.set(next.id, next);
-    void saveRoomSnapshot(next);
+    this.saveRoom(next);
     return next;
   }
 
@@ -162,7 +238,7 @@ export class RoomManager {
     const result = reduceOnlineIntent(room, payload.playerId, payload.baseRevision, payload.intent);
     if (result.ok) {
       this.rooms.set(result.room.id, result.room);
-      void saveRoomSnapshot(result.room);
+      this.saveRoom(result.room);
     }
     return result;
   }
