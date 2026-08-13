@@ -79,6 +79,28 @@ describe('RoomManager room list', () => {
     expect(manager.roomForPlayer('guest')?.players.guest.connected).toBe(false);
   });
 
+  it('removes playing room members when they intentionally leave', () => {
+    const manager = new RoomManager();
+    const room = manager.createRoom({ playerId: 'host', playerName: 'Host', seed: 1 });
+    manager.joinRoom({ roomId: room.room.id, playerId: 'guest', playerName: 'Guest' });
+    manager.selectForce({ roomId: room.room.id, playerId: 'host', forceId: 'liu' });
+    manager.selectForce({ roomId: room.room.id, playerId: 'guest', forceId: 'cao' });
+    manager.startRoom({ roomId: room.room.id, playerId: 'host' });
+
+    const guestResult = manager.leavePlayer('guest');
+
+    expect(guestResult?.removed).toBe(false);
+    expect(manager.roomForPlayer('guest')).toBeNull();
+    expect(manager.roomForPlayer('host')?.players.guest).toBeUndefined();
+    expect(manager.roomForPlayer('host')?.turnPlayerIds).toEqual(['host']);
+    expect(() => manager.resumeRoom({ playerId: 'guest' })).toThrow();
+
+    const hostResult = manager.leavePlayer('host');
+
+    expect(hostResult?.removed).toBe(true);
+    expect(manager.roomForPlayer('host')).toBeNull();
+  });
+
   it('restores a saved playing room from the database and resumes the player', async () => {
     const db = await database();
     const manager = new RoomManager({ db });
@@ -155,6 +177,33 @@ describe('RoomManager room list', () => {
     expect(resumed.state?.playerForceId).toBe('cao');
     expect(resumedAfterReload.room.id).toBe(savedRoom.id);
     expect(resumedAfterReload.state?.playerForceId).toBe('cao');
+    db.close();
+  });
+
+  it('prunes only inactive persisted rooms selected by the caller', async () => {
+    const db = await database();
+    const manager = new RoomManager({ db });
+    const oldRoom = manager.createRoom({ playerId: 'old-host', playerName: 'Old Host', seed: 1 });
+    manager.joinRoom({ roomId: oldRoom.room.id, playerId: 'old-guest', playerName: 'Old Guest' });
+    manager.selectForce({ roomId: oldRoom.room.id, playerId: 'old-host', forceId: 'liu' });
+    manager.selectForce({ roomId: oldRoom.room.id, playerId: 'old-guest', forceId: 'cao' });
+    manager.startRoom({ roomId: oldRoom.room.id, playerId: 'old-host' });
+    manager.disconnectPlayer('old-host');
+    manager.disconnectPlayer('old-guest');
+
+    const activeRoom = manager.createRoom({ playerId: 'active-host', playerName: 'Active Host', seed: 2 });
+    const prune = (manager as RoomManager & {
+      pruneRoomsUpdatedBefore?: (cutoffIso: string) => string[];
+    }).pruneRoomsUpdatedBefore;
+
+    if (!prune) {
+      db.close();
+      expect(typeof prune).toBe('function');
+      return;
+    }
+
+    expect(prune.call(manager, '2999-01-01T00:00:00.000Z')).toEqual([oldRoom.room.id]);
+    expect(db.loadRooms().map((room) => room.id)).toEqual([activeRoom.room.id]);
     db.close();
   });
 });

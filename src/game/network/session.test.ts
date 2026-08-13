@@ -8,6 +8,7 @@ import {
   startOnlineRoom,
 } from './session';
 import { neighborsOf } from '../battle/grid';
+import { reduceGameIntent } from './intentReducer';
 
 describe('online room session', () => {
   function readyStartedRoom() {
@@ -18,6 +19,58 @@ describe('online room session', () => {
       { playerId: 'guest', forceId: 'cao' },
     );
     return startOnlineRoom(ready, { playerId: 'host' });
+  }
+
+  function readyStrategyRoom() {
+    const room = structuredClone(readyStartedRoom());
+    if (!room.state) throw new Error('room state should exist');
+    room.state.units['host-strategy-unit'] = {
+      id: 'host-strategy-unit',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      homeCityId: 'jiangling',
+      troopType: 'spear',
+      q: 8,
+      r: 25,
+      troops: 3000,
+      gold: 1000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    room.state.units['guest-strategy-target'] = {
+      id: 'guest-strategy-target',
+      forceId: 'cao',
+      leaderId: 'cao-cao',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 9,
+      r: 25,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    room.state.units['guest-discord-victim'] = {
+      id: 'guest-discord-victim',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 10,
+      r: 25,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    return room;
   }
 
   it('keeps a created and joined room in lobby until forces are selected and the host starts', () => {
@@ -211,6 +264,50 @@ describe('online room session', () => {
     expect(playerState(result.room, 'guest')?.units['guest-strategy-target'].confusedTenDays).toBe(1);
   });
 
+  it.each([
+    ['disturb', 85],
+    ['discord', 80],
+  ] as const)('matches the complete seeded %s outcome through local and online reducers', (strategyId, expectedEnergy) => {
+    const room = readyStrategyRoom();
+    const localStart = playerState(room, 'host');
+    if (!localStart) throw new Error('host state should exist');
+    const intent = {
+      type: 'useUnitStrategy' as const,
+      unitId: 'host-strategy-unit',
+      strategyId,
+      selection: { targetUnitId: 'guest-strategy-target' } as const,
+    };
+
+    const localOutcome = reduceGameIntent(localStart, 'liu', intent);
+    const onlineResult = reduceOnlineIntent(room, 'host', room.revision, intent);
+
+    expect(onlineResult.ok).toBe(true);
+    if (!onlineResult.ok) throw new Error('online strategy should succeed');
+    if (!onlineResult.room.state) throw new Error('online strategy state should exist');
+    const onlineOutcome = onlineResult.room.state;
+    expect(onlineOutcome).toEqual(localOutcome);
+    expect(onlineOutcome.rngCursor).toBe(localOutcome.rngCursor);
+    expect(onlineOutcome.rngCursor).toBe(localStart.rngCursor + 1);
+    expect(onlineOutcome.strategyResultReports).toEqual(localOutcome.strategyResultReports);
+    expect(onlineOutcome.strategyResultReports).toEqual([expect.objectContaining({
+      strategyId, succeeded: true, q: 9, r: 25,
+    })]);
+    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ energy: expectedEnergy, acted: true });
+    expect(localOutcome.units['host-strategy-unit']).toMatchObject({ energy: expectedEnergy, acted: true });
+
+    if (strategyId === 'disturb') {
+      expect(onlineOutcome.units['guest-strategy-target'].confusedTenDays).toBe(1);
+      expect(onlineOutcome.units['guest-strategy-target']).toEqual(localOutcome.units['guest-strategy-target']);
+    } else {
+      expect(onlineOutcome.units['guest-discord-victim'].troops).toBeLessThan(3000);
+      expect(onlineOutcome.units['guest-discord-victim']).toEqual(localOutcome.units['guest-discord-victim']);
+      expect(onlineOutcome.battleDamageReports).toEqual(localOutcome.battleDamageReports);
+      expect(onlineOutcome.battleDamageReports).toEqual([
+        expect.objectContaining({ unitId: 'guest-discord-victim', q: 10, r: 25 }),
+      ]);
+    }
+  });
+
   it('applies facility build intents in a mobile duel room', () => {
     const room = structuredClone(readyStartedRoom());
     if (!room.state) throw new Error('room state should exist');
@@ -276,6 +373,21 @@ describe('online room session', () => {
     expect(guestDone.room.activePlayerId).toBe('host');
     expect(guestDone.room.completedTurnPlayerIds).toEqual([]);
     expect(guestDone.room.state?.tenDay).toBe(2);
+  });
+
+  it('clears stale strategy reports when online control advances', () => {
+    const room = readyStartedRoom();
+    room.state!.strategyResultReports = [{
+      id: 'old-strategy', strategyId: 'disturb', q: 9, r: 25,
+      label: '计略失败', succeeded: false,
+    }];
+
+    const hostDone = reduceOnlineIntent(room, 'host', room.revision, { type: 'endTenDay' });
+
+    expect(hostDone.ok).toBe(true);
+    if (!hostDone.ok) return;
+    expect(hostDone.room.activePlayerId).toBe('guest');
+    expect(hostDone.room.state?.strategyResultReports).toEqual([]);
   });
 
   it('fires only the next active player arrow towers when online control passes to them', () => {

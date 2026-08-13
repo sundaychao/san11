@@ -159,6 +159,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
   let message = '';
   next.battleDamageReports = [];
   next.cityEffectReports = [];
+  next.strategyResultReports = [];
 
   switch (command.type) {
     case 'develop': {

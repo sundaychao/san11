@@ -1,6 +1,6 @@
 import { CITY_IDS, FORCE_IDS, OFFICER_IDS } from './scenario/jingxiang208';
 import { ARMAMENT_TYPES } from './armaments';
-import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Stats } from './types';
+import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Stats, StrategyResultReport } from './types';
 
 export const AUTO_SAVE_KEY = 'jingxiang-208-autosave-v1';
 export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
@@ -10,6 +10,7 @@ export type SaveSlot = 'auto' | 'manual';
 const TROOP_TYPES = ['sword', 'spear', 'halberd', 'crossbow', 'cavalry', 'siege'];
 const FACILITY_TYPES = ['drum', 'arrowTower', 'musicTower', 'fortress', 'earthwork', 'fireSeed', 'fireBall'];
 const APTITUDE_GRADES = ['S', 'A', 'B', 'C'];
+const STRATEGY_IDS = ['fire', 'extinguish', 'false-report', 'disturb', 'calm', 'inspire', 'discord'];
 const MOBILE_DUEL_CITY_IDS = ['xiangyang', 'jiangling'];
 
 export interface SaveAdapter {
@@ -168,7 +169,9 @@ function validBattleDamageReport(value: unknown): value is BattleDamageReport {
     typeof report.amount === 'number' &&
     Number.isInteger(report.amount) &&
     report.amount >= 0 &&
-    (report.kind === 'attack' || report.kind === 'counter');
+    (report.kind === 'attack' || report.kind === 'counter') &&
+    (report.critical === undefined || typeof report.critical === 'boolean') &&
+    (report.label === undefined || typeof report.label === 'string');
 }
 
 function validCityEffectReport(value: unknown): value is CityEffectReport {
@@ -196,6 +199,17 @@ function validFacilityRepairReport(value: unknown): value is FacilityRepairRepor
     Number.isInteger(report.amount) &&
     report.amount >= 0 &&
     (report.kind === 'build' || report.kind === 'repair');
+}
+
+function validStrategyResultReport(value: unknown): value is StrategyResultReport {
+  if (!value || typeof value !== 'object') return false;
+  const report = value as Partial<StrategyResultReport>;
+  return typeof report.id === 'string' &&
+    STRATEGY_IDS.includes(report.strategyId!) &&
+    Number.isInteger(report.q) &&
+    Number.isInteger(report.r) &&
+    typeof report.label === 'string' &&
+    typeof report.succeeded === 'boolean';
 }
 
 function validFirePlot(value: unknown): value is FirePlot {
@@ -295,6 +309,10 @@ export function isGameState(value: unknown): value is GameState {
     (state.facilityRepairReports === undefined || (
       Array.isArray(state.facilityRepairReports) &&
       state.facilityRepairReports.every(validFacilityRepairReport)
+    )) &&
+    (state.strategyResultReports === undefined || (
+      Array.isArray(state.strategyResultReports) &&
+      state.strategyResultReports.every(validStrategyResultReport)
     )) &&
     (state.firePlots === undefined || (
       Array.isArray(state.firePlots) &&

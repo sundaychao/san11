@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { executeCommand } from './commands';
+import { deployUnit, effectiveUnitAbilities } from './battle/actions';
 import {
   AUTO_SAVE_KEY,
   MANUAL_SAVE_KEY,
@@ -31,6 +32,63 @@ describe('persistence', () => {
     expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
   });
 
+  it('round-trips a critical battle damage report', () => {
+    const state = createGame('liu', 9);
+    state.battleDamageReports = [{
+      id: 'critical-1', unitId: 'enemy-1', q: 10, r: 11, amount: 777, kind: 'attack',
+      critical: true, label: '暴击',
+    }];
+
+    writeSave(storage, 'auto', state);
+
+    expect(loadSave(storage, 'auto')).toEqual({ ok: true, state });
+  });
+
+  it('loads an older v2 save without strategy result reports', () => {
+    const state = createGame('liu', 9);
+    delete state.strategyResultReports;
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify(state));
+
+    expect(loadSave(storage, 'auto')).toEqual({ ok: true, state });
+  });
+
+  it('round-trips a failed strategy result report', () => {
+    const state = createGame('liu', 9);
+    state.strategyResultReports = [{
+      id: 'strategy-disturb-1', strategyId: 'disturb', q: 10, r: 11,
+      label: '计略失败', succeeded: false,
+    }];
+
+    writeSave(storage, 'auto', state);
+
+    expect(loadSave(storage, 'auto')).toEqual({ ok: true, state });
+  });
+
+  it('rejects an invalid strategy result report', () => {
+    const state = createGame('liu', 9);
+    (state as unknown as { strategyResultReports: Array<Record<string, unknown>> }).strategyResultReports = [{
+      id: 'strategy-disturb-1', strategyId: 'unknown', q: 10, r: 11,
+      label: '计略失败', succeeded: false,
+    }];
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify(state));
+
+    expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '存档无法读取' });
+  });
+
+  it.each([
+    ['critical', { critical: 'yes' }],
+    ['label', { label: 135 }],
+  ] as const)('rejects an invalid battle damage report %s field', (_field, invalidField) => {
+    const state = createGame('liu', 9);
+    (state as unknown as { battleDamageReports: Array<Record<string, unknown>> }).battleDamageReports = [{
+      id: 'critical-1', unitId: 'enemy-1', q: 10, r: 11, amount: 777, kind: 'attack',
+      ...invalidField,
+    }];
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify(state));
+
+    expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '存档无法读取' });
+  });
+
   it('loads older v2 saves without officer skill and aptitude fields', () => {
     const state = createGame('liu', 9);
     for (const officer of Object.values(state.officers)) {
@@ -40,6 +98,27 @@ describe('persistence', () => {
     storage.setItem(AUTO_SAVE_KEY, JSON.stringify(state));
 
     expect(loadSave(storage, 'auto')).toEqual({ ok: true, state });
+  });
+
+  it('loads a valid older v2 unit whose formation list omits its leader', () => {
+    const state = deployUnit(createGame('liu', 9), 'liu', {
+      cityId: 'jiangling', officerIds: ['jian-yong', 'guan-yu'],
+      troopType: 'spear', troops: 3000, food: 3000,
+    });
+    const unit = Object.values(state.units)[0];
+    state.officers['jian-yong'].stats.intelligence = 100;
+    unit.officerIds = ['guan-yu', 'missing-officer', 'guan-yu'];
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify(state));
+
+    const loaded = loadSave(storage, 'auto');
+
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(effectiveUnitAbilities(loaded.state, loaded.state.units[unit.id])).toMatchObject({
+      leadership: { officerId: 'jian-yong' },
+      war: { officerId: 'guan-yu' },
+      intelligence: { officerId: 'jian-yong' },
+    });
   });
 
   it('uses an independent manual slot', () => {

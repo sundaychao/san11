@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { TROOP_LABELS } from '../game/armaments';
+import { effectiveUnitAbilities, fireStrategySuccessChance, tacticCriticalChance } from '../game/battle/actions';
 import type { ArmyUnit, GameState } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -30,6 +31,11 @@ export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps
   const officers = officerIds.map((id) => state.officers[id]).filter(Boolean);
   const leader = officers[0];
   const deputies = officers.slice(1);
+  const abilities = effectiveUnitAbilities(state, unit);
+  const officerName = (officerId: string | null) => officerId ? state.officers[officerId]?.name ?? '未知' : '—';
+  const aptitude = abilities.aptitude.grade;
+  const criticalChance = aptitude ? `${tacticCriticalChance(abilities.war.value, aptitude)}%` : '—';
+  const fireChance = `${fireStrategySuccessChance(abilities.intelligence.value)}%`;
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
@@ -54,6 +60,15 @@ export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps
             <small>{deputies.length > 0 ? `${deputies.length} 人` : '无'}</small>
           </article>
         </section>
+
+        <dl className="unit-detail-grid unit-detail-effective-grid" aria-label="有效部队能力">
+          <div><dt>统率</dt><dd><strong>{abilities.leadership.value}</strong><span>{officerName(abilities.leadership.officerId)}</span></dd></div>
+          <div><dt>武力</dt><dd><strong>{abilities.war.value}</strong><span>{officerName(abilities.war.officerId)}</span></dd></div>
+          <div><dt>智力</dt><dd><strong>{abilities.intelligence.value}</strong><span>{officerName(abilities.intelligence.officerId)}</span></dd></div>
+          <div><dt>适性</dt><dd><strong>{aptitude ?? '—'}</strong><span>{officerName(abilities.aptitude.officerId)}</span></dd></div>
+          <div><dt>战法暴击率</dt><dd>{criticalChance}</dd></div>
+          <div><dt>火计成功率</dt><dd>{fireChance}</dd></div>
+        </dl>
 
         <dl className="unit-detail-grid">
           <div><dt>势力</dt><dd>{state.forces[unit.forceId].name}</dd></div>

@@ -858,6 +858,259 @@ describe('command interface', () => {
     expect(screen.getByTestId('battle-damage-number')).toBeVisible();
   });
 
+  it('shows all troop tactics while locking tiers above the formation aptitude', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'spear',
+      troops: 3000,
+      food: 3000,
+    });
+    const attacker = Object.values(state.units)[0];
+    state.officers['guan-yu'].aptitudes = { ...state.officers['guan-yu'].aptitudes!, spear: 'B' };
+    Object.assign(attacker, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 22 });
+    state.units['enemy-aptitude-target'] = {
+      id: 'enemy-aptitude-target',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      q: 11,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    renderState(state);
+
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    const tacticCommand = within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' });
+
+    expect(tacticCommand).toBeEnabled();
+    await user.click(tacticCommand);
+
+    const tacticMenu = screen.getByTestId('unit-tactic-menu');
+    expect(within(tacticMenu).getByRole('button', { name: '突刺' })).toBeEnabled();
+    expect(within(tacticMenu).getByRole('button', { name: '螺旋突刺' })).toBeDisabled();
+    expect(within(tacticMenu).getByRole('button', { name: '螺旋突刺' })).toHaveAttribute('title', '需要枪兵适性 A');
+    expect(within(tacticMenu).getByRole('button', { name: '二段突刺' })).toBeDisabled();
+    expect(within(tacticMenu).getByRole('button', { name: '二段突刺' })).toHaveAttribute('title', '需要枪兵适性 S');
+  });
+
+  it('locks tactics that cost more energy while keeping an affordable tactic usable', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'spear',
+      troops: 3000,
+      food: 3000,
+    });
+    const attacker = Object.values(state.units)[0];
+    Object.assign(attacker, { q: 10, r: 10, energy: 19, moved: false, acted: false, movementRemaining: 22 });
+    state.units['enemy-energy-target'] = {
+      id: 'enemy-energy-target',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      q: 11,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    renderState(state);
+
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    const tacticCommand = within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' });
+
+    expect(tacticCommand).toBeEnabled();
+    await user.click(tacticCommand);
+
+    const tacticMenu = screen.getByTestId('unit-tactic-menu');
+    expect(within(tacticMenu).getByRole('button', { name: '突刺' })).toBeEnabled();
+    expect(within(tacticMenu).getByRole('button', { name: '螺旋突刺' })).toBeDisabled();
+    expect(within(tacticMenu).getByRole('button', { name: '螺旋突刺' })).toHaveAttribute('title', '气力不足');
+  });
+
+  it('locks a tactic without a valid target while another tactic keeps the primary command enabled', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'crossbow',
+      troops: 2000,
+      food: 3000,
+    });
+    const attacker = Object.values(state.units)[0];
+    state.officers['guan-yu'].aptitudes = { ...state.officers['guan-yu'].aptitudes!, crossbow: 'S' };
+    Object.assign(attacker, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 19 });
+    state.units['enemy-crossbow-target'] = {
+      id: 'enemy-crossbow-target',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      q: 11,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    renderState(state);
+
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    const tacticCommand = within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' });
+
+    expect(tacticCommand).toBeEnabled();
+    await user.click(tacticCommand);
+
+    const tacticMenu = screen.getByTestId('unit-tactic-menu');
+    expect(within(tacticMenu).getByRole('button', { name: '火矢' })).toBeDisabled();
+    expect(within(tacticMenu).getByRole('button', { name: '火矢' })).toHaveAttribute('title', '无有效目标');
+    expect(within(tacticMenu).getByRole('button', { name: '贯箭' })).toBeEnabled();
+  });
+
+  it('disables the primary tactic command when every tactic is unavailable', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'spear',
+      troops: 3000,
+      food: 3000,
+    });
+    const attacker = Object.values(state.units)[0];
+    Object.assign(attacker, { q: 10, r: 10, energy: 14, moved: false, acted: false, movementRemaining: 22 });
+    state.units['enemy-unavailable-target'] = {
+      id: 'enemy-unavailable-target',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      q: 11,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    renderState(state);
+
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+
+    expect(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' })).toBeDisabled();
+  });
+
+  it('prioritizes aptitude and action status over energy and target reasons', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'spear',
+      troops: 3000,
+      food: 3000,
+    });
+    const attacker = Object.values(state.units)[0];
+    Object.assign(attacker, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 22 });
+    state.units['enemy-reason-target'] = {
+      id: 'enemy-reason-target',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      q: 11,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    renderState(state);
+
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' }));
+
+    state.officers['guan-yu'].aptitudes = { ...state.officers['guan-yu'].aptitudes!, spear: 'B' };
+    Object.assign(attacker, { acted: true, confusedTenDays: 1, energy: 0 });
+    delete state.units['enemy-reason-target'];
+    fireEvent.pointerEnter(marker, { clientX: 240, clientY: 180 });
+
+    const tacticMenu = screen.getByTestId('unit-tactic-menu');
+    expect(within(tacticMenu).getByRole('button', { name: '螺旋突刺' })).toHaveAttribute('title', '需要枪兵适性 A');
+    expect(within(tacticMenu).getByRole('button', { name: '突刺' })).toHaveAttribute('title', '部队已行动');
+
+    attacker.acted = false;
+    fireEvent.pointerEnter(marker, { clientX: 240, clientY: 180 });
+
+    expect(within(tacticMenu).getByRole('button', { name: '突刺' })).toHaveAttribute('title', '部队无法行动');
+  });
+
+  it('does not enter target selection when a locked tactic is clicked', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'spear',
+      troops: 3000,
+      food: 3000,
+    });
+    const attacker = Object.values(state.units)[0];
+    state.officers['guan-yu'].aptitudes = { ...state.officers['guan-yu'].aptitudes!, spear: 'B' };
+    Object.assign(attacker, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 22 });
+    state.units['enemy-locked-target'] = {
+      id: 'enemy-locked-target',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      q: 11,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    renderState(state);
+
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' }));
+
+    const lockedTactic = within(screen.getByTestId('unit-tactic-menu')).getByRole('button', { name: '螺旋突刺' });
+    fireEvent.click(lockedTactic);
+
+    expect(screen.queryByTestId('attack-target-arrow')).not.toBeInTheDocument();
+    expect(screen.getByTestId('unit-tactic-menu')).toBeVisible();
+  });
+
   it('enables joint attack from a move destination when another actionable friendly unit also neighbors the enemy', () => {
     const deployed = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -1000,6 +1253,44 @@ describe('command interface', () => {
 
       act(() => vi.advanceTimersByTime(1));
       expect(screen.queryByTestId('battle-damage-number')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows failed strategy feedback for two seconds without rendering successful outcomes', () => {
+    vi.useFakeTimers();
+    const state = createGame('liu', 1);
+    state.strategyResultReports = [
+      {
+        id: 'strategy-failed',
+        strategyId: 'fire',
+        q: 10,
+        r: 10,
+        label: '计略失败',
+        succeeded: false,
+      },
+      {
+        id: 'strategy-succeeded',
+        strategyId: 'fire',
+        q: 11,
+        r: 10,
+        label: '计略成功',
+        succeeded: true,
+      },
+    ];
+
+    try {
+      renderState(state);
+
+      expect(screen.getByTestId('strategy-result-label')).toHaveTextContent('计略失败');
+      expect(screen.queryByText('计略成功')).not.toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(1999));
+      expect(screen.getByTestId('strategy-result-label')).toBeVisible();
+
+      act(() => vi.advanceTimersByTime(1));
+      expect(screen.queryByTestId('strategy-result-label')).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

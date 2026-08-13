@@ -92,6 +92,8 @@ export interface BattleDamageReport {
   r: number;
   amount: number;
   kind: 'attack' | 'counter';
+  critical?: boolean;
+  label?: string;
 }
 
 export interface CityEffectReport {
@@ -111,6 +113,15 @@ export interface FacilityRepairReport {
   r: number;
   amount: number;
   kind: 'build' | 'repair';
+}
+
+export interface StrategyResultReport {
+  id: string;
+  strategyId: 'fire' | 'extinguish' | 'false-report' | 'disturb' | 'calm' | 'inspire' | 'discord';
+  q: number;
+  r: number;
+  label: string;
+  succeeded: boolean;
 }
 
 export interface FirePlot {
@@ -151,6 +162,7 @@ export interface GameState {
   battleDamageReports?: BattleDamageReport[];
   cityEffectReports?: CityEffectReport[];
   facilityRepairReports?: FacilityRepairReport[];
+  strategyResultReports?: StrategyResultReport[];
   firePlots?: FirePlot[];
   facilities?: Record<string, Facility>;
   logs: GameLog[];

@@ -1,8 +1,9 @@
 import { ArrowLeft, RotateCcw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { playClickOnSound, playLeftMouseSound, playRightMouseSound, playWaitingForTargetSound } from '../audio/soundEffects';
-import { attackableCities, attackableFacilities, attackableUnits, deploymentCells, deployUnitPreviewWithId, FACILITY_BUILD_COSTS, facilityBuildTargets, jointAttackableUnits, movementCells, repairableFacilities, strategyTargetCells, strategyTargetUnits, tacticTargetUnits, unitFacilities, unitIsIncapacitated, unitStrategies, unitTactics, type StrategyId, type TacticId } from '../game/battle/actions';
+import { effectiveUnitAbilities, harmfulStrategySuccessChance, attackableCities, attackableFacilities, attackableUnits, deploymentCells, deployUnitPreviewWithId, FACILITY_BUILD_COSTS, facilityBuildTargets, jointAttackableUnits, movementCells, repairableFacilities, requiredAptitudeForTactic, strategyTargetCells, strategyTargetUnits, tacticTargetUnits, unitCanUseTactic, unitFacilities, unitIsIncapacitated, unitStrategies, unitTactics, type StrategyId, type TacticId, type UnitTactic } from '../game/battle/actions';
 import type { GridCoord } from '../game/battle/grid';
+import { TROOP_LABELS } from '../game/armaments';
 import {
   clearEditor,
   createEditorState,
@@ -20,7 +21,7 @@ import {
 } from '../game/map-editor/editor';
 import { useGame } from '../game/store/GameProvider';
 import { territoryForceAt } from '../game/territory';
-import type { BattleDamageReport, CityEffectReport, FacilityRepairReport, FacilityType, GameCommand, GridCell, TerrainType } from '../game/types';
+import type { BattleDamageReport, CityEffectReport, FacilityRepairReport, FacilityType, GameCommand, GameState, GridCell, StrategyResultReport, TerrainType } from '../game/types';
 import { BattlePanel } from './BattlePanel';
 import { CityInfoPanel } from './CityInfoPanel';
 import { CityCommandMenu } from './CityCommandMenu';
@@ -39,11 +40,13 @@ import { TopBar } from './TopBar';
 import { TransportDialog, type TransportConfirmInput } from './TransportDialog';
 import { UnitDetailDialog } from './UnitDetailDialog';
 import { UnitInfoPanel } from './UnitInfoPanel';
+import { INITIAL_MAP_INTERACTION, reduceMapInteraction } from './gameInteraction';
 
 const UNIT_COMMANDS = ['待命', '攻击', '齐攻', '战法', '单挑', '计略', '设置', '修补'] as const;
 const UNIT_STRATEGIES = unitStrategies();
 const UNIT_FACILITIES = unitFacilities();
 const PENDING_DEPLOY_UNIT_ID = '__pending-deploy__';
+const HARMFUL_UNIT_STRATEGIES = new Set<StrategyId>(['false-report', 'disturb', 'discord']);
 
 const TERRAIN_LABELS: Record<TerrainType, string> = {
   road: '道路',
@@ -67,6 +70,19 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
+function tacticUnavailableReason(state: GameState, unitId: string, tactic: UnitTactic, origin?: GridCoord) {
+  const unit = state.units[unitId];
+  if (!unit) return '部队无法行动';
+  if (!unitCanUseTactic(state, unitId, tactic.id)) {
+    return `需要${TROOP_LABELS[tactic.troopType]}适性 ${requiredAptitudeForTactic(tactic.id)}`;
+  }
+  if (unit.acted) return '部队已行动';
+  if (unitIsIncapacitated(unit)) return '部队无法行动';
+  if (unit.energy < tactic.cost) return '气力不足';
+  if (tacticTargetUnits(state, unitId, tactic.id, origin).length === 0) return '无有效目标';
+  return undefined;
+}
+
 export function GameShell() {
   const { applyMapEditorMap, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, dismantleFacility, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, moveUnit, repairFacility, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
@@ -77,10 +93,47 @@ export function GameShell() {
   const [pendingDeployCommand, setPendingDeployCommand] = useState<{ input: DeployConfirmInput; destination: GridCoord } | null>(null);
   const [pendingDeployAction, setPendingDeployAction] = useState<{ input: DeployConfirmInput & { destination: GridCoord }; unitId: string } | null>(null);
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
-  const [unitCommandMenu, setUnitCommandMenu] = useState<{ unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null>(null);
-  const [unitTacticMenu, setUnitTacticMenu] = useState<{ unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null>(null);
-  const [unitStrategyMenu, setUnitStrategyMenu] = useState<{ unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null>(null);
-  const [unitFacilityMenu, setUnitFacilityMenu] = useState<{ unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null>(null);
+  const [unitInteraction, unitInteractionDispatch] = useReducer(reduceMapInteraction, INITIAL_MAP_INTERACTION);
+  const unitCommandMenu = unitInteraction.type === 'unit-menu'
+    ? unitInteraction
+    : unitInteraction.type === 'unit-submenu'
+      ? unitInteraction.parent
+      : null;
+  const unitTacticMenu = unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'tactic'
+    ? unitInteraction
+    : null;
+  const unitStrategyMenu = unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'strategy'
+    ? unitInteraction
+    : null;
+  const unitFacilityMenu = unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'facility'
+    ? unitInteraction
+    : null;
+  const setUnitCommandMenu = useCallback((menu: { unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null) => {
+    unitInteractionDispatch(menu
+      ? { type: 'open-unit-menu', ...menu }
+      : { type: 'close' });
+  }, []);
+  const setUnitTacticMenu = useCallback((menu: { unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null) => {
+    if (menu) {
+      unitInteractionDispatch({ type: 'open-unit-submenu', kind: 'tactic', position: menu.position, destination: menu.destination });
+    } else if (unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'tactic') {
+      unitInteractionDispatch({ type: 'back' });
+    }
+  }, [unitInteraction]);
+  const setUnitStrategyMenu = useCallback((menu: { unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null) => {
+    if (menu) {
+      unitInteractionDispatch({ type: 'open-unit-submenu', kind: 'strategy', position: menu.position, destination: menu.destination });
+    } else if (unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'strategy') {
+      unitInteractionDispatch({ type: 'back' });
+    }
+  }, [unitInteraction]);
+  const setUnitFacilityMenu = useCallback((menu: { unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null) => {
+    if (menu) {
+      unitInteractionDispatch({ type: 'open-unit-submenu', kind: 'facility', position: menu.position, destination: menu.destination });
+    } else if (unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'facility') {
+      unitInteractionDispatch({ type: 'back' });
+    }
+  }, [unitInteraction]);
   const [unitIntelMenu, setUnitIntelMenu] = useState<{ unitId: string; position: { x: number; y: number } } | null>(null);
   const [unitDetailId, setUnitDetailId] = useState<string | null>(null);
   const [unitOfficerListId, setUnitOfficerListId] = useState<string | null>(null);
@@ -91,6 +144,7 @@ export function GameShell() {
   const [targetingFacility, setTargetingFacility] = useState<{ unitId: string; facilityType: FacilityType; origin?: GridCoord } | null>(null);
   const [targetingRepair, setTargetingRepair] = useState<{ unitId: string; origin?: GridCoord } | null>(null);
   const [visibleDamageReports, setVisibleDamageReports] = useState<BattleDamageReport[]>([]);
+  const [visibleStrategyResultReports, setVisibleStrategyResultReports] = useState<StrategyResultReport[]>([]);
   const [visibleCityEffectReports, setVisibleCityEffectReports] = useState<CityEffectReport[]>([]);
   const [visibleFacilityRepairReports, setVisibleFacilityRepairReports] = useState<FacilityRepairReport[]>([]);
   const [hoveredCell, setHoveredCell] = useState<GridCell | null>(null);
@@ -116,8 +170,21 @@ export function GameShell() {
   const unitIntelMenuRef = useRef<HTMLElement>(null);
   const facilityContextMenuRef = useRef<HTMLElement>(null);
   const uploadedMapUrlRef = useRef<string | null>(null);
+  const unitHoverCloseTimerRef = useRef<number | null>(null);
   const canOperateCurrentTurn = !state || state.turnForceId === state.playerForceId;
   const closeCommand = useCallback(() => setActiveCommand(null), []);
+  const cancelUnitHoverClose = useCallback(() => {
+    if (unitHoverCloseTimerRef.current === null) return;
+    window.clearTimeout(unitHoverCloseTimerRef.current);
+    unitHoverCloseTimerRef.current = null;
+  }, []);
+  const scheduleUnitHoverClose = useCallback(() => {
+    cancelUnitHoverClose();
+    unitHoverCloseTimerRef.current = window.setTimeout(() => {
+      unitHoverCloseTimerRef.current = null;
+      setHoveredUnit(null);
+    }, 120);
+  }, [cancelUnitHoverClose]);
   const launchCommand = useCallback((type: GameCommand['type']) => {
     setActiveCommand(type);
     setCityMenu(null);
@@ -325,14 +392,9 @@ export function GameShell() {
   ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
   const unitMenuTactics = useMemo(() => (
     unitMenuState && unitMenuUnitId
-      ? unitTactics(unitMenuState, unitMenuUnitId).filter((tactic) => tacticTargetUnits(unitMenuState, unitMenuUnitId, tactic.id, unitMenuDestination).length > 0)
+      ? unitTactics(unitMenuState, unitMenuUnitId).filter((tactic) => !tacticUnavailableReason(unitMenuState, unitMenuUnitId, tactic, unitMenuDestination))
       : []
   ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
-  const unitMenuTacticTargets = useMemo(() => (
-    unitMenuState && unitMenuUnitId
-      ? unitMenuTactics.flatMap((tactic) => tacticTargetUnits(unitMenuState, unitMenuUnitId, tactic.id, unitMenuDestination))
-      : []
-  ), [unitMenuDestination, unitMenuState, unitMenuTactics, unitMenuUnitId]);
   const unitMenuStrategies = useMemo(() => (
     unitMenuState && unitMenuUnitId
       ? UNIT_STRATEGIES.filter((strategy) => {
@@ -348,11 +410,12 @@ export function GameShell() {
       ? UNIT_FACILITIES.filter((facility) => facilityBuildTargets(unitMenuState, unitMenuUnitId, unitMenuDestination, facility.type).length > 0)
       : []
   ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
+  const tacticMenuState = pendingDeployActionPreview?.state ?? state;
   const tacticMenuTactics = useMemo(() => (
-    state && unitTacticMenu
-      ? unitTactics(state, unitTacticMenu.unitId).filter((tactic) => tacticTargetUnits(state, unitTacticMenu.unitId, tactic.id, unitTacticMenu.destination).length > 0)
+    tacticMenuState && unitTacticMenu
+      ? unitTactics(tacticMenuState, unitTacticMenu.unitId)
       : []
-  ), [state, unitTacticMenu]);
+  ), [tacticMenuState, unitTacticMenu]);
   const firePlotTargets = useMemo(() => (
     (pendingDeployActionPreview?.state ?? state) && targetingFacility
       ? facilityBuildTargets((pendingDeployActionPreview?.state ?? state)!, targetingFacility.unitId, targetingFacility.origin, targetingFacility.facilityType)
@@ -366,6 +429,23 @@ export function GameShell() {
     if (targetingUnitStrategy) return strategyTargetUnits(targetState, targetingUnitStrategy.unitId, targetingUnitStrategy.strategyId, targetingUnitStrategy.origin).map((unit) => unit.id);
     return [];
   }, [pendingDeployActionPreview, state, targetingAttack, targetingTactic, targetingUnitStrategy]);
+  const hoveredStrategyChance = useMemo(() => {
+    const targetState = pendingDeployActionPreview?.state ?? state;
+    if (!targetState || !targetingUnitStrategy || !hoveredUnit) return undefined;
+    if (!HARMFUL_UNIT_STRATEGIES.has(targetingUnitStrategy.strategyId)) return undefined;
+    if (!attackTargetUnitIds.includes(hoveredUnit.unitId)) return undefined;
+    const source = targetState.units[targetingUnitStrategy.unitId];
+    const target = targetState.units[hoveredUnit.unitId];
+    const strategy = UNIT_STRATEGIES.find((candidate) => candidate.id === targetingUnitStrategy.strategyId);
+    if (!source || !target || !strategy) return undefined;
+    return {
+      name: strategy.name,
+      percent: harmfulStrategySuccessChance(
+        effectiveUnitAbilities(targetState, source).intelligence.value,
+        effectiveUnitAbilities(targetState, target).intelligence.value,
+      ),
+    };
+  }, [attackTargetUnitIds, hoveredUnit, pendingDeployActionPreview, state, targetingUnitStrategy]);
   const attackTargetCityIds = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
     if (!targetState || !targetingAttack) return [];
@@ -416,6 +496,8 @@ export function GameShell() {
   }, [canOperateCurrentTurn, deployTargets, deployTransportUnit, pendingDeploy, pendingTransport]);
 
   const selectUnit = useCallback((unitId: string, position: { x: number; y: number }) => {
+    cancelUnitHoverClose();
+    setHoveredUnit(null);
     if (!state) return;
     const unit = state.units[unitId];
     if (!canOperateCurrentTurn || !unit || unit.forceId !== state.playerForceId || unit.moved || unitIsIncapacitated(unit) || unit.movementRemaining <= 0) {
@@ -452,7 +534,7 @@ export function GameShell() {
     }
     setUnitCommandMenu(null);
     setSelectedUnitId(unitId);
-  }, [canOperateCurrentTurn, selectedUnitId, state]);
+  }, [cancelUnitHoverClose, canOperateCurrentTurn, selectedUnitId, state]);
 
   const openUnitIntelMenu = useCallback((unitId: string, position: { x: number; y: number }) => {
     if (!state?.units[unitId]) return;
@@ -1130,6 +1212,18 @@ export function GameShell() {
   }, [state?.battleDamageReports]);
 
   useEffect(() => {
+    const reports = state?.strategyResultReports ?? [];
+    if (reports.length === 0) {
+      setVisibleStrategyResultReports([]);
+      return undefined;
+    }
+
+    setVisibleStrategyResultReports(reports);
+    const timer = window.setTimeout(() => setVisibleStrategyResultReports([]), 2000);
+    return () => window.clearTimeout(timer);
+  }, [state?.strategyResultReports]);
+
+  useEffect(() => {
     const reports = state?.cityEffectReports ?? [];
     if (reports.length === 0) {
       setVisibleCityEffectReports([]);
@@ -1155,6 +1249,8 @@ export function GameShell() {
 
   useEffect(() => revokeUploadedMapPreview, [revokeUploadedMapPreview]);
 
+  useEffect(() => () => cancelUnitHoverClose(), [cancelUnitHoverClose]);
+
   return (
     <main className="game-shell">
       <TopBar />
@@ -1179,6 +1275,7 @@ export function GameShell() {
         attackTargetFacilityIds={targetFacilityIds}
         attackTargetUnitIds={attackTargetUnitIds}
         damageReports={visibleDamageReports}
+        strategyResultReports={visibleStrategyResultReports}
         cityEffectReports={visibleCityEffectReports}
         facilityRepairReports={visibleFacilityRepairReports}
         selectedUnitId={selectedUnitId}
@@ -1187,8 +1284,11 @@ export function GameShell() {
         onFirePlotTargetSelect={selectFirePlotTarget}
         onUnitSelect={selectUnit}
         onUnitContextMenu={openUnitIntelMenu}
-        onUnitHover={(unitId, position) => setHoveredUnit({ unitId, position })}
-        onUnitLeave={() => setHoveredUnit(null)}
+        onUnitHover={(unitId, position) => {
+          cancelUnitHoverClose();
+          setHoveredUnit({ unitId, position });
+        }}
+        onUnitLeave={scheduleUnitHoverClose}
         onCityHover={(cityId, position) => setHoveredCity({ cityId, position })}
         onCityLeave={() => setHoveredCity(null)}
         onAttackTargetSelect={selectAttackTarget}
@@ -1206,7 +1306,14 @@ export function GameShell() {
         </div>
       )}
       {state && hoveredUnit && state.units[hoveredUnit.unitId] && (
-        <UnitInfoPanel unit={state.units[hoveredUnit.unitId]} state={state} position={hoveredUnit.position} />
+        <UnitInfoPanel
+          unit={state.units[hoveredUnit.unitId]}
+          state={state}
+          position={hoveredUnit.position}
+          strategyChance={hoveredStrategyChance}
+          onPointerEnter={cancelUnitHoverClose}
+          onPointerLeave={scheduleUnitHoverClose}
+        />
       )}
       <button type="button" className="map-editor-toggle primary-button" data-testid="map-editor-toggle-button" onClick={openEditor}>地图编辑</button>
       {state && hoveredCity && state.cities[hoveredCity.cityId] && (
@@ -1313,7 +1420,7 @@ export function GameShell() {
               (commandIndex === 1 && unitMenuAttackTargets.length === 0 && unitMenuAttackCities.length === 0 && unitMenuAttackFacilities.length === 0) ||
               (command === '单挑' && unitMenuAttackTargets.length === 0) ||
               (command === '齐攻' && unitMenuJointAttackTargets.length === 0) ||
-              (command === '战法' && unitMenuTacticTargets.length === 0) ||
+              (command === '战法' && unitMenuTactics.length === 0) ||
               (command === '计略' && unitMenuStrategies.length === 0) ||
               (commandIndex === 7 && unitMenuRepairTargets.length === 0);
             const onClick =
@@ -1406,11 +1513,22 @@ export function GameShell() {
             setUnitTacticMenu(null);
           }}
         >
-          {tacticMenuTactics.map((tactic) => (
-            <button key={tactic.id} type="button" onClick={() => selectUnitTactic(tactic.id)}>
-              {tactic.name}
-            </button>
-          ))}
+          {tacticMenuTactics.map((tactic) => {
+            const reason = tacticMenuState
+              ? tacticUnavailableReason(tacticMenuState, unitTacticMenu.unitId, tactic, unitTacticMenu.destination)
+              : '部队无法行动';
+            return (
+              <button
+                key={tactic.id}
+                type="button"
+                disabled={Boolean(reason)}
+                title={reason}
+                onClick={() => selectUnitTactic(tactic.id)}
+              >
+                {tactic.name}
+              </button>
+            );
+          })}
         </nav>
       )}
       {unitIntelMenu && (

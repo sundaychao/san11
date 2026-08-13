@@ -5,7 +5,7 @@ import { coordsWithinRange, gridKey, sevenCellCityFootprint, type GridCoord } fr
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
 import type { EditableCityMarker } from '../game/map-editor/editor';
 import { useGame } from '../game/store/GameProvider';
-import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GridCell, TroopType } from '../game/types';
+import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GridCell, StrategyResultReport, TroopType } from '../game/types';
 
 interface MapView {
   x: number;
@@ -77,6 +77,7 @@ interface StrategicMapProps {
   attackTargetFacilityIds?: string[];
   attackTargetUnitIds?: string[];
   damageReports?: BattleDamageReport[];
+  strategyResultReports?: StrategyResultReport[];
   cityEffectReports?: CityEffectReport[];
   facilityRepairReports?: FacilityRepairReport[];
   selectedUnitId?: string | null;
@@ -112,6 +113,7 @@ export function StrategicMap({
   attackTargetFacilityIds = [],
   attackTargetUnitIds = [],
   damageReports = [],
+  strategyResultReports = [],
   cityEffectReports = [],
   facilityRepairReports = [],
   onCityMenu,
@@ -316,18 +318,71 @@ export function StrategicMap({
     );
   };
 
+  const damageLineHeight = 17;
+  const damageLayout = new Map<string, { criticalY?: number; damageY: number }>();
+  const damageGroups = new Map<string, BattleDamageReport[]>();
+  for (const report of damageReports) {
+    const key = `${report.q},${report.r}`;
+    const group = damageGroups.get(key) ?? [];
+    group.push(report);
+    damageGroups.set(key, group);
+  }
+  for (const reports of damageGroups.values()) {
+    const position = cellPosition(reports[0].q, reports[0].r);
+    const lineCount = reports.reduce((count, report) => count + (report.critical ? 2 : 1), 0);
+    const desiredBottomY = position.y - 31;
+    const topY = Math.max(12, desiredBottomY - (lineCount - 1) * damageLineHeight);
+    let lineIndex = 0;
+    for (const report of reports) {
+      const criticalY = report.critical ? topY + lineIndex++ * damageLineHeight : undefined;
+      const damageY = topY + lineIndex++ * damageLineHeight;
+      damageLayout.set(report.id, { criticalY, damageY });
+    }
+  }
+
   const renderDamageNumber = (report: BattleDamageReport) => {
     const position = cellPosition(report.q, report.r);
     const centerX = position.x + CELL_SIZE / 2;
+    const layout = damageLayout.get(report.id)!;
+    return (
+      <g key={report.id}>
+        {report.critical && (
+          <text
+            className="battle-critical-label"
+            data-testid="battle-critical-label"
+            data-grid-position={`${report.q},${report.r}`}
+            x={centerX}
+            y={layout.criticalY}
+          >
+            {report.label ?? '暴击'}
+          </text>
+        )}
+        <text
+          className={`battle-damage-number is-${report.kind}`}
+          data-testid="battle-damage-number"
+          data-grid-position={`${report.q},${report.r}`}
+          x={centerX}
+          y={layout.damageY}
+        >
+          -{report.amount.toLocaleString('en-US')}
+        </text>
+      </g>
+    );
+  };
+
+  const renderStrategyResultLabel = (report: StrategyResultReport) => {
+    if (report.succeeded) return null;
+    const position = cellPosition(report.q, report.r);
     return (
       <text
         key={report.id}
-        className={`battle-damage-number is-${report.kind}`}
-        data-testid="battle-damage-number"
-        x={centerX}
+        className="strategy-result-label"
+        data-testid="strategy-result-label"
+        data-grid-position={`${report.q},${report.r}`}
+        x={position.x + CELL_SIZE / 2}
         y={Math.max(12, position.y - 31)}
       >
-        -{report.amount.toLocaleString('en-US')}
+        {report.label || '计略失败'}
       </text>
     );
   };
@@ -668,6 +723,7 @@ export function StrategicMap({
           {Object.values(state.units).map(renderUnitMarker)}
           {firePlots.map(renderFireMarker)}
           {damageReports.map(renderDamageNumber)}
+          {strategyResultReports.map(renderStrategyResultLabel)}
         </svg>
       </div>
 

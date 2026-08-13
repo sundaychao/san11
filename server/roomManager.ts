@@ -117,6 +117,43 @@ export class RoomManager {
     this.db?.deleteRoom(roomId);
   }
 
+  private removePlayerFromRoom(room: OnlineRoom, playerId: string) {
+    if (playerId === room.hostPlayerId || Object.keys(room.players).length <= 1) {
+      for (const memberId of Object.keys(room.players)) this.playerRooms.delete(memberId);
+      this.rooms.delete(room.id);
+      this.deleteRoom(room.id);
+      return { room, removed: true };
+    }
+
+    const leavingForceId = room.players[playerId]?.forceId ?? null;
+    const players = { ...room.players };
+    delete players[playerId];
+    const turnPlayerIds = room.turnPlayerIds.filter((candidateId) => candidateId !== playerId);
+    let completedTurnPlayerIds = room.completedTurnPlayerIds.filter((candidateId) => candidateId !== playerId);
+    let activePlayerId = room.activePlayerId;
+    if (!activePlayerId || activePlayerId === playerId || !turnPlayerIds.includes(activePlayerId)) {
+      activePlayerId = turnPlayerIds.find((candidateId) => !completedTurnPlayerIds.includes(candidateId)) ?? turnPlayerIds[0] ?? null;
+      if (activePlayerId && completedTurnPlayerIds.includes(activePlayerId)) completedTurnPlayerIds = [];
+    }
+
+    const next = {
+      ...room,
+      revision: room.revision + 1,
+      players,
+      playerOrder: room.playerOrder.filter((candidateId) => candidateId !== playerId),
+      turnPlayerIds,
+      activePlayerId,
+      completedTurnPlayerIds,
+      tenDayReadyForceIds: leavingForceId
+        ? room.tenDayReadyForceIds.filter((forceId) => forceId !== leavingForceId)
+        : room.tenDayReadyForceIds,
+    };
+    this.playerRooms.delete(playerId);
+    this.rooms.set(next.id, next);
+    this.saveRoom(next);
+    return { room: next, removed: false };
+  }
+
   createRoom(input: { playerId: string; playerName: string; seed?: number }) {
     const roomId = createRoomCode(new Set(this.rooms.keys()));
     const room = createOnlineRoom({
@@ -196,31 +233,24 @@ export class RoomManager {
     if (!room) return null;
 
     if (room.phase === 'lobby') {
-      if (playerId === room.hostPlayerId || Object.keys(room.players).length <= 1) {
-        for (const memberId of Object.keys(room.players)) this.playerRooms.delete(memberId);
-        this.rooms.delete(room.id);
-        this.deleteRoom(room.id);
-        return { room, removed: true };
-      }
-
-      const players = { ...room.players };
-      delete players[playerId];
-      const next = {
-        ...room,
-        revision: room.revision + 1,
-        players,
-        playerOrder: room.playerOrder.filter((candidateId) => candidateId !== playerId),
-      };
-      this.playerRooms.delete(playerId);
-      this.rooms.set(next.id, next);
-      this.saveRoom(next);
-      return { room: next, removed: false };
+      return this.removePlayerFromRoom(room, playerId);
     }
 
     const next = setPlayerConnected(room, playerId, false);
     this.rooms.set(next.id, next);
     this.saveRoom(next);
     return { room: next, removed: false };
+  }
+
+  leavePlayer(playerId: string, roomId?: string) {
+    const targetRoomId = roomId?.toUpperCase() ?? this.playerRooms.get(playerId);
+    if (!targetRoomId) return null;
+    const room = this.rooms.get(targetRoomId);
+    if (!room || !room.players[playerId]) {
+      this.playerRooms.delete(playerId);
+      return null;
+    }
+    return this.removePlayerFromRoom(room, playerId);
   }
 
   markConnected(playerId: string, connected: boolean) {
@@ -230,6 +260,22 @@ export class RoomManager {
     this.rooms.set(next.id, next);
     this.saveRoom(next);
     return next;
+  }
+
+  pruneRoomsUpdatedBefore(cutoffIso: string) {
+    const connectedRoomIds = [...this.rooms.values()]
+      .filter((room) => Object.values(room.players).some((player) => player.connected))
+      .map((room) => room.id);
+    const deletedIds = this.db?.deleteRoomsUpdatedBefore(cutoffIso, connectedRoomIds) ?? [];
+
+    for (const roomId of deletedIds) {
+      const room = this.rooms.get(roomId);
+      if (!room) continue;
+      for (const playerId of Object.keys(room.players)) this.playerRooms.delete(playerId);
+      this.rooms.delete(roomId);
+    }
+
+    return deletedIds;
   }
 
   applyIntent(payload: AuthenticatedGameIntentPayload) {

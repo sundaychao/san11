@@ -69,6 +69,11 @@ export interface StartRoomPayload {
   roomId: string;
 }
 
+export interface LeaveRoomPayload {
+  token: string;
+  roomId: string;
+}
+
 export interface GameIntentPayload {
   roomId: string;
   token: string;
@@ -83,6 +88,10 @@ export type OnlineAck =
 
 export type RoomListAck =
   | { ok: true; rooms: OnlineRoomListItem[] }
+  | { ok: false; reason: string };
+
+export type LeaveRoomAck =
+  | { ok: true }
   | { ok: false; reason: string };
 
 export interface RoomListUpdate {

@@ -192,6 +192,8 @@ button { color: inherit; }
 .fire-cell-marker { pointer-events: none; fill: #ffcf42; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 24px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(102, 13, 5, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 5px rgba(255, 86, 36, 0.85)); }
 .battle-damage-number { pointer-events: none; fill: #ffdf54; font-family: Consolas, "Courier New", monospace; font-size: 14px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(88, 8, 6, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .battle-damage-number.is-counter { fill: #ff8f6f; }
+.battle-critical-label { pointer-events: none; fill: #ffe56b; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 14px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(138, 23, 16, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
+.strategy-result-label { pointer-events: none; fill: #e1e4e1; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 13px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(25, 31, 29, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .facility-repair-number { pointer-events: none; fill: #8ff0ae; font-family: Consolas, "Courier New", monospace; font-size: 14px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(8, 45, 24, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .facility-repair-number.is-build { fill: #ffe37a; }
 .city-effect-number { position: absolute; left: 50%; bottom: calc(50% + 58px); z-index: 2; min-width: max-content; transform: translateX(-50%); pointer-events: none; color: #f7ef83; font-family: Consolas, "Microsoft YaHei", sans-serif; font-size: 18px; font-weight: 900; line-height: 1; text-shadow: 0 2px 0 rgba(17, 24, 21, 0.98), 2px 0 0 rgba(17, 24, 21, 0.98), -2px 0 0 rgba(17, 24, 21, 0.98), 0 -2px 0 rgba(17, 24, 21, 0.98), 0 0 7px rgba(0, 0, 0, 0.9); white-space: nowrap; }
@@ -249,7 +251,7 @@ button { color: inherit; }
 .map-tools { position: absolute; z-index: 6; top: 14px; left: 14px; display: flex; gap: 5px; padding: 5px; }
 .map-tools .icon-button { background: rgba(24, 37, 33, 0.9); }
 .hover-coordinate { position: fixed; z-index: 16; left: 50%; bottom: 16px; min-width: 118px; padding: 7px 14px; transform: translateX(-50%); color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 13px; font-weight: 700; text-align: center; pointer-events: none; }
-.unit-info-panel { position: fixed; z-index: 18; width: 178px; padding: 7px; pointer-events: none; background: rgba(12, 28, 31, 0.96); color: var(--paper); }
+.unit-info-panel { position: fixed; z-index: 18; width: 178px; max-height: calc(100dvh - 16px); padding: 7px; overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; touch-action: pan-y; background: rgba(12, 28, 31, 0.96); color: var(--paper); scrollbar-width: thin; }
 .unit-info-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; padding: 0 5px; border-bottom: 1px solid var(--line); }
 .unit-info-panel > header strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 16px; }
 .unit-info-panel > header span { display: grid; place-items: center; min-width: 20px; min-height: 22px; background: #d4ad28; color: #1b211b; font: 700 14px Consolas, "Courier New", monospace; }
@@ -257,6 +259,11 @@ button { color: inherit; }
 .unit-info-officers > div, .unit-info-panel dl > div { display: grid; grid-template-columns: 48px 1fr; align-items: center; min-height: 24px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); }
 .unit-info-officers span, .unit-info-panel dt { padding-left: 5px; color: var(--muted); font-size: 11px; }
 .unit-info-officers strong, .unit-info-panel dd { margin: 0; padding: 2px 6px; color: #fff6d6; font-size: 12px; text-align: right; }
+.unit-info-abilities { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 0 6px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); }
+.unit-info-abilities span { display: flex; align-items: baseline; justify-content: center; gap: 3px; min-width: 0; padding: 4px 2px; color: var(--muted); font-size: 10px; }
+.unit-info-abilities span + span { border-left: 1px solid rgba(146, 136, 115, 0.4); }
+.unit-info-abilities strong { color: #fff6d6; font: 700 12px Consolas, "Courier New", monospace; }
+.unit-info-strategy-chance { margin: 0 0 6px; padding: 5px 6px; border: 1px solid rgba(212, 173, 40, 0.55); color: #f1d66e; font-size: 12px; font-weight: 700; text-align: center; }
 .unit-info-panel dl { display: grid; gap: 3px; margin: 0; }
 .unit-info-panel dd { font-family: Consolas, "Courier New", monospace; font-variant-numeric: tabular-nums; }
 .unit-info-panel dd em { margin-left: 6px; color: #f1d66e; font-style: normal; }
@@ -412,13 +419,13 @@ button { color: inherit; }
   outline: none;
 }
 .map-context-menu button:disabled, .map-context-menu button.is-disabled,
-.unit-command-menu button:disabled, .unit-command-menu button.is-disabled,
+.unit-command-menu button:disabled, .unit-command-menu button.is-disabled, .unit-tactic-menu button:disabled,
 .unit-strategy-menu button:disabled {
   color: #787465;
   cursor: default;
 }
 .map-context-menu button:disabled:hover, .map-context-menu button.is-disabled:hover,
-.unit-command-menu button:disabled:hover,
+.unit-command-menu button:disabled:hover, .unit-tactic-menu button:disabled:hover,
 .unit-strategy-menu button:disabled:hover {
   background: transparent;
 }
@@ -442,7 +449,7 @@ button { color: inherit; }
 .officer-list-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .officer-list-dialog header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
 .officer-list-dialog h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 26px; }
-.unit-detail-dialog { width: min(760px, calc(100vw - 72px)); display: grid; gap: 14px; padding: 16px; background: rgba(18, 43, 45, 0.96); }
+.unit-detail-dialog { width: min(760px, calc(100vw - 72px)); max-height: min(680px, calc(100dvh - 40px)); display: grid; gap: 14px; padding: 16px; overflow-y: auto; overscroll-behavior: contain; background: rgba(18, 43, 45, 0.96); }
 .unit-detail-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .unit-detail-dialog header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
 .unit-detail-dialog h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 28px; }
@@ -455,6 +462,9 @@ button { color: inherit; }
 .unit-detail-grid div { display: grid; grid-template-columns: 70px 1fr; min-height: 30px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); }
 .unit-detail-grid dt { display: flex; align-items: center; padding-left: 8px; color: var(--muted); font-size: 12px; }
 .unit-detail-grid dd { display: flex; align-items: center; justify-content: flex-end; margin: 0; padding: 0 10px; color: #fff6d6; font: 700 13px Consolas, "Courier New", monospace; }
+.unit-detail-effective-grid dd { gap: 7px; min-width: 0; }
+.unit-detail-effective-grid dd strong { color: #fff6d6; font: inherit; }
+.unit-detail-effective-grid dd span { overflow: hidden; color: #bfc9c1; font: 11px system-ui, sans-serif; text-overflow: ellipsis; white-space: nowrap; }
 .officer-list-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
 .officer-list-tabs button { min-width: 0; min-height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.06); color: var(--paper); cursor: pointer; }
 .officer-list-tabs button:hover, .officer-list-tabs button:focus-visible, .officer-list-tabs button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.22); outline: none; }
@@ -673,6 +683,7 @@ button { color: inherit; }
   .city-marker-copy strong { font-size: 14px; }
   .event-log { display: none; }
   .modal-backdrop, .result-backdrop { align-items: end; padding: 0; }
+  .unit-detail-dialog { width: 100%; max-height: min(90dvh, calc(100dvh - 16px)); padding: 15px; border-width: 1px 0 0; }
   .command-dialog, .result-overlay, .confirm-dialog { width: 100%; max-height: 86dvh; padding: 15px; border-width: 1px 0 0; }
   .amount-grid { grid-template-columns: 1fr; }
   .result-overlay h1 { font-size: 25px; }

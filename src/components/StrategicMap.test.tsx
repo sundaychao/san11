@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { CITY_GRID_CENTERS, GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
@@ -207,6 +207,114 @@ describe('StrategicMap', () => {
     expect(screen.getByTestId('battle-damage-number')).toHaveTextContent('-300');
   });
 
+  it('renders critical damage and failed strategy feedback at their report coordinates', () => {
+    const state = createGame('liu', 1);
+    state.battleDamageReports = [{
+      id: 'critical-damage',
+      unitId: 'critical-target',
+      q: 12,
+      r: 10,
+      amount: 640,
+      kind: 'attack',
+      critical: true,
+      label: '暴击',
+    }];
+    state.strategyResultReports = [
+      {
+        id: 'failed-strategy',
+        strategyId: 'fire',
+        q: 10,
+        r: 11,
+        label: '计略失败',
+        succeeded: false,
+      },
+      {
+        id: 'successful-strategy',
+        strategyId: 'fire',
+        q: 11,
+        r: 11,
+        label: '计略成功',
+        succeeded: true,
+      },
+    ];
+
+    renderGame(state);
+
+    const critical = screen.getByTestId('battle-critical-label');
+    const damage = screen.getByTestId('battle-damage-number');
+    const failure = screen.getByTestId('strategy-result-label');
+    expect(critical).toHaveTextContent('暴击');
+    expect(critical).toHaveAttribute('data-grid-position', '12,10');
+    expect(critical).toHaveAttribute('x', '537.5');
+    expect(critical).toHaveAttribute('y', '360.5');
+    expect(damage).toHaveTextContent('-640');
+    expect(damage).toHaveAttribute('data-grid-position', '12,10');
+    expect(damage).toHaveAttribute('x', '537.5');
+    expect(damage).toHaveAttribute('y', '377.5');
+    expect(failure).toHaveTextContent('计略失败');
+    expect(failure).toHaveAttribute('data-grid-position', '10,11');
+    expect(failure).toHaveAttribute('x', '451.5');
+    expect(failure).toHaveAttribute('y', '420.5');
+    expect(screen.queryByText('计略成功')).not.toBeInTheDocument();
+  });
+
+  it('stacks two fire-arrow damage reports at the same ordinary grid position', () => {
+    const state = createGame('liu', 1);
+    state.battleDamageReports = [
+      {
+        id: 'fire-arrow-hit', unitId: 'fire-arrow-target', q: 12, r: 10,
+        amount: 520, kind: 'attack',
+      },
+      {
+        id: 'fire-arrow-burn', unitId: 'fire-arrow-target', q: 12, r: 10,
+        amount: 300, kind: 'attack',
+      },
+    ];
+
+    renderGame(state);
+
+    const damageNumbers = screen.getAllByTestId('battle-damage-number');
+    expect(damageNumbers.map((node) => node.getAttribute('y'))).toEqual(['360.5', '377.5']);
+  });
+
+  it('keeps top-row critical labels separated while preserving the normal damage baseline', () => {
+    const state = createGame('liu', 1);
+    state.battleDamageReports = [
+      {
+        id: 'top-row-critical',
+        unitId: 'critical-target',
+        q: 0,
+        r: 0,
+        amount: 640,
+        kind: 'attack',
+        critical: true,
+        label: '暴击',
+      },
+      {
+        id: 'top-row-normal',
+        unitId: 'normal-target',
+        q: 0,
+        r: 0,
+        amount: 320,
+        kind: 'attack',
+      },
+    ];
+
+    renderGame(state);
+
+    const critical = screen.getByTestId('battle-critical-label');
+    const damageNumbers = screen.getAllByTestId('battle-damage-number');
+    const criticalDamage = damageNumbers.find((node) => node.textContent === '-640')!;
+    const normalDamage = damageNumbers.find((node) => node.textContent === '-320')!;
+    const criticalY = Number(critical.getAttribute('y'));
+    const criticalDamageY = Number(criticalDamage.getAttribute('y'));
+    expect(criticalY).toBe(12);
+    expect(criticalDamageY).toBe(29);
+    expect(criticalDamageY - criticalY).toBe(17);
+    expect(normalDamage).toHaveAttribute('y', '46');
+    expect(new Set([criticalY, criticalDamageY, Number(normalDamage.getAttribute('y'))]).size).toBe(3);
+  });
+
   it('shows facility status while hovering a facility marker', () => {
     const state = createGame('liu', 1);
     state.facilities = {
@@ -361,7 +469,7 @@ describe('StrategicMap', () => {
     expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
   });
 
-  it('shows unit information while hovering a field unit and hides it after leaving', () => {
+  it('shows unit information while hovering a field unit and hides it after leaving', async () => {
     const deployed = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -383,7 +491,7 @@ describe('StrategicMap', () => {
 
     fireEvent.pointerLeave(unitMarker);
 
-    expect(screen.queryByTestId('unit-info-panel')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('unit-info-panel')).not.toBeInTheDocument());
   });
 
   it('marks units with distinct force ids and force colors', () => {

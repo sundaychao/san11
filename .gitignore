@@ -5,3 +5,7 @@ dist/
 playwright-report/
 test-results/
 artifacts/
+server/data/*.db
+server/data/*.db-*
+server/data/users.json
+server/data/rooms/*.json

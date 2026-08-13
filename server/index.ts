@@ -10,6 +10,7 @@ import type {
   GameIntentPayload,
   IntentAck,
   JoinRoomPayload,
+  LeaveRoomPayload,
   OnlineAck,
   OnlineSnapshot,
   ResumeRoomPayload,
@@ -200,6 +201,24 @@ io.on('connection', (socket) => {
       emitLobbyRoomList();
     } catch (error) {
       ack(ackError(error));
+    }
+  });
+
+  socket.on('room:leave', async (payload: LeaveRoomPayload, ack: (response: { ok: true } | { ok: false; reason: string }) => void) => {
+    try {
+      const session = await auth.authenticate(payload.token);
+      const playerId = session?.userId ?? socket.data.playerId as string | undefined;
+      if (!playerId) throw new Error('请先登录');
+      const result = manager.leavePlayer(playerId, payload.roomId.trim().toUpperCase());
+      if (result) {
+        socket.leave(result.room.id);
+        socket.data.playerId = undefined;
+        if (!result.removed) emitRoomUpdate(result.room.id);
+        emitLobbyRoomList();
+      }
+      ack({ ok: true });
+    } catch (error) {
+      ack({ ok: false, reason: error instanceof Error ? error.message : '退出房间失败' });
     }
   });
 

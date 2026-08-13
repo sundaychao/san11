@@ -30,6 +30,7 @@ function isQuarterStartMonth(month: number) {
 function clearTransientBattleReports(state: GameState) {
   state.battleDamageReports = [];
   state.facilityRepairReports = [];
+  state.strategyResultReports = [];
 }
 
 function applyPossibleEvent(state: GameState, city: City) {

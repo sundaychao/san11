@@ -7,6 +7,8 @@ import type {
   GameIntentPayload,
   IntentAck,
   JoinRoomPayload,
+  LeaveRoomAck,
+  LeaveRoomPayload,
   OnlineAck,
   OnlineSnapshot,
   ResumeRoomPayload,
@@ -28,6 +30,7 @@ export type OnlineSocket = Socket<{
   'room:resume': (payload: ResumeRoomPayload, ack: (response: OnlineAck) => void) => void;
   'room:selectForce': (payload: SelectForcePayload, ack: (response: OnlineAck) => void) => void;
   'room:startGame': (payload: StartRoomPayload, ack: (response: OnlineAck) => void) => void;
+  'room:leave': (payload: LeaveRoomPayload, ack: (response: LeaveRoomAck) => void) => void;
   'game:intent': (payload: GameIntentPayload, ack: (response: IntentAck) => void) => void;
   'auth:register': (payload: AuthPayload, ack: (response: AuthAck) => void) => void;
   'auth:login': (payload: AuthPayload, ack: (response: AuthAck) => void) => void;

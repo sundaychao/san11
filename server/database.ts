@@ -123,6 +123,28 @@ export class GameDatabase {
     this.db.prepare('DELETE FROM rooms WHERE id = ?').run(roomId);
   }
 
+  deleteRoomsUpdatedBefore(cutoffIso: string, protectedRoomIds: string[] = []) {
+    const candidates = this.db
+      .prepare('SELECT id FROM rooms WHERE updated_at < ? ORDER BY id')
+      .all(cutoffIso) as unknown as Array<{ id: string }>;
+    const protectedIds = new Set(protectedRoomIds);
+    const deletedIds = candidates
+      .map(({ id }) => id)
+      .filter((id) => !protectedIds.has(id));
+    const remove = this.db.prepare('DELETE FROM rooms WHERE id = ?');
+
+    this.db.exec('BEGIN');
+    try {
+      for (const roomId of deletedIds) remove.run(roomId);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+
+    return deletedIds;
+  }
+
   loadRooms(): OnlineRoom[] {
     const rows = this.db.prepare('SELECT room_json FROM rooms').all() as unknown as RoomRow[];
     return rows.flatMap((row) => {

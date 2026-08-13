@@ -58,7 +58,7 @@ describe('command engine', () => {
     })]);
   });
 
-  it('clears stale battle damage reports when executing a city command', () => {
+  it('clears stale battle reports when executing a city command', () => {
     const state = createGame('liu', 1);
     state.battleDamageReports = [{
       id: 'old-damage',
@@ -68,12 +68,17 @@ describe('command engine', () => {
       amount: 900,
       kind: 'attack',
     }];
+    state.strategyResultReports = [{
+      id: 'old-strategy', strategyId: 'disturb', q: 10, r: 10,
+      label: '计略失败', succeeded: false,
+    }];
 
     const next = executeCommand(state, 'liu', {
       type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
     });
 
     expect(next.battleDamageReports).toEqual([]);
+    expect(next.strategyResultReports).toEqual([]);
   });
 
   it('produces selected armaments with gold and officer action costs', () => {

@@ -1,26 +1,12 @@
 import { runAiTurn } from '../ai';
 import {
-  attackFacility,
-  attackCity,
-  attackUnit,
-  buildFacility,
-  deployTransportUnit,
-  deployUnit,
-  deployUnitWithId,
-  dismantleFacility,
-  moveUnit,
-  repairFacility,
   settleBattleFacilities,
-  useFirePlot,
-  useUnitStrategy,
-  useUnitTactic,
-  waitUnit,
 } from '../battle/actions';
-import { executeCommand } from '../commands';
 import { FORCE_IDS } from '../scenario/jingxiang208';
 import { createMobileDuelGame } from '../scenario/mobileDuel';
 import { settleTenDay } from '../turn';
 import type { ForceId, GameState } from '../types';
+import { reduceGameIntent } from './intentReducer';
 import type { GameIntent } from './intents';
 
 export const ONLINE_DUEL_MAX_PLAYERS = 2;
@@ -232,77 +218,6 @@ function stateForAction(room: OnlineRoom, forceId: ForceId) {
   return personalizeState(room.state, forceId, forceId);
 }
 
-function applyGameIntent(room: OnlineRoom, forceId: ForceId, intent: Exclude<GameIntent, { type: 'endTenDay' }>): GameState {
-  const state = stateForAction(room, forceId);
-  switch (intent.type) {
-    case 'issueCommand':
-      return executeCommand(state, forceId, intent.command);
-    case 'deployUnit':
-      return deployUnit(state, forceId, intent.input);
-    case 'deployUnitAction': {
-      const deployed = deployUnitWithId(state, forceId, intent.input);
-      switch (intent.action.type) {
-        case 'wait':
-          return deployed.state;
-        case 'attackUnit':
-          return attackUnit(deployed.state, forceId, deployed.unitId, intent.action.targetId);
-        case 'attackFacility':
-          return attackFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityId);
-        case 'attackCity':
-          return attackCity(deployed.state, forceId, deployed.unitId, intent.action.cityId);
-        case 'useUnitTactic':
-          return useUnitTactic(deployed.state, forceId, deployed.unitId, intent.action.targetId, intent.action.tacticId);
-        case 'useUnitStrategy':
-          return useUnitStrategy(deployed.state, forceId, deployed.unitId, intent.action.strategyId, intent.action.selection);
-        case 'buildFacility':
-          return buildFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityType, intent.action.target);
-        case 'repairFacility':
-          return repairFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityId);
-      }
-    }
-    case 'deployTransportUnit':
-      return deployTransportUnit(state, forceId, intent.input);
-    case 'moveUnit':
-      return moveUnit(state, forceId, intent.unitId, intent.destination);
-    case 'waitUnit':
-      return waitUnit(state, forceId, intent.unitId);
-    case 'attackUnit': {
-      const moved = intent.destination ? moveUnit(state, forceId, intent.attackerId, intent.destination) : state;
-      return attackUnit(moved, forceId, intent.attackerId, intent.targetId);
-    }
-    case 'attackFacility': {
-      const moved = intent.destination ? moveUnit(state, forceId, intent.attackerId, intent.destination) : state;
-      return attackFacility(moved, forceId, intent.attackerId, intent.facilityId);
-    }
-    case 'useUnitTactic': {
-      const moved = intent.destination ? moveUnit(state, forceId, intent.attackerId, intent.destination) : state;
-      return useUnitTactic(moved, forceId, intent.attackerId, intent.targetId, intent.tacticId);
-    }
-    case 'useUnitStrategy': {
-      const moved = intent.destination ? moveUnit(state, forceId, intent.unitId, intent.destination) : state;
-      return useUnitStrategy(moved, forceId, intent.unitId, intent.strategyId, intent.selection);
-    }
-    case 'useFirePlot': {
-      const moved = intent.destination ? moveUnit(state, forceId, intent.unitId, intent.destination) : state;
-      return useFirePlot(moved, forceId, intent.unitId, intent.target);
-    }
-    case 'buildFacility': {
-      const moved = intent.destination ? moveUnit(state, forceId, intent.unitId, intent.destination) : state;
-      return buildFacility(moved, forceId, intent.unitId, intent.facilityType, intent.target);
-    }
-    case 'repairFacility': {
-      const moved = intent.destination ? moveUnit(state, forceId, intent.unitId, intent.destination) : state;
-      return repairFacility(moved, forceId, intent.unitId, intent.facilityId);
-    }
-    case 'dismantleFacility':
-      return dismantleFacility(state, forceId, intent.facilityId);
-    case 'attackCity': {
-      const moved = intent.destination ? moveUnit(state, forceId, intent.attackerId, intent.destination) : state;
-      return attackCity(moved, forceId, intent.attackerId, intent.cityId);
-    }
-  }
-}
-
 function advanceTenDay(room: OnlineRoom): GameState {
   if (!room.state) throw new Error('游戏尚未开始');
   let state = room.state;
@@ -320,6 +235,7 @@ function settleActivePlayerTurnStart(room: OnlineRoom, activePlayerId: string | 
   const next = structuredClone(room.state);
   next.battleDamageReports = [];
   next.facilityRepairReports = [];
+  next.strategyResultReports = [];
   settleBattleFacilities(next, activeForceId);
   return canonicalState(next, hostForceId(room));
 }
@@ -362,7 +278,7 @@ export function reduceOnlineIntent(room: OnlineRoom, playerId: string, baseRevis
       return { ok: true, room: nextRoom };
     }
 
-    const nextState = applyGameIntent(room, forceId, intent);
+    const nextState = reduceGameIntent(stateForAction(room, forceId), forceId, intent);
     return {
       ok: true,
       room: {

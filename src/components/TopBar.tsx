@@ -1,4 +1,4 @@
-import { Save, SkipForward, Users } from 'lucide-react';
+import { LogOut, Save, SkipForward, Users } from 'lucide-react';
 import { useState } from 'react';
 import { validateCommand } from '../game/commands';
 import { useGame } from '../game/store/GameProvider';
@@ -76,7 +76,7 @@ export function TopBar() {
           <button className="icon-button" type="button" onClick={manualSave} title="手动存档" aria-label="手动存档"><Save aria-hidden="true" /></button>
           <button className="next-month" data-testid="end-ten-day-button" type="button" onClick={endTenDay} disabled={state.phase === 'finished' || (isOnline && !isMyOnlineTurn)}><SkipForward aria-hidden="true" />{isOnline ? '进行' : '结束本旬'}</button>
           <button className="next-month" data-testid="end-month-button" type="button" onClick={requestEndMonth} aria-label="进行到下月" disabled={state.phase === 'finished'}><SkipForward aria-hidden="true" />进行·下月</button>
-          {isOnline && <button className="next-month" type="button" onClick={disconnectOnline}>断开</button>}
+          {isOnline && <button className="next-month" type="button" onClick={disconnectOnline}><LogOut aria-hidden="true" />退出房间</button>}
         </div>
       </header>
       {showOfficers && <OfficerListDialog onClose={() => setShowOfficers(false)} />}

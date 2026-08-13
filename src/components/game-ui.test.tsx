@@ -8,6 +8,13 @@ import { GameProvider } from '../game/store/GameProvider';
 import { MANUAL_SAVE_KEY, writeSave } from '../game/persistence';
 import { settleTenDay } from '../game/turn';
 import { GameShell } from './GameShell';
+import { UnitDetailDialog } from './UnitDetailDialog';
+import css from '../styles/global.css?raw';
+
+function cssRule(selector: string) {
+  const escapedSelector = selector.replaceAll('.', '\\.');
+  return css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
+}
 
 function mockFileDownloads() {
   const originalCreateObjectUrl = URL.createObjectURL;
@@ -301,6 +308,243 @@ describe('game interface shell', () => {
 
     expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/menu/waitingForTarget.mp3'));
     expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows effective formation abilities, providers, and derived battle rates', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['liu-bei', 'guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units)[0];
+    unit.officerIds = ['liu-bei', 'guan-yu', 'zhuge-liang'];
+    state.officers['zhuge-liang'].stats.intelligence = 88;
+    Object.assign(unit, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 22 });
+
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const marker = screen.getByTestId('battle-unit-marker');
+    fireEvent.pointerEnter(marker, { clientX: 300, clientY: 180 });
+
+    const hoverAbilities = within(screen.getByTestId('unit-info-panel')).getByTestId('unit-effective-abilities');
+    expect(hoverAbilities).toHaveTextContent('统78');
+    expect(hoverAbilities).toHaveTextContent('武97');
+    expect(hoverAbilities).toHaveTextContent('智88');
+    expect(hoverAbilities).toHaveTextContent('适S');
+
+    fireEvent.pointerLeave(marker);
+    fireEvent.contextMenu(marker, { clientX: 260, clientY: 190 });
+    await user.click(within(screen.getByTestId('unit-intel-context-menu')).getByTestId('unit-detail-button'));
+
+    const dialog = screen.getByTestId('unit-detail-dialog');
+    const detailRow = (label: string) => within(dialog).getByText(label, { selector: 'dt' }).closest('div')!;
+    expect(detailRow('统率')).toHaveTextContent('78刘备');
+    expect(detailRow('武力')).toHaveTextContent('97关羽');
+    expect(detailRow('智力')).toHaveTextContent('88诸葛亮');
+    expect(detailRow('适性')).toHaveTextContent('S关羽');
+    expect(detailRow('战法暴击率')).toHaveTextContent('26%');
+    expect(detailRow('火计成功率')).toHaveTextContent('85%');
+  });
+
+  it.each([
+    ['剑兵', { kind: 'combat' as const, troopType: 'sword' as const }],
+    ['输送队', { kind: 'transport' as const, troopType: 'spear' as const }],
+  ])('shows unavailable aptitude and tactic critical rate for %s', (_label, unitKind) => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'liu-bei',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = { ...Object.values(state.units)[0], ...unitKind };
+
+    render(<UnitDetailDialog unit={unit} state={state} onClose={vi.fn()} />);
+
+    const dialog = screen.getByTestId('unit-detail-dialog');
+    const detailRow = (label: string) => within(dialog).getByText(label, { selector: 'dt' }).closest('div')!;
+    expect(detailRow('适性')).toHaveTextContent('—');
+    expect(detailRow('战法暴击率')).toHaveTextContent('—');
+  });
+
+  it('shows harmful strategy success chance for the eligible hovered enemy formation', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['liu-bei', 'guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const source = Object.values(state.units)[0];
+    source.officerIds = ['liu-bei', 'guan-yu', 'zhuge-liang'];
+    state.officers['zhuge-liang'].stats.intelligence = 88;
+    state.officers['guo-jia'].stats.intelligence = 82;
+    Object.assign(source, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 22 });
+    state.units['strategy-target'] = {
+      id: 'strategy-target',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      officerIds: ['cao-ren', 'guo-jia'],
+      homeCityId: 'xiangyang',
+      troopType: 'halberd',
+      q: 11,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 20,
+      moved: false,
+      acted: false,
+    };
+
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const sourceMarker = screen.getAllByTestId('battle-unit-marker')
+      .find((marker) => marker.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(sourceMarker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(sourceMarker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '计略' }));
+    await user.click(within(screen.getByTestId('unit-strategy-menu')).getByRole('button', { name: '伪报（15）' }));
+
+    const targetMarker = screen.getAllByTestId('battle-unit-marker')
+      .find((marker) => marker.getAttribute('data-grid-position') === '11,10')!;
+    fireEvent.pointerEnter(targetMarker, { clientX: 300, clientY: 180 });
+
+    expect(screen.getByTestId('unit-info-panel')).toHaveTextContent('伪报成功率 76%');
+  });
+
+  it('keeps hover and detail information scroll-contained inside short viewports', () => {
+    const hoverRule = cssRule('.unit-info-panel');
+    const detailRule = cssRule('.unit-detail-dialog');
+
+    expect(hoverRule).toContain('max-height: calc(100dvh - 16px)');
+    expect(hoverRule).toContain('overflow-y: auto');
+    expect(hoverRule).toContain('pointer-events: auto');
+    expect(hoverRule).toContain('touch-action: pan-y');
+    expect(detailRule).toContain('max-height: min(680px, calc(100dvh - 40px))');
+    expect(detailRule).toContain('overflow-y: auto');
+    expect(css).toMatch(/@media \(max-width: 700px\)[\s\S]*?\.unit-detail-dialog\s*\{[^}]*max-height:/);
+  });
+
+  it('keeps unit information open during pointer handoff and closes after leaving the panel', () => {
+    vi.useFakeTimers();
+    try {
+      const state = deployUnit(createGame('liu', 1), 'liu', {
+        cityId: 'jiangling',
+        officerId: 'liu-bei',
+        troopType: 'spear',
+        troops: 4000,
+        food: 6000,
+      });
+      render(
+        <GameProvider initialState={state} storage={window.localStorage}>
+          <GameShell />
+        </GameProvider>,
+      );
+
+      const marker = screen.getByTestId('battle-unit-marker');
+      fireEvent.pointerEnter(marker, { clientX: 300, clientY: 180 });
+      const panel = screen.getByTestId('unit-info-panel');
+
+      fireEvent.pointerLeave(marker);
+      fireEvent.pointerEnter(panel);
+      act(() => vi.advanceTimersByTime(200));
+      expect(panel).toBeVisible();
+
+      fireEvent.pointerLeave(panel);
+      act(() => vi.advanceTimersByTime(119));
+      expect(panel).toBeVisible();
+      act(() => vi.advanceTimersByTime(1));
+      expect(screen.queryByTestId('unit-info-panel')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides harmful strategy chance while hovering an ineligible enemy', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['liu-bei', 'guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const source = Object.values(state.units)[0];
+    Object.assign(source, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 22 });
+    state.units['eligible-strategy-target'] = {
+      id: 'eligible-strategy-target', forceId: 'cao', leaderId: 'cao-ren', homeCityId: 'xiangyang', troopType: 'halberd',
+      q: 11, r: 10, troops: 3000, food: 3000, energy: 100, movementRemaining: 20, moved: false, acted: false,
+    };
+    state.units['ineligible-strategy-target'] = {
+      id: 'ineligible-strategy-target', forceId: 'cao', leaderId: 'guo-jia', homeCityId: 'xiangyang', troopType: 'crossbow',
+      q: 20, r: 20, troops: 3000, food: 3000, energy: 100, movementRemaining: 20, moved: false, acted: false,
+    };
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const sourceMarker = screen.getAllByTestId('battle-unit-marker')
+      .find((marker) => marker.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(sourceMarker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(sourceMarker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '计略' }));
+    await user.click(within(screen.getByTestId('unit-strategy-menu')).getByRole('button', { name: '伪报（15）' }));
+
+    const ineligibleMarker = screen.getAllByTestId('battle-unit-marker')
+      .find((marker) => marker.getAttribute('data-grid-position') === '20,20')!;
+    fireEvent.pointerEnter(ineligibleMarker, { clientX: 300, clientY: 180 });
+
+    expect(screen.getByTestId('unit-info-panel')).not.toHaveTextContent('伪报成功率');
+  });
+
+  it('hides strategy chance for an eligible non-harmful strategy target', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'liu-bei',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const source = Object.values(state.units)[0];
+    Object.assign(source, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 22 });
+    state.units['inspire-target'] = {
+      id: 'inspire-target', forceId: 'liu', leaderId: 'guan-yu', homeCityId: 'jiangling', troopType: 'spear',
+      q: 11, r: 10, troops: 3000, food: 3000, energy: 60, movementRemaining: 22, moved: false, acted: false,
+    };
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const sourceMarker = screen.getAllByTestId('battle-unit-marker')
+      .find((marker) => marker.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(sourceMarker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(sourceMarker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '计略' }));
+    await user.click(within(screen.getByTestId('unit-strategy-menu')).getByRole('button', { name: '鼓舞（10）' }));
+
+    const targetMarker = screen.getAllByTestId('battle-unit-marker')
+      .find((marker) => marker.getAttribute('data-grid-position') === '11,10')!;
+    fireEvent.pointerEnter(targetMarker, { clientX: 300, clientY: 180 });
+
+    expect(screen.getByTestId('unit-info-panel')).not.toHaveTextContent('成功率');
   });
 
   it('opens a recruit officer selection dialog from the urban city menu', async () => {

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { runAiTurn } from '../ai';
+import { nextRandom } from '../random';
 import { createGame } from '../scenario/jingxiang208';
 import { territoryCityAt, territoryForceAt } from '../territory';
 import { settleTenDay } from '../turn';
-import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, FACILITY_BUILD_COSTS, facilityBuildTargets, jointAttackableUnits, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
+import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
+import { damageRoll } from './shared';
 
 function cityKeys(state: ReturnType<typeof createGame>) {
   return new Set(Object.values(state.cities).flatMap((city) => (
@@ -53,6 +55,65 @@ function addEnemyUnit(state: ReturnType<typeof createGame>, id: string, coord: {
     acted: false,
   };
   state.officers['cao-ren'].location = { kind: 'unit', unitId: id };
+}
+
+function seedForFirstRoll(predicate: (value: number) => boolean) {
+  for (let seed = 1; seed < 100_000; seed += 1) {
+    if (predicate(nextRandom(seed, 0).value)) return seed;
+  }
+  throw new Error('Unable to find a matching deterministic seed');
+}
+
+function spearTacticState(grade: 'S' | 'A' | 'B' | 'C', seed = 1, troops = 10_000) {
+  const state = deployUnit(createGame('liu', seed), 'liu', {
+    cityId: 'jiangling',
+    officerId: 'guan-yu',
+    troopType: 'spear',
+    troops: 4000,
+    food: 5000,
+  });
+  setUniformTerrain(state, 'plain');
+  const attacker = Object.values(state.units)[0];
+  readyUnitAt(state, attacker.id, { q: 10, r: 10 }, 'spear');
+  state.officers['guan-yu'].aptitudes!.spear = grade;
+  state.officers['cao-ren'].stats.leadership = state.officers['guan-yu'].stats.leadership;
+  addEnemyUnit(state, 'enemy-tactic', { q: 11, r: 10 }, troops);
+  return { state, attacker, target: state.units['enemy-tactic'] };
+}
+
+type ProbabilisticStrategyId = 'fire' | 'false-report' | 'disturb' | 'discord';
+
+function probabilisticStrategyState(strategyId: ProbabilisticStrategyId) {
+  const state = deployUnit(createGame('liu', 1), 'liu', {
+    cityId: 'jiangling', officerId: 'guan-yu', troops: 3000, food: 3000,
+  });
+  setUniformTerrain(state, 'plain');
+  const unit = Object.values(state.units)[0];
+  readyUnitAt(state, unit.id, { q: 10, r: 10 });
+  state.units[unit.id].energy = 100;
+  state.officers['guan-yu'].stats.intelligence = 70;
+  addEnemyUnit(state, 'strategy-target', { q: 11, r: 10 });
+  state.officers['cao-ren'].stats.intelligence = 70;
+
+  if (strategyId === 'discord') {
+    addEnemyUnit(state, 'discord-victim', { q: 12, r: 11 });
+    state.units['discord-victim'].leaderId = 'cao-cao';
+    state.officers['cao-cao'].stats.intelligence = 1;
+    state.officers['cao-cao'].location = { kind: 'unit', unitId: 'discord-victim' };
+  }
+
+  const selection = strategyId === 'fire'
+    ? { coord: { q: 10, r: 9 } } as const
+    : { targetUnitId: 'strategy-target' } as const;
+  const target = strategyId === 'fire' ? { q: 10, r: 9 } : state.units['strategy-target'];
+  const sourceIntelligence = effectiveUnitAbilities(state, unit).intelligence.value;
+  const chance = strategyId === 'fire'
+    ? fireStrategySuccessChance(sourceIntelligence)
+    : harmfulStrategySuccessChance(
+      sourceIntelligence,
+      effectiveUnitAbilities(state, state.units['strategy-target']).intelligence.value,
+    );
+  return { state, unit, selection, target, chance };
 }
 
 describe('battle deployment and movement actions', () => {
@@ -841,6 +902,142 @@ describe('battle deployment and movement actions', () => {
     expect(unitTactics(state, unit.id).map((tactic) => tactic.name)).toEqual(['突击', '突破', '突进']);
   });
 
+  it.each([
+    ['C', 0],
+    ['B', 1],
+    ['A', 2],
+    ['S', 3],
+  ] as const)('keeps all spear tactic definitions visible while %s aptitude unlocks %i tiers', (grade, unlocked) => {
+    const { state, attacker } = spearTacticState(grade);
+    const tacticIds = ['spear-thrust', 'spear-spiral', 'spear-double'] as const;
+
+    expect(unitTactics(state, attacker.id)).toHaveLength(3);
+    expect(tacticIds.filter((tacticId) => unitCanUseTactic(state, attacker.id, tacticId))).toHaveLength(unlocked);
+  });
+
+  it('rejects an aptitude-locked tactic before energy and target validation', () => {
+    const { state, attacker } = spearTacticState('B');
+    state.units[attacker.id].energy = 0;
+
+    expect(() => useUnitTactic(state, 'liu', attacker.id, 'enemy-tactic', 'spear-spiral'))
+      .toThrow('需要枪兵适性 A');
+  });
+
+  it('uses a deputy aptitude to unlock a tier-three tactic', () => {
+    const state = createGame('liu', 1);
+    const deployed = deployUnit(state, 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['jian-yong', 'guan-yu'],
+      troopType: 'spear',
+      troops: 3000,
+      food: 3000,
+    });
+    const unit = Object.values(deployed.units)[0];
+
+    expect(unit.leaderId).toBe('jian-yong');
+    expect(unitCanUseTactic(deployed, unit.id, 'spear-double')).toBe(true);
+  });
+
+  it('uses defender leadership to reduce normal attack damage', () => {
+    const base = deployUnit(createGame('liu', 77), 'liu', {
+      cityId: 'jiangling', officerId: 'guan-yu', troops: 4000, food: 5000,
+    });
+    const attacker = Object.values(base.units)[0];
+    readyUnitAt(base, attacker.id, { q: 10, r: 10 });
+    addEnemyUnit(base, 'enemy-defense', { q: 11, r: 10 }, 10_000);
+    const lowDefense = structuredClone(base);
+    const highDefense = structuredClone(base);
+    lowDefense.officers['cao-ren'].stats.leadership = 40;
+    highDefense.officers['cao-ren'].stats.leadership = 100;
+
+    const lowDamage = attackUnit(lowDefense, 'liu', attacker.id, 'enemy-defense').battleDamageReports![0].amount;
+    const highDamage = attackUnit(highDefense, 'liu', attacker.id, 'enemy-defense').battleDamageReports![0].amount;
+
+    expect(highDamage).toBeLessThan(lowDamage);
+  });
+
+  it('uses the highest-war deputy without changing leader leadership', () => {
+    const base = deployUnit(createGame('liu', 91), 'liu', {
+      cityId: 'jiangling', officerIds: ['jian-yong', 'guan-yu'], troops: 4000, food: 5000,
+    });
+    const attacker = Object.values(base.units)[0];
+    readyUnitAt(base, attacker.id, { q: 10, r: 10 });
+    addEnemyUnit(base, 'enemy-deputy', { q: 11, r: 10 }, 10_000);
+    base.officers['cao-ren'].stats.leadership = base.officers['jian-yong'].stats.leadership;
+    const lowWar = structuredClone(base);
+    const highWar = structuredClone(base);
+    lowWar.officers['guan-yu'].stats.war = 1;
+    highWar.officers['guan-yu'].stats.war = 100;
+
+    const lowDamage = attackUnit(lowWar, 'liu', attacker.id, 'enemy-deputy').battleDamageReports![0].amount;
+    const highDamage = attackUnit(highWar, 'liu', attacker.id, 'enemy-deputy').battleDamageReports![0].amount;
+
+    expect(highWar.officers['jian-yong'].stats.leadership).toBe(lowWar.officers['jian-yong'].stats.leadership);
+    expect(highDamage).toBeGreaterThan(lowDamage);
+  });
+
+  it('applies B, A, and S tactic damage multipliers before rounding', () => {
+    const criticalChance = tacticCriticalChance(97, 'S') / 100;
+    const seed = seedForFirstRoll((value) => value >= criticalChance);
+    const damages = (['B', 'A', 'S'] as const).map((grade) => {
+      const { state, attacker } = spearTacticState(grade, seed);
+      return useUnitTactic(state, 'liu', attacker.id, 'enemy-tactic', 'spear-thrust').battleDamageReports![0].amount;
+    });
+    const { state, attacker } = spearTacticState('B', seed);
+    state.rngCursor = nextRandom(seed, state.rngCursor).cursor;
+    const baseDamage = damageRoll(state, attacker, 'plain');
+
+    expect(damages).toEqual([1, 1.1, 1.2].map((multiplier) => Math.round(baseDamage * 1.18 * multiplier)));
+  });
+
+  it('uses one tactic critical roll and reports a 135 percent critical hit', () => {
+    const chance = tacticCriticalChance(97, 'S') / 100;
+    const criticalSeed = seedForFirstRoll((value) => value < chance);
+    const { state, attacker } = spearTacticState('S', criticalSeed);
+    const expectedState = structuredClone(state);
+    expectedState.rngCursor = nextRandom(criticalSeed, expectedState.rngCursor).cursor;
+    const expectedBase = damageRoll(expectedState, expectedState.units[attacker.id], 'plain');
+
+    const next = useUnitTactic(state, 'liu', attacker.id, 'enemy-tactic', 'spear-thrust');
+
+    expect(next.rngCursor).toBe(state.rngCursor + 2);
+    expect(next.battleDamageReports![0]).toMatchObject({
+      amount: Math.round(expectedBase * 1.18 * 1.2 * 1.35),
+      critical: true,
+      label: '暴击',
+    });
+  });
+
+  it('omits critical report fields when the shared roll misses', () => {
+    const chance = tacticCriticalChance(97, 'S') / 100;
+    const normalSeed = seedForFirstRoll((value) => value >= chance);
+    const { state, attacker } = spearTacticState('S', normalSeed);
+
+    const next = useUnitTactic(state, 'liu', attacker.id, 'enemy-tactic', 'spear-thrust');
+
+    expect(next.battleDamageReports![0].critical).toBeUndefined();
+    expect(next.battleDamageReports![0].label).toBeUndefined();
+  });
+
+  it('shares one critical result across every whirlwind target', () => {
+    const chance = tacticCriticalChance(97, 'S') / 100;
+    const criticalSeed = seedForFirstRoll((value) => value < chance);
+    const state = deployUnit(createGame('liu', criticalSeed), 'liu', {
+      cityId: 'jiangling', officerId: 'guan-yu', troopType: 'halberd', troops: 2000, food: 5000,
+    });
+    setUniformTerrain(state, 'plain');
+    const attacker = Object.values(state.units)[0];
+    readyUnitAt(state, attacker.id, { q: 10, r: 10 }, 'halberd');
+    addEnemyUnit(state, 'whirlwind-a', { q: 11, r: 10 }, 10_000);
+    addEnemyUnit(state, 'whirlwind-b', { q: 10, r: 9 }, 10_000);
+
+    const next = useUnitTactic(state, 'liu', attacker.id, 'whirlwind-a', 'halberd-whirlwind');
+
+    expect(next.rngCursor).toBe(state.rngCursor + 3);
+    expect(next.battleDamageReports).toHaveLength(2);
+    expect(next.battleDamageReports?.every((report) => report.critical && report.label === '暴击')).toBe(true);
+  });
+
   it('uses spear tactics to push or confuse a target and spend energy', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -995,6 +1192,7 @@ describe('battle deployment and movement actions', () => {
     setUniformTerrain(crossbowState, 'plain');
     const crossbow = Object.values(crossbowState.units)[0];
     readyUnitAt(crossbowState, crossbow.id, { q: 10, r: 10 }, 'crossbow');
+    crossbowState.officers['guan-yu'].aptitudes!.crossbow = 'A';
     crossbowState.units['friendly-middle'] = {
       id: 'friendly-middle',
       kind: 'combat',
@@ -1162,6 +1360,105 @@ describe('battle deployment and movement actions', () => {
     expect(inspired.units[unit.id]).toMatchObject({ energy: 60, acted: true });
   });
 
+  it.each([
+    ['fire', '火计', 10],
+    ['false-report', '伪报', 15],
+    ['disturb', '扰乱', 15],
+    ['discord', '内讧', 20],
+  ] as const)('%s succeeds on a seeded roll below its calculated chance', (strategyId, label, cost) => {
+    const { state, unit, selection, target, chance } = probabilisticStrategyState(strategyId);
+    state.seed = seedForFirstRoll((value) => value < chance / 100);
+    const targetStatus = state.units['strategy-target'];
+    const victimTroops = state.units['discord-victim']?.troops;
+
+    const next = useUnitStrategy(state, 'liu', unit.id, strategyId, selection);
+
+    expect(next.rngCursor).toBe(state.rngCursor + 1);
+    expect(next.units[unit.id]).toMatchObject({ energy: 100 - cost, acted: true });
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({
+      strategyId, label, succeeded: true, q: target.q, r: target.r,
+    })]);
+    if (strategyId === 'fire') expect(next.firePlots).toContainEqual(target);
+    if (strategyId === 'false-report') expect(targetStatus.falseReportedTenDays).toBeUndefined();
+    if (strategyId === 'false-report') expect(next.units['strategy-target'].falseReportedTenDays).toBe(1);
+    if (strategyId === 'disturb') expect(next.units['strategy-target'].confusedTenDays).toBe(1);
+    if (strategyId === 'discord') expect(next.units['discord-victim'].troops).toBeLessThan(victimTroops!);
+  });
+
+  it.each([
+    ['fire', 10],
+    ['false-report', 15],
+    ['disturb', 15],
+    ['discord', 20],
+  ] as const)('%s fails without applying effects on a seeded roll above its calculated chance', (strategyId, cost) => {
+    const { state, unit, selection, target, chance } = probabilisticStrategyState(strategyId);
+    state.seed = seedForFirstRoll((value) => value >= chance / 100);
+    state.battleDamageReports = [{
+      id: 'old-damage', unitId: 'old-target', q: 1, r: 1, amount: 99, kind: 'attack',
+    }];
+    state.facilityRepairReports = [{
+      id: 'old-repair', facilityId: 'old-facility', q: 2, r: 2, amount: 88, kind: 'repair',
+    }];
+    const beforeFirePlots = structuredClone(state.firePlots ?? []);
+    const beforeTarget = structuredClone(state.units['strategy-target']);
+    const beforeVictim = structuredClone(state.units['discord-victim']);
+
+    const next = useUnitStrategy(state, 'liu', unit.id, strategyId, selection);
+
+    expect(next.rngCursor).toBe(state.rngCursor + 1);
+    expect(next.units[unit.id]).toMatchObject({ energy: 100 - cost, acted: true });
+    expect(next.firePlots ?? []).toEqual(beforeFirePlots);
+    expect(next.units['strategy-target']).toEqual(beforeTarget);
+    expect(next.units['discord-victim']).toEqual(beforeVictim);
+    expect(next.battleDamageReports).toEqual([]);
+    expect(next.facilityRepairReports).toEqual([]);
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({
+      strategyId, label: '计略失败', succeeded: false, q: target.q, r: target.r,
+    })]);
+  });
+
+  it.each([
+    ['extinguish', '灭火'],
+    ['calm', '镇定'],
+    ['inspire', '鼓舞'],
+  ] as const)('%s always succeeds without consuming RNG', (strategyId, label) => {
+    const state = deployUnit(createGame('liu', 17), 'liu', {
+      cityId: 'jiangling', officerId: 'guan-yu', troops: 3000, food: 3000,
+    });
+    setUniformTerrain(state, 'plain');
+    const unit = Object.values(state.units)[0];
+    readyUnitAt(state, unit.id, { q: 10, r: 10 });
+    state.units[unit.id].energy = 50;
+    state.rngCursor = 7;
+    state.firePlots = [{ q: 11, r: 10 }];
+    state.battleDamageReports = [{
+      id: 'old-damage', unitId: 'old-target', q: 1, r: 1, amount: 99, kind: 'attack',
+    }];
+    state.facilityRepairReports = [{
+      id: 'old-build', facilityId: 'old-facility', q: 2, r: 2, amount: 88, kind: 'build',
+    }];
+    state.units['calm-target'] = {
+      id: 'calm-target', kind: 'combat', forceId: 'liu', leaderId: 'zhang-fei', homeCityId: 'jiangling',
+      troopType: 'sword', q: 9, r: 10, troops: 3000, food: 3000, energy: 80,
+      movementRemaining: 20, confusedTenDays: 1, moved: false, acted: false,
+    };
+    const selection = strategyId === 'extinguish'
+      ? { coord: { q: 11, r: 10 } } as const
+      : { targetUnitId: strategyId === 'calm' ? 'calm-target' : unit.id } as const;
+    const target = strategyId === 'extinguish'
+      ? { q: 11, r: 10 }
+      : strategyId === 'calm' ? state.units['calm-target'] : unit;
+
+    const next = useUnitStrategy(state, 'liu', unit.id, strategyId, selection);
+
+    expect(next.rngCursor).toBe(state.rngCursor);
+    expect(next.battleDamageReports).toEqual([]);
+    expect(next.facilityRepairReports).toEqual([]);
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({
+      strategyId, label, succeeded: true, q: target.q, r: target.r,
+    })]);
+  });
+
   it('sets occupied target cells on fire and damages units from any force standing there', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -1296,7 +1593,7 @@ describe('battle deployment and movement actions', () => {
     expect(() => moveUnit(second, 'liu', secondUnit.id, { q: firstUnit.q, r: firstUnit.r })).toThrow(/占用/);
   });
 
-  it('clears stale battle damage reports when a unit only moves', () => {
+  it('clears stale battle reports when a unit only moves', () => {
     const deployed = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -1315,11 +1612,16 @@ describe('battle deployment and movement actions', () => {
       amount: 600,
       kind: 'attack',
     }];
+    deployed.strategyResultReports = [{
+      id: 'old-strategy', strategyId: 'disturb', q: unit.q, r: unit.r,
+      label: '计略失败', succeeded: false,
+    }];
 
     const moved = moveUnit(deployed, 'liu', unit.id, destination);
 
     expect(moved.units[unit.id].troops).toBe(unit.troops);
     expect(moved.battleDamageReports).toEqual([]);
+    expect(moved.strategyResultReports).toEqual([]);
   });
 
   it('marks a unit acted when it waits', () => {

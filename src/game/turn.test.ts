@@ -79,7 +79,7 @@ describe('monthly settlement', () => {
 });
 
 describe('ten-day settlement', () => {
-  it('clears previous battle damage reports when advancing the ten-day turn', () => {
+  it('clears previous battle reports when advancing the ten-day turn', () => {
     const state = createGame('liu', 1);
     state.battleDamageReports = [{
       id: 'old-damage',
@@ -89,10 +89,15 @@ describe('ten-day settlement', () => {
       amount: 500,
       kind: 'attack',
     }];
+    state.strategyResultReports = [{
+      id: 'old-strategy', strategyId: 'disturb', q: 35, r: 20,
+      label: '计略失败', succeeded: false,
+    }];
 
     const next = settleTenDay(state);
 
     expect(next.battleDamageReports).toEqual([]);
+    expect(next.strategyResultReports).toEqual([]);
   });
 
   it('consumes city food in proportion to garrison size', () => {

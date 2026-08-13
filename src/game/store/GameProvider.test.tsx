@@ -10,11 +10,23 @@ import { GameShell } from '../../components/GameShell';
 import { GameProvider, useGame } from './GameProvider';
 
 const socketHolder = vi.hoisted(() => ({ socket: null as FakeOnlineSocket | null }));
+const localIntentHolder = vi.hoisted(() => ({ apply: vi.fn() }));
 
 vi.mock('../../network/socketClient', () => ({
   DEFAULT_ONLINE_SERVER_URL: 'http://localhost:8787',
   createOnlineSocket: vi.fn(() => socketHolder.socket),
 }));
+
+vi.mock('./gameCommandDispatcher', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./gameCommandDispatcher')>();
+  return {
+    ...actual,
+    applyLocalIntent: (...args: Parameters<typeof actual.applyLocalIntent>) => {
+      localIntentHolder.apply(...args);
+      return actual.applyLocalIntent(...args);
+    },
+  };
+});
 
 class MemoryStorage implements SaveAdapter {
   readonly values = new Map<string, string>();
@@ -122,6 +134,7 @@ function OnlineProbe() {
       <button onClick={() => void (game as any).resumeOnlineRoom({ serverUrl: 'http://server.test' }).catch(() => undefined)}>resume room</button>
       <button onClick={() => void game.selectOnlineForce('liu')}>select liu</button>
       <button onClick={() => void game.startOnlineGame()}>start online</button>
+      <button onClick={() => game.disconnectOnline()}>leave room</button>
     </div>
   );
 }
@@ -142,6 +155,8 @@ class FakeOnlineSocket {
 
   rejectCreateWithAuthError = false;
   delayRoomResume = false;
+  skipLeaveAck = false;
+  disconnected = false;
   startGameState = createGame('liu', 1);
   intentAckSnapshot: unknown = null;
 
@@ -163,7 +178,7 @@ class FakeOnlineSocket {
   }
 
   disconnect() {
-    // no-op for tests
+    this.disconnected = true;
   }
 
   flushRoomResume() {
@@ -304,6 +319,10 @@ class FakeOnlineSocket {
     if (event === 'game:intent') {
       ack?.(this.intentAckSnapshot ? { ok: true, snapshot: this.intentAckSnapshot } : { ok: true });
     }
+    if (event === 'room:leave') {
+      if (this.skipLeaveAck) return;
+      ack?.({ ok: true });
+    }
   }
 
   emitServer(event: string, payload: unknown) {
@@ -376,6 +395,7 @@ function placeUnitOutsideXiangyang(state: ReturnType<typeof createGame>, unitId:
 describe('GameProvider', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    localIntentHolder.apply.mockClear();
     window.localStorage.clear();
     socketHolder.socket = null;
   });
@@ -474,6 +494,33 @@ describe('GameProvider', () => {
 
     expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/troops/followme.mp3'));
     expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes local unit movement through the shared intent dispatcher', async () => {
+    const user = userEvent.setup();
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'sword',
+      troops: 4000,
+      food: 6000,
+    });
+    const ready = settleTenDay(deployed);
+    const unitId = Object.keys(ready.units)[0];
+    const destination = movementCells(ready, unitId)[0];
+
+    render(
+      <GameProvider initialState={ready} storage={new MemoryStorage()}>
+        <MoveProbe unitId={unitId} destination={destination} />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'move unit' }));
+
+    expect(localIntentHolder.apply).toHaveBeenCalledWith(
+      ready,
+      { type: 'moveUnit', unitId, destination },
+    );
   });
 
   it('plays the follow-me sound after initial deployment movement', async () => {
@@ -1056,6 +1103,53 @@ describe('GameProvider', () => {
     });
     expect(screen.getByLabelText('phase')).toHaveTextContent('playing');
     expect(screen.getByLabelText('state')).toHaveTextContent('liu');
+  });
+
+  it('leaves the current online room before disconnecting locally', async () => {
+    const user = userEvent.setup();
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    const storage = new MemoryStorage();
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+
+    render(<GameProvider storage={storage}><OnlineProbe /></GameProvider>);
+
+    await user.click(screen.getByRole('button', { name: 'create room' }));
+    expect(storage.getItem('jingxiang-208-last-online-room-v1')).not.toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'leave room' }));
+
+    expect(socket.emitted.at(-1)).toMatchObject({
+      event: 'room:leave',
+      payload: { token: 'token', roomId: 'ABCD' },
+    });
+    expect(screen.getByLabelText('room')).toHaveTextContent('none');
+    expect(storage.getItem('jingxiang-208-last-online-room-v1')).toBeNull();
+  });
+
+  it('disconnects locally even when the leave request is not acknowledged', async () => {
+    const user = userEvent.setup();
+    const socket = new FakeOnlineSocket();
+    socket.skipLeaveAck = true;
+    socketHolder.socket = socket;
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+
+    render(<GameProvider storage={new MemoryStorage()}><OnlineProbe /></GameProvider>);
+
+    await user.click(screen.getByRole('button', { name: 'create room' }));
+    await user.click(screen.getByRole('button', { name: 'leave room' }));
+
+    expect(socket.emitted.at(-1)).toMatchObject({ event: 'room:leave' });
+    expect(socket.disconnected).toBe(true);
+    expect(screen.getByLabelText('room')).toHaveTextContent('none');
   });
 
   it('loads lobby rooms from the online server', async () => {
