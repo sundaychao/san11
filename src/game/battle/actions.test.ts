@@ -64,6 +64,13 @@ function seedForFirstRoll(predicate: (value: number) => boolean) {
   throw new Error('Unable to find a matching deterministic seed');
 }
 
+function seedForTwoRolls(firstPredicate: (value: number) => boolean, secondPredicate: (value: number) => boolean) {
+  for (let seed = 1; seed < 100_000; seed += 1) {
+    if (firstPredicate(nextRandom(seed, 0).value) && secondPredicate(nextRandom(seed, 1).value)) return seed;
+  }
+  throw new Error('Unable to find matching deterministic seeds');
+}
+
 function spearTacticState(grade: 'S' | 'A' | 'B' | 'C', seed = 1, troops = 10_000) {
   const state = deployUnit(createGame('liu', seed), 'liu', {
     cityId: 'jiangling',
@@ -1082,7 +1089,7 @@ describe('battle deployment and movement actions', () => {
     addEnemyUnit(state, 'enemy-distance-two', { q: 12, r: 11 });
 
     expect(tacticTargetUnits(state, attacker.id, 'crossbow-fire').map((unit) => unit.id)).toEqual(['enemy-distance-two']);
-    expect(tacticTargetUnits(state, attacker.id, 'crossbow-pierce').map((unit) => unit.id)).toEqual(['enemy-adjacent', 'enemy-distance-two']);
+    expect(tacticTargetUnits(state, attacker.id, 'crossbow-pierce').map((unit) => unit.id)).toEqual(['enemy-distance-two']);
     expect(tacticTargetUnits(state, attacker.id, 'crossbow-volley').map((unit) => unit.id)).toEqual(['enemy-adjacent', 'enemy-distance-two']);
   });
 
@@ -1347,7 +1354,8 @@ describe('battle deployment and movement actions', () => {
     expect(() => waitUnit(falseReported, 'cao', 'enemy-plot')).toThrow(/伪报|混乱/);
 
     const disturbed = useUnitStrategy(state, 'liu', unit.id, 'disturb', { targetUnitId: 'enemy-plot' });
-    expect(disturbed.units['enemy-plot'].confusedTenDays).toBe(1);
+    expect(disturbed.units['enemy-plot'].confusedTenDays).toBeGreaterThanOrEqual(1);
+    expect(disturbed.units['enemy-plot'].confusedTenDays).toBeLessThanOrEqual(3);
     expect(disturbed.units[unit.id]).toMatchObject({ energy: 35, acted: true });
     expect(() => waitUnit(disturbed, 'cao', 'enemy-plot')).toThrow(/伪报|混乱/);
 
@@ -1373,7 +1381,7 @@ describe('battle deployment and movement actions', () => {
 
     const next = useUnitStrategy(state, 'liu', unit.id, strategyId, selection);
 
-    expect(next.rngCursor).toBe(state.rngCursor + 1);
+    expect(next.rngCursor).toBe(state.rngCursor + (strategyId === 'disturb' ? 2 : 1));
     expect(next.units[unit.id]).toMatchObject({ energy: 100 - cost, acted: true });
     expect(next.strategyResultReports).toEqual([expect.objectContaining({
       strategyId, label, succeeded: true, q: target.q, r: target.r,
@@ -1381,8 +1389,24 @@ describe('battle deployment and movement actions', () => {
     if (strategyId === 'fire') expect(next.firePlots).toContainEqual(target);
     if (strategyId === 'false-report') expect(targetStatus.falseReportedTenDays).toBeUndefined();
     if (strategyId === 'false-report') expect(next.units['strategy-target'].falseReportedTenDays).toBe(1);
-    if (strategyId === 'disturb') expect(next.units['strategy-target'].confusedTenDays).toBe(1);
+    if (strategyId === 'disturb') {
+      expect(next.units['strategy-target'].confusedTenDays).toBeGreaterThanOrEqual(1);
+      expect(next.units['strategy-target'].confusedTenDays).toBeLessThanOrEqual(3);
+    }
     if (strategyId === 'discord') expect(next.units['discord-victim'].troops).toBeLessThan(victimTroops!);
+  });
+
+  it.each([1, 2, 3])('assigns a successful disturb a deterministic random duration of %i ten-day turns', (duration) => {
+    const { state, unit, selection, chance } = probabilisticStrategyState('disturb');
+    state.seed = seedForTwoRolls(
+      (value) => value < chance / 100,
+      (value) => Math.floor(value * 3) + 1 === duration,
+    );
+
+    const next = useUnitStrategy(state, 'liu', unit.id, 'disturb', selection);
+
+    expect(next.units['strategy-target'].confusedTenDays).toBe(duration);
+    expect(next.rngCursor).toBe(2);
   });
 
   it.each([
@@ -1496,6 +1520,61 @@ describe('battle deployment and movement actions', () => {
     expect(friendlyBurned.firePlots).toContainEqual({ q: 10, r: 9 });
     expect(friendlyBurned.units['friendly-on-fire'].troops).toBeLessThan(3000);
     expect(friendlyBurned.battleDamageReports?.some((report) => report.unitId === 'friendly-on-fire')).toBe(true);
+  });
+
+  it('uses the enemy unit intelligence when fire targets an occupied enemy cell', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 3000,
+      food: 3000,
+    });
+    setUniformTerrain(state, 'plain');
+    const unit = Object.values(state.units)[0];
+    readyUnitAt(state, unit.id, { q: 10, r: 10 });
+    state.officers['guan-yu'].stats.intelligence = 90;
+    addEnemyUnit(state, 'high-intelligence-fire-target', { q: 10, r: 9 });
+    state.officers['cao-ren'].stats.intelligence = 90;
+
+    const defenderChance = harmfulStrategySuccessChance(90, 90);
+    const emptyCellChance = fireStrategySuccessChance(90);
+    state.seed = seedForFirstRoll((value) => (
+      value >= defenderChance / 100 && value < emptyCellChance / 100
+    ));
+
+    const next = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 10, r: 9 } });
+
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
+    expect(next.firePlots ?? []).not.toContainEqual({ q: 10, r: 9 });
+    expect(next.units['high-intelligence-fire-target'].troops).toBe(3000);
+  });
+
+  it('ignites an occupied enemy cell when the fire strategy succeeds', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 3000,
+      food: 3000,
+    });
+    setUniformTerrain(state, 'plain');
+    const unit = Object.values(state.units)[0];
+    readyUnitAt(state, unit.id, { q: 10, r: 10 });
+    state.officers['guan-yu'].stats.intelligence = 90;
+    addEnemyUnit(state, 'low-intelligence-fire-target', { q: 10, r: 9 });
+    state.officers['cao-ren'].stats.intelligence = 40;
+
+    const defenderChance = harmfulStrategySuccessChance(90, 40);
+    const emptyCellChance = fireStrategySuccessChance(90);
+    state.seed = seedForFirstRoll((value) => (
+      value >= emptyCellChance / 100 && value < defenderChance / 100
+    ));
+
+    const next = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 10, r: 9 } });
+
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true })]);
+    expect(next.firePlots).toContainEqual({ q: 10, r: 9 });
+    expect(next.units['low-intelligence-fire-target'].troops).toBeLessThan(3000);
+    expect(next.battleDamageReports?.some((report) => report.unitId === 'low-intelligence-fire-target')).toBe(true);
   });
 
   it('uses discord to make an adjacent enemy attack a neighboring same-force unit', () => {
@@ -1727,6 +1806,51 @@ describe('battle deployment and movement actions', () => {
     expect(next.units[attacker.id].energy).toBe(90);
     expect(next.units[attacker.id].acted).toBe(true);
     expect(next.units[enemyId].acted).toBe(false);
+  });
+
+  it('captures half of a defeated unit gold and food', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troops: 4000,
+      food: 6000,
+    });
+    const attacker = Object.values(deployed.units)[0];
+    const enemyId = 'unit-loot-cao-ren';
+    const enemyPosition = neighborsOf(attacker.q, attacker.r)[0];
+    deployed.units[enemyId] = {
+      id: enemyId,
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      q: enemyPosition.q,
+      r: enemyPosition.r,
+      troops: 1,
+      gold: 1001,
+      food: 2001,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    deployed.officers['cao-ren'].location = { kind: 'unit', unitId: enemyId };
+
+    const next = attackUnit(deployed, 'liu', attacker.id, enemyId);
+
+    expect(next.units[enemyId]).toBeUndefined();
+    expect(next.units[attacker.id]).toMatchObject({ gold: 500, food: 7000 });
+  });
+
+  it('captures supplies when a tactic deals the defeating blow', () => {
+    const { state, attacker } = spearTacticState('S', 1, 1);
+    state.units['enemy-tactic'].gold = 801;
+    state.units['enemy-tactic'].food = 1601;
+
+    const next = useUnitTactic(state, 'liu', attacker.id, 'enemy-tactic', 'spear-thrust');
+
+    expect(next.units['enemy-tactic']).toBeUndefined();
+    expect(next.units[attacker.id]).toMatchObject({ gold: 400, food: 5800 });
   });
 
   it('records damage numbers for the attacked unit and counterattack loss', () => {

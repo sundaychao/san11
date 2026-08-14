@@ -48,14 +48,6 @@ function cellPosition(q: number, r: number) {
   };
 }
 
-function cellCenterPercent(q: number, r: number, worldWidth: number, worldHeight: number) {
-  const position = cellPosition(q, r);
-  return {
-    left: ((position.x + CELL_SIZE / 2) / worldWidth) * 100,
-    top: ((position.y + CELL_SIZE / 2) / worldHeight) * 100,
-  };
-}
-
 function clampScale(value: number) {
   return Math.min(2.4, Math.max(0.85, Math.round(value * 100) / 100));
 }
@@ -150,6 +142,24 @@ export function StrategicMap({
   const gridHeight = state.gridHeight ?? DEFAULT_GRID_HEIGHT;
   const worldWidth = gridWidth * CELL_SIZE;
   const worldHeight = gridHeight * CELL_SIZE;
+  const localCity = Object.values(state.cities).find((city) => city.ownerId === state.playerForceId);
+  const opponentCity = Object.values(state.cities).find((city) => city.ownerId !== state.playerForceId);
+  const perspectiveRotated = state.scenarioId === 'mobile-duel' && Boolean(
+    localCity && opponentCity && localCity.gridR < opponentCity.gridR,
+  );
+  const displayCellPosition = (q: number, r: number) => {
+    const position = cellPosition(q, r);
+    return perspectiveRotated
+      ? { x: worldWidth - position.x - CELL_SIZE, y: worldHeight - position.y - CELL_SIZE }
+      : position;
+  };
+  const displayCellCenterPercent = (q: number, r: number) => {
+    const position = displayCellPosition(q, r);
+    return {
+      left: ((position.x + CELL_SIZE / 2) / worldWidth) * 100,
+      top: ((position.y + CELL_SIZE / 2) / worldHeight) * 100,
+    };
+  };
 
   const zoom = (amount: number) => {
     setView((current) => ({ ...current, scale: clampScale(current.scale + amount) }));
@@ -213,7 +223,6 @@ export function StrategicMap({
   }
   const moveMode = moveTargetKeys.size > 0;
   const firePlotMode = firePlotTargetKeys.size > 0;
-  const cityHitTargetsEnabled = !editorMode && !deployMode && !moveMode && !firePlotMode;
   const selectedDeployKey = selectedDeployTarget ? `${selectedDeployTarget.q},${selectedDeployTarget.r}` : null;
   const displayGridKeys = new Set(displayGrid.map(gridKey));
   const hoveredFacility = hoveredFacilityId ? state.facilities?.[hoveredFacilityId] : undefined;
@@ -238,7 +247,7 @@ export function StrategicMap({
     }
   };
   const renderUnitMarker = (unit: ArmyUnit) => {
-    const position = cellPosition(unit.q, unit.r);
+    const position = displayCellPosition(unit.q, unit.r);
     const leaderName = state.officers[unit.leaderId]?.name ?? '';
     const troopType = unit.troopType ?? 'sword';
     const unitKind = unit.kind ?? 'combat';
@@ -328,7 +337,7 @@ export function StrategicMap({
     damageGroups.set(key, group);
   }
   for (const reports of damageGroups.values()) {
-    const position = cellPosition(reports[0].q, reports[0].r);
+    const position = displayCellPosition(reports[0].q, reports[0].r);
     const lineCount = reports.reduce((count, report) => count + (report.critical ? 2 : 1), 0);
     const desiredBottomY = position.y - 31;
     const topY = Math.max(12, desiredBottomY - (lineCount - 1) * damageLineHeight);
@@ -341,7 +350,7 @@ export function StrategicMap({
   }
 
   const renderDamageNumber = (report: BattleDamageReport) => {
-    const position = cellPosition(report.q, report.r);
+    const position = displayCellPosition(report.q, report.r);
     const centerX = position.x + CELL_SIZE / 2;
     const layout = damageLayout.get(report.id)!;
     return (
@@ -372,7 +381,7 @@ export function StrategicMap({
 
   const renderStrategyResultLabel = (report: StrategyResultReport) => {
     if (report.succeeded) return null;
-    const position = cellPosition(report.q, report.r);
+    const position = displayCellPosition(report.q, report.r);
     return (
       <text
         key={report.id}
@@ -388,7 +397,7 @@ export function StrategicMap({
   };
 
   const renderFireMarker = (plot: FirePlot) => {
-    const position = cellPosition(plot.q, plot.r);
+    const position = displayCellPosition(plot.q, plot.r);
     return (
       <text
         key={`fire-${plot.q}-${plot.r}`}
@@ -404,7 +413,7 @@ export function StrategicMap({
   };
 
   const renderFacilityRepairNumber = (report: FacilityRepairReport) => {
-    const position = cellPosition(report.q, report.r);
+    const position = displayCellPosition(report.q, report.r);
     const centerX = position.x + CELL_SIZE / 2;
     return (
       <text
@@ -448,7 +457,7 @@ export function StrategicMap({
         )}
         <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}${moveMode ? ' is-moving' : ''}${firePlotMode ? ' is-strategy-targeting' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${worldWidth} ${worldHeight}`} aria-hidden="true">
           {displayGrid.map((cell) => {
-            const position = cellPosition(cell.q, cell.r);
+            const position = displayCellPosition(cell.q, cell.r);
             const cellKey = `${cell.q},${cell.r}`;
             const isDeployTarget = deployTargetKeys.has(cellKey);
             const isMoveTarget = moveTargetKeys.has(cellKey);
@@ -515,12 +524,14 @@ export function StrategicMap({
           })}
           {displayCities.flatMap((city) => (
             sevenCellCityFootprint(city).map((coord) => {
-              const position = cellPosition(coord.q, coord.r);
+              const position = displayCellPosition(coord.q, coord.r);
               const gameCity = editorMode ? undefined : state.cities[city.id as CityId];
               return (
                 <rect
                   key={`${city.id}-${coord.q},${coord.r}`}
                   data-testid={gameCity ? `city-footprint-${gameCity.id}-${coord.q}-${coord.r}` : undefined}
+                  data-city-id={gameCity?.id}
+                  data-grid-position={`${coord.q},${coord.r}`}
                   x={position.x + 2}
                   y={position.y + 2}
                   width={CELL_SIZE - 4}
@@ -552,7 +563,7 @@ export function StrategicMap({
             })
           ))}
           {facilityRangeCells.map((coord) => {
-            const position = cellPosition(coord.q, coord.r);
+            const position = displayCellPosition(coord.q, coord.r);
             return (
               <rect
                 key={`facility-range-${coord.q}-${coord.r}`}
@@ -568,7 +579,7 @@ export function StrategicMap({
             );
           })}
           {Object.values(state.facilities ?? {}).map((facility) => {
-            const position = cellPosition(facility.q, facility.r);
+            const position = displayCellPosition(facility.q, facility.r);
             const isFacilityTarget = attackTargetFacilityIdSet.has(facility.id);
             const isCompleted = facility.completed !== false;
             return (
@@ -636,43 +647,11 @@ export function StrategicMap({
           {facilityRepairReports.map(renderFacilityRepairNumber)}
         </svg>
         <div className={`city-marker-layer${editorMode || deployMode || moveMode ? ' is-editing' : ''}`} aria-label="荆襄城市">
-          {cityHitTargetsEnabled && Object.values(state.cities).flatMap((city) => (
-            sevenCellCityFootprint({ q: city.gridQ, r: city.gridR }).map((coord) => {
-              const hitPosition = cellCenterPercent(coord.q, coord.r, worldWidth, worldHeight);
-              return (
-                <button
-                  key={`${city.id}-hit-${coord.q}-${coord.r}`}
-                  type="button"
-                  className="city-footprint-hit"
-                  style={{
-                    left: `${hitPosition.left}%`,
-                    top: `${hitPosition.top}%`,
-                  }}
-                  aria-label={`${city.name}城池区域 ${coord.q},${coord.r}`}
-                  data-testid={`city-hit-cell-${city.id}-${coord.q}-${coord.r}`}
-                  onPointerDown={(event) => {
-                    if (event.button !== 0) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    selectCityFromMap(city.id, { x: event.clientX + 12, y: event.clientY + 4 });
-                  }}
-                  onContextMenu={(event) => {
-                    dismissCityHover();
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onMapContextClose?.();
-                  }}
-                  onPointerEnter={(event) => onCityHover?.(city.id, { x: event.clientX + 14, y: event.clientY + 4 })}
-                  onPointerLeave={() => onCityLeave?.()}
-                />
-              );
-            })
-          ))}
           {Object.values(state.cities).map((city) => {
             const force = state.forces[city.ownerId];
             const selected = selectedCityId === city.id;
             const isAttackTarget = attackTargetCityIdSet.has(city.id);
-            const markerPosition = cellCenterPercent(city.gridQ, city.gridR, worldWidth, worldHeight);
+            const markerPosition = displayCellCenterPercent(city.gridQ, city.gridR);
             const cityEffect = cityEffectReports.find((report) => report.cityId === city.id);
             return (
               <button
@@ -706,7 +685,6 @@ export function StrategicMap({
                   </span>
                 )}
                 {isAttackTarget && <span className="city-attack-target-arrow" data-testid="attack-city-target-arrow">▼</span>}
-                <span className="city-fort" aria-hidden="true"><i /></span>
                 <span className="city-marker-copy">
                   <strong>{city.name}</strong>
                   <span className="city-marker-stats" aria-hidden="true">
@@ -739,7 +717,11 @@ export function StrategicMap({
             key={city.id}
             type="button"
             className={selectedCityId === city.id ? 'is-selected' : ''}
-            style={{ left: `${city.mapX * 100}%`, top: `${city.mapY * 100}%`, backgroundColor: state.forces[city.ownerId].color }}
+            style={{
+              left: `${(perspectiveRotated ? 1 - city.mapX : city.mapX) * 100}%`,
+              top: `${(perspectiveRotated ? 1 - city.mapY : city.mapY) * 100}%`,
+              backgroundColor: state.forces[city.ownerId].color,
+            }}
             aria-label={`在小地图选择${city.name}`}
             onClick={() => selectCity(city.id)}
           />

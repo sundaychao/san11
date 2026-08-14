@@ -260,8 +260,11 @@ describe('online room session', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.room.state?.units['host-strategy-unit']).toMatchObject({ energy: 85, acted: true });
-    expect(result.room.state?.units['guest-strategy-target'].confusedTenDays).toBe(1);
-    expect(playerState(result.room, 'guest')?.units['guest-strategy-target'].confusedTenDays).toBe(1);
+    expect(result.room.state?.units['guest-strategy-target'].confusedTenDays).toBeGreaterThanOrEqual(1);
+    expect(result.room.state?.units['guest-strategy-target'].confusedTenDays).toBeLessThanOrEqual(3);
+    expect(playerState(result.room, 'guest')?.units['guest-strategy-target'].confusedTenDays).toBe(
+      result.room.state?.units['guest-strategy-target'].confusedTenDays,
+    );
   });
 
   it.each([
@@ -287,7 +290,7 @@ describe('online room session', () => {
     const onlineOutcome = onlineResult.room.state;
     expect(onlineOutcome).toEqual(localOutcome);
     expect(onlineOutcome.rngCursor).toBe(localOutcome.rngCursor);
-    expect(onlineOutcome.rngCursor).toBe(localStart.rngCursor + 1);
+    expect(onlineOutcome.rngCursor).toBe(localStart.rngCursor + (strategyId === 'disturb' ? 2 : 1));
     expect(onlineOutcome.strategyResultReports).toEqual(localOutcome.strategyResultReports);
     expect(onlineOutcome.strategyResultReports).toEqual([expect.objectContaining({
       strategyId, succeeded: true, q: 9, r: 25,
@@ -296,7 +299,8 @@ describe('online room session', () => {
     expect(localOutcome.units['host-strategy-unit']).toMatchObject({ energy: expectedEnergy, acted: true });
 
     if (strategyId === 'disturb') {
-      expect(onlineOutcome.units['guest-strategy-target'].confusedTenDays).toBe(1);
+      expect(onlineOutcome.units['guest-strategy-target'].confusedTenDays).toBeGreaterThanOrEqual(1);
+      expect(onlineOutcome.units['guest-strategy-target'].confusedTenDays).toBeLessThanOrEqual(3);
       expect(onlineOutcome.units['guest-strategy-target']).toEqual(localOutcome.units['guest-strategy-target']);
     } else {
       expect(onlineOutcome.units['guest-discord-victim'].troops).toBeLessThan(3000);

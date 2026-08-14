@@ -49,4 +49,12 @@ describe('global map styles', () => {
     expect(minHeight).toBeGreaterThanOrEqual(56);
     expect(fontSize).toBeGreaterThanOrEqual(18);
   });
+
+  it('keeps the unit hover panel compact without losing its scroll boundary', () => {
+    const rule = cssRule('.unit-info-panel');
+
+    expect(Number(rule.match(/width:\s*(\d+)px/)?.[1])).toBeLessThanOrEqual(158);
+    expect(rule).toContain('padding: 5px');
+    expect(rule).toContain('overflow-y: auto');
+  });
 });

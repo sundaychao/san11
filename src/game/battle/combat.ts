@@ -41,7 +41,7 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
   next.strategyResultReports = [];
 
   if (nextTarget.troops <= 0) {
-    removeUnit(next, nextTarget);
+    removeUnit(next, nextTarget, nextAttacker);
     return next;
   }
   if (areAdjacent(nextTarget, nextAttacker)) {
@@ -51,7 +51,7 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
       unitId: attackerId, q: nextAttacker.q, r: nextAttacker.r, amount: counterDamage, kind: 'counter',
     });
     nextAttacker.troops -= counterDamage;
-    if (nextAttacker.troops <= 0) removeUnit(next, nextAttacker);
+    if (nextAttacker.troops <= 0) removeUnit(next, nextAttacker, nextTarget);
   }
   return next;
 }

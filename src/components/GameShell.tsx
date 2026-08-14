@@ -515,7 +515,7 @@ export function GameShell() {
       setFacilityContextMenu(null);
       return;
     }
-    playWaitingForTargetSound();
+    if (selectedUnitId !== unitId) playWaitingForTargetSound();
     setCityMenu(null);
     setMapContextMenu(null);
     setUnitIntelMenu(null);

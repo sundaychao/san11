@@ -310,6 +310,32 @@ describe('game interface shell', () => {
     expect(play).toHaveBeenCalledTimes(1);
   });
 
+  it('does not replay the waiting-for-target sound when opening the selected unit menu', async () => {
+    const user = userEvent.setup();
+    const { AudioMock, play } = mockAudioPlayback();
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['guan-yu'],
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+
+    render(
+      <GameProvider initialState={settleTenDay(deployed)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const marker = screen.getByTestId('battle-unit-marker');
+    await user.click(marker);
+    await user.click(marker);
+
+    expect(screen.getByTestId('unit-command-menu')).toBeVisible();
+    expect(AudioMock).toHaveBeenCalledTimes(1);
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
   it('shows effective formation abilities, providers, and derived battle rates', async () => {
     const user = userEvent.setup();
     const state = deployUnit(createGame('liu', 1), 'liu', {
@@ -699,11 +725,11 @@ describe('game interface shell', () => {
     await user.click(within(menu).getByRole('button', { name: '军事' }));
     expect(within(menu).getByRole('button', { name: '出征' })).toBeVisible();
 
-    fireEvent.mouseDown(screen.getByTestId('map-viewport'), { button: 0 });
+    fireEvent.pointerDown(screen.getByTestId('map-viewport'), { button: 0 });
     expect(within(menu).queryByRole('button', { name: '出征' })).not.toBeInTheDocument();
     expect(screen.getByTestId('city-command-menu')).toBeVisible();
 
-    fireEvent.mouseDown(screen.getByTestId('map-viewport'), { button: 0 });
+    fireEvent.pointerDown(screen.getByTestId('map-viewport'), { button: 0 });
     expect(screen.queryByTestId('city-command-menu')).not.toBeInTheDocument();
   });
 

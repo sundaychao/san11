@@ -73,16 +73,48 @@ describe('StrategicMap', () => {
     expect(screen.getByTestId('city-command-menu')).toBeVisible();
   });
 
-  it('renders a top-level click target for every city footprint cell', () => {
+  it('represents a city with seven grid cells and no standalone fort icon', () => {
+    const state = createGame('liu', 1);
+    renderGame(state);
+
+    const city = state.cities.jiangling;
+    const footprint = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR });
+
+    expect(screen.getAllByTestId(/^city-footprint-jiangling-/)).toHaveLength(7);
+    for (const coord of footprint) {
+      expect(screen.getByTestId(`city-footprint-${city.id}-${coord.q}-${coord.r}`)).toHaveClass('city-footprint-cell');
+    }
+    expect(screen.queryByTestId(`city-hit-cell-${city.id}-${city.gridQ}-${city.gridR}`)).not.toBeInTheDocument();
+    const cityMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes(city.name));
+    expect(cityMarker?.querySelector('.city-fort')).not.toBeInTheDocument();
+  });
+
+  it('opens the city menu from every rendered city footprint square', () => {
     const state = createGame('liu', 1);
     renderGame(state);
 
     const city = state.cities.jiangling;
     for (const coord of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) {
-      const hitTarget = screen.getByTestId(`city-hit-cell-${city.id}-${coord.q}-${coord.r}`);
-      fireEvent.pointerDown(hitTarget, { button: 0, buttons: 1, clientX: 260, clientY: 190 });
+      fireEvent.pointerDown(screen.getByTestId(`city-footprint-${city.id}-${coord.q}-${coord.r}`), {
+        button: 0,
+        buttons: 1,
+        clientX: 260,
+        clientY: 190,
+      });
       expect(screen.getByTestId('city-command-menu')).toBeVisible();
     }
+  });
+
+  it('keeps the city menu open after a real click sequence on an owned footprint square', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    renderGame(state);
+
+    const city = state.cities.jiangling;
+
+    await user.click(screen.getByTestId(`city-footprint-${city.id}-${city.gridQ}-${city.gridR}`));
+
+    expect(screen.getByTestId('city-command-menu')).toBeVisible();
   });
 
   it('zooms the image and city layer together', () => {
@@ -485,9 +517,11 @@ describe('StrategicMap', () => {
 
     const info = screen.getByTestId('unit-info-panel');
     expect(info).toHaveTextContent('关羽部队');
-    expect(info).toHaveTextContent('4,000');
-    expect(info).toHaveTextContent('6,000');
-    expect(info).toHaveTextContent('枪兵');
+    expect(info).toHaveTextContent('资金');
+    expect(info).toHaveTextContent('兵粮');
+    expect(info).toHaveTextContent('士气');
+    expect(info).not.toHaveTextContent('士兵');
+    expect(info).not.toHaveTextContent('兵科');
 
     fireEvent.pointerLeave(unitMarker);
 
@@ -702,6 +736,34 @@ describe('StrategicMap', () => {
     expect(Number.parseFloat(bottomMarker!.style.top)).toBeCloseTo((29 / 33) * 100, 4);
     expect(Number.parseFloat(topMarker!.style.left)).toBeCloseTo((8.5 / 16) * 100, 4);
     expect(Number.parseFloat(topMarker!.style.top)).toBeCloseTo((3 / 33) * 100, 4);
+  });
+
+  it('puts the local city at the bottom for the top-side online player', () => {
+    const state = createMobileDuelGame('liu', 'cao', 1);
+    state.playerForceId = 'cao';
+    renderGame(state);
+
+    const localCity = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes(state.cities.xiangyang.name));
+    const opponentCity = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes(state.cities.jiangling.name));
+
+    expect(localCity).toBeTruthy();
+    expect(opponentCity).toBeTruthy();
+    expect(Number.parseFloat(localCity!.style.top)).toBeGreaterThan(80);
+    expect(Number.parseFloat(opponentCity!.style.top)).toBeLessThan(20);
+  });
+
+  it('keeps all seven city cells aligned with the rotated guest grid', () => {
+    const state = createMobileDuelGame('liu', 'cao', 1);
+    state.playerForceId = 'cao';
+    renderGame(state);
+
+    const city = state.cities.xiangyang;
+    for (const coord of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) {
+      const mapCell = screen.getByTestId(`map-cell-${coord.q}-${coord.r}`);
+      const cityCell = screen.getByTestId(`city-footprint-${city.id}-${coord.q}-${coord.r}`);
+      expect(cityCell.getAttribute('x')).toBe(`${Number(mapCell.getAttribute('x')) + 2}`);
+      expect(cityCell.getAttribute('y')).toBe(`${Number(mapCell.getAttribute('y')) + 2}`);
+    }
   });
 
   it('shows troop and population values next to the city name on map markers', () => {

@@ -616,8 +616,15 @@ export function unitTerrain(state: GameState, unit: ArmyUnit) {
   return cellAt(state, unit)?.terrain ?? 'plain';
 }
 
-export function removeUnit(next: GameState, unit: ArmyUnit) {
+export function removeUnit(next: GameState, unit: ArmyUnit, looter?: ArmyUnit) {
   const officerIds = unit.officerIds ?? [unit.leaderId];
+  if (looter && looter.id !== unit.id && looter.forceId !== unit.forceId) {
+    const nextLooter = next.units[looter.id];
+    if (nextLooter) {
+      nextLooter.gold = (nextLooter.gold ?? 0) + Math.floor((unit.gold ?? 0) / 2);
+      nextLooter.food += Math.floor(unit.food / 2);
+    }
+  }
   delete next.units[unit.id];
   const retreatCity = Object.values(next.cities).find((city) => city.ownerId === unit.forceId);
   for (const officerId of officerIds) {
@@ -776,7 +783,7 @@ export function tacticTargetUnits(state: GameState, attackerId: string, tacticId
   const tactic = TACTICS[tacticId];
   if (!attacker || attacker.kind === 'transport' || !tactic || tactic.troopType !== (attacker.troopType ?? 'sword')) return [];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
-  const minRange = tacticId === 'crossbow-fire' ? 2 : 1;
+  const minRange = tacticId === 'crossbow-fire' || tacticId === 'crossbow-pierce' ? 2 : 1;
   return Object.values(state.units)
     .filter((unit) => {
       if (unit.id === attacker.id || unit.forceId === attacker.forceId) return false;
@@ -992,7 +999,7 @@ function applyTacticDamage(
     kind: 'attack',
     ...(critical ? { critical: true, label: '暴击' } : {}),
   });
-  if (nextTarget.troops <= 0) removeUnit(next, nextTarget);
+  if (nextTarget.troops <= 0) removeUnit(next, nextTarget, nextAttacker);
 }
 
 function applyTacticPositionEffect(next: GameState, attackerId: string, targetId: string, tactic: UnitTactic) {
@@ -1062,7 +1069,7 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
   for (const affectedUnit of affected) {
     applyTacticDamage(next, nextAttacker, affectedUnit, tactic, aptitude, critical);
   }
-  if (fireArrowCells.length > 0) igniteGroundFire(next, fireArrowCells);
+  if (fireArrowCells.length > 0) igniteGroundFire(next, fireArrowCells, nextAttacker);
   if (next.units[targetId]) applyTacticPositionEffect(next, attackerId, targetId, tactic);
   if (next.units[attackerId]) {
     next.units[attackerId].energy -= tactic.cost;
@@ -1113,7 +1120,7 @@ function addDamageReport(next: GameState, unit: ArmyUnit, amount: number, prefix
   });
 }
 
-function damageUnitsAt(next: GameState, coords: GridCoord[], amount: number, prefix: string) {
+function damageUnitsAt(next: GameState, coords: GridCoord[], amount: number, prefix: string, looter?: ArmyUnit) {
   const keys = new Set(coords.map(gridKey));
   for (const unit of [...Object.values(next.units)]) {
     if (!keys.has(gridKey(unit))) continue;
@@ -1122,7 +1129,7 @@ function damageUnitsAt(next: GameState, coords: GridCoord[], amount: number, pre
     const damage = reduceUnitDamageByFortress(next, nextUnit, amount);
     nextUnit.troops -= damage;
     addDamageReport(next, nextUnit, damage, prefix);
-    if (nextUnit.troops <= 0) removeUnit(next, nextUnit);
+    if (nextUnit.troops <= 0) removeUnit(next, nextUnit, looter);
   }
 }
 
@@ -1144,24 +1151,24 @@ function addFirePlots(next: GameState, coords: GridCoord[]) {
   }
 }
 
-function igniteGroundFire(next: GameState, coords: GridCoord[]) {
+function igniteGroundFire(next: GameState, coords: GridCoord[], looter?: ArmyUnit) {
   addFirePlots(next, coords);
-  damageUnitsAt(next, coords, FIRE_PLOT_DAMAGE, 'fire-plot');
+  damageUnitsAt(next, coords, FIRE_PLOT_DAMAGE, 'fire-plot', looter);
 }
 
-function igniteFacility(next: GameState, source: GridCoord, facility: Facility) {
+function igniteFacility(next: GameState, source: GridCoord, facility: Facility, looter?: ArmyUnit) {
   if (!facilityIsCompleted(facility)) return false;
   if (facility.type === 'fireSeed') {
     const cells = [facility, ...neighborsOf(facility.q, facility.r)];
     addFirePlots(next, cells);
-    damageUnitsAt(next, cells, FIRE_SEED_DAMAGE, 'fire-seed');
+    damageUnitsAt(next, cells, FIRE_SEED_DAMAGE, 'fire-seed', looter);
     delete next.facilities?.[facility.id];
     return true;
   }
   if (facility.type === 'fireBall') {
     const cells = fireBallCells(next, source, facility);
     addFirePlots(next, cells);
-    damageUnitsAt(next, cells, FIRE_BALL_DAMAGE, 'fire-ball');
+    damageUnitsAt(next, cells, FIRE_BALL_DAMAGE, 'fire-ball', looter);
     delete next.facilities?.[facility.id];
     return true;
   }
@@ -1196,8 +1203,21 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
 
   const probabilistic = strategyId === 'fire' || strategyId === 'false-report' || strategyId === 'disturb' || strategyId === 'discord';
   const sourceIntelligence = effectiveUnitAbilities(state, unit).intelligence.value;
+  const fireTargetUnit = strategyId === 'fire' && targetCoord
+    ? Object.values(state.units).find((candidate) => (
+      candidate.id !== unit.id &&
+      candidate.forceId !== unit.forceId &&
+      candidate.q === targetCoord.q &&
+      candidate.r === targetCoord.r
+    ))
+    : undefined;
   const chance = strategyId === 'fire'
-    ? fireStrategySuccessChance(sourceIntelligence)
+    ? fireTargetUnit
+      ? harmfulStrategySuccessChance(
+        sourceIntelligence,
+        effectiveUnitAbilities(state, fireTargetUnit).intelligence.value,
+      )
+      : fireStrategySuccessChance(sourceIntelligence)
     : probabilistic && targetUnit
       ? harmfulStrategySuccessChance(sourceIntelligence, effectiveUnitAbilities(state, targetUnit).intelligence.value)
       : 100;
@@ -1207,6 +1227,10 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
   next.battleDamageReports = [];
   next.facilityRepairReports = [];
   if (roll) next.rngCursor = roll.cursor;
+  const disturbDurationRoll = strategyId === 'disturb' && succeeded
+    ? nextRandom(next.seed, next.rngCursor)
+    : undefined;
+  if (disturbDurationRoll) next.rngCursor = disturbDurationRoll.cursor;
   spendStrategyCost(next, unitId, strategy);
   next.strategyResultReports = [strategyReport(next, unitId, strategy, targetCoord, succeeded)];
   if (!succeeded) return next;
@@ -1215,10 +1239,10 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
     next.firePlots ??= [];
     if (strategyId === 'fire') {
       const facility = facilityAt(next, targetCoord);
-      if (facility && igniteFacility(next, next.units[unitId], facility)) {
+      if (facility && igniteFacility(next, next.units[unitId], facility, next.units[unitId])) {
         next.battleDamageReports ??= [];
       } else {
-        igniteGroundFire(next, [targetCoord]);
+        igniteGroundFire(next, [targetCoord], next.units[unitId]);
       }
     } else if (strategyId === 'extinguish') {
       next.firePlots = next.firePlots.filter((plot) => plot.q !== targetCoord.q || plot.r !== targetCoord.r);
@@ -1232,7 +1256,7 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
   if (strategyId === 'false-report') {
     target.falseReportedTenDays = 1;
   } else if (strategyId === 'disturb') {
-    target.confusedTenDays = 1;
+    target.confusedTenDays = disturbDurationRoll ? Math.floor(disturbDurationRoll.value * 3) + 1 : 1;
   } else if (strategyId === 'calm') {
     delete target.confusedTenDays;
     delete target.falseReportedTenDays;
@@ -1251,7 +1275,7 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
       amount: damage,
       kind: 'attack',
     }];
-    if (victim.troops <= 0) removeUnit(next, victim);
+    if (victim.troops <= 0) removeUnit(next, victim, target);
   }
 
   return next;

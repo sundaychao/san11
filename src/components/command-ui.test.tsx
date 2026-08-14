@@ -985,7 +985,8 @@ describe('command interface', () => {
     const tacticMenu = screen.getByTestId('unit-tactic-menu');
     expect(within(tacticMenu).getByRole('button', { name: '火矢' })).toBeDisabled();
     expect(within(tacticMenu).getByRole('button', { name: '火矢' })).toHaveAttribute('title', '无有效目标');
-    expect(within(tacticMenu).getByRole('button', { name: '贯箭' })).toBeEnabled();
+    expect(within(tacticMenu).getByRole('button', { name: '贯箭' })).toBeDisabled();
+    expect(within(tacticMenu).getByRole('button', { name: '乱射' })).toBeEnabled();
   });
 
   it('disables the primary tactic command when every tactic is unavailable', () => {

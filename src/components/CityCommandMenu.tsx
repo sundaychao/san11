@@ -81,7 +81,7 @@ export function CityCommandMenu({ cityId, actionPoints, position, onClose, onCom
   }, [closeCurrentLevel]);
 
   useEffect(() => {
-    const handleMouseDown = (event: globalThis.MouseEvent) => {
+    const handlePointerDown = (event: globalThis.PointerEvent) => {
       if (event.button !== 0) return;
       if (menuRef.current?.contains(event.target as Node)) return;
       if (activeSection) {
@@ -91,8 +91,8 @@ export function CityCommandMenu({ cityId, actionPoints, position, onClose, onCom
       onClose();
     };
 
-    document.addEventListener('mousedown', handleMouseDown);
-    return () => document.removeEventListener('mousedown', handleMouseDown);
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [activeSection, onClose]);
 
   return (

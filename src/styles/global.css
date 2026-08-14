@@ -208,25 +208,12 @@ button { color: inherit; }
 .battle-unit-leader-name { fill: #fff6d6; font-size: 11px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 3px; vector-effect: non-scaling-stroke; }
 .city-marker-layer { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
 .city-marker-layer.is-editing { pointer-events: none; opacity: 0.8; }
-.city-footprint-hit {
-  position: absolute;
-  z-index: 2;
-  pointer-events: auto;
-  width: 43px;
-  height: 43px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  transform: translate(-50%, -50%);
-  cursor: pointer;
-}
-.city-footprint-hit:hover, .city-footprint-hit:focus-visible { outline: 1px solid rgba(242, 215, 120, 0.45); outline-offset: -2px; }
 .city-marker {
   position: absolute;
-  pointer-events: auto;
+  pointer-events: none;
   z-index: 1;
-  width: 96px;
-  height: 74px;
+  width: 43px;
+  height: 43px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -237,13 +224,9 @@ button { color: inherit; }
 }
 .city-marker:hover, .city-marker:focus-visible, .city-marker.is-selected { outline: none; }
 .city-marker:hover .city-marker-copy, .city-marker:focus-visible .city-marker-copy, .city-marker.is-selected .city-marker-copy { border-color: #f2d778; outline: 2px solid rgba(242, 215, 120, 0.58); outline-offset: 1px; }
-.city-marker:hover .city-fort, .city-marker:focus-visible .city-fort, .city-marker.is-selected .city-fort { box-shadow: 0 0 0 2px rgba(242, 215, 120, 0.62); }
 .city-marker.is-attack-target .city-marker-copy { border-color: #ffd842; outline: 2px solid rgba(255, 216, 66, 0.62); outline-offset: 1px; }
-.city-marker.is-attack-target .city-fort { box-shadow: 0 0 0 2px rgba(255, 216, 66, 0.72); }
 .city-attack-target-arrow { position: absolute; left: 50%; top: -11px; transform: translateX(-50%); color: #ffd842; font-size: 18px; font-weight: 900; line-height: 1; pointer-events: none; text-shadow: 0 1px 2px rgba(16, 19, 15, 0.96), 0 0 5px rgba(255, 216, 66, 0.6); }
-.city-fort { position: absolute; left: 50%; top: 50%; width: 28px; height: 28px; display: grid; place-items: center; border: 2px solid var(--force-color); background: rgba(244, 237, 217, 0.18); transform: translate(-50%, -50%) rotate(45deg); box-shadow: 0 3px 8px rgba(10, 14, 12, 0.45); }
-.city-fort i { width: 8px; height: 8px; background: var(--force-color); border: 1px solid #f4edd9; }
-.city-marker-copy { position: absolute; left: 50%; bottom: calc(50% + 21px); min-width: 96px; display: grid; grid-template-columns: auto minmax(52px, 1fr); align-items: start; gap: 3px 7px; padding: 4px 6px; border: 1px solid rgba(218, 203, 158, 0.72); border-radius: 2px; background: rgba(24, 37, 33, 0.88); box-shadow: 0 3px 8px rgba(10, 14, 12, 0.45); transform: translateX(-50%); line-height: 1.1; white-space: nowrap; }
+.city-marker-copy { position: absolute; left: 50%; bottom: calc(50% + 21px); min-width: 96px; display: grid; grid-template-columns: auto minmax(52px, 1fr); align-items: start; gap: 3px 7px; padding: 4px 6px; border: 1px solid rgba(218, 203, 158, 0.72); border-radius: 2px; background: rgba(24, 37, 33, 0.88); box-shadow: 0 3px 8px rgba(10, 14, 12, 0.45); transform: translateX(-50%); line-height: 1.1; white-space: nowrap; pointer-events: none; }
 .city-marker-copy strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 15px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
 .city-marker-stats { display: grid; gap: 1px; }
 .city-marker-stat { display: block; color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 11px; font-weight: 800; text-align: right; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
@@ -251,20 +234,20 @@ button { color: inherit; }
 .map-tools { position: absolute; z-index: 6; top: 14px; left: 14px; display: flex; gap: 5px; padding: 5px; }
 .map-tools .icon-button { background: rgba(24, 37, 33, 0.9); }
 .hover-coordinate { position: fixed; z-index: 16; left: 50%; bottom: 16px; min-width: 118px; padding: 7px 14px; transform: translateX(-50%); color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 13px; font-weight: 700; text-align: center; pointer-events: none; }
-.unit-info-panel { position: fixed; z-index: 18; width: 178px; max-height: calc(100dvh - 16px); padding: 7px; overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; touch-action: pan-y; background: rgba(12, 28, 31, 0.96); color: var(--paper); scrollbar-width: thin; }
-.unit-info-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; padding: 0 5px; border-bottom: 1px solid var(--line); }
-.unit-info-panel > header strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 16px; }
-.unit-info-panel > header span { display: grid; place-items: center; min-width: 20px; min-height: 22px; background: #d4ad28; color: #1b211b; font: 700 14px Consolas, "Courier New", monospace; }
-.unit-info-officers { display: grid; gap: 4px; margin: 6px 0; }
-.unit-info-officers > div, .unit-info-panel dl > div { display: grid; grid-template-columns: 48px 1fr; align-items: center; min-height: 24px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); }
-.unit-info-officers span, .unit-info-panel dt { padding-left: 5px; color: var(--muted); font-size: 11px; }
-.unit-info-officers strong, .unit-info-panel dd { margin: 0; padding: 2px 6px; color: #fff6d6; font-size: 12px; text-align: right; }
-.unit-info-abilities { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 0 6px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); }
-.unit-info-abilities span { display: flex; align-items: baseline; justify-content: center; gap: 3px; min-width: 0; padding: 4px 2px; color: var(--muted); font-size: 10px; }
+.unit-info-panel { position: fixed; z-index: 18; width: 154px; max-height: calc(100dvh - 16px); padding: 5px; overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; touch-action: pan-y; background: rgba(12, 28, 31, 0.96); color: var(--paper); scrollbar-width: thin; }
+.unit-info-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 5px; min-height: 24px; padding: 0 4px; border-bottom: 1px solid var(--line); }
+.unit-info-panel > header strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 14px; }
+.unit-info-panel > header span { display: grid; place-items: center; min-width: 18px; min-height: 19px; background: #d4ad28; color: #1b211b; font: 700 12px Consolas, "Courier New", monospace; }
+.unit-info-officers { display: grid; gap: 3px; margin: 4px 0; }
+.unit-info-officers > div, .unit-info-panel dl > div { display: grid; grid-template-columns: 42px 1fr; align-items: center; min-height: 20px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); }
+.unit-info-officers span, .unit-info-panel dt { padding-left: 4px; color: var(--muted); font-size: 10px; }
+.unit-info-officers strong, .unit-info-panel dd { margin: 0; padding: 1px 4px; color: #fff6d6; font-size: 11px; text-align: right; }
+.unit-info-abilities { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 0 4px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); }
+.unit-info-abilities span { display: flex; align-items: baseline; justify-content: center; gap: 2px; min-width: 0; padding: 3px 1px; color: var(--muted); font-size: 9px; }
 .unit-info-abilities span + span { border-left: 1px solid rgba(146, 136, 115, 0.4); }
-.unit-info-abilities strong { color: #fff6d6; font: 700 12px Consolas, "Courier New", monospace; }
-.unit-info-strategy-chance { margin: 0 0 6px; padding: 5px 6px; border: 1px solid rgba(212, 173, 40, 0.55); color: #f1d66e; font-size: 12px; font-weight: 700; text-align: center; }
-.unit-info-panel dl { display: grid; gap: 3px; margin: 0; }
+.unit-info-abilities strong { color: #fff6d6; font: 700 11px Consolas, "Courier New", monospace; }
+.unit-info-strategy-chance { margin: 0 0 4px; padding: 4px 5px; border: 1px solid rgba(212, 173, 40, 0.55); color: #f1d66e; font-size: 11px; font-weight: 700; text-align: center; }
+.unit-info-panel dl { display: grid; gap: 2px; margin: 0; }
 .unit-info-panel dd { font-family: Consolas, "Courier New", monospace; font-variant-numeric: tabular-nums; }
 .unit-info-panel dd em { margin-left: 6px; color: #f1d66e; font-style: normal; }
 .city-info-panel { position: fixed; z-index: 18; width: 176px; padding: 7px; pointer-events: none; background: rgba(12, 28, 31, 0.96); color: var(--paper); }
@@ -678,8 +661,7 @@ button { color: inherit; }
   .mini-map { display: none; }
   .map-tools { top: 8px; left: 8px; }
   .map-tools .icon-button { width: 36px; min-height: 36px; }
-  .city-marker { width: 78px; height: 62px; padding: 0; }
-  .city-fort { width: 23px; height: 23px; }
+  .city-marker { width: 43px; height: 43px; padding: 0; }
   .city-marker-copy strong { font-size: 14px; }
   .event-log { display: none; }
   .modal-backdrop, .result-backdrop { align-items: end; padding: 0; }

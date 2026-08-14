@@ -166,6 +166,34 @@ describe('ten-day settlement', () => {
     expect(next.units['plot-status-unit'].burningTenDays).toBeUndefined();
   });
 
+  it('restores a three-turn confused unit one turn at a time', () => {
+    const state = createGame('liu', 1);
+    state.units['long-confused-unit'] = {
+      id: 'long-confused-unit',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 10,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      confusedTenDays: 3,
+      moved: false,
+      acted: false,
+    };
+
+    const secondTurn = settleTenDay(state);
+    expect(secondTurn.units['long-confused-unit'].confusedTenDays).toBe(2);
+    const thirdTurn = settleTenDay(secondTurn);
+    expect(thirdTurn.units['long-confused-unit'].confusedTenDays).toBe(1);
+    const recovered = settleTenDay(thirdTurn);
+    expect(recovered.units['long-confused-unit'].confusedTenDays).toBeUndefined();
+  });
+
   it('records arrow tower automatic damage reports when entering a new ten-day turn', () => {
     const state = createGame('liu', 1);
     state.units['arrow-target'] = {

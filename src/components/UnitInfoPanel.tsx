@@ -1,15 +1,6 @@
 import type { CSSProperties } from 'react';
 import { effectiveUnitAbilities } from '../game/battle/actions';
-import type { ArmyUnit, GameState, TroopType } from '../game/types';
-
-const TROOP_LABELS: Record<TroopType, string> = {
-  sword: '剑兵',
-  spear: '枪兵',
-  halberd: '戟兵',
-  crossbow: '弩兵',
-  cavalry: '骑兵',
-  siege: '兵器',
-};
+import type { ArmyUnit, GameState } from '../game/types';
 
 interface UnitInfoPanelProps {
   unit: ArmyUnit;
@@ -20,12 +11,6 @@ interface UnitInfoPanelProps {
   onPointerLeave?(): void;
 }
 
-function unitArmamentLabel(unit: ArmyUnit) {
-  if (unit.kind === 'transport') return '输送队';
-  if (unit.troopType === 'siege') return '兵器';
-  return unit.troopType ? TROOP_LABELS[unit.troopType] : '剑兵';
-}
-
 export function UnitInfoPanel({ unit, state, position, strategyChance, onPointerEnter, onPointerLeave }: UnitInfoPanelProps) {
   const leader = state.officers[unit.leaderId];
   const officerIds = unit.officerIds ?? [unit.leaderId];
@@ -33,8 +18,8 @@ export function UnitInfoPanel({ unit, state, position, strategyChance, onPointer
   const abilities = effectiveUnitAbilities(state, unit);
   const aptitude = abilities.aptitude.grade ?? '—';
   const style = {
-    left: Math.max(8, Math.min(position.x, window.innerWidth - 190)),
-    top: Math.max(8, Math.min(position.y, window.innerHeight - 336)),
+    left: Math.max(8, Math.min(position.x, window.innerWidth - 166)),
+    top: Math.max(8, Math.min(position.y, window.innerHeight - 226)),
   } as CSSProperties;
 
   return (
@@ -64,9 +49,7 @@ export function UnitInfoPanel({ unit, state, position, strategyChance, onPointer
       <dl>
         <div><dt>资金</dt><dd>{(unit.gold ?? 0).toLocaleString('en-US')}</dd></div>
         <div><dt>兵粮</dt><dd>{unit.food.toLocaleString('en-US')}</dd></div>
-        <div><dt>士兵</dt><dd>{unit.troops.toLocaleString('en-US')}</dd></div>
         <div><dt>士气</dt><dd>{unit.energy}/100</dd></div>
-        <div><dt>兵科</dt><dd>{unitArmamentLabel(unit)} <em>{aptitude}</em></dd></div>
       </dl>
     </aside>
   );
