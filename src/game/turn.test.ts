@@ -168,6 +168,11 @@ describe('ten-day settlement', () => {
     expect(next.officers['zhou-yu'].location).toEqual({ kind: 'city', cityId: 'changsha' });
     expect(skillSources(next)).toEqual([{ name: '米道', sourceOfficerIds: ['zhou-yu'] }]);
     expect(next.cities.changsha.food).toBe(cityFoodAfterSupply + Math.round(baseQuarterlyFood * 1.5));
+    const completionLogIndex = next.logs.findIndex((log) => log.id.startsWith('armament-complete-3-zhou-yu-'));
+    const monthFourLogIndex = next.logs.findIndex((log) => log.id === 'month-4');
+    expect(completionLogIndex).toBeGreaterThanOrEqual(0);
+    expect(monthFourLogIndex).toBeGreaterThanOrEqual(0);
+    expect(monthFourLogIndex).toBeGreaterThan(completionLogIndex);
   });
 
   it('clears previous battle reports when advancing the ten-day turn', () => {
