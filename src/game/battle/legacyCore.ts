@@ -1287,25 +1287,19 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
 
   const probabilistic = strategyId === 'fire' || strategyId === 'false-report' || strategyId === 'disturb' || strategyId === 'discord';
   const sourceIntelligence = effectiveUnitAbilities(state, unit).intelligence.value;
-  const fireTargetUnit = strategyId === 'fire' && targetCoord
+  const occupiedFireTarget = strategyId === 'fire' && targetCoord
     ? Object.values(state.units).find((candidate) => (
       candidate.id !== unit.id &&
-      candidate.forceId !== unit.forceId &&
       candidate.q === targetCoord.q &&
       candidate.r === targetCoord.r
     ))
     : undefined;
   const chance = strategyId === 'fire'
-    ? fireTargetUnit
-      ? harmfulStrategySuccessChance(
-        sourceIntelligence,
-        effectiveUnitAbilities(state, fireTargetUnit).intelligence.value,
-      )
-      : fireStrategySuccessChance(sourceIntelligence)
+    ? fireStrategySuccessChance(sourceIntelligence)
     : probabilistic && targetUnit
       ? harmfulStrategySuccessChance(sourceIntelligence, effectiveUnitAbilities(state, targetUnit).intelligence.value)
       : 100;
-  const skillTarget = fireTargetUnit ?? targetUnit;
+  const skillTarget = occupiedFireTarget ?? targetUnit;
   const skillRules = resolveStrategySkillRules(state, unit, skillTarget, strategyId, strategy.cost);
   const roll = probabilistic && !skillRules.guaranteed && !skillRules.immune
     ? nextRandom(state.seed, state.rngCursor)

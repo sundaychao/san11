@@ -1745,7 +1745,7 @@ describe('battle deployment and movement actions', () => {
     expect(friendlyBurned.battleDamageReports?.some((report) => report.unitId === 'friendly-on-fire')).toBe(true);
   });
 
-  it('uses the enemy unit intelligence when fire targets an occupied enemy cell', () => {
+  it('keeps the base fire chance when an occupied target has equal intelligence', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -1767,12 +1767,13 @@ describe('battle deployment and movement actions', () => {
 
     const next = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 10, r: 9 } });
 
-    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
-    expect(next.firePlots ?? []).not.toContainEqual({ q: 10, r: 9 });
-    expect(next.units['high-intelligence-fire-target'].troops).toBe(3000);
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true })]);
+    expect(next.firePlots).toContainEqual(expect.objectContaining({ q: 10, r: 9 }));
+    expect(next.units['high-intelligence-fire-target'].troops).toBeLessThan(3000);
+    expect(next.rngCursor).toBe(state.rngCursor + 2);
   });
 
-  it('ignites an occupied enemy cell when the fire strategy succeeds', () => {
+  it('does not raise the base fire chance for a lower-intelligence occupant', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -1794,10 +1795,10 @@ describe('battle deployment and movement actions', () => {
 
     const next = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 10, r: 9 } });
 
-    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true })]);
-    expect(next.firePlots).toContainEqual({ q: 10, r: 9 });
-    expect(next.units['low-intelligence-fire-target'].troops).toBeLessThan(3000);
-    expect(next.battleDamageReports?.some((report) => report.unitId === 'low-intelligence-fire-target')).toBe(true);
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
+    expect(next.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: 10, r: 9 }));
+    expect(next.units['low-intelligence-fire-target'].troops).toBe(3000);
+    expect(next.rngCursor).toBe(state.rngCursor + 1);
   });
 
   it('uses discord to make an adjacent enemy attack a neighboring same-force unit', () => {
@@ -2473,6 +2474,23 @@ describe('strategy officer skills', () => {
 
     expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
     expect(next.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: 11, r: 10 }));
+    expect(next.rngCursor).toBe(state.rngCursor + 1);
+  });
+
+  it('guarantees 火神 fire against a lower-intelligence friendly occupant', () => {
+    const { state, caster, target } = strategySkillState('火神');
+    target.forceId = caster.forceId;
+    state.officers['zhuge-liang'].stats.intelligence = 100;
+    state.officers['cao-ren'].stats.intelligence = 1;
+    const chance = fireStrategySuccessChance(100);
+    state.seed = seedForFirstRoll((value) => value >= chance / 100);
+
+    const next = useUnitStrategy(state, 'liu', caster.id, 'fire', { coord: { q: target.q, r: target.r } });
+
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true })]);
+    expect(next.firePlots).toContainEqual(expect.objectContaining({ q: target.q, r: target.r }));
+    expect(next.units[target.id].troops).toBe(4000);
+    expect(next.units[caster.id]).toMatchObject({ energy: 90, acted: true });
     expect(next.rngCursor).toBe(state.rngCursor + 1);
   });
 

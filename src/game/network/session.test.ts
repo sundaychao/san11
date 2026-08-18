@@ -348,6 +348,107 @@ describe('online room session', () => {
     expect(onlineOutcome.strategyResultReports).toEqual(localOutcome.strategyResultReports);
   });
 
+  it('keeps guaranteed occupied-target 火神 fire identical through direct and online reducers', () => {
+    const room = readyStrategyRoom();
+    if (!room.state) throw new Error('room state should exist');
+    room.state.officers['liu-bei'].skill = '火神';
+    room.state.officers['liu-bei'].stats.intelligence = 100;
+    room.state.officers['liu-bei'].location = { kind: 'unit', unitId: 'host-strategy-unit' };
+    room.state.officers['cao-cao'].stats.intelligence = 1;
+    room.state.officers['cao-cao'].location = { kind: 'unit', unitId: 'guest-strategy-target' };
+    const localStart = playerState(room, 'host');
+    if (!localStart) throw new Error('host state should exist');
+    const intent = {
+      type: 'useUnitStrategy' as const,
+      unitId: 'host-strategy-unit',
+      strategyId: 'fire' as const,
+      selection: { coord: { q: 9, r: 25 } } as const,
+    };
+
+    const localOutcome = reduceGameIntent(localStart, 'liu', intent);
+    const onlineResult = reduceOnlineIntent(room, 'host', room.revision, intent);
+
+    expect(onlineResult.ok).toBe(true);
+    if (!onlineResult.ok || !onlineResult.room.state) throw new Error('online strategy should succeed');
+    const onlineOutcome = onlineResult.room.state;
+    expect(onlineOutcome).toEqual(localOutcome);
+    expect(onlineOutcome.strategyResultReports).toEqual([
+      expect.objectContaining({ strategyId: 'fire', succeeded: true, q: 9, r: 25 }),
+    ]);
+    expect(onlineOutcome.firePlots).toContainEqual(expect.objectContaining({ q: 9, r: 25 }));
+    expect(onlineOutcome.units['guest-strategy-target'].troops).toBe(2000);
+    expect(onlineOutcome.battleDamageReports).toEqual([
+      expect.objectContaining({ unitId: 'guest-strategy-target', amount: 1000, q: 9, r: 25 }),
+    ]);
+    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ energy: 90, acted: true });
+    expect(onlineOutcome.rngCursor).toBe(localStart.rngCursor + 1);
+  });
+
+  it('keeps hostile fire rejection by target 火神 identical through direct and online reducers', () => {
+    const room = readyStrategyRoom();
+    if (!room.state) throw new Error('room state should exist');
+    room.state.officers['liu-bei'].skill = '无';
+    room.state.officers['liu-bei'].location = { kind: 'unit', unitId: 'host-strategy-unit' };
+    room.state.officers['cao-cao'].skill = '火神';
+    room.state.officers['cao-cao'].location = { kind: 'unit', unitId: 'guest-strategy-target' };
+    const localStart = playerState(room, 'host');
+    if (!localStart) throw new Error('host state should exist');
+    const intent = {
+      type: 'useUnitStrategy' as const,
+      unitId: 'host-strategy-unit',
+      strategyId: 'fire' as const,
+      selection: { coord: { q: 9, r: 25 } } as const,
+    };
+
+    const localOutcome = reduceGameIntent(localStart, 'liu', intent);
+    const onlineResult = reduceOnlineIntent(room, 'host', room.revision, intent);
+
+    expect(onlineResult.ok).toBe(true);
+    if (!onlineResult.ok || !onlineResult.room.state) throw new Error('online strategy should succeed');
+    const onlineOutcome = onlineResult.room.state;
+    expect(onlineOutcome).toEqual(localOutcome);
+    expect(onlineOutcome.strategyResultReports).toEqual([
+      expect.objectContaining({ strategyId: 'fire', succeeded: false, q: 9, r: 25 }),
+    ]);
+    expect(onlineOutcome.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: 9, r: 25 }));
+    expect(onlineOutcome.units['guest-strategy-target'].troops).toBe(3000);
+    expect(onlineOutcome.battleDamageReports).toEqual([]);
+    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ energy: 90, acted: true });
+    expect(onlineOutcome.rngCursor).toBe(localStart.rngCursor);
+  });
+
+  it('keeps hostile disturb rejection by target 洞察 identical through direct and online reducers', () => {
+    const room = readyStrategyRoom();
+    if (!room.state) throw new Error('room state should exist');
+    room.state.officers['liu-bei'].skill = '无';
+    room.state.officers['liu-bei'].location = { kind: 'unit', unitId: 'host-strategy-unit' };
+    room.state.officers['cao-cao'].skill = '洞察';
+    room.state.officers['cao-cao'].location = { kind: 'unit', unitId: 'guest-strategy-target' };
+    const localStart = playerState(room, 'host');
+    if (!localStart) throw new Error('host state should exist');
+    const intent = {
+      type: 'useUnitStrategy' as const,
+      unitId: 'host-strategy-unit',
+      strategyId: 'disturb' as const,
+      selection: { targetUnitId: 'guest-strategy-target' } as const,
+    };
+
+    const localOutcome = reduceGameIntent(localStart, 'liu', intent);
+    const onlineResult = reduceOnlineIntent(room, 'host', room.revision, intent);
+
+    expect(onlineResult.ok).toBe(true);
+    if (!onlineResult.ok || !onlineResult.room.state) throw new Error('online strategy should succeed');
+    const onlineOutcome = onlineResult.room.state;
+    expect(onlineOutcome).toEqual(localOutcome);
+    expect(onlineOutcome.strategyResultReports).toEqual([
+      expect.objectContaining({ strategyId: 'disturb', succeeded: false, q: 9, r: 25 }),
+    ]);
+    expect(onlineOutcome.units['guest-strategy-target'].confusedTenDays).toBeUndefined();
+    expect(onlineOutcome.battleDamageReports).toEqual([]);
+    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ energy: 85, acted: true });
+    expect(onlineOutcome.rngCursor).toBe(localStart.rngCursor);
+  });
+
   it('applies facility build intents in a mobile duel room', () => {
     const room = structuredClone(readyStartedRoom());
     if (!room.state) throw new Error('room state should exist');
