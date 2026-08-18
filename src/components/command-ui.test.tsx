@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { deployTransportUnit, deployUnit, movementCells } from '../game/battle/actions';
+import { movementAllowanceForProfile } from '../game/battle/definitions';
+import { deploymentCells } from '../game/battle/deployment';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from '../game/battle/grid';
 import { executeCommand } from '../game/commands';
 import { createGame } from '../game/scenario/jingxiang208';
@@ -359,6 +361,26 @@ describe('command interface', () => {
     expect(within(unitMarker).getByText('枪')).toBeVisible();
     expect(within(unitMarker).getByText('刘备')).toBeVisible();
     expect(within(unitMarker).getByText('4,000')).toBeVisible();
+  });
+
+  it('shows 强行 deployment targets for the selected officer', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    state.officers['liu-bei'].skill = '强行';
+    const base = deploymentCells(state, 'jiangling', movementAllowanceForProfile('sword'), 'sword');
+    const enhanced = deploymentCells(state, 'jiangling', movementAllowanceForProfile('sword') + 5, 'sword');
+    const destination = enhanced.find((coord) => !base.some((cell) => cell.q === coord.q && cell.r === coord.r));
+    expect(destination).toBeDefined();
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    await user.click(within(menu).getByRole('button', { name: '出征' }));
+    const dialog = await chooseDeployLeader(user, '刘备');
+    await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
+
+    expect(screen.getByTestId(`deploy-target-${destination!.q}-${destination!.r}`)).toBeVisible();
   });
 
   it('opens a separate officer picker and assigns one leader with two deputies', async () => {

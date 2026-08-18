@@ -3,6 +3,7 @@ import { ARMAMENT_LABELS, armamentsOf } from './armaments';
 import { movementAllowanceForUnit, settleBattleFacilities, unitSupplyMultiplier } from './battle/actions';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
+import { movementAllowanceBonus } from './skills/rules/movement';
 import type { ArmyUnit, City, GameState } from './types';
 
 interface CityEvent {
@@ -116,7 +117,7 @@ function settleUnitSupply(next: GameState, unit: ArmyUnit) {
     return;
   }
 
-  unit.movementRemaining = movementAllowanceForUnit(unit);
+  unit.movementRemaining = movementAllowanceForUnit(unit) + movementAllowanceBonus(next, unit);
   unit.moved = false;
   unit.acted = false;
   tickUnitStatus(unit, 'confusedTenDays');

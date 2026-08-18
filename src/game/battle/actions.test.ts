@@ -4,7 +4,9 @@ import { nextRandom } from '../random';
 import { createGame } from '../scenario/jingxiang208';
 import { territoryCityAt, territoryForceAt } from '../territory';
 import { settleTenDay } from '../turn';
+import type { TroopType } from '../types';
 import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
+import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 import { damageRoll } from './shared';
 
@@ -55,6 +57,17 @@ function addEnemyUnit(state: ReturnType<typeof createGame>, id: string, coord: {
     acted: false,
   };
   state.officers['cao-ren'].location = { kind: 'unit', unitId: id };
+}
+
+function stateWithSkillUnit(skill: string, troopType: TroopType) {
+  const state = createGame('liu', 1);
+  state.officers['liu-bei'].skill = skill;
+  state.units.test = {
+    id: 'test', kind: 'combat', forceId: 'liu', leaderId: 'liu-bei', officerIds: ['liu-bei'],
+    homeCityId: 'jiangling', troopType, q: 0, r: 0, troops: 4000, food: 4000,
+    energy: 100, movementRemaining: 30, moved: false, acted: false,
+  };
+  return state;
 }
 
 function seedForFirstRoll(predicate: (value: number) => boolean) {
@@ -124,6 +137,57 @@ function probabilisticStrategyState(strategyId: ProbabilisticStrategyId) {
 }
 
 describe('battle deployment and movement actions', () => {
+  it('resets a 强行 formation to base movement plus five', () => {
+    const state = stateWithSkillUnit('强行', 'spear');
+    state.units.test.movementRemaining = 0;
+    state.units.test.moved = true;
+
+    const next = settleTenDay(state);
+
+    expect(next.units.test.movementRemaining).toBe(movementAllowanceForUnit(next.units.test) + 5);
+  });
+
+  it('allows 飞将 to continue through an enemy zoc while ordinary formations stop there', () => {
+    const state = stateWithSkillUnit('飞将', 'spear');
+    state.units.test.movementRemaining = 8;
+    state.units.enemy = {
+      id: 'enemy', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
+      homeCityId: 'xiangyang', troopType: 'spear', q: 1, r: 1, troops: 4000, food: 4000,
+      energy: 100, movementRemaining: 20, moved: false, acted: false,
+    };
+    state.grid = [
+      { q: 0, r: 0, terrain: 'road' }, { q: 1, r: 0, terrain: 'road' },
+      { q: 2, r: 0, terrain: 'road' }, { q: 1, r: 1, terrain: 'road' },
+    ];
+
+    expect(movementCells(state, 'test')).toContainEqual({ q: 2, r: 0 });
+    expect(movementCells(state, 'test')).not.toContainEqual({ q: 1, r: 1 });
+    state.officers['liu-bei'].skill = '无';
+    expect(movementCells(state, 'test')).not.toContainEqual({ q: 2, r: 0 });
+  });
+
+  it('uses selected officer movement skills in deployment validation', () => {
+    const state = createGame('liu', 1);
+    state.officers['liu-bei'].skill = '强行';
+    const base = deploymentCells(state, 'jiangling', movementAllowanceForProfile('spear'), 'spear');
+    const enhanced = deploymentCells(state, 'jiangling', movementAllowanceForProfile('spear') + 5, 'spear');
+    const destination = enhanced.find((coord) => !base.some((cell) => cell.q === coord.q && cell.r === coord.r));
+
+    expect(destination).toBeDefined();
+    const deployed = deployUnit(state, 'liu', {
+      cityId: 'jiangling', officerIds: ['liu-bei'], troopType: 'spear', troops: 3000, food: 3000,
+      destination,
+    });
+    const unit = Object.values(deployed.units)[0];
+    expect(unit.movementRemaining).toBe(movementAllowanceForProfile('spear') + 5);
+
+    const preview = deployUnitPreviewWithId(state, 'liu', {
+      cityId: 'jiangling', officerIds: ['liu-bei'], troopType: 'spear', troops: 3000, food: 3000,
+      destination,
+    });
+    expect(preview.state.units[preview.unitId].movementRemaining).toBe(movementAllowanceForProfile('spear') + 5);
+  });
+
   it('deploys one officer as a one-cell unit outside the seven-cell city footprint', () => {
     const state = createGame('liu', 1);
     const beforeCity = state.cities.jiangling;
@@ -146,7 +210,7 @@ describe('battle deployment and movement actions', () => {
       troops: 4000,
       food: 6000,
       energy: 100,
-      movementRemaining: 0,
+      movementRemaining: movementAllowanceForProfile('sword'),
       moved: true,
       acted: false,
     });

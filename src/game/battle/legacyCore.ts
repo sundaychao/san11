@@ -1,6 +1,7 @@
 import { TRANSPORT_MOVEMENT, TROOP_MOVEMENT } from '../armaments';
 import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, GridCell, StrategyResultReport, TerrainType, TroopType } from '../types';
 import { nextRandom } from '../random';
+import { unitIgnoresEnemyZoc } from '../skills/rules/movement';
 import { territoryCityAt } from '../territory';
 import { coordsWithinRange, gridKey, isSameCoord, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance } from './officerAbilities';
@@ -641,7 +642,7 @@ function reachableCostsFrom(
   start: GridCoord,
   movementBudget: number,
   profile: MovementProfile,
-  options: { ignoredUnitId?: string; allowedCityTransitKeys?: Set<string>; movingForceId?: ForceId } = {},
+  options: { ignoredUnitId?: string; allowedCityTransitKeys?: Set<string>; movingForceId?: ForceId; ignoreEnemyZoc?: boolean } = {},
 ) {
   const startKey = gridKey(start);
   const costs = new Map<string, number>([[startKey, 0]]);
@@ -649,7 +650,9 @@ function reachableCostsFrom(
   const cityKeys = allCityKeys(state);
   const unitKeys = occupiedUnitKeys(state, options.ignoredUnitId);
   const facilityKeys = occupiedFacilityKeys(state);
-  const zocKeys = options.movingForceId ? controlledZoneKeysForForce(state, options.movingForceId) : new Set<string>();
+  const zocKeys = options.movingForceId && !options.ignoreEnemyZoc
+    ? controlledZoneKeysForForce(state, options.movingForceId)
+    : new Set<string>();
 
   while (frontier.length > 0) {
     const current = frontier.shift()!;
@@ -679,6 +682,7 @@ export function reachableCosts(state: GameState, unit: ArmyUnit) {
   return reachableCostsFrom(state, unit, unit.movementRemaining, movementProfileForUnit(unit), {
     ignoredUnitId: unit.id,
     movingForceId: unit.forceId,
+    ignoreEnemyZoc: unitIgnoresEnemyZoc(state, unit),
   });
 }
 

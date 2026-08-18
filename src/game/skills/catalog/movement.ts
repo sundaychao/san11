@@ -11,13 +11,17 @@ function movementSkill(name: string, description: string, effects: SkillEffect[]
   };
 }
 
+function activeMovementSkill(name: string, description: string, effects: SkillEffect[]): SkillDefinition {
+  return { ...movementSkill(name, description, effects), implementationStatus: 'active' };
+}
+
 export const MOVEMENT_SKILLS: SkillDefinition[] = [
-  movementSkill('飞将', '陆地移动忽略敌方ZOC；对武力较低目标成功施展非兵器陆战战法时必定暴击', [
+  activeMovementSkill('飞将', '陆地移动忽略敌方ZOC；对武力较低目标成功施展非兵器陆战战法时必定暴击', [
     { kind: 'ignoreEnemyZoc', terrain: 'land' },
     { kind: 'tacticCritical', condition: { kind: 'targetWarLower' }, excludeTroopTypes: ['siege'] },
   ]),
   movementSkill('遁走', '陆地移动忽略敌方ZOC'),
-  movementSkill('强行', '非兵器、非运输陆地部队移动力增加5', [
+  activeMovementSkill('强行', '非兵器、非运输陆地部队移动力增加5', [
     { kind: 'movementAllowance', add: 5, excludeKinds: ['transport'], troopTypes: ['sword', 'spear', 'halberd', 'crossbow', 'cavalry'] },
   ]),
   movementSkill('长驱', '骑兵移动力增加'),

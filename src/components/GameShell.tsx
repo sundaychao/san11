@@ -2,8 +2,10 @@ import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { playClickOnSound, playLeftMouseSound, playRightMouseSound, playWaitingForTargetSound } from '../audio/soundEffects';
 import { effectiveUnitAbilities, harmfulStrategySuccessChance, attackableCities, attackableFacilities, attackableUnits, deploymentCells, deployUnitPreviewWithId, FACILITY_BUILD_COSTS, facilityBuildTargets, jointAttackableUnits, movementCells, repairableFacilities, requiredAptitudeForTactic, strategyTargetCells, strategyTargetUnits, tacticTargetUnits, unitCanUseTactic, unitFacilities, unitIsIncapacitated, unitStrategies, unitTactics, type StrategyId, type TacticId, type UnitTactic } from '../game/battle/actions';
+import { movementAllowanceForProfile } from '../game/battle/definitions';
 import type { GridCoord } from '../game/battle/grid';
 import { TROOP_LABELS } from '../game/armaments';
+import { formationMovementAllowanceBonus } from '../game/skills';
 import {
   clearEditor,
   createEditorState,
@@ -347,7 +349,10 @@ export function GameShell() {
     const pending = pendingDeploy ?? pendingTransport;
     if (!state || !pending) return [];
     if (targetingFacility || targetingFirePlot || targetingRepair) return [];
-    return deploymentCells(state, pending.cityId, undefined, pendingDeploy ? pendingDeploy.troopType : 'transport');
+    if (!pendingDeploy) return deploymentCells(state, pending.cityId, undefined, 'transport');
+    const movementAllowance = movementAllowanceForProfile(pendingDeploy.troopType) +
+      formationMovementAllowanceBonus(state, pendingDeploy.officerIds, pendingDeploy.troopType);
+    return deploymentCells(state, pending.cityId, movementAllowance, pendingDeploy.troopType);
   }, [pendingDeploy, pendingTransport, state, targetingFacility, targetingFirePlot, targetingRepair]);
   const moveTargets = useMemo(() => (
     state && selectedUnitId && !targetingAttack && !targetingTactic && !targetingFirePlot && !targetingUnitStrategy && !targetingFacility && !targetingRepair ? movementCells(state, selectedUnitId) : []
