@@ -312,6 +312,42 @@ describe('online room session', () => {
     }
   });
 
+  it('keeps 百出 and 连环 cost, status duration, reports, and RNG identical online', () => {
+    const room = readyStrategyRoom();
+    if (!room.state) throw new Error('room state should exist');
+    room.state.officers['liu-bei'].skill = '连环';
+    room.state.officers['liu-bei'].stats.intelligence = 100;
+    room.state.officers['liu-bei'].location = { kind: 'unit', unitId: 'host-strategy-unit' };
+    room.state.officers['zhuge-liang'].skill = '百出';
+    room.state.officers['zhuge-liang'].location = { kind: 'unit', unitId: 'host-strategy-unit' };
+    room.state.officers['cao-cao'].stats.intelligence = 1;
+    room.state.officers['cao-ren'].stats.intelligence = 1;
+    room.state.units['host-strategy-unit'].officerIds = ['liu-bei', 'zhuge-liang'];
+    room.state.units['host-strategy-unit'].energy = 1;
+    const localStart = playerState(room, 'host');
+    if (!localStart) throw new Error('host state should exist');
+    const intent = {
+      type: 'useUnitStrategy' as const,
+      unitId: 'host-strategy-unit',
+      strategyId: 'disturb' as const,
+      selection: { targetUnitId: 'guest-strategy-target' } as const,
+    };
+
+    const localOutcome = reduceGameIntent(localStart, 'liu', intent);
+    const onlineResult = reduceOnlineIntent(room, 'host', room.revision, intent);
+
+    expect(onlineResult.ok).toBe(true);
+    if (!onlineResult.ok || !onlineResult.room.state) throw new Error('online strategy should succeed');
+    const onlineOutcome = onlineResult.room.state;
+    expect(onlineOutcome).toEqual(localOutcome);
+    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ energy: 0, acted: true });
+    expect(onlineOutcome.units['guest-strategy-target'].confusedTenDays).toBe(
+      onlineOutcome.units['guest-discord-victim'].confusedTenDays,
+    );
+    expect(onlineOutcome.rngCursor).toBe(localStart.rngCursor + 2);
+    expect(onlineOutcome.strategyResultReports).toEqual(localOutcome.strategyResultReports);
+  });
+
   it('applies facility build intents in a mobile duel room', () => {
     const room = structuredClone(readyStartedRoom());
     if (!room.state) throw new Error('room state should exist');

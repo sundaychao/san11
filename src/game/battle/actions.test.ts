@@ -9,6 +9,7 @@ import { attackableCities, attackableFacilities, attackableUnits, attackCity, at
 import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 import { damageRoll } from './shared';
+import { strategyEnergyCostForUnit } from './strategies';
 
 function cityKeys(state: ReturnType<typeof createGame>) {
   return new Set(Object.values(state.cities).flatMap((city) => (
@@ -92,6 +93,32 @@ function combatSkillState(attackerSkill: string, targetSkill = '无', targetTroo
     },
   };
   return { state, attacker: state.units['skill-attacker'], target: state.units['skill-target'] };
+}
+
+function strategySkillState(casterSkill = '无', targetSkill = '无') {
+  const state = createGame('liu', 1);
+  setUniformTerrain(state, 'plain');
+  state.officers['zhuge-liang'].skill = casterSkill;
+  state.officers['zhuge-liang'].location = { kind: 'unit', unitId: 'strategy-caster' };
+  state.officers['cao-ren'].skill = targetSkill;
+  state.officers['cao-ren'].location = { kind: 'unit', unitId: 'strategy-skill-target' };
+  state.units = {
+    'strategy-caster': {
+      id: 'strategy-caster', kind: 'combat', forceId: 'liu', leaderId: 'zhuge-liang', officerIds: ['zhuge-liang'],
+      homeCityId: 'jiangling', troopType: 'spear', q: 10, r: 10, troops: 5000, food: 5000,
+      energy: 100, movementRemaining: 20, moved: false, acted: false,
+    },
+    'strategy-skill-target': {
+      id: 'strategy-skill-target', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
+      homeCityId: 'xiangyang', troopType: 'spear', q: 11, r: 10, troops: 5000, food: 5000,
+      energy: 100, movementRemaining: 20, moved: false, acted: false,
+    },
+  };
+  return {
+    state,
+    caster: state.units['strategy-caster'],
+    target: state.units['strategy-skill-target'],
+  };
 }
 
 function seedForFirstRoll(predicate: (value: number) => boolean) {
@@ -2422,5 +2449,126 @@ describe('battle deployment and movement actions', () => {
     expect(next.units[unit.id].movementRemaining).toBe(22);
     expect(next.units[unit.id].moved).toBe(false);
     expect(next.units[unit.id].acted).toBe(false);
+  });
+});
+
+describe('strategy officer skills', () => {
+  it('uses the same 百出 cost helper for validation and actual spending', () => {
+    const { state, caster } = strategySkillState('百出');
+    caster.energy = 1;
+
+    expect(strategyEnergyCostForUnit(state, caster.id, 'disturb')).toBe(1);
+    const next = useUnitStrategy(state, 'liu', caster.id, 'disturb', { targetUnitId: 'strategy-skill-target' });
+    expect(next.units[caster.id]).toMatchObject({ energy: 0, acted: true });
+  });
+
+  it('does not guarantee 火神 fire on an empty cell', () => {
+    const { state, caster } = strategySkillState('火神');
+    state.officers['zhuge-liang'].stats.intelligence = 1;
+    delete state.units['strategy-skill-target'];
+    const chance = fireStrategySuccessChance(1);
+    state.seed = seedForFirstRoll((value) => value >= chance / 100);
+
+    const next = useUnitStrategy(state, 'liu', caster.id, 'fire', { coord: { q: 11, r: 10 } });
+
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
+    expect(next.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: 11, r: 10 }));
+    expect(next.rngCursor).toBe(state.rngCursor + 1);
+  });
+
+  it('doubles only 火神 immediate fire damage and leaves the later ground-fire tick at 500', () => {
+    const { state, caster, target } = strategySkillState('火神');
+    state.officers['zhuge-liang'].stats.intelligence = 100;
+    state.officers['cao-ren'].stats.intelligence = 1;
+
+    const ignited = useUnitStrategy(state, 'liu', caster.id, 'fire', { coord: { q: target.q, r: target.r } });
+
+    expect(ignited.units[target.id].troops).toBe(4000);
+    expect(ignited.rngCursor).toBe(state.rngCursor + 1);
+    const nextTenDay = settleTenDay(ignited);
+    expect(nextTenDay.units[target.id].troops).toBe(3500);
+    expect(nextTenDay.battleDamageReports).toEqual([
+      expect.objectContaining({ unitId: target.id, amount: 500 }),
+    ]);
+  });
+
+  it.each([
+    ['火神', 'fire', 10],
+    ['洞察', 'fire', 10],
+    ['洞察', 'false-report', 15],
+    ['洞察', 'disturb', 15],
+    ['洞察', 'discord', 20],
+  ] as const)('spends once without RNG or side effects when %s blocks hostile %s', (targetSkill, strategyId, cost) => {
+    const { state, caster, target } = strategySkillState('无', targetSkill);
+    state.officers['zhuge-liang'].stats.intelligence = 100;
+    state.officers['cao-ren'].stats.intelligence = 1;
+    state.rngCursor = 7;
+    state.officers['xiahou-dun'].location = { kind: 'unit', unitId: 'strategy-discord-victim' };
+    state.units['strategy-discord-victim'] = {
+      ...target,
+      id: 'strategy-discord-victim',
+      leaderId: 'xiahou-dun',
+      officerIds: ['xiahou-dun'],
+      q: 12,
+      r: 11,
+    };
+    const selection = strategyId === 'fire'
+      ? { coord: { q: target.q, r: target.r } } as const
+      : { targetUnitId: target.id } as const;
+
+    const next = useUnitStrategy(state, 'liu', caster.id, strategyId, selection);
+
+    expect(next.units[caster.id]).toMatchObject({ energy: 100 - cost, acted: true });
+    expect(next.rngCursor).toBe(state.rngCursor);
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
+    expect(next.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: target.q, r: target.r }));
+    expect(next.units[target.id].falseReportedTenDays).toBeUndefined();
+    expect(next.units[target.id].confusedTenDays).toBeUndefined();
+    expect(next.units['strategy-discord-victim'].troops).toBe(5000);
+    expect(next.battleDamageReports).toEqual([]);
+  });
+
+  it('does not let 洞察 block a friendly inspire strategy', () => {
+    const { state, caster, target } = strategySkillState('无', '洞察');
+    target.forceId = caster.forceId;
+    target.energy = 40;
+
+    const next = useUnitStrategy(state, 'liu', caster.id, 'inspire', { targetUnitId: target.id });
+
+    expect(next.units[caster.id]).toMatchObject({ energy: 90, acted: true });
+    expect(next.units[target.id].energy).toBe(60);
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true })]);
+    expect(next.rngCursor).toBe(state.rngCursor);
+  });
+
+  it.each([
+    ['false-report', 'falseReportedTenDays', 1],
+    ['disturb', 'confusedTenDays', 2],
+  ] as const)('chains one successful %s duration without extra cost or RNG', (strategyId, statusKey, expectedCursor) => {
+    const { state, caster, target } = strategySkillState('连环');
+    state.officers['zhuge-liang'].stats.intelligence = 100;
+    state.officers['cao-ren'].stats.intelligence = 1;
+    const chainCells = neighborsOf(target.q, target.r)
+      .filter((coord) => coord.q !== caster.q || coord.r !== caster.r);
+    state.officers['xiahou-dun'].location = { kind: 'unit', unitId: 'z-adjacent' };
+    state.officers['cao-cao'].location = { kind: 'unit', unitId: 'a-adjacent' };
+    state.units['z-adjacent'] = {
+      ...target, id: 'z-adjacent', leaderId: 'xiahou-dun', officerIds: ['xiahou-dun'],
+      q: chainCells[0].q, r: chainCells[0].r,
+    };
+    state.units['a-adjacent'] = {
+      ...target, id: 'a-adjacent', leaderId: 'cao-cao', officerIds: ['cao-cao'],
+      q: chainCells[1].q, r: chainCells[1].r,
+    };
+
+    const next = useUnitStrategy(state, 'liu', caster.id, strategyId, { targetUnitId: target.id });
+    const sharedDuration = next.units[target.id][statusKey];
+
+    expect(sharedDuration).toBeGreaterThanOrEqual(1);
+    expect(next.units['a-adjacent'][statusKey]).toBe(sharedDuration);
+    expect(next.units['z-adjacent'][statusKey]).toBe(sharedDuration);
+    expect(next.units[caster.id]).toMatchObject({ energy: 85, acted: true });
+    expect(next.rngCursor).toBe(state.rngCursor + expectedCursor);
+    expect(next.strategyResultReports).toHaveLength(1);
   });
 });

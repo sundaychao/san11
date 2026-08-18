@@ -21,6 +21,7 @@ import {
   type MapEditorState,
   type MapEditorTool,
 } from '../game/map-editor/editor';
+import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { useGame } from '../game/store/GameProvider';
 import { territoryForceAt } from '../game/territory';
 import type { BattleDamageReport, CityEffectReport, FacilityRepairReport, FacilityType, GameCommand, GameState, GridCell, StrategyResultReport, TerrainType } from '../game/types';
@@ -404,7 +405,7 @@ export function GameShell() {
     unitMenuState && unitMenuUnitId
       ? UNIT_STRATEGIES.filter((strategy) => {
         const unit = unitMenuState.units[unitMenuUnitId];
-        if (!unit || unit.energy < strategy.cost) return false;
+        if (!unit || unit.energy < strategyEnergyCostForUnit(unitMenuState, unitMenuUnitId, strategy.id)) return false;
         if (strategy.target === 'cell') return strategyTargetCells(unitMenuState, unitMenuUnitId, strategy.id, unitMenuDestination).length > 0;
         return strategyTargetUnits(unitMenuState, unitMenuUnitId, strategy.id, unitMenuDestination).length > 0;
       })
@@ -1478,7 +1479,7 @@ export function GameShell() {
           })}
         </nav>
       )}
-      {unitStrategyMenu && (
+      {unitStrategyMenu && unitMenuState && (
         <nav
           ref={unitStrategyMenuRef}
           className="unit-strategy-menu tool-panel"
@@ -1492,16 +1493,19 @@ export function GameShell() {
             setUnitStrategyMenu(null);
           }}
         >
-          {UNIT_STRATEGIES.map((strategy) => (
-            <button
-              key={strategy.id}
-              type="button"
-              disabled={!unitMenuStrategies.some((candidate) => candidate.id === strategy.id)}
-              onClick={() => selectUnitStrategy(strategy.id)}
-            >
-              {strategy.name}（{strategy.cost}）
-            </button>
-          ))}
+          {UNIT_STRATEGIES.map((strategy) => {
+            const cost = strategyEnergyCostForUnit(unitMenuState, unitStrategyMenu.unitId, strategy.id);
+            return (
+              <button
+                key={strategy.id}
+                type="button"
+                disabled={!unitMenuStrategies.some((candidate) => candidate.id === strategy.id)}
+                onClick={() => selectUnitStrategy(strategy.id)}
+              >
+                {strategy.name}（{cost}）
+              </button>
+            );
+          })}
         </nav>
       )}
       {unitTacticMenu && (

@@ -2,6 +2,7 @@ export {
   firePlotCells,
   strategyTargetCells,
   strategyTargetUnits,
+  strategyEnergyCostForUnit,
   unitStrategies,
   useFirePlot,
   useUnitStrategy,

@@ -1,8 +1,10 @@
 import { TRANSPORT_MOVEMENT, TROOP_MOVEMENT } from '../armaments';
 import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, GridCell, StrategyResultReport, TerrainType, TroopType } from '../types';
 import { nextRandom } from '../random';
+import { applyChainStrategyEffect } from '../skills/handlers';
 import { reduceIncomingDamageBySkills, tacticCriticalMode } from '../skills/rules/combat';
 import { unitIgnoresEnemyZoc } from '../skills/rules/movement';
+import { resolveStrategySkillRules } from '../skills/rules/strategy';
 import { territoryCityAt } from '../territory';
 import { coordsWithinRange, gridKey, isSameCoord, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance } from './officerAbilities';
@@ -860,6 +862,13 @@ export function unitStrategies(): UnitStrategy[] {
   return Object.values(STRATEGIES);
 }
 
+export function strategyEnergyCostForUnit(state: GameState, unitId: string, strategyId: StrategyId) {
+  const unit = state.units[unitId];
+  const strategy = STRATEGIES[strategyId];
+  if (!unit || !strategy) throw new Error('部队不能使用该计略');
+  return resolveStrategySkillRules(state, unit, undefined, strategyId, strategy.cost).energyCost;
+}
+
 export function strategyTargetCells(state: GameState, unitId: string, strategyId: StrategyId, origin?: GridCoord): GridCoord[] {
   const unit = state.units[unitId];
   if (!unit || unit.kind === 'transport') return [];
@@ -1121,6 +1130,67 @@ function discordVictim(next: GameState, target: ArmyUnit) {
     .sort((a, b) => a.troops - b.troops || a.id.localeCompare(b.id))[0];
 }
 
+interface SuccessfulUnitStrategyOutcome {
+  statusDuration: number;
+  successRollValue: number | undefined;
+}
+
+function applySuccessfulUnitStrategy(
+  next: GameState,
+  strategyId: StrategyId,
+  targetId: string,
+  outcome: SuccessfulUnitStrategyOutcome,
+) {
+  const target = next.units[targetId];
+  if (!target) return;
+
+  if (strategyId === 'false-report') {
+    target.falseReportedTenDays = outcome.statusDuration;
+  } else if (strategyId === 'disturb') {
+    target.confusedTenDays = outcome.statusDuration;
+  } else if (strategyId === 'calm') {
+    delete target.confusedTenDays;
+    delete target.falseReportedTenDays;
+  } else if (strategyId === 'inspire') {
+    target.energy = Math.min(100, target.energy + 20);
+  } else if (strategyId === 'discord') {
+    const victim = discordVictim(next, target);
+    if (!victim) throw new Error('目标不在计略范围');
+    const damage = reduceUnitDamageByFortress(
+      next,
+      victim,
+      damageForRoll(next, target, unitTerrain(next, victim), outcome.successRollValue ?? 0, false, victim),
+    );
+    victim.troops -= damage;
+    next.battleDamageReports = [{
+      id: `strategy-${strategyId}-${next.month}-${next.tenDay}-${next.rngCursor}-${victim.id}`,
+      unitId: victim.id,
+      q: victim.q,
+      r: victim.r,
+      amount: damage,
+      kind: 'attack',
+    }];
+    if (victim.troops <= 0) removeUnit(next, victim, target);
+  }
+}
+
+function multiplyImmediateFireDamage(
+  next: GameState,
+  firstReportIndex: number,
+  multiplier: number,
+  looter: ArmyUnit,
+) {
+  if (multiplier <= 1) return;
+  for (const report of (next.battleDamageReports ?? []).slice(firstReportIndex)) {
+    const extraDamage = report.amount * (multiplier - 1);
+    report.amount += extraDamage;
+    const unit = next.units[report.unitId];
+    if (!unit) continue;
+    unit.troops -= extraDamage;
+    if (unit.troops <= 0) removeUnit(next, unit, looter);
+  }
+}
+
 function addDamageReport(next: GameState, unit: ArmyUnit, amount: number, prefix: string) {
   next.battleDamageReports ??= [];
   next.battleDamageReports.push({
@@ -1193,7 +1263,8 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
   const strategy = STRATEGIES[strategyId];
   if (!strategy) throw new Error('部队不能使用该计略');
   if (unit.kind === 'transport') throw new Error('运输队不能使用计略');
-  if (unit.energy < strategy.cost) throw new Error('气力不足');
+  const energyCost = strategyEnergyCostForUnit(state, unitId, strategyId);
+  if (unit.energy < energyCost) throw new Error('气力不足');
 
   let targetCoord: GridCoord;
   let targetUnit: ArmyUnit | undefined;
@@ -1234,8 +1305,12 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
     : probabilistic && targetUnit
       ? harmfulStrategySuccessChance(sourceIntelligence, effectiveUnitAbilities(state, targetUnit).intelligence.value)
       : 100;
-  const roll = probabilistic ? nextRandom(state.seed, state.rngCursor) : undefined;
-  const succeeded = !roll || roll.value < chance / 100;
+  const skillTarget = fireTargetUnit ?? targetUnit;
+  const skillRules = resolveStrategySkillRules(state, unit, skillTarget, strategyId, strategy.cost);
+  const roll = probabilistic && !skillRules.guaranteed && !skillRules.immune
+    ? nextRandom(state.seed, state.rngCursor)
+    : undefined;
+  const succeeded = !skillRules.immune && (skillRules.guaranteed || !roll || roll.value < chance / 100);
   const next = structuredClone(state);
   next.battleDamageReports = [];
   next.facilityRepairReports = [];
@@ -1244,19 +1319,21 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
     ? nextRandom(next.seed, next.rngCursor)
     : undefined;
   if (disturbDurationRoll) next.rngCursor = disturbDurationRoll.cursor;
-  spendStrategyCost(next, unitId, strategy);
+  spendStrategyCost(next, unitId, { ...strategy, cost: energyCost });
   next.strategyResultReports = [strategyReport(next, unitId, strategy, targetCoord, succeeded)];
   if (!succeeded) return next;
 
   if (strategy.target === 'cell') {
     next.firePlots ??= [];
     if (strategyId === 'fire') {
+      const firstFireDamageReport = next.battleDamageReports.length;
       const facility = facilityAt(next, targetCoord);
       if (facility && igniteFacility(next, next.units[unitId], facility, next.units[unitId])) {
         next.battleDamageReports ??= [];
       } else {
         igniteGroundFire(next, [targetCoord], next.units[unitId]);
       }
+      multiplyImmediateFireDamage(next, firstFireDamageReport, skillRules.fireDamageMultiplier, next.units[unitId]);
     } else if (strategyId === 'extinguish') {
       next.firePlots = next.firePlots.filter((plot) => plot.q !== targetCoord.q || plot.r !== targetCoord.r);
     }
@@ -1266,29 +1343,30 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
   const target = next.units[targetUnit!.id];
   if (!target) throw new Error('计略目标不存在');
 
-  if (strategyId === 'false-report') {
-    target.falseReportedTenDays = 1;
-  } else if (strategyId === 'disturb') {
-    target.confusedTenDays = disturbDurationRoll ? Math.floor(disturbDurationRoll.value * 3) + 1 : 1;
-  } else if (strategyId === 'calm') {
-    delete target.confusedTenDays;
-    delete target.falseReportedTenDays;
-  } else if (strategyId === 'inspire') {
-    target.energy = Math.min(100, target.energy + 20);
-  } else if (strategyId === 'discord') {
-    const victim = discordVictim(next, target);
-    if (!victim) throw new Error('目标不在计略范围');
-    const damage = reduceUnitDamageByFortress(next, victim, damageForRoll(next, target, unitTerrain(next, victim), roll!.value, false, victim));
-    victim.troops -= damage;
-    next.battleDamageReports = [{
-      id: `strategy-${strategyId}-${next.month}-${next.tenDay}-${next.rngCursor}-${victim.id}`,
-      unitId: victim.id,
-      q: victim.q,
-      r: victim.r,
-      amount: damage,
-      kind: 'attack',
-    }];
-    if (victim.troops <= 0) removeUnit(next, victim, target);
+  const sharedDuration = strategyId === 'disturb' && disturbDurationRoll
+    ? Math.floor(disturbDurationRoll.value * 3) + 1
+    : 1;
+  const sharedOutcome = { statusDuration: sharedDuration, successRollValue: roll?.value };
+  const applySuccessfulStatus = (targetId: string, duration: number) => {
+    const nextCaster = next.units[unitId];
+    const nextStatusTarget = next.units[targetId];
+    if (!nextCaster || !nextStatusTarget) return;
+    const targetRules = resolveStrategySkillRules(next, nextCaster, nextStatusTarget, strategyId, strategy.cost);
+    if (targetRules.immune) return;
+    applySuccessfulUnitStrategy(next, strategyId, targetId, { ...sharedOutcome, statusDuration: duration });
+  };
+
+  if (skillRules.chain) {
+    applyChainStrategyEffect({
+      state: next,
+      casterId: unitId,
+      originalTargetId: target.id,
+      strategyId,
+      sharedDuration,
+      applySuccessfulStatus,
+    });
+  } else {
+    applySuccessfulUnitStrategy(next, strategyId, target.id, sharedOutcome);
   }
 
   return next;

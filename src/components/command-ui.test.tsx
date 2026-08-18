@@ -56,6 +56,39 @@ function destinationWithEnemyNeighbor(state: ReturnType<typeof createGame>, unit
 }
 
 describe('command interface', () => {
+  it('shows and enables every 百出 strategy at the shared one-energy cost', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling', officerId: 'liu-bei', troops: 3000, food: 3000,
+    });
+    const caster = Object.values(state.units)[0];
+    state.officers['liu-bei'].skill = '百出';
+    state.officers['liu-bei'].location = { kind: 'unit', unitId: caster.id };
+    Object.assign(caster, { q: 10, r: 10, energy: 1, moved: false, acted: false, movementRemaining: 22 });
+    state.officers['cao-ren'].location = { kind: 'unit', unitId: 'strategy-menu-target' };
+    state.units['strategy-menu-target'] = {
+      id: 'strategy-menu-target', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
+      homeCityId: 'xiangyang', troopType: 'sword', q: 11, r: 10, troops: 3000, food: 3000,
+      energy: 100, movementRemaining: 20, moved: false, acted: false,
+    };
+    renderState(state);
+
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    const strategyCommand = within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '计略' });
+
+    expect(strategyCommand).toBeEnabled();
+    await user.click(strategyCommand);
+    const strategyMenu = screen.getByTestId('unit-strategy-menu');
+    for (const button of within(strategyMenu).getAllByRole('button')) {
+      expect(button).toHaveTextContent(/（1）$/);
+    }
+    expect(within(strategyMenu).getByRole('button', { name: '火计（1）' })).toBeEnabled();
+    expect(within(strategyMenu).getByRole('button', { name: '扰乱（1）' })).toBeEnabled();
+  });
+
   it('confirms before ending a month with legal actions remaining', async () => {
     const user = userEvent.setup();
     renderState();
