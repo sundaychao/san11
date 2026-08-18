@@ -1187,6 +1187,7 @@ describe('battle deployment and movement actions', () => {
 
   it('rolls area tactic damage and 不屈 once per target in deterministic order', () => {
     const { state, attacker, target } = combatSkillState('无', '不屈', 2999);
+    state.seed = 78_549;
     attacker.troopType = 'halberd';
     state.officers['guan-yu'].aptitudes!.halberd = 'S';
     state.officers['xiahou-dun'].skill = '不屈';
@@ -1199,16 +1200,45 @@ describe('battle deployment and movement actions', () => {
       q: 10,
       r: 9,
     };
+    const expectedState = structuredClone(state);
+    const expectedAttacker = expectedState.units[attacker.id];
+    const abilities = effectiveUnitAbilities(expectedState, expectedAttacker);
+    const tactic = unitTactics(expectedState, expectedAttacker.id)
+      .find((candidate) => candidate.id === 'halberd-whirlwind')!;
+    const criticalRoll = nextRandom(expectedState.seed, expectedState.rngCursor);
+    expectedState.rngCursor = criticalRoll.cursor;
+    const critical = criticalRoll.value < tacticCriticalChance(abilities.war.value, abilities.aptitude.grade!) / 100;
+    const damageMultiplier = tactic.power * 1.2 * (critical ? 1.35 : 1);
+
+    const replayExpectedHit = (unitId: string) => {
+      const expectedTarget = expectedState.units[unitId];
+      const rolledDamage = damageRoll(expectedState, expectedAttacker, 'plain', false, expectedTarget);
+      const ordinaryDamage = Math.min(expectedTarget.troops, Math.round(rolledDamage * damageMultiplier));
+      const defenseRoll = nextRandom(expectedState.seed, expectedState.rngCursor);
+      expectedState.rngCursor = defenseRoll.cursor;
+      return {
+        defenseRoll: defenseRoll.value,
+        report: {
+          id: `tactic-${tactic.id}-${expectedState.month}-${expectedState.tenDay}-${expectedState.rngCursor}-${unitId}`,
+          unitId,
+          q: expectedTarget.q,
+          r: expectedTarget.r,
+          amount: defenseRoll.value < 0.5 ? 0 : ordinaryDamage,
+          kind: 'attack' as const,
+          ...(critical ? { critical: true, label: '暴击' } : {}),
+        },
+      };
+    };
+    const firstExpected = replayExpectedHit(target.id);
+    const secondExpected = replayExpectedHit('area-protected');
 
     const next = useUnitTactic(state, 'liu', attacker.id, target.id, 'halberd-whirlwind');
 
-    expect(next.rngCursor).toBe(state.rngCursor + 5);
-    expect(next.battleDamageReports?.map((report) => report.unitId)).toEqual([target.id, 'area-protected']);
-    expect(next.battleDamageReports?.map((report) => report.amount)).toEqual([
-      expect.any(Number),
-      0,
-    ]);
-    expect(next.battleDamageReports?.[0].amount).toBeGreaterThan(0);
+    expect(firstExpected.defenseRoll).toBeLessThan(0.5);
+    expect(nextRandom(state.seed, 3).value).toBeGreaterThanOrEqual(0.5);
+    expect(secondExpected.defenseRoll).toBeGreaterThanOrEqual(0.5);
+    expect(next.rngCursor).toBe(expectedState.rngCursor);
+    expect(next.battleDamageReports).toEqual([firstExpected.report, secondExpected.report]);
   });
 
   it('uses spear tactics to push or confuse a target and spend energy', () => {
