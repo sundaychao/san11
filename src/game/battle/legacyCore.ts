@@ -1,6 +1,7 @@
 import { TRANSPORT_MOVEMENT, TROOP_MOVEMENT } from '../armaments';
 import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, GridCell, StrategyResultReport, TerrainType, TroopType } from '../types';
 import { nextRandom } from '../random';
+import { reduceIncomingDamageBySkills, tacticCriticalMode } from '../skills/rules/combat';
 import { unitIgnoresEnemyZoc } from '../skills/rules/movement';
 import { territoryCityAt } from '../territory';
 import { coordsWithinRange, gridKey, isSameCoord, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
@@ -994,7 +995,8 @@ function applyTacticDamage(
     TACTIC_APTITUDE_DAMAGE[aptitude] *
     (critical ? 1.35 : 1),
   );
-  const damage = reduceUnitDamageByFortress(next, nextTarget, modifiedDamage);
+  const fortifiedDamage = reduceUnitDamageByFortress(next, nextTarget, modifiedDamage);
+  const damage = reduceIncomingDamageBySkills(next, nextTarget, fortifiedDamage, 'tactic');
   nextTarget.troops -= damage;
   next.battleDamageReports ??= [];
   next.battleDamageReports.push({
@@ -1066,9 +1068,13 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
   const nextTarget = next.units[targetId];
   const abilities = effectiveUnitAbilities(next, nextAttacker);
   const aptitude = abilities.aptitude.grade!;
-  const criticalRoll = nextRandom(next.seed, next.rngCursor);
-  next.rngCursor = criticalRoll.cursor;
-  const critical = criticalRoll.value < tacticCriticalChance(abilities.war.value, aptitude) / 100;
+  const criticalMode = tacticCriticalMode(next, nextAttacker, nextTarget, tacticId);
+  let critical = criticalMode === 'guaranteed';
+  if (criticalMode === 'normal') {
+    const criticalRoll = nextRandom(next.seed, next.rngCursor);
+    next.rngCursor = criticalRoll.cursor;
+    critical = criticalRoll.value < tacticCriticalChance(abilities.war.value, aptitude) / 100;
+  }
   const affected = tacticAffectedUnits(next, nextAttacker, nextTarget, tactic);
   const fireArrowCells = tactic.id === 'crossbow-fire'
     ? affected.map((unit) => ({ q: unit.q, r: unit.r }))

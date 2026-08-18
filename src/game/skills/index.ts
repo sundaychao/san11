@@ -3,6 +3,7 @@ export { skillConditionMatches } from './conditions';
 export { effectsOfKind, hasActiveSkill } from './stacking';
 export { resolveCitySkills, resolveCommandSkills, resolveOfficerSkills, resolveUnitSkills } from './sources';
 export { formationMovementAllowanceBonus, movementAllowanceBonus, unitIgnoresEnemyZoc } from './rules/movement';
+export { normalAttackIsCritical, reduceIncomingDamageBySkills, rollRepeatNormalAttack, tacticCriticalMode } from './rules/combat';
 export type {
   ActiveSkill,
   SkillCondition,

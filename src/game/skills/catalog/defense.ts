@@ -11,8 +11,12 @@ function defenseSkill(name: string, description: string, effects: SkillEffect[] 
   };
 }
 
+function activeDefenseSkill(name: string, description: string, effects: SkillEffect[]): SkillDefinition {
+  return { ...defenseSkill(name, description, effects), implementationStatus: 'active' };
+}
+
 export const DEFENSE_SKILLS: SkillDefinition[] = [
-  defenseSkill('不屈', '兵力少于3000时有50%概率免除受到的攻击伤害', [
+  activeDefenseSkill('不屈', '兵力少于3000时有50%概率免除受到的攻击伤害', [
     { kind: 'negateIncomingDamage', chance: 0.5, condition: { kind: 'troopsBelow', amount: 3000 }, sources: ['normalAttack', 'counter', 'tactic'] },
   ]),
   defenseSkill('金刚', '受到少量伤害时有50%概率完全免除'),

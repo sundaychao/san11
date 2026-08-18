@@ -48,14 +48,14 @@ describe('skill sources', () => {
     expect(state.units.test.officerIds).toEqual(officerIds);
   });
 
-  it('keeps planned definitions displayable but ignores unknown and blocked officer skills', () => {
+  it('resolves registered non-blocked definitions but ignores unknown and blocked officer skills', () => {
     const state = createGame('liu', 1);
     state.officers['liu-bei'].skill = '神将';
     state.officers['guan-yu'].skill = '强袭';
     state.officers['zhang-fei'].skill = '不存在的特技';
 
     expect(resolveOfficerSkills(state, ['liu-bei', 'guan-yu', 'zhang-fei'])).toMatchObject([
-      { definition: { name: '神将', implementationStatus: 'planned' }, sourceOfficerIds: ['liu-bei'] },
+      { definition: { name: '神将' }, sourceOfficerIds: ['liu-bei'] },
     ]);
   });
 

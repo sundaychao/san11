@@ -11,11 +11,15 @@ function attackSkill(name: string, description: string, effects: SkillEffect[] =
   };
 }
 
+function activeAttackSkill(name: string, description: string, effects: SkillEffect[]): SkillDefinition {
+  return { ...attackSkill(name, description, effects), implementationStatus: 'active' };
+}
+
 export const ATTACK_SKILLS: SkillDefinition[] = [
   attackSkill('扫讨', '攻击时降低敌方少量气力'),
   attackSkill('威风', '攻击时降低敌方大量气力'),
   attackSkill('昂扬', '击破敌军后恢复气力'),
-  attackSkill('连战', '普通攻击有50%概率连续攻击两次', [{ kind: 'repeatNormalAttack', chance: 0.5 }]),
+  activeAttackSkill('连战', '普通攻击有50%概率连续攻击两次', [{ kind: 'repeatNormalAttack', chance: 0.5 }]),
   attackSkill('急袭', '陆地普通攻击时有50%概率不受反击伤害'),
   attackSkill('强袭', '水上普通攻击时有50%概率不受反击伤害', [], ['navy']),
   attackSkill('乱战', '森林地形攻击时必定暴击'),
@@ -35,7 +39,7 @@ export const ATTACK_SKILLS: SkillDefinition[] = [
   attackSkill('骑将', '骑兵战法攻击武力较低目标时必定暴击'),
   attackSkill('水将', '水军战法攻击武力较低目标时必定暴击', [], ['navy']),
   attackSkill('勇将', '全部战法攻击武力较低目标时必定暴击'),
-  attackSkill('神将', '普通攻击和全部战法攻击武力较低目标时必定暴击', [
+  activeAttackSkill('神将', '普通攻击和全部战法攻击武力较低目标时必定暴击', [
     { kind: 'normalAttackCritical', condition: { kind: 'targetWarLower' } },
     { kind: 'tacticCritical', condition: { kind: 'targetWarLower' } },
   ]),

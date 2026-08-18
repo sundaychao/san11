@@ -7,6 +7,7 @@ export {
 } from './legacyCore';
 
 import type { CityId, ForceId, GameState } from '../types';
+import { normalAttackIsCritical, reduceIncomingDamageBySkills, rollRepeatNormalAttack } from '../skills/rules/combat';
 import { attackableFacilities, attackableUnits } from './legacyCore';
 import {
   areAdjacent,
@@ -17,6 +18,41 @@ import {
   removeUnit,
   unitTerrain,
 } from './shared';
+
+const NORMAL_ATTACK_CRITICAL_MULTIPLIER = 1.35;
+
+function applyNormalAttackHit(
+  next: GameState,
+  attackerId: string,
+  targetId: string,
+  critical: boolean,
+) {
+  const attacker = next.units[attackerId];
+  const target = next.units[targetId];
+  if (!attacker || !target) return false;
+
+  const rolledDamage = damageRoll(next, attacker, unitTerrain(next, target), false, target);
+  const criticalDamage = critical
+    ? Math.round(rolledDamage * NORMAL_ATTACK_CRITICAL_MULTIPLIER)
+    : rolledDamage;
+  const fortifiedDamage = reduceUnitDamageByFortress(next, target, criticalDamage);
+  const damage = reduceIncomingDamageBySkills(next, target, fortifiedDamage, 'normalAttack');
+  target.troops -= damage;
+  next.battleDamageReports ??= [];
+  next.battleDamageReports.push({
+    id: `damage-${next.month}-${next.tenDay}-${next.rngCursor}-${targetId}`,
+    unitId: targetId,
+    q: target.q,
+    r: target.r,
+    amount: damage,
+    kind: 'attack',
+    ...(critical ? { critical: true, label: '暴击' } : {}),
+  });
+  if (target.troops > 0) return true;
+
+  removeUnit(next, target, attacker);
+  return false;
+}
 
 export function attackUnit(state: GameState, forceId: ForceId, attackerId: string, targetId: string): GameState {
   const attacker = assertUnitTurn(state, forceId, attackerId);
@@ -29,23 +65,21 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];
   const nextTarget = next.units[targetId];
-  const damage = reduceUnitDamageByFortress(next, nextTarget, damageRoll(next, nextAttacker, unitTerrain(next, nextTarget), false, nextTarget));
-  nextTarget.troops -= damage;
+  const critical = normalAttackIsCritical(next, nextAttacker, nextTarget);
   nextAttacker.energy -= 10;
   nextAttacker.acted = true;
-  next.battleDamageReports = [{
-    id: `damage-${next.month}-${next.tenDay}-${next.rngCursor}-${targetId}`,
-    unitId: targetId, q: nextTarget.q, r: nextTarget.r, amount: damage, kind: 'attack',
-  }];
+  next.battleDamageReports = [];
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
 
-  if (nextTarget.troops <= 0) {
-    removeUnit(next, nextTarget, nextAttacker);
-    return next;
+  if (!applyNormalAttackHit(next, attackerId, targetId, critical)) return next;
+  if (rollRepeatNormalAttack(next, nextAttacker)) {
+    if (!applyNormalAttackHit(next, attackerId, targetId, critical)) return next;
   }
   if (areAdjacent(nextTarget, nextAttacker)) {
-    const counterDamage = reduceUnitDamageByFortress(next, nextAttacker, damageRoll(next, nextTarget, unitTerrain(next, nextAttacker), true, nextAttacker));
+    const rolledCounterDamage = damageRoll(next, nextTarget, unitTerrain(next, nextAttacker), true, nextAttacker);
+    const fortifiedCounterDamage = reduceUnitDamageByFortress(next, nextAttacker, rolledCounterDamage);
+    const counterDamage = reduceIncomingDamageBySkills(next, nextAttacker, fortifiedCounterDamage, 'counter');
     next.battleDamageReports.push({
       id: `damage-${next.month}-${next.tenDay}-${next.rngCursor}-${attackerId}`,
       unitId: attackerId, q: nextAttacker.q, r: nextAttacker.r, amount: counterDamage, kind: 'counter',

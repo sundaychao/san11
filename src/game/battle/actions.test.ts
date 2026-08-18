@@ -70,6 +70,30 @@ function stateWithSkillUnit(skill: string, troopType: TroopType) {
   return state;
 }
 
+function combatSkillState(attackerSkill: string, targetSkill = '无', targetTroops = 6000) {
+  const state = createGame('liu', 1);
+  setUniformTerrain(state, 'plain');
+  state.officers['guan-yu'].skill = attackerSkill;
+  state.officers['guan-yu'].stats.war = 97;
+  state.officers['guan-yu'].location = { kind: 'unit', unitId: 'skill-attacker' };
+  state.officers['cao-ren'].skill = targetSkill;
+  state.officers['cao-ren'].stats.war = 60;
+  state.officers['cao-ren'].location = { kind: 'unit', unitId: 'skill-target' };
+  state.units = {
+    'skill-attacker': {
+      id: 'skill-attacker', kind: 'combat', forceId: 'liu', leaderId: 'guan-yu', officerIds: ['guan-yu'],
+      homeCityId: 'jiangling', troopType: 'spear', q: 10, r: 10, troops: 6000, food: 6000,
+      energy: 100, movementRemaining: 20, moved: false, acted: false,
+    },
+    'skill-target': {
+      id: 'skill-target', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
+      homeCityId: 'xiangyang', troopType: 'spear', q: 11, r: 10, troops: targetTroops, food: 6000,
+      energy: 100, movementRemaining: 20, moved: false, acted: false,
+    },
+  };
+  return { state, attacker: state.units['skill-attacker'], target: state.units['skill-target'] };
+}
+
 function seedForFirstRoll(predicate: (value: number) => boolean) {
   for (let seed = 1; seed < 100_000; seed += 1) {
     if (predicate(nextRandom(seed, 0).value)) return seed;
@@ -95,6 +119,7 @@ function spearTacticState(grade: 'S' | 'A' | 'B' | 'C', seed = 1, troops = 10_00
   setUniformTerrain(state, 'plain');
   const attacker = Object.values(state.units)[0];
   readyUnitAt(state, attacker.id, { q: 10, r: 10 }, 'spear');
+  state.officers['guan-yu'].skill = '无';
   state.officers['guan-yu'].aptitudes!.spear = grade;
   state.officers['cao-ren'].stats.leadership = state.officers['guan-yu'].stats.leadership;
   addEnemyUnit(state, 'enemy-tactic', { q: 11, r: 10 }, troops);
@@ -1103,6 +1128,7 @@ describe('battle deployment and movement actions', () => {
     setUniformTerrain(state, 'plain');
     const attacker = Object.values(state.units)[0];
     readyUnitAt(state, attacker.id, { q: 10, r: 10 }, 'halberd');
+    state.officers['guan-yu'].skill = '无';
     addEnemyUnit(state, 'whirlwind-a', { q: 11, r: 10 }, 10_000);
     addEnemyUnit(state, 'whirlwind-b', { q: 10, r: 9 }, 10_000);
 
@@ -1111,6 +1137,78 @@ describe('battle deployment and movement actions', () => {
     expect(next.rngCursor).toBe(state.rngCursor + 3);
     expect(next.battleDamageReports).toHaveLength(2);
     expect(next.battleDamageReports?.every((report) => report.critical && report.label === '暴击')).toBe(true);
+  });
+
+  it('uses 飞将 tactic criticals without consuming the ordinary critical roll', () => {
+    const { state, attacker, target } = combatSkillState('飞将', '无', 10_000);
+    const expectedState = structuredClone(state);
+    const expectedBase = damageRoll(
+      expectedState,
+      expectedState.units[attacker.id],
+      'plain',
+      false,
+      expectedState.units[target.id],
+    );
+
+    const next = useUnitTactic(state, 'liu', attacker.id, target.id, 'spear-thrust');
+
+    expect(next.rngCursor).toBe(state.rngCursor + 1);
+    expect(next.battleDamageReports).toEqual([
+      expect.objectContaining({
+        unitId: target.id,
+        amount: Math.round(expectedBase * 1.18 * 1.2 * 1.35),
+        critical: true,
+        label: '暴击',
+      }),
+    ]);
+  });
+
+  it('shares a guaranteed action-level critical across area targets', () => {
+    const { state, attacker, target } = combatSkillState('神将', '无', 10_000);
+    attacker.troopType = 'halberd';
+    state.officers['guan-yu'].aptitudes!.halberd = 'S';
+    state.officers['xiahou-dun'].stats.war = 100;
+    state.officers['xiahou-dun'].location = { kind: 'unit', unitId: 'area-stronger' };
+    state.units['area-stronger'] = {
+      ...target,
+      id: 'area-stronger',
+      leaderId: 'xiahou-dun',
+      officerIds: ['xiahou-dun'],
+      q: 10,
+      r: 9,
+    };
+
+    const next = useUnitTactic(state, 'liu', attacker.id, target.id, 'halberd-whirlwind');
+
+    expect(next.rngCursor).toBe(state.rngCursor + 2);
+    expect(next.battleDamageReports?.map((report) => report.unitId)).toEqual([target.id, 'area-stronger']);
+    expect(next.battleDamageReports?.every((report) => report.critical && report.label === '暴击')).toBe(true);
+  });
+
+  it('rolls area tactic damage and 不屈 once per target in deterministic order', () => {
+    const { state, attacker, target } = combatSkillState('无', '不屈', 2999);
+    attacker.troopType = 'halberd';
+    state.officers['guan-yu'].aptitudes!.halberd = 'S';
+    state.officers['xiahou-dun'].skill = '不屈';
+    state.officers['xiahou-dun'].location = { kind: 'unit', unitId: 'area-protected' };
+    state.units['area-protected'] = {
+      ...target,
+      id: 'area-protected',
+      leaderId: 'xiahou-dun',
+      officerIds: ['xiahou-dun'],
+      q: 10,
+      r: 9,
+    };
+
+    const next = useUnitTactic(state, 'liu', attacker.id, target.id, 'halberd-whirlwind');
+
+    expect(next.rngCursor).toBe(state.rngCursor + 5);
+    expect(next.battleDamageReports?.map((report) => report.unitId)).toEqual([target.id, 'area-protected']);
+    expect(next.battleDamageReports?.map((report) => report.amount)).toEqual([
+      expect.any(Number),
+      0,
+    ]);
+    expect(next.battleDamageReports?.[0].amount).toBeGreaterThan(0);
   });
 
   it('uses spear tactics to push or confuse a target and spend energy', () => {
@@ -1838,6 +1936,76 @@ describe('battle deployment and movement actions', () => {
       earthwork: { id: 'earthwork', type: 'earthwork', forceId: 'cao', q: 12, r: 10, durability: 400 },
     };
     expect(movementCells(state, unit.id)).toContainEqual({ q: 12, r: 11 });
+  });
+
+  it('reports 神将 normal attacks as critical without an extra RNG roll', () => {
+    const { state, attacker, target } = combatSkillState('神将', '无', 10_000);
+    const expectedState = structuredClone(state);
+    const expectedBase = damageRoll(expectedState, expectedState.units[attacker.id], 'plain', false, expectedState.units[target.id]);
+
+    const next = attackUnit(state, 'liu', attacker.id, target.id);
+
+    expect(next.rngCursor).toBe(state.rngCursor + 2);
+    expect(next.battleDamageReports?.[0]).toMatchObject({
+      unitId: target.id,
+      amount: Math.round(expectedBase * 1.35),
+      critical: true,
+      label: '暴击',
+    });
+  });
+
+  it('resolves 连战 through two normal hits but spends energy and counters once', () => {
+    const { state, attacker, target } = combatSkillState('连战', '无', 10_000);
+    const expectedState = structuredClone(state);
+    const expectedFirst = damageRoll(expectedState, expectedState.units[attacker.id], 'plain', false, expectedState.units[target.id]);
+    expectedState.rngCursor = nextRandom(expectedState.seed, expectedState.rngCursor).cursor;
+    const expectedSecond = damageRoll(expectedState, expectedState.units[attacker.id], 'plain', false, expectedState.units[target.id]);
+
+    const next = attackUnit(state, 'liu', attacker.id, target.id);
+    const targetReports = next.battleDamageReports?.filter((report) => report.unitId === target.id) ?? [];
+
+    expect(targetReports.map((report) => report.amount)).toEqual([expectedFirst, expectedSecond]);
+    expect(next.battleDamageReports?.filter((report) => report.kind === 'counter')).toHaveLength(1);
+    expect(next.rngCursor).toBe(state.rngCursor + 4);
+    expect(next.units[attacker.id]).toMatchObject({ energy: 90, acted: true });
+  });
+
+  it('does not roll 连战 after the first normal hit defeats the target', () => {
+    const { state, attacker, target } = combatSkillState('连战', '无', 1);
+
+    const next = attackUnit(state, 'liu', attacker.id, target.id);
+
+    expect(next.units[target.id]).toBeUndefined();
+    expect(next.rngCursor).toBe(state.rngCursor + 1);
+    expect(next.battleDamageReports).toHaveLength(1);
+    expect(next.units[attacker.id]).toMatchObject({ energy: 90, acted: true });
+  });
+
+  it('lets 不屈 negate eligible normal damage below 3000 but not at exactly 3000', () => {
+    const { state, attacker, target } = combatSkillState('无', '不屈', 2999);
+
+    const protectedState = attackUnit(state, 'liu', attacker.id, target.id);
+
+    expect(protectedState.units[target.id].troops).toBe(2999);
+    expect(protectedState.battleDamageReports?.[0].amount).toBe(0);
+    expect(protectedState.rngCursor).toBe(state.rngCursor + 3);
+
+    state.units[target.id].troops = 3000;
+    const ordinaryState = attackUnit(state, 'liu', attacker.id, target.id);
+    expect(ordinaryState.units[target.id].troops).toBeLessThan(3000);
+    expect(ordinaryState.rngCursor).toBe(state.rngCursor + 2);
+  });
+
+  it('lets 不屈 independently negate counterattack damage', () => {
+    const { state, attacker, target } = combatSkillState('不屈', '无', 10_000);
+    state.seed = 3214;
+    attacker.troops = 2999;
+
+    const next = attackUnit(state, 'liu', attacker.id, target.id);
+
+    expect(next.units[attacker.id].troops).toBe(2999);
+    expect(next.battleDamageReports?.find((report) => report.kind === 'counter')?.amount).toBe(0);
+    expect(next.rngCursor).toBe(state.rngCursor + 3);
   });
 
   it('damages an adjacent enemy unit and receives a counterattack', () => {
