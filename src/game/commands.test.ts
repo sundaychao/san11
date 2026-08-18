@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { executeCommand, transferDuration, validateCommand } from './commands';
+import { ARMAMENT_GOLD_COST, produceArmamentYield } from './armaments';
+import { COMMAND_AP, executeCommand, transferDuration, validateCommand } from './commands';
 import { createGame } from './scenario/jingxiang208';
 
 describe('command engine', () => {
@@ -58,6 +59,23 @@ describe('command engine', () => {
     })]);
   });
 
+  it('applies 名声 after the existing recruit formula without changing costs', () => {
+    const state = createGame('liu', 1);
+    state.officers['liu-bei'].skill = '名声';
+    const next = executeCommand(state, 'liu', {
+      type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
+    });
+    const base = 300 + state.officers['liu-bei'].stats.charisma * 10;
+
+    expect(next.cities.jiangling.troops - state.cities.jiangling.troops).toBe(Math.round(base * 1.5));
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 800);
+    expect(next.cities.jiangling.food).toBe(state.cities.jiangling.food - 500);
+    expect(next.cities.jiangling.population).toBe(state.cities.jiangling.population - 500);
+    expect(next.cities.jiangling.order).toBe(state.cities.jiangling.order - 2);
+    expect(next.actionPoints.liu).toBe(state.actionPoints.liu - COMMAND_AP.recruit);
+    expect(next.officers['liu-bei'].acted).toBe(true);
+  });
+
   it('clears stale battle reports when executing a city command', () => {
     const state = createGame('liu', 1);
     state.battleDamageReports = [{
@@ -99,6 +117,39 @@ describe('command engine', () => {
       label: '弩',
       kind: 'armament',
     })]);
+  });
+
+  it('applies 能吏 to spear, halberd, and crossbow production only', () => {
+    const state = createGame('liu', 1);
+    state.officers['liu-bei'].skill = '能吏';
+    const base = produceArmamentYield(state.officers['liu-bei'], 'crossbow');
+    const before = state.cities.jiangling.armaments!.crossbow;
+    const next = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'crossbow',
+    });
+
+    expect(next.cities.jiangling.armaments!.crossbow - before).toBe(Math.round(base * 1.5));
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - ARMAMENT_GOLD_COST);
+    expect(next.actionPoints.liu).toBe(state.actionPoints.liu - COMMAND_AP.produceArmament);
+    expect(next.officers['liu-bei'].acted).toBe(true);
+  });
+
+  it('does not apply 能吏 to delayed armament production', () => {
+    const state = createGame('liu', 1);
+    state.officers['liu-bei'].skill = '能吏';
+    const next = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'ram',
+    });
+
+    expect(next.officers['liu-bei'].location).toEqual({
+      kind: 'task',
+      cityId: 'jiangling',
+      task: 'armament',
+      armamentType: 'ram',
+      amount: 2,
+      remainingTenDays: 3,
+    });
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - ARMAMENT_GOLD_COST);
   });
 
   it('starts a one-month special armament production task with two units', () => {

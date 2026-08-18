@@ -1,5 +1,6 @@
 import { nextRandom } from './random';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, isDelayedArmament, produceArmamentYield, DELAYED_ARMAMENT_TEN_DAYS } from './armaments';
+import { commandYieldMultiplier } from './skills/rules/city';
 import type { City, ForceId, GameCommand, GameState, Officer } from './types';
 
 export const COMMAND_AP = {
@@ -174,7 +175,8 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     }
     case 'recruit': {
       const officer = next.officers[command.officerId];
-      const gain = 300 + officer.stats.charisma * 10;
+      const baseGain = 300 + officer.stats.charisma * 10;
+      const gain = Math.round(baseGain * commandYieldMultiplier(next, command));
       city.gold -= 800;
       city.food -= 500;
       city.population -= 500;
@@ -196,7 +198,8 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'produceArmament': {
       const officer = next.officers[command.officerId];
       const current = armamentsOf(city.armaments);
-      const gain = produceArmamentYield(officer, command.armamentType);
+      const baseGain = produceArmamentYield(officer, command.armamentType);
+      const gain = Math.round(baseGain * commandYieldMultiplier(next, command));
       city.gold -= ARMAMENT_GOLD_COST;
       if (isDelayedArmament(command.armamentType)) {
         officer.location = {

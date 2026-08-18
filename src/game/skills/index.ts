@@ -8,6 +8,7 @@ export { resolveStrategySkillRules } from './rules/strategy';
 export type { StrategySkillRules } from './rules/strategy';
 export { facilityBuildPowerMultiplier } from './rules/facility';
 export { applyForceTurnStartSkillEffects, settleForceTurnStart } from './rules/turn';
+export { cityIncomeMultiplier, commandYieldMultiplier } from './rules/city';
 export { applyChainStrategyEffect } from './handlers';
 export type { ChainStrategyContext } from './handlers';
 export type {

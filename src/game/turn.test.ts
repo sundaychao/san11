@@ -33,6 +33,66 @@ describe('monthly settlement', () => {
     expect(next.cities.jiangling.food).toBe(expectedFood);
   });
 
+  it('multiplies generated city income once and stops after the resident transfers', () => {
+    const state = createGame('sun', 4394);
+    state.officers['lu-su'].skill = '富豪';
+    const city = state.cities.changsha;
+    const baseGold = Math.round(city.commerce * 20 + city.population / 100);
+    const first = settleMonth(state);
+
+    expect(first.cities.changsha.gold).toBe(city.gold + Math.round(baseGold * 1.5));
+
+    state.officers['lu-su'].location = {
+      kind: 'transfer', fromCityId: 'changsha', targetCityId: 'jiangxia', remainingTenDays: 1,
+    };
+    const second = settleMonth(state);
+    expect(second.cities.changsha.gold).toBe(city.gold + baseGold);
+  });
+
+  it('counts a 米道 production task, does not stack duplicates, and multiplies only quarterly base food', () => {
+    const state = createGame('sun', 4394);
+    state.month = 3;
+    state.officers['zhou-yu'].skill = '米道';
+    state.officers['zhou-yu'].location = {
+      kind: 'task', cityId: 'changsha', task: 'armament', armamentType: 'ram', amount: 2, remainingTenDays: 2,
+    };
+    state.officers['lu-su'].skill = '米道';
+    const city = state.cities.changsha;
+    const baseFood = Math.round(city.agriculture * 60 + city.population / 40);
+    const next = settleMonth(state);
+
+    expect(next.cities.changsha.food).toBe(city.food + Math.round(baseFood * 1.5));
+  });
+
+  it('does not multiply existing food outside the quarterly income boundary', () => {
+    const state = createGame('sun', 4394);
+    state.officers['lu-su'].skill = '米道';
+    const before = state.cities.changsha.food;
+
+    const next = settleMonth(state);
+
+    expect(next.cities.changsha.food).toBe(before);
+  });
+
+  it('preserves unskilled settlement values and RNG results for the same seed', () => {
+    const state = createGame('liu', 20804);
+    for (const officer of Object.values(state.officers)) officer.skill = undefined;
+
+    const next = settleMonth(state);
+
+    expect(next.rngCursor).toBe(9);
+    expect(next.logs.slice(-2)).toEqual([
+      { id: 'event-1-lingling-8', month: 1, forceId: 'biao', message: '零陵发生丰收' },
+      { id: 'month-2', month: 2, forceId: null, message: '进入建安十三年后的第2个月。' },
+    ]);
+    expect(next.cities.changsha).toMatchObject({
+      gold: 9280, food: 36000, population: 98401, order: 82, troops: 13200,
+    });
+    expect(next.cities.lingling).toMatchObject({
+      gold: 10280, food: 38000, population: 82369, order: 90, troops: 11000,
+    });
+  });
+
   it('replays the same events from the same game state', () => {
     const first = settleMonth(createGame('liu', 20804));
     const second = settleMonth(createGame('liu', 20804));

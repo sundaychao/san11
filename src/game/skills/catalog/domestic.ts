@@ -11,9 +11,13 @@ function domesticSkill(name: string, description: string, effects: SkillEffect[]
   };
 }
 
+function activeDomesticSkill(name: string, description: string, effects: SkillEffect[]): SkillDefinition {
+  return { ...domesticSkill(name, description, effects), implementationStatus: 'active' };
+}
+
 export const DOMESTIC_SKILLS: SkillDefinition[] = [
-  domesticSkill('名声', '执行征兵时增加征兵量', [{ kind: 'commandYieldMultiplier', command: 'recruit', multiplier: 1.5 }]),
-  domesticSkill('能吏', '执行枪、戟、弩兵装生产时增加产量', [
+  activeDomesticSkill('名声', '执行征兵时增加征兵量', [{ kind: 'commandYieldMultiplier', command: 'recruit', multiplier: 1.5 }]),
+  activeDomesticSkill('能吏', '执行枪、戟、弩兵装生产时增加产量', [
     { kind: 'commandYieldMultiplier', command: 'produceArmament', multiplier: 1.5, armamentTypes: ['spear', 'halberd', 'crossbow'] },
   ]),
   domesticSkill('繁殖', '执行军马生产时增加产量'),

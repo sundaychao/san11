@@ -5,6 +5,7 @@ import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
 import { movementAllowanceBonus } from './skills/rules/movement';
 import { settleForceTurnStart } from './skills/rules/turn';
+import { cityIncomeMultiplier } from './skills/rules/city';
 import type { ArmyUnit, City, GameState } from './types';
 
 interface CityEvent {
@@ -59,8 +60,12 @@ export function settleMonth(state: GameState): GameState {
   const shouldSettleQuarterFood = isQuarterStartMonth(enteringMonth);
 
   for (const city of Object.values(next.cities)) {
-    city.gold += Math.round(city.commerce * 20 + city.population / 100);
-    if (shouldSettleQuarterFood) city.food += Math.round(city.agriculture * 60 + city.population / 40);
+    const baseGold = Math.round(city.commerce * 20 + city.population / 100);
+    city.gold += Math.round(baseGold * cityIncomeMultiplier(next, city.id, 'gold'));
+    if (shouldSettleQuarterFood) {
+      const baseFood = Math.round(city.agriculture * 60 + city.population / 40);
+      city.food += Math.round(baseFood * cityIncomeMultiplier(next, city.id, 'food'));
+    }
     city.population += Math.floor((city.population * 0.005 * city.order) / 100);
     applyPossibleEvent(next, city);
   }
