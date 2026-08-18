@@ -1447,6 +1447,7 @@ export function settleBattleFacilities(next: GameState, activeForceId?: ForceId)
   for (const facility of Object.values(next.facilities ?? {})) {
     if (!facilityIsCompleted(facility)) continue;
     if (facility.type === 'musicTower') {
+      if (activeForceId && facility.forceId !== activeForceId) continue;
       for (const unit of Object.values(next.units)) {
         if (unit.forceId === facility.forceId && gridDistanceWithin(facility, unit, 2) <= 2) {
           unit.energy = Math.min(100, unit.energy + 10);

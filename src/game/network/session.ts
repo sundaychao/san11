@@ -216,12 +216,24 @@ function stateForAction(room: OnlineRoom, forceId: ForceId) {
   return personalizeState(room.state, forceId, forceId);
 }
 
+function stateForForceTurnStart(state: GameState, activeForceId: ForceId) {
+  const next = structuredClone(state);
+  next.battleDamageReports = [];
+  next.facilityRepairReports = [];
+  next.strategyResultReports = [];
+  settleForceTurnStart(next, activeForceId);
+  return next;
+}
+
 function advanceTenDay(room: OnlineRoom): GameState {
   if (!room.state) throw new Error('游戏尚未开始');
   let state = room.state;
   const occupied = new Set(occupiedForceIds(room));
   for (const forceId of FORCE_IDS) {
-    if (!occupied.has(forceId)) state = runAiTurn(personalizeState(state, forceId), forceId);
+    if (!occupied.has(forceId)) {
+      state = stateForForceTurnStart(personalizeState(state, forceId), forceId);
+      state = runAiTurn(state, forceId);
+    }
   }
   return settleTenDay(canonicalState(state, hostForceId(room)));
 }
@@ -230,11 +242,7 @@ function settleActivePlayerTurnStart(room: OnlineRoom, activePlayerId: string | 
   if (!room.state || !activePlayerId) return room.state;
   const activeForceId = room.players[activePlayerId]?.forceId;
   if (!activeForceId) return room.state;
-  const next = structuredClone(room.state);
-  next.battleDamageReports = [];
-  next.facilityRepairReports = [];
-  next.strategyResultReports = [];
-  settleForceTurnStart(next, activeForceId);
+  const next = stateForForceTurnStart(room.state, activeForceId);
   return canonicalState(next, hostForceId(room));
 }
 

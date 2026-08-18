@@ -497,7 +497,7 @@ describe('GameProvider', () => {
       r: 4,
       troops: 3000,
       food: 3000,
-      energy: 80,
+      energy: 40,
       movementRemaining: 5,
       moved: false,
       acted: false,
@@ -505,6 +505,7 @@ describe('GameProvider', () => {
     state.facilities = {
       liuArrow: { id: 'liuArrow', type: 'arrowTower', forceId: 'liu', q: 2, r: 4, durability: 700, completed: true },
       caoArrow: { id: 'caoArrow', type: 'arrowTower', forceId: 'cao', q: 10, r: 10, durability: 700, completed: true },
+      caoMusic: { id: 'caoMusic', type: 'musicTower', forceId: 'cao', q: 4, r: 5, durability: 800, completed: true },
     };
 
     render(
@@ -518,7 +519,7 @@ describe('GameProvider', () => {
     expect(screen.getByLabelText('first-target-troops')).toHaveTextContent('2700');
     expect(screen.getByLabelText('second-target-troops')).toHaveTextContent('2700');
     expect(screen.getByLabelText('first-target-energy')).toHaveTextContent('90');
-    expect(screen.getByLabelText('second-target-energy')).toHaveTextContent('90');
+    expect(screen.getByLabelText('second-target-energy')).toHaveTextContent('60');
     expect(screen.getByLabelText('damage-reports')).toHaveTextContent('cao-target');
   });
 

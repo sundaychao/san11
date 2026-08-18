@@ -656,4 +656,55 @@ describe('online room session', () => {
     expect(guestDone.room.state?.units['guest-musician'].energy).toBe(90);
     expect((guestDone.room.state?.battleDamageReports ?? []).map((report) => report.unitId)).toEqual(['cao-target']);
   });
+
+  it('settles facilities and 乐奏 once before each unoccupied AI force turn', () => {
+    const room = readyStartedRoom();
+    room.state!.officers['biao-musician-leader'] = {
+      ...room.state!.officers['liu-bei'],
+      id: 'biao-musician-leader',
+      name: 'Biao Musician',
+      forceId: 'biao',
+      cityId: 'lingling',
+      location: { kind: 'unit', unitId: 'biao-musician' },
+      skill: '乐奏',
+      acted: false,
+    };
+    room.state!.units['biao-musician'] = {
+      id: 'biao-musician',
+      kind: 'combat',
+      forceId: 'biao',
+      leaderId: 'biao-musician-leader',
+      officerIds: ['biao-musician-leader'],
+      homeCityId: 'lingling',
+      troopType: 'spear',
+      q: 12,
+      r: 10,
+      troops: 4000,
+      food: 4000,
+      energy: 60,
+      movementRemaining: 20,
+      moved: false,
+      acted: false,
+    };
+    room.state!.facilities = {
+      biaoMusic: {
+        id: 'biaoMusic',
+        type: 'musicTower',
+        forceId: 'biao',
+        q: 10,
+        r: 10,
+        durability: 800,
+        completed: true,
+      },
+    };
+
+    const hostDone = reduceOnlineIntent(room, 'host', room.revision, { type: 'endTenDay' });
+    expect(hostDone.ok).toBe(true);
+    if (!hostDone.ok) return;
+    const guestDone = reduceOnlineIntent(hostDone.room, 'guest', hostDone.room.revision, { type: 'endTenDay' });
+
+    expect(guestDone.ok).toBe(true);
+    if (!guestDone.ok) return;
+    expect(guestDone.room.state?.units['biao-musician'].energy).toBe(80);
+  });
 });
