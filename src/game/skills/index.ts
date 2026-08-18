@@ -6,6 +6,8 @@ export { formationMovementAllowanceBonus, movementAllowanceBonus, unitIgnoresEne
 export { normalAttackIsCritical, reduceIncomingDamageBySkills, rollRepeatNormalAttack, tacticCriticalMode } from './rules/combat';
 export { resolveStrategySkillRules } from './rules/strategy';
 export type { StrategySkillRules } from './rules/strategy';
+export { facilityBuildPowerMultiplier } from './rules/facility';
+export { applyForceTurnStartSkillEffects, settleForceTurnStart } from './rules/turn';
 export { applyChainStrategyEffect } from './handlers';
 export type { ChainStrategyContext } from './handlers';
 export type {

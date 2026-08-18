@@ -1,9 +1,10 @@
 import { clamp } from './commands';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
-import { movementAllowanceForUnit, settleBattleFacilities, unitSupplyMultiplier } from './battle/actions';
+import { movementAllowanceForUnit, unitSupplyMultiplier } from './battle/actions';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
 import { movementAllowanceBonus } from './skills/rules/movement';
+import { settleForceTurnStart } from './skills/rules/turn';
 import type { ArmyUnit, City, GameState } from './types';
 
 interface CityEvent {
@@ -192,7 +193,7 @@ export function settleTenDay(state: GameState): GameState {
   clearTransientBattleReports(next);
   for (const city of Object.values(next.cities)) settleCitySupply(city);
   for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
-  settleBattleFacilities(next, state.playerForceId);
+  settleForceTurnStart(next, state.playerForceId);
   settleOfficerTransfers(next);
   settleOfficerTasks(next);
 

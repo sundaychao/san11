@@ -26,6 +26,7 @@ import {
 } from '../persistence';
 import type { GridCoord } from '../battle/grid';
 import { createGame, FORCE_IDS } from '../scenario/jingxiang208';
+import { settleForceTurnStart } from '../skills/rules/turn';
 import { settleMonth, settleTenDay } from '../turn';
 import type { EditableCityMarker } from '../map-editor/editor';
 import type { City, CityId, FacilityType, ForceId, GameCommand, GameState, GridCell, TroopType } from '../types';
@@ -155,7 +156,14 @@ function isAuthExpired(reason: string) {
 function runOpponentTurns(state: GameState) {
   let next = state;
   for (const forceId of FORCE_IDS) {
-    if (forceId !== state.playerForceId) next = runAiTurn(next, forceId);
+    if (forceId !== state.playerForceId) {
+      next = structuredClone(next);
+      next.battleDamageReports = [];
+      next.facilityRepairReports = [];
+      next.strategyResultReports = [];
+      settleForceTurnStart(next, forceId);
+      next = runAiTurn(next, forceId);
+    }
   }
   return next;
 }

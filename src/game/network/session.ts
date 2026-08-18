@@ -1,9 +1,7 @@
 import { runAiTurn } from '../ai';
-import {
-  settleBattleFacilities,
-} from '../battle/actions';
 import { FORCE_IDS } from '../scenario/jingxiang208';
 import { createMobileDuelGame } from '../scenario/mobileDuel';
+import { settleForceTurnStart } from '../skills/rules/turn';
 import { settleTenDay } from '../turn';
 import type { ForceId, GameState } from '../types';
 import { reduceGameIntent } from './intentReducer';
@@ -236,7 +234,7 @@ function settleActivePlayerTurnStart(room: OnlineRoom, activePlayerId: string | 
   next.battleDamageReports = [];
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
-  settleBattleFacilities(next, activeForceId);
+  settleForceTurnStart(next, activeForceId);
   return canonicalState(next, hostForceId(room));
 }
 

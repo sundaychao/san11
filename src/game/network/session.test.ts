@@ -21,6 +21,23 @@ describe('online room session', () => {
     return startOnlineRoom(ready, { playerId: 'host' });
   }
 
+  function addTurnStartMusicians(room: ReturnType<typeof readyStartedRoom>) {
+    room.state!.officers['zhang-fei'].skill = '乐奏';
+    room.state!.officers['cao-cao'].skill = '乐奏';
+    room.state!.officers['zhang-fei'].location = { kind: 'unit', unitId: 'host-musician' };
+    room.state!.officers['cao-cao'].location = { kind: 'unit', unitId: 'guest-musician' };
+    room.state!.units['host-musician'] = {
+      id: 'host-musician', kind: 'combat', forceId: 'liu', leaderId: 'zhang-fei', officerIds: ['zhang-fei'],
+      homeCityId: 'jiangling', troopType: 'spear', q: 0, r: 0, troops: 4000, food: 4000,
+      energy: 80, movementRemaining: 20, moved: false, acted: false,
+    };
+    room.state!.units['guest-musician'] = {
+      id: 'guest-musician', kind: 'combat', forceId: 'cao', leaderId: 'cao-cao', officerIds: ['cao-cao'],
+      homeCityId: 'xiangyang', troopType: 'spear', q: 15, r: 32, troops: 4000, food: 4000,
+      energy: 80, movementRemaining: 20, moved: false, acted: false,
+    };
+  }
+
   function readyStrategyRoom() {
     const room = structuredClone(readyStartedRoom());
     if (!room.state) throw new Error('room state should exist');
@@ -533,6 +550,7 @@ describe('online room session', () => {
 
   it('fires only the next active player arrow towers when online control passes to them', () => {
     const room = readyStartedRoom();
+    addTurnStartMusicians(room);
     room.state!.units['liu-target'] = {
       id: 'liu-target',
       kind: 'combat',
@@ -577,6 +595,65 @@ describe('online room session', () => {
     expect(hostDone.room.activePlayerId).toBe('guest');
     expect(hostDone.room.state?.units['liu-target'].troops).toBe(2700);
     expect(hostDone.room.state?.units['cao-target'].troops).toBe(3000);
+    expect(hostDone.room.state?.units['guest-musician'].energy).toBe(85);
+    expect(hostDone.room.state?.units['host-musician'].energy).toBe(80);
     expect((hostDone.room.state?.battleDamageReports ?? []).map((report) => report.unitId)).toEqual(['liu-target']);
+  });
+
+  it('fires only the first active player arrow towers when online players advance to the next ten-day turn', () => {
+    const room = readyStartedRoom();
+    addTurnStartMusicians(room);
+    room.state!.units['liu-target'] = {
+      id: 'liu-target',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      homeCityId: 'jiangling',
+      troopType: 'sword',
+      q: 12,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    room.state!.units['cao-target'] = {
+      id: 'cao-target',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 4,
+      r: 4,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    room.state!.facilities = {
+      liuArrow: { id: 'liuArrow', type: 'arrowTower', forceId: 'liu', q: 2, r: 4, durability: 700 },
+      caoArrow: { id: 'caoArrow', type: 'arrowTower', forceId: 'cao', q: 10, r: 10, durability: 700 },
+    };
+
+    const hostDone = reduceOnlineIntent(room, 'host', room.revision, { type: 'endTenDay' });
+    expect(hostDone.ok).toBe(true);
+    if (!hostDone.ok) return;
+    expect(hostDone.room.state?.units['guest-musician'].energy).toBe(85);
+    expect(hostDone.room.state?.units['host-musician'].energy).toBe(80);
+    const guestDone = reduceOnlineIntent(hostDone.room, 'guest', hostDone.room.revision, { type: 'endTenDay' });
+
+    expect(guestDone.ok).toBe(true);
+    if (!guestDone.ok) return;
+    expect(guestDone.room.state?.tenDay).toBe(2);
+    expect(guestDone.room.state?.units['liu-target'].troops).toBe(2700);
+    expect(guestDone.room.state?.units['cao-target'].troops).toBe(2700);
+    expect(guestDone.room.state?.units['host-musician'].energy).toBe(90);
+    expect(guestDone.room.state?.units['guest-musician'].energy).toBe(90);
+    expect((guestDone.room.state?.battleDamageReports ?? []).map((report) => report.unitId)).toEqual(['cao-target']);
   });
 });

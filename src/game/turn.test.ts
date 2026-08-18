@@ -230,13 +230,20 @@ describe('ten-day settlement', () => {
     ]);
   });
 
-  it('only fires arrow towers owned by the force whose turn is starting', () => {
+  it('fires only the current player force arrow tower when entering a new ten-day turn', () => {
     const state = createGame('liu', 1);
+    state.officers['liu-bei'].skill = '乐奏';
+    state.officers['guan-yu'].skill = '乐奏';
+    state.officers['cao-ren'].skill = '乐奏';
+    state.officers['liu-bei'].location = { kind: 'unit', unitId: 'liu-target' };
+    state.officers['guan-yu'].location = { kind: 'unit', unitId: 'liu-target' };
+    state.officers['cao-ren'].location = { kind: 'unit', unitId: 'cao-target' };
     state.units['liu-target'] = {
       id: 'liu-target',
       kind: 'combat',
       forceId: 'liu',
       leaderId: 'guan-yu',
+      officerIds: ['guan-yu', 'liu-bei'],
       homeCityId: 'jiangling',
       troopType: 'sword',
       q: 12,
@@ -253,6 +260,7 @@ describe('ten-day settlement', () => {
       kind: 'combat',
       forceId: 'cao',
       leaderId: 'cao-ren',
+      officerIds: ['cao-ren'],
       homeCityId: 'xiangyang',
       troopType: 'sword',
       q: 4,
@@ -273,6 +281,8 @@ describe('ten-day settlement', () => {
 
     expect(next.units['cao-target'].troops).toBe(2700);
     expect(next.units['liu-target'].troops).toBe(3000);
+    expect(next.units['liu-target'].energy).toBe(90);
+    expect(next.units['cao-target'].energy).toBe(85);
     expect((next.battleDamageReports ?? []).map((report) => report.unitId)).toEqual(['cao-target']);
   });
 

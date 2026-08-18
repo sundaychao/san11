@@ -61,6 +61,20 @@ function LocalTenDayProbe({ targetId }: { targetId: string }) {
   );
 }
 
+function LocalTenDayTwoTargetProbe({ firstTargetId, secondTargetId }: { firstTargetId: string; secondTargetId: string }) {
+  const game = useGame();
+  return (
+    <div>
+      <output aria-label="first-target-troops">{game.state?.units[firstTargetId]?.troops ?? 0}</output>
+      <output aria-label="second-target-troops">{game.state?.units[secondTargetId]?.troops ?? 0}</output>
+      <output aria-label="first-target-energy">{game.state?.units[firstTargetId]?.energy ?? 0}</output>
+      <output aria-label="second-target-energy">{game.state?.units[secondTargetId]?.energy ?? 0}</output>
+      <output aria-label="damage-reports">{game.state?.battleDamageReports?.map((report) => report.unitId).join(',') ?? 'none'}</output>
+      <button onClick={() => game.endTenDay()}>end ten day</button>
+    </div>
+  );
+}
+
 function MoveProbe({ unitId, destination }: { unitId: string; destination: { q: number; r: number } }) {
   const game = useGame();
   return <button onClick={() => game.moveUnit(unitId, destination)}>move unit</button>;
@@ -447,6 +461,65 @@ describe('GameProvider', () => {
 
     expect(screen.getByLabelText('target-troops')).toHaveTextContent('2700');
     expect(screen.getByLabelText('damage-reports')).toHaveTextContent('arrow-target');
+  });
+
+  it('fires opponent force effects before local AI turns and player effects before the next ten-day turn', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    state.officers['guan-yu'].skill = '乐奏';
+    state.officers['cao-ren'].skill = '乐奏';
+    state.officers['guan-yu'].location = { kind: 'unit', unitId: 'liu-target' };
+    state.officers['cao-ren'].location = { kind: 'unit', unitId: 'cao-target' };
+    state.units['liu-target'] = {
+      id: 'liu-target',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'guan-yu',
+      homeCityId: 'jiangling',
+      troopType: 'sword',
+      q: 12,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    state.units['cao-target'] = {
+      id: 'cao-target',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 4,
+      r: 4,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    state.facilities = {
+      liuArrow: { id: 'liuArrow', type: 'arrowTower', forceId: 'liu', q: 2, r: 4, durability: 700, completed: true },
+      caoArrow: { id: 'caoArrow', type: 'arrowTower', forceId: 'cao', q: 10, r: 10, durability: 700, completed: true },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={new MemoryStorage()}>
+        <LocalTenDayTwoTargetProbe firstTargetId="liu-target" secondTargetId="cao-target" />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'end ten day' }));
+
+    expect(screen.getByLabelText('first-target-troops')).toHaveTextContent('2700');
+    expect(screen.getByLabelText('second-target-troops')).toHaveTextContent('2700');
+    expect(screen.getByLabelText('first-target-energy')).toHaveTextContent('90');
+    expect(screen.getByLabelText('second-target-energy')).toHaveTextContent('90');
+    expect(screen.getByLabelText('damage-reports')).toHaveTextContent('cao-target');
   });
 
   it('writes manual save and resets both slots', async () => {

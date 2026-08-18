@@ -615,6 +615,39 @@ describe('battle deployment and movement actions', () => {
     expect(facility).toMatchObject({ type: 'earthwork', durability: 400, completed: true });
   });
 
+  it('doubles initial construction and free repair durability with deputy-provided 筑城 without changing gold cost', () => {
+    const state = createGame('liu', 1);
+    setUniformTerrain(state, 'plain');
+    state.officers['guan-yu'].skill = '筑城';
+    state.officers['zhang-fei'].skill = '筑城';
+    state.officers['guan-yu'].location = { kind: 'unit', unitId: 'builder' };
+    state.officers['zhang-fei'].location = { kind: 'unit', unitId: 'builder' };
+    state.units.builder = {
+      id: 'builder', kind: 'combat', forceId: 'liu', leaderId: 'liu-bei', officerIds: ['liu-bei', 'guan-yu', 'zhang-fei'],
+      homeCityId: 'jiangling', troopType: 'spear', q: 10, r: 10, troops: 10_000, gold: 2000,
+      food: 5000, energy: 100, movementRemaining: 20, moved: false, acted: false,
+    };
+    const target = facilityBuildTargets(state, 'builder', undefined, 'arrowTower')[0];
+
+    const built = buildFacility(state, 'liu', 'builder', 'arrowTower', target);
+    const facilityId = Object.keys(built.facilities!)[0];
+
+    expect(built.facilities?.[facilityId]).toMatchObject({ durability: 700, completed: true });
+    expect(built.units.builder.gold).toBe(2000 - FACILITY_BUILD_COSTS.arrowTower);
+    expect(built.facilityRepairReports).toEqual([expect.objectContaining({ amount: 700, kind: 'build' })]);
+
+    const repairState = structuredClone(state);
+    repairState.units.builder.troops = 2000;
+    repairState.facilities = {
+      repairTarget: { id: 'repairTarget', type: 'arrowTower', forceId: 'liu', q: 11, r: 10, durability: 100, completed: false },
+    };
+    const repaired = repairFacility(repairState, 'liu', 'builder', 'repairTarget');
+
+    expect(repaired.facilities?.repairTarget.durability).toBe(300);
+    expect(repaired.units.builder.gold).toBe(2000);
+    expect(repaired.facilityRepairReports).toEqual([expect.objectContaining({ amount: 200, kind: 'repair' })]);
+  });
+
   it('repairs unfinished own facilities until they are completed', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',

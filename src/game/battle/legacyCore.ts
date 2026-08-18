@@ -3,6 +3,7 @@ import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairRep
 import { nextRandom } from '../random';
 import { applyChainStrategyEffect } from '../skills/handlers';
 import { reduceIncomingDamageBySkills, tacticCriticalMode } from '../skills/rules/combat';
+import { facilityBuildPowerMultiplier } from '../skills/rules/facility';
 import { unitIgnoresEnemyZoc } from '../skills/rules/movement';
 import { resolveStrategySkillRules } from '../skills/rules/strategy';
 import { territoryCityAt } from '../territory';
@@ -264,8 +265,9 @@ export function facilityIsCompleted(facility: Facility) {
   return facility.completed !== false;
 }
 
-function facilityBuildPower(unit: Pick<ArmyUnit, 'troops'>) {
-  return Math.max(1, Math.ceil((unit.troops / 10000) * FACILITY_BUILD_DURABILITY_PER_TEN_THOUSAND));
+function facilityBuildPower(state: GameState, unit: ArmyUnit) {
+  const basePower = Math.max(1, Math.ceil((unit.troops / 10000) * FACILITY_BUILD_DURABILITY_PER_TEN_THOUSAND));
+  return basePower * facilityBuildPowerMultiplier(state, unit);
 }
 
 function repairFacilityDurability(facility: Facility, amount: number) {
@@ -1394,7 +1396,7 @@ export function buildFacility(state: GameState, forceId: ForceId, unitId: string
   const next = structuredClone(state);
   next.facilities ??= {};
   const id = `facility-${facilityType}-${next.month}-${next.tenDay}-${unitId}-${Object.keys(next.facilities).length + 1}`;
-  const buildAmount = facilityBuildPower(unit);
+  const buildAmount = facilityBuildPower(state, unit);
   const durability = Math.min(facility.durability, buildAmount);
   next.facilities[id] = {
     id,
@@ -1422,7 +1424,7 @@ export function repairFacility(state: GameState, forceId: ForceId, unitId: strin
   if (!repairableFacilities(state, unitId).some((target) => target.id === facilityId)) throw new Error('设施不在修补范围');
 
   const next = structuredClone(state);
-  const amount = repairedDurabilityAmount(next.facilities![facilityId], facilityBuildPower(unit));
+  const amount = repairedDurabilityAmount(next.facilities![facilityId], facilityBuildPower(state, unit));
   next.facilities![facilityId] = repairFacilityDurability(next.facilities![facilityId], amount);
   addFacilityRepairReport(next, next.facilities![facilityId], amount, 'repair');
   next.battleDamageReports = [];
