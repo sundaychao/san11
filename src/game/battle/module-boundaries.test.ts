@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const modules = [
@@ -27,5 +27,14 @@ describe('battle module boundaries', () => {
 
     const source = readFileSync(filename, 'utf8');
     expect(source).not.toMatch(/from ['"]react|window\.|document\.|soundEffects|socket\.io/);
+  });
+
+  it('keeps every skill module independent from frontend and networking', () => {
+    const files = readdirSync('src/game/skills', { recursive: true })
+      .filter((name): name is string => typeof name === 'string' && name.endsWith('.ts') && !name.endsWith('.test.ts'));
+    for (const file of files) {
+      const source = readFileSync(`src/game/skills/${file}`, 'utf8');
+      expect(source).not.toMatch(/from ['"]react|window\.|document\.|soundEffects|socket\.io/);
+    }
   });
 });
