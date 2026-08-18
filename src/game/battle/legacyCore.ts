@@ -650,14 +650,17 @@ function reachableCostsFrom(
   const cityKeys = allCityKeys(state);
   const unitKeys = occupiedUnitKeys(state, options.ignoredUnitId);
   const facilityKeys = occupiedFacilityKeys(state);
-  const zocKeys = options.movingForceId && !options.ignoreEnemyZoc
-    ? controlledZoneKeysForForce(state, options.movingForceId)
-    : new Set<string>();
+  const zocKeys = options.movingForceId ? controlledZoneKeysForForce(state, options.movingForceId) : new Set<string>();
 
   while (frontier.length > 0) {
     const current = frontier.shift()!;
     const currentKey = gridKey(current);
-    if (currentKey !== startKey && zocKeys.has(currentKey)) continue;
+    const currentTerrain = cellAt(state, current)?.terrain;
+    const ignoresLandZoc = options.ignoreEnemyZoc === true &&
+      currentTerrain !== undefined &&
+      currentTerrain !== 'shallowWater' &&
+      currentTerrain !== 'deepWater';
+    if (currentKey !== startKey && zocKeys.has(currentKey) && !ignoresLandZoc) continue;
     const currentCost = costs.get(currentKey)!;
     for (const neighbor of neighborsOf(current.q, current.r)) {
       const key = gridKey(neighbor);

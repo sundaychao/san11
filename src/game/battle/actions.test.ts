@@ -147,9 +147,9 @@ describe('battle deployment and movement actions', () => {
     expect(next.units.test.movementRemaining).toBe(movementAllowanceForUnit(next.units.test) + 5);
   });
 
-  it('allows 飞将 to continue through an enemy zoc while ordinary formations stop there', () => {
+  it('allows 飞将 through land zoc but stops at shallow-water zoc and occupied cells', () => {
     const state = stateWithSkillUnit('飞将', 'spear');
-    state.units.test.movementRemaining = 8;
+    state.units.test.movementRemaining = 12;
     state.units.enemy = {
       id: 'enemy', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
       homeCityId: 'xiangyang', troopType: 'spear', q: 1, r: 1, troops: 4000, food: 4000,
@@ -162,6 +162,10 @@ describe('battle deployment and movement actions', () => {
 
     expect(movementCells(state, 'test')).toContainEqual({ q: 2, r: 0 });
     expect(movementCells(state, 'test')).not.toContainEqual({ q: 1, r: 1 });
+    for (const cell of state.grid) cell.terrain = 'shallowWater';
+    expect(movementCells(state, 'test')).not.toContainEqual({ q: 2, r: 0 });
+
+    for (const cell of state.grid) cell.terrain = 'road';
     state.officers['liu-bei'].skill = '无';
     expect(movementCells(state, 'test')).not.toContainEqual({ q: 2, r: 0 });
   });
