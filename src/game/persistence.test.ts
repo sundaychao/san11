@@ -32,6 +32,53 @@ describe('persistence', () => {
     expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
   });
 
+  it('round-trips every first-stage and unknown custom skill without persisting derived rules', () => {
+    const state = createGame('liu', 9);
+    const skillNames = [
+      '强行', '飞将', '神将', '连战', '不屈', '百出', '火神', '洞察', '连环', '筑城', '乐奏', '富豪', '米道', '名声', '能吏', '自定义未登记',
+    ] as const;
+    const assignedOfficerIds = Object.values(state.officers)
+      .slice(0, skillNames.length)
+      .map((officer, index) => {
+        officer.skill = skillNames[index];
+        return officer.id;
+      });
+
+    writeSave(storage, 'auto', state);
+
+    const loaded = loadSave(storage, 'auto');
+    expect(loaded).toEqual({ ok: true, state });
+    if (!loaded.ok) return;
+    expect(assignedOfficerIds.map((officerId) => loaded.state.officers[officerId].skill)).toEqual(skillNames);
+
+    const serialized = storage.getItem(AUTO_SAVE_KEY)!;
+    expect((JSON.parse(serialized) as { schemaVersion: number }).schemaVersion).toBe(2);
+    for (const derivedKey of [
+      'ActiveSkill',
+      'sourceOfficerIds',
+      'definition',
+      'effects',
+      'implementationStatus',
+      'movementAllowance',
+      'ignoreEnemyZoc',
+      'tacticCritical',
+      'normalAttackCritical',
+      'repeatNormalAttack',
+      'negateIncomingDamage',
+      'strategyEnergyCost',
+      'strategyGuaranteed',
+      'strategyImmunity',
+      'fireDamageMultiplier',
+      'buildPowerMultiplier',
+      'turnStartEnergy',
+      'commandYieldMultiplier',
+      'cityIncomeMultiplier',
+      'complexHandler',
+    ]) {
+      expect(serialized).not.toContain(`"${derivedKey}"`);
+    }
+  });
+
   it('round-trips a critical battle damage report', () => {
     const state = createGame('liu', 9);
     state.battleDamageReports = [{

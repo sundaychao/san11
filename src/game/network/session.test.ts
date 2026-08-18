@@ -8,6 +8,7 @@ import {
   startOnlineRoom,
 } from './session';
 import { neighborsOf } from '../battle/grid';
+import { settleForceTurnStart } from '../skills/rules/turn';
 import { reduceGameIntent } from './intentReducer';
 
 describe('online room session', () => {
@@ -598,6 +599,44 @@ describe('online room session', () => {
     expect(hostDone.room.state?.units['guest-musician'].energy).toBe(85);
     expect(hostDone.room.state?.units['host-musician'].energy).toBe(80);
     expect((hostDone.room.state?.battleDamageReports ?? []).map((report) => report.unitId)).toEqual(['liu-target']);
+  });
+
+  it('keeps seeded 乐奏 handoff units, facility reports, resources, and RNG identical to direct settlement', () => {
+    const room = readyStartedRoom();
+    addTurnStartMusicians(room);
+    if (!room.state) throw new Error('room state should exist');
+    room.seed = 73;
+    room.state.seed = 73;
+    room.state.rngCursor = 0;
+    room.state.units['handoff-target'] = {
+      id: 'handoff-target', kind: 'combat', forceId: 'liu', leaderId: 'liu-bei', officerIds: ['liu-bei'],
+      homeCityId: 'jiangling', troopType: 'spear', q: 12, r: 10, troops: 3000, food: 3000,
+      energy: 80, movementRemaining: 20, moved: false, acted: false,
+    };
+    room.state.facilities = {
+      handoffTower: {
+        id: 'handoffTower', type: 'arrowTower', forceId: 'cao', q: 10, r: 10, durability: 700, completed: true,
+      },
+    };
+    const local = playerState(room, 'host');
+    if (!local) throw new Error('host state should exist');
+    local.battleDamageReports = [];
+    local.facilityRepairReports = [];
+    local.strategyResultReports = [];
+
+    settleForceTurnStart(local, 'cao');
+    const online = reduceOnlineIntent(room, 'host', room.revision, { type: 'endTenDay' });
+
+    expect(online.ok).toBe(true);
+    if (!online.ok) throw new Error('online handoff should succeed');
+    const onlineGuest = playerState(online.room, 'guest');
+    if (!onlineGuest) throw new Error('guest state should exist');
+    expect({ ...onlineGuest, playerForceId: local.playerForceId, turnForceId: local.turnForceId }).toEqual(local);
+    expect(onlineGuest.units['guest-musician'].energy).toBe(85);
+    expect(local.units['guest-musician'].energy).toBe(85);
+    expect(onlineGuest.battleDamageReports).toEqual(local.battleDamageReports);
+    expect(onlineGuest.battleDamageReports?.map((report) => report.unitId)).toEqual(['handoff-target']);
+    expect(onlineGuest.rngCursor).toBe(local.rngCursor);
   });
 
   it('fires only the first active player arrow towers when online players advance to the next ten-day turn', () => {

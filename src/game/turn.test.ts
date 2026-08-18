@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { executeCommand } from './commands';
 import { createGame } from './scenario/jingxiang208';
+import { resolveCitySkills } from './skills/sources';
 import { settleMonth, settleTenDay } from './turn';
 
 describe('monthly settlement', () => {
@@ -139,6 +140,36 @@ describe('monthly settlement', () => {
 });
 
 describe('ten-day settlement', () => {
+  it('keeps a completing same-city 米道 production officer as the exact quarterly income source', () => {
+    const state = createGame('sun', 4394);
+    state.month = 3;
+    state.tenDay = 3;
+    for (const officer of Object.values(state.officers)) {
+      if (officer.cityId === 'changsha') officer.skill = undefined;
+    }
+    state.officers['zhou-yu'].skill = '米道';
+    state.officers['zhou-yu'].location = {
+      kind: 'task', cityId: 'changsha', task: 'armament', armamentType: 'ram', amount: 2, remainingTenDays: 1,
+    };
+    const city = state.cities.changsha;
+    const cityFoodAfterSupply = city.food - Math.ceil((city.troops * 500) / 10000);
+    const baseQuarterlyFood = Math.round(city.agriculture * 60 + city.population / 40);
+    const skillSources = (current: typeof state) => resolveCitySkills(current, 'changsha').map((skill) => ({
+      name: skill.definition.name,
+      sourceOfficerIds: skill.sourceOfficerIds,
+    }));
+
+    expect(skillSources(state)).toEqual([{ name: '米道', sourceOfficerIds: ['zhou-yu'] }]);
+
+    const next = settleTenDay(state);
+
+    expect(next.month).toBe(4);
+    expect(next.tenDay).toBe(1);
+    expect(next.officers['zhou-yu'].location).toEqual({ kind: 'city', cityId: 'changsha' });
+    expect(skillSources(next)).toEqual([{ name: '米道', sourceOfficerIds: ['zhou-yu'] }]);
+    expect(next.cities.changsha.food).toBe(cityFoodAfterSupply + Math.round(baseQuarterlyFood * 1.5));
+  });
+
   it('clears previous battle reports when advancing the ten-day turn', () => {
     const state = createGame('liu', 1);
     state.battleDamageReports = [{
