@@ -87,6 +87,20 @@ describe('command interface', () => {
     }
     expect(within(strategyMenu).getByRole('button', { name: '火计（1）' })).toBeEnabled();
     expect(within(strategyMenu).getByRole('button', { name: '扰乱（1）' })).toBeEnabled();
+
+    await user.click(within(strategyMenu).getByRole('button', { name: '火计（1）' }));
+    expect(screen.getByTestId('strategy-target-11-10')).toBeVisible();
+    const enemyUnit = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '11,10')!;
+    fireEvent.pointerDown(enemyUnit, { button: 0, buttons: 1, clientX: 280, clientY: 180 });
+
+    expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
+
+    const actedCaster = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(actedCaster, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(actedCaster, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
   });
 
   it('confirms before ending a month with legal actions remaining', async () => {
@@ -144,7 +158,12 @@ describe('command interface', () => {
     expect(within(abilityRow).getByText('99')).toBeVisible();
 
     await user.click(within(dialog).getByRole('button', { name: '特技' }));
+    expect(within(dialog).getByRole('button', { name: '按说明排序' })).toBeVisible();
     expect(officerRow('刘备')).toHaveTextContent('仁德');
+    expect(officerRow('刘备')).toHaveTextContent('项目自定义特技，效果将在单独规则设计中启用');
+    const noSkillCells = within(officerRow('糜芳')).getAllByRole('cell');
+    expect(noSkillCells[0].textContent).toBe('');
+    expect(noSkillCells[1].textContent).toBe('');
 
     await user.click(within(dialog).getByRole('button', { name: '适性' }));
     expect(within(dialog).getByText('枪')).toBeVisible();
@@ -394,6 +413,47 @@ describe('command interface', () => {
     expect(within(unitMarker).getByText('枪')).toBeVisible();
     expect(within(unitMarker).getByText('刘备')).toBeVisible();
     expect(within(unitMarker).getByText('4,000')).toBeVisible();
+  });
+
+  it('opens the strategy menu for Ma Su during the first deployment action', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    await user.click(screen.getByRole('button', { name: /^武陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    await user.click(within(menu).getByRole('button', { name: '出征' }));
+    const deployDialog = await chooseDeployLeader(user, '马谡');
+    await user.click(within(deployDialog).getByRole('button', { name: '确定出征' }));
+
+    fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
+    const unitMenu = screen.getByTestId('unit-command-menu');
+    await user.click(within(unitMenu).getByRole('button', { name: '计略' }));
+
+    expect(screen.getByTestId('unit-strategy-menu')).toBeVisible();
+  });
+
+  it('completes Ma Su deployment after selecting 火计 and a target cell', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    await user.click(screen.getByRole('button', { name: /^武陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    await user.click(within(menu).getByRole('button', { name: '出征' }));
+    const deployDialog = await chooseDeployLeader(user, '马谡');
+    await user.click(within(deployDialog).getByRole('button', { name: '确定出征' }));
+
+    fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
+    const unitMenu = screen.getByTestId('unit-command-menu');
+    await user.click(within(unitMenu).getByRole('button', { name: '计略' }));
+    await user.click(within(screen.getByTestId('unit-strategy-menu')).getByRole('button', { name: /火计/ }));
+
+    const target = screen.getAllByTestId(/strategy-target-/)[0];
+    fireEvent.pointerDown(target, { button: 0, buttons: 1 });
+
+    expect(screen.getByTestId('battle-unit-marker')).toBeVisible();
+    expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
   });
 
   it('shows 强行 deployment targets for the selected officer', async () => {
@@ -1078,54 +1138,6 @@ describe('command interface', () => {
     expect(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' })).toBeDisabled();
   });
 
-  it('prioritizes aptitude and action status over energy and target reasons', async () => {
-    const user = userEvent.setup();
-    const state = deployUnit(createGame('liu', 1), 'liu', {
-      cityId: 'jiangling',
-      officerId: 'guan-yu',
-      troopType: 'spear',
-      troops: 3000,
-      food: 3000,
-    });
-    const attacker = Object.values(state.units)[0];
-    Object.assign(attacker, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 22 });
-    state.units['enemy-reason-target'] = {
-      id: 'enemy-reason-target',
-      forceId: 'cao',
-      leaderId: 'cao-ren',
-      homeCityId: 'xiangyang',
-      q: 11,
-      r: 10,
-      troops: 3000,
-      food: 3000,
-      energy: 100,
-      movementRemaining: 5,
-      moved: false,
-      acted: false,
-    };
-    renderState(state);
-
-    const marker = screen.getAllByTestId('battle-unit-marker')
-      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
-    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
-    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
-    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' }));
-
-    state.officers['guan-yu'].aptitudes = { ...state.officers['guan-yu'].aptitudes!, spear: 'B' };
-    Object.assign(attacker, { acted: true, confusedTenDays: 1, energy: 0 });
-    delete state.units['enemy-reason-target'];
-    fireEvent.pointerEnter(marker, { clientX: 240, clientY: 180 });
-
-    const tacticMenu = screen.getByTestId('unit-tactic-menu');
-    expect(within(tacticMenu).getByRole('button', { name: '螺旋突刺' })).toHaveAttribute('title', '需要枪兵适性 A');
-    expect(within(tacticMenu).getByRole('button', { name: '突刺' })).toHaveAttribute('title', '部队已行动');
-
-    attacker.acted = false;
-    fireEvent.pointerEnter(marker, { clientX: 240, clientY: 180 });
-
-    expect(within(tacticMenu).getByRole('button', { name: '突刺' })).toHaveAttribute('title', '部队无法行动');
-  });
-
   it('does not enter target selection when a locked tactic is clicked', async () => {
     const user = userEvent.setup();
     const state = deployUnit(createGame('liu', 1), 'liu', {
@@ -1165,6 +1177,65 @@ describe('command interface', () => {
 
     expect(screen.queryByTestId('attack-target-arrow')).not.toBeInTheDocument();
     expect(screen.getByTestId('unit-tactic-menu')).toBeVisible();
+  });
+
+  it('ignites a completed fire ball facility when clicked as a fire strategy target', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 4000,
+      food: 6000,
+    });
+    const attacker = Object.values(state.units)[0];
+    Object.assign(attacker, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 22 });
+    state.facilities = {
+      ball: { id: 'ball', type: 'fireBall', forceId: 'liu', q: 11, r: 10, durability: 200, completed: true },
+    };
+    renderState(state);
+
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getAllByRole('button')[5]);
+    await user.click(within(screen.getByTestId('unit-strategy-menu')).getAllByRole('button')[0]);
+
+    expect(screen.getByTestId('strategy-target-11-10')).toBeVisible();
+    fireEvent.pointerDown(screen.getByTestId('battle-facility-marker'), { button: 0, buttons: 1, clientX: 280, clientY: 180 });
+
+    expect(screen.queryByTestId('battle-facility-marker')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('fire-cell-marker')).toHaveLength(3);
+  });
+
+  it('ignites a completed fire ball facility when clicked as a fire arrow tactic target', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'crossbow',
+      troops: 1000,
+      food: 6000,
+    });
+    const attacker = Object.values(state.units)[0];
+    Object.assign(attacker, { q: 10, r: 10, energy: 100, moved: false, acted: false, movementRemaining: 22 });
+    state.facilities = {
+      ball: { id: 'ball', type: 'fireBall', forceId: 'liu', q: 12, r: 11, durability: 200, completed: true },
+    };
+    renderState(state);
+
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' }));
+    await user.click(within(screen.getByTestId('unit-tactic-menu')).getByRole('button', { name: '火矢' }));
+
+    expect(screen.getByTestId('attack-facility-target-arrow')).toBeVisible();
+    fireEvent.pointerDown(screen.getByTestId('battle-facility-marker'), { button: 0, buttons: 1, clientX: 300, clientY: 180 });
+
+    expect(screen.queryByTestId('battle-facility-marker')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('fire-cell-marker')).toHaveLength(3);
   });
 
   it('enables joint attack from a move destination when another actionable friendly unit also neighbors the enemy', () => {

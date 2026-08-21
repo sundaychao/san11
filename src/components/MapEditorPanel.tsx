@@ -1,4 +1,5 @@
 import { Brush, Castle, FileImage, FileJson, FileText, Mountain, RotateCcw, RotateCw, Trash2, Waves } from 'lucide-react';
+import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import type { MapEditorTool } from '../game/map-editor/editor';
 import type { TerrainType } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
@@ -54,10 +55,11 @@ export function MapEditorPanel({
   onSelectTool,
   onUndo,
 }: MapEditorPanelProps) {
+  const audio = useAudioEventAdapter();
   const activeLabel = activeTool === 'city' ? '城市' : TERRAIN_TOOLS.find((item) => item.tool === activeTool)?.label;
 
   return (
-    <section className="map-editor-panel tool-panel" data-testid="map-editor-panel" aria-label="地图编辑器" onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
+    <section className="map-editor-panel tool-panel" data-testid="map-editor-panel" aria-label="地图编辑器" onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
       <header>
         <div>
           <p>方格图</p>

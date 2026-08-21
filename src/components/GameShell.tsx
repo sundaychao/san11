@@ -1,11 +1,10 @@
 import { ArrowLeft, RotateCcw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { playClickOnSound, playLeftMouseSound, playRightMouseSound, playWaitingForTargetSound } from '../audio/soundEffects';
-import { effectiveUnitAbilities, harmfulStrategySuccessChance, attackableCities, attackableFacilities, attackableUnits, deploymentCells, deployUnitPreviewWithId, FACILITY_BUILD_COSTS, facilityBuildTargets, jointAttackableUnits, movementCells, repairableFacilities, requiredAptitudeForTactic, strategyTargetCells, strategyTargetUnits, tacticTargetUnits, unitCanUseTactic, unitFacilities, unitIsIncapacitated, unitStrategies, unitTactics, type StrategyId, type TacticId, type UnitTactic } from '../game/battle/actions';
-import { movementAllowanceForProfile } from '../game/battle/definitions';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
+import { effectiveUnitAbilities, harmfulStrategySuccessChance, deployUnitPreviewWithId, FACILITY_BUILD_COSTS, unitFacilities, unitIsIncapacitated, unitStrategies, type StrategyId, type TacticId } from '../game/battle/actions';
 import type { GridCoord } from '../game/battle/grid';
-import { TROOP_LABELS } from '../game/armaments';
-import { formationMovementAllowanceBonus } from '../game/skills';
+import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticFacilityTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
+import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import {
   clearEditor,
   createEditorState,
@@ -21,7 +20,6 @@ import {
   type MapEditorState,
   type MapEditorTool,
 } from '../game/map-editor/editor';
-import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { useGame } from '../game/store/GameProvider';
 import { territoryForceAt } from '../game/territory';
 import type { BattleDamageReport, CityEffectReport, FacilityRepairReport, FacilityType, GameCommand, GameState, GridCell, StrategyResultReport, TerrainType } from '../game/types';
@@ -43,7 +41,7 @@ import { TopBar } from './TopBar';
 import { TransportDialog, type TransportConfirmInput } from './TransportDialog';
 import { UnitDetailDialog } from './UnitDetailDialog';
 import { UnitInfoPanel } from './UnitInfoPanel';
-import { INITIAL_MAP_INTERACTION, reduceMapInteraction } from './gameInteraction';
+import { useUnitMenuInteraction } from './useUnitMenuInteraction';
 
 const UNIT_COMMANDS = ['待命', '攻击', '齐攻', '战法', '单挑', '计略', '设置', '修补'] as const;
 const UNIT_STRATEGIES = unitStrategies();
@@ -73,21 +71,9 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
-function tacticUnavailableReason(state: GameState, unitId: string, tactic: UnitTactic, origin?: GridCoord) {
-  const unit = state.units[unitId];
-  if (!unit) return '部队无法行动';
-  if (!unitCanUseTactic(state, unitId, tactic.id)) {
-    return `需要${TROOP_LABELS[tactic.troopType]}适性 ${requiredAptitudeForTactic(tactic.id)}`;
-  }
-  if (unit.acted) return '部队已行动';
-  if (unitIsIncapacitated(unit)) return '部队无法行动';
-  if (unit.energy < tactic.cost) return '气力不足';
-  if (tacticTargetUnits(state, unitId, tactic.id, origin).length === 0) return '无有效目标';
-  return undefined;
-}
-
 export function GameShell() {
   const { applyMapEditorMap, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, dismantleFacility, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, moveUnit, repairFacility, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
+  const { emit: emitAudioEvent } = useAudioEventAdapter();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [transportCityId, setTransportCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
@@ -96,47 +82,16 @@ export function GameShell() {
   const [pendingDeployCommand, setPendingDeployCommand] = useState<{ input: DeployConfirmInput; destination: GridCoord } | null>(null);
   const [pendingDeployAction, setPendingDeployAction] = useState<{ input: DeployConfirmInput & { destination: GridCoord }; unitId: string } | null>(null);
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
-  const [unitInteraction, unitInteractionDispatch] = useReducer(reduceMapInteraction, INITIAL_MAP_INTERACTION);
-  const unitCommandMenu = unitInteraction.type === 'unit-menu'
-    ? unitInteraction
-    : unitInteraction.type === 'unit-submenu'
-      ? unitInteraction.parent
-      : null;
-  const unitTacticMenu = unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'tactic'
-    ? unitInteraction
-    : null;
-  const unitStrategyMenu = unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'strategy'
-    ? unitInteraction
-    : null;
-  const unitFacilityMenu = unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'facility'
-    ? unitInteraction
-    : null;
-  const setUnitCommandMenu = useCallback((menu: { unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null) => {
-    unitInteractionDispatch(menu
-      ? { type: 'open-unit-menu', ...menu }
-      : { type: 'close' });
-  }, []);
-  const setUnitTacticMenu = useCallback((menu: { unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null) => {
-    if (menu) {
-      unitInteractionDispatch({ type: 'open-unit-submenu', kind: 'tactic', position: menu.position, destination: menu.destination });
-    } else if (unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'tactic') {
-      unitInteractionDispatch({ type: 'back' });
-    }
-  }, [unitInteraction]);
-  const setUnitStrategyMenu = useCallback((menu: { unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null) => {
-    if (menu) {
-      unitInteractionDispatch({ type: 'open-unit-submenu', kind: 'strategy', position: menu.position, destination: menu.destination });
-    } else if (unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'strategy') {
-      unitInteractionDispatch({ type: 'back' });
-    }
-  }, [unitInteraction]);
-  const setUnitFacilityMenu = useCallback((menu: { unitId: string; position: { x: number; y: number }; destination?: GridCoord } | null) => {
-    if (menu) {
-      unitInteractionDispatch({ type: 'open-unit-submenu', kind: 'facility', position: menu.position, destination: menu.destination });
-    } else if (unitInteraction.type === 'unit-submenu' && unitInteraction.kind === 'facility') {
-      unitInteractionDispatch({ type: 'back' });
-    }
-  }, [unitInteraction]);
+  const {
+    unitCommandMenu,
+    unitTacticMenu,
+    unitStrategyMenu,
+    unitFacilityMenu,
+    setUnitCommandMenu,
+    setUnitTacticMenu,
+    setUnitStrategyMenu,
+    setUnitFacilityMenu,
+  } = useUnitMenuInteraction();
   const [unitIntelMenu, setUnitIntelMenu] = useState<{ unitId: string; position: { x: number; y: number } } | null>(null);
   const [unitDetailId, setUnitDetailId] = useState<string | null>(null);
   const [unitOfficerListId, setUnitOfficerListId] = useState<string | null>(null);
@@ -350,13 +305,12 @@ export function GameShell() {
     const pending = pendingDeploy ?? pendingTransport;
     if (!state || !pending) return [];
     if (targetingFacility || targetingFirePlot || targetingRepair) return [];
-    if (!pendingDeploy) return deploymentCells(state, pending.cityId, undefined, 'transport');
-    const movementAllowance = movementAllowanceForProfile(pendingDeploy.troopType) +
-      formationMovementAllowanceBonus(state, pendingDeploy.officerIds, pendingDeploy.troopType);
-    return deploymentCells(state, pending.cityId, movementAllowance, pendingDeploy.troopType);
+    return getDeploymentTargets(state, pendingDeploy
+      ? { cityId: pendingDeploy.cityId, troopType: pendingDeploy.troopType, officerIds: pendingDeploy.officerIds }
+      : { cityId: pendingTransport!.cityId, kind: 'transport' });
   }, [pendingDeploy, pendingTransport, state, targetingFacility, targetingFirePlot, targetingRepair]);
   const moveTargets = useMemo(() => (
-    state && selectedUnitId && !targetingAttack && !targetingTactic && !targetingFirePlot && !targetingUnitStrategy && !targetingFacility && !targetingRepair ? movementCells(state, selectedUnitId) : []
+    state && selectedUnitId && !targetingAttack && !targetingTactic && !targetingFirePlot && !targetingUnitStrategy && !targetingFacility && !targetingRepair ? getMovementTargets(state, selectedUnitId) : []
   ), [selectedUnitId, state, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingTactic, targetingUnitStrategy]);
   const isPendingDeployCommandMenu = unitCommandMenu?.unitId === PENDING_DEPLOY_UNIT_ID;
   const pendingDeployPreview = useMemo(() => {
@@ -381,58 +335,28 @@ export function GameShell() {
   const unitMenuState = pendingDeployPreview?.state ?? state;
   const unitMenuUnitId = pendingDeployPreview?.unitId ?? unitCommandMenu?.unitId;
   const unitMenuDestination = pendingDeployPreview ? undefined : unitCommandMenu?.destination;
-  const unitMenuAttackTargets = useMemo(() => (
-    unitMenuState && unitMenuUnitId ? attackableUnits(unitMenuState, unitMenuUnitId, unitMenuDestination) : []
+  const unitMenuQuery = useMemo(() => (
+    unitMenuState && unitMenuUnitId ? getUnitActionQuery(unitMenuState, unitMenuUnitId, unitMenuDestination) : null
   ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
-  const unitMenuAttackCities = useMemo(() => (
-    unitMenuState && unitMenuUnitId ? attackableCities(unitMenuState, unitMenuUnitId, unitMenuDestination) : []
-  ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
-  const unitMenuAttackFacilities = useMemo(() => (
-    unitMenuState && unitMenuUnitId ? attackableFacilities(unitMenuState, unitMenuUnitId, unitMenuDestination) : []
-  ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
-  const unitMenuRepairTargets = useMemo(() => (
-    unitMenuState && unitMenuUnitId ? repairableFacilities(unitMenuState, unitMenuUnitId, unitMenuDestination) : []
-  ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
-  const unitMenuJointAttackTargets = useMemo(() => (
-    unitMenuState && unitMenuUnitId ? jointAttackableUnits(unitMenuState, unitMenuUnitId, unitMenuDestination) : []
-  ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
-  const unitMenuTactics = useMemo(() => (
-    unitMenuState && unitMenuUnitId
-      ? unitTactics(unitMenuState, unitMenuUnitId).filter((tactic) => !tacticUnavailableReason(unitMenuState, unitMenuUnitId, tactic, unitMenuDestination))
-      : []
-  ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
-  const unitMenuStrategies = useMemo(() => (
-    unitMenuState && unitMenuUnitId
-      ? UNIT_STRATEGIES.filter((strategy) => {
-        const unit = unitMenuState.units[unitMenuUnitId];
-        if (!unit || unit.energy < strategyEnergyCostForUnit(unitMenuState, unitMenuUnitId, strategy.id)) return false;
-        if (strategy.target === 'cell') return strategyTargetCells(unitMenuState, unitMenuUnitId, strategy.id, unitMenuDestination).length > 0;
-        return strategyTargetUnits(unitMenuState, unitMenuUnitId, strategy.id, unitMenuDestination).length > 0;
-      })
-      : []
-  ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
-  const unitMenuFacilities = useMemo(() => (
-    unitMenuState && unitMenuUnitId
-      ? UNIT_FACILITIES.filter((facility) => facilityBuildTargets(unitMenuState, unitMenuUnitId, unitMenuDestination, facility.type).length > 0)
-      : []
-  ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
+  const unitMenuStrategies = unitMenuQuery?.availableStrategies ?? [];
+  const unitMenuFacilities = unitMenuQuery?.availableFacilities ?? [];
   const tacticMenuState = pendingDeployActionPreview?.state ?? state;
-  const tacticMenuTactics = useMemo(() => (
+  const tacticMenuOptions = (
     tacticMenuState && unitTacticMenu
-      ? unitTactics(tacticMenuState, unitTacticMenu.unitId)
+      ? getUnitTacticOptions(tacticMenuState, unitTacticMenu.unitId, unitTacticMenu.destination)
       : []
-  ), [tacticMenuState, unitTacticMenu]);
+  );
   const firePlotTargets = useMemo(() => (
     (pendingDeployActionPreview?.state ?? state) && targetingFacility
-      ? facilityBuildTargets((pendingDeployActionPreview?.state ?? state)!, targetingFacility.unitId, targetingFacility.origin, targetingFacility.facilityType)
-      : (pendingDeployActionPreview?.state ?? state) && targetingFirePlot ? strategyTargetCells((pendingDeployActionPreview?.state ?? state)!, targetingFirePlot.unitId, targetingFirePlot.strategyId, targetingFirePlot.origin) : []
+      ? getFacilityBuildTargets((pendingDeployActionPreview?.state ?? state)!, targetingFacility.unitId, targetingFacility.origin, targetingFacility.facilityType)
+      : (pendingDeployActionPreview?.state ?? state) && targetingFirePlot ? getStrategyCellTargets((pendingDeployActionPreview?.state ?? state)!, targetingFirePlot.unitId, targetingFirePlot.strategyId, targetingFirePlot.origin) : []
   ), [pendingDeployActionPreview, state, targetingFacility, targetingFirePlot]);
   const attackTargetUnitIds = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
     if (!targetState) return [];
-    if (targetingAttack) return attackableUnits(targetState, targetingAttack.unitId, targetingAttack.origin).map((unit) => unit.id);
-    if (targetingTactic) return tacticTargetUnits(targetState, targetingTactic.unitId, targetingTactic.tacticId, targetingTactic.origin).map((unit) => unit.id);
-    if (targetingUnitStrategy) return strategyTargetUnits(targetState, targetingUnitStrategy.unitId, targetingUnitStrategy.strategyId, targetingUnitStrategy.origin).map((unit) => unit.id);
+    if (targetingAttack) return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackUnits.map((unit) => unit.id);
+    if (targetingTactic) return getTacticUnitTargets(targetState, targetingTactic.unitId, targetingTactic.tacticId, targetingTactic.origin).map((unit) => unit.id);
+    if (targetingUnitStrategy) return getStrategyUnitTargets(targetState, targetingUnitStrategy.unitId, targetingUnitStrategy.strategyId, targetingUnitStrategy.origin).map((unit) => unit.id);
     return [];
   }, [pendingDeployActionPreview, state, targetingAttack, targetingTactic, targetingUnitStrategy]);
   const hoveredStrategyChance = useMemo(() => {
@@ -455,15 +379,16 @@ export function GameShell() {
   const attackTargetCityIds = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
     if (!targetState || !targetingAttack) return [];
-    return attackableCities(targetState, targetingAttack.unitId, targetingAttack.origin).map((city) => city.id);
+    return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackCities.map((city) => city.id);
   }, [pendingDeployActionPreview, state, targetingAttack]);
   const targetFacilityIds = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
     if (!targetState) return [];
-    if (targetingAttack) return attackableFacilities(targetState, targetingAttack.unitId, targetingAttack.origin).map((facility) => facility.id);
-    if (targetingRepair) return repairableFacilities(targetState, targetingRepair.unitId, targetingRepair.origin).map((facility) => facility.id);
+    if (targetingAttack) return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackFacilities.map((facility) => facility.id);
+    if (targetingTactic) return getTacticFacilityTargets(targetState, targetingTactic.unitId, targetingTactic.tacticId, targetingTactic.origin).map((facility) => facility.id);
+    if (targetingRepair) return getRepairTargets(targetState, targetingRepair.unitId, targetingRepair.origin).map((facility) => facility.id);
     return [];
-  }, [pendingDeployActionPreview, state, targetingAttack, targetingRepair]);
+  }, [pendingDeployActionPreview, state, targetingAttack, targetingRepair, targetingTactic]);
 
   const closeDeployDialog = useCallback(() => {
     setDeployCityId(null);
@@ -506,7 +431,7 @@ export function GameShell() {
     setHoveredUnit(null);
     if (!state) return;
     const unit = state.units[unitId];
-    if (!canOperateCurrentTurn || !unit || unit.forceId !== state.playerForceId || unit.moved || unitIsIncapacitated(unit) || unit.movementRemaining <= 0) {
+    if (!canOperateCurrentTurn || !unit || unit.forceId !== state.playerForceId || unit.moved || unit.acted || unitIsIncapacitated(unit) || unit.movementRemaining <= 0) {
       setSelectedUnitId(null);
       setUnitCommandMenu(null);
       setUnitIntelMenu(null);
@@ -521,7 +446,7 @@ export function GameShell() {
       setFacilityContextMenu(null);
       return;
     }
-    if (selectedUnitId !== unitId) playWaitingForTargetSound();
+    if (selectedUnitId !== unitId) emitAudioEvent({ type: 'menu-waiting-for-target' });
     setCityMenu(null);
     setMapContextMenu(null);
     setUnitIntelMenu(null);
@@ -540,7 +465,7 @@ export function GameShell() {
     }
     setUnitCommandMenu(null);
     setSelectedUnitId(unitId);
-  }, [cancelUnitHoverClose, canOperateCurrentTurn, selectedUnitId, state]);
+  }, [cancelUnitHoverClose, canOperateCurrentTurn, emitAudioEvent, selectedUnitId, state]);
 
   const openUnitIntelMenu = useCallback((unitId: string, position: { x: number; y: number }) => {
     if (!state?.units[unitId]) return;
@@ -566,17 +491,17 @@ export function GameShell() {
 
   const openUnitDetail = useCallback(() => {
     if (!unitIntelMenu) return;
-    playClickOnSound();
+    emitAudioEvent({ type: 'menu-click-on' });
     setUnitDetailId(unitIntelMenu.unitId);
     setUnitIntelMenu(null);
-  }, [unitIntelMenu]);
+  }, [emitAudioEvent, unitIntelMenu]);
 
   const openUnitOfficers = useCallback(() => {
     if (!unitIntelMenu) return;
-    playClickOnSound();
+    emitAudioEvent({ type: 'menu-click-on' });
     setUnitOfficerListId(unitIntelMenu.unitId);
     setUnitIntelMenu(null);
-  }, [unitIntelMenu]);
+  }, [emitAudioEvent, unitIntelMenu]);
 
   const selectMoveTarget = useCallback((coord: GridCoord, position: { x: number; y: number }) => {
     if (!canOperateCurrentTurn) return;
@@ -623,9 +548,7 @@ export function GameShell() {
       !unitCommandMenu ||
       !unitMenuState ||
       !unitMenuUnitId ||
-      (attackableUnits(unitMenuState, unitMenuUnitId, unitMenuDestination).length === 0 &&
-        attackableCities(unitMenuState, unitMenuUnitId, unitMenuDestination).length === 0 &&
-        attackableFacilities(unitMenuState, unitMenuUnitId, unitMenuDestination).length === 0)
+      !unitMenuQuery?.commandAvailability.attack
     ) return;
     const deployAction = isPendingDeployCommandMenu ? beginPendingDeployAction() : null;
     const commandUnitId = deployAction?.unitId ?? unitMenuUnitId;
@@ -639,10 +562,10 @@ export function GameShell() {
     setUnitTacticMenu(null);
     setUnitStrategyMenu(null);
     setUnitCommandMenu(null);
-  }, [beginPendingDeployAction, canOperateCurrentTurn, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuState, unitMenuUnitId]);
+  }, [beginPendingDeployAction, canOperateCurrentTurn, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuState, unitMenuUnitId]);
 
   const executeUnitRepairCommand = useCallback(() => {
-    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || unitMenuRepairTargets.length === 0) return;
+    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || !unitMenuQuery?.commandAvailability.repair) return;
     const deployAction = isPendingDeployCommandMenu ? beginPendingDeployAction() : null;
     const commandUnitId = deployAction?.unitId ?? unitMenuUnitId;
     setSelectedUnitId(commandUnitId);
@@ -656,11 +579,11 @@ export function GameShell() {
     setUnitStrategyMenu(null);
     setUnitFacilityMenu(null);
     setUnitCommandMenu(null);
-  }, [beginPendingDeployAction, canOperateCurrentTurn, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuRepairTargets.length, unitMenuUnitId]);
+  }, [beginPendingDeployAction, canOperateCurrentTurn, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuUnitId]);
 
   const executeUnitTacticCommand = useCallback(() => {
-    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || unitMenuTactics.length === 0) return;
-    playClickOnSound();
+    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || !unitMenuQuery?.commandAvailability.tactic) return;
+    emitAudioEvent({ type: 'menu-click-on' });
     const deployAction = isPendingDeployCommandMenu ? beginPendingDeployAction() : null;
     setUnitStrategyMenu(null);
     setUnitTacticMenu({
@@ -668,11 +591,11 @@ export function GameShell() {
       position: { x: unitCommandMenu.position.x + 108, y: unitCommandMenu.position.y },
       destination: deployAction ? undefined : unitMenuDestination,
     });
-  }, [beginPendingDeployAction, canOperateCurrentTurn, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuTactics.length, unitMenuUnitId]);
+  }, [beginPendingDeployAction, canOperateCurrentTurn, emitAudioEvent, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuUnitId]);
 
   const executeUnitStrategyCommand = useCallback(() => {
-    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || unitMenuStrategies.length === 0) return;
-    playClickOnSound();
+    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || !unitMenuQuery?.commandAvailability.strategy) return;
+    emitAudioEvent({ type: 'menu-click-on' });
     const deployAction = isPendingDeployCommandMenu ? beginPendingDeployAction() : null;
     setUnitTacticMenu(null);
     setUnitFacilityMenu(null);
@@ -681,11 +604,11 @@ export function GameShell() {
       position: { x: unitCommandMenu.position.x + 108, y: unitCommandMenu.position.y },
       destination: deployAction ? undefined : unitMenuDestination,
     });
-  }, [beginPendingDeployAction, canOperateCurrentTurn, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuStrategies.length, unitMenuUnitId]);
+  }, [beginPendingDeployAction, canOperateCurrentTurn, emitAudioEvent, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuUnitId]);
 
   const executeUnitFacilityCommand = useCallback(() => {
-    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || unitMenuFacilities.length === 0) return;
-    playClickOnSound();
+    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || !unitMenuQuery?.commandAvailability.facility) return;
+    emitAudioEvent({ type: 'menu-click-on' });
     const deployAction = isPendingDeployCommandMenu ? beginPendingDeployAction() : null;
     setUnitTacticMenu(null);
     setUnitStrategyMenu(null);
@@ -694,7 +617,7 @@ export function GameShell() {
       position: { x: unitCommandMenu.position.x + 108, y: unitCommandMenu.position.y },
       destination: deployAction ? undefined : unitMenuDestination,
     });
-  }, [beginPendingDeployAction, canOperateCurrentTurn, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuFacilities.length, unitMenuUnitId]);
+  }, [beginPendingDeployAction, canOperateCurrentTurn, emitAudioEvent, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuUnitId]);
 
   const selectUnitTactic = useCallback((tacticId: TacticId) => {
     if (!canOperateCurrentTurn) return;
@@ -849,6 +772,12 @@ export function GameShell() {
       if (!handled) {
         attackFacility(targetingAttack.unitId, facilityId, targetingAttack.origin);
       }
+    } else if (targetingTactic) {
+      const handled = pendingDeployAction?.unitId === targetingTactic.unitId &&
+        finishPendingDeployAction({ type: 'useUnitTactic', targetId: facilityId, tacticId: targetingTactic.tacticId });
+      if (!handled) {
+        useUnitTactic(targetingTactic.unitId, facilityId, targetingTactic.tacticId, targetingTactic.origin);
+      }
     } else if (targetingRepair) {
       const handled = pendingDeployAction?.unitId === targetingRepair.unitId &&
         finishPendingDeployAction({ type: 'repairFacility', facilityId });
@@ -869,7 +798,7 @@ export function GameShell() {
     setUnitTacticMenu(null);
     setUnitStrategyMenu(null);
     setUnitFacilityMenu(null);
-  }, [attackFacility, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, repairFacility, targetFacilityIds, targetingAttack, targetingRepair]);
+  }, [attackFacility, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, repairFacility, targetFacilityIds, targetingAttack, targetingRepair, targetingTactic, useUnitTactic]);
 
   const selectAttackCityTarget = useCallback((cityId: NonNullable<typeof selectedCityId>) => {
     if (!canOperateCurrentTurn) return;
@@ -895,7 +824,7 @@ export function GameShell() {
     if (!state || !canOperateCurrentTurn) return;
     const facility = state.facilities?.[facilityId];
     if (!facility || facility.forceId !== state.playerForceId) return;
-    playRightMouseSound();
+    emitAudioEvent({ type: 'menu-right-click' });
     setHoveredUnit(null);
     setHoveredCity(null);
     setCityMenu(null);
@@ -914,18 +843,18 @@ export function GameShell() {
     setTargetingRepair(null);
     setSelectedUnitId(null);
     setFacilityContextMenu({ facilityId, position });
-  }, [canOperateCurrentTurn, state]);
+  }, [canOperateCurrentTurn, emitAudioEvent, state]);
 
   const revokeFacilityFromMenu = useCallback(() => {
     if (!facilityContextMenu) return;
-    playClickOnSound();
+    emitAudioEvent({ type: 'menu-click-on' });
     dismantleFacility(facilityContextMenu.facilityId);
     setFacilityContextMenu(null);
-  }, [dismantleFacility, facilityContextMenu]);
+  }, [dismantleFacility, emitAudioEvent, facilityContextMenu]);
 
   const openMapContextMenu = useCallback((position: { x: number; y: number }) => {
     if (facilityContextMenu) {
-      playRightMouseSound();
+      emitAudioEvent({ type: 'menu-right-click' });
       setFacilityContextMenu(null);
       return;
     }
@@ -989,7 +918,7 @@ export function GameShell() {
     setTargetingRepair(null);
     setShowMapIntelOptions(false);
     setMapContextMenu(position);
-  }, [cityMenu, deployCityId, editorState, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
+  }, [cityMenu, deployCityId, editorState, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
 
   const proceedTenDayFromMap = useCallback(() => {
     setMapContextMenu(null);
@@ -1007,10 +936,10 @@ export function GameShell() {
 
   const openIntelFromMap = useCallback(() => {
     setShowMapIntelOptions((current) => {
-      if (!current) playClickOnSound();
+      if (!current) emitAudioEvent({ type: 'menu-click-on' });
       return !current;
     });
-  }, []);
+  }, [emitAudioEvent]);
 
   const openPlayerOfficersFromMap = useCallback(() => {
     setMapContextMenu(null);
@@ -1082,16 +1011,16 @@ export function GameShell() {
   const closeMapContextMenuFromRightClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    playRightMouseSound();
+    emitAudioEvent({ type: 'menu-right-click' });
     setMapContextMenu(null);
     setShowMapIntelOptions(false);
     setFacilityContextMenu(null);
-  }, []);
+  }, [emitAudioEvent]);
 
   const closeUnitCommandMenuFromRightClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    playRightMouseSound();
+    emitAudioEvent({ type: 'menu-right-click' });
     setUnitCommandMenu(null);
     setUnitTacticMenu(null);
     setUnitStrategyMenu(null);
@@ -1102,14 +1031,14 @@ export function GameShell() {
     setTargetingFacility(null);
     setTargetingRepair(null);
     setFacilityContextMenu(null);
-  }, []);
+  }, [emitAudioEvent]);
 
   const closeUnitIntelMenuFromRightClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    playRightMouseSound();
+    emitAudioEvent({ type: 'menu-right-click' });
     setUnitIntelMenu(null);
-  }, []);
+  }, [emitAudioEvent]);
 
   useEffect(() => {
     if (!mapContextMenu) return undefined;
@@ -1263,7 +1192,7 @@ export function GameShell() {
       <StrategicMap
         onCityMenu={(cityId, position) => {
           if (!canOperateCurrentTurn) return;
-          playLeftMouseSound();
+          emitAudioEvent({ type: 'menu-left-click' });
           setMapContextMenu(null);
           setCityMenu({ cityId, position });
         }}
@@ -1405,7 +1334,7 @@ export function GameShell() {
           onContextMenu={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            playRightMouseSound();
+            emitAudioEvent({ type: 'menu-right-click' });
             setFacilityContextMenu(null);
           }}
         >
@@ -1422,13 +1351,23 @@ export function GameShell() {
           onContextMenu={closeUnitCommandMenuFromRightClick}
         >
           {UNIT_COMMANDS.map((command, commandIndex) => {
-            const disabled =
-              (commandIndex === 1 && unitMenuAttackTargets.length === 0 && unitMenuAttackCities.length === 0 && unitMenuAttackFacilities.length === 0) ||
-              (command === '单挑' && unitMenuAttackTargets.length === 0) ||
-              (command === '齐攻' && unitMenuJointAttackTargets.length === 0) ||
-              (command === '战法' && unitMenuTactics.length === 0) ||
-              (command === '计略' && unitMenuStrategies.length === 0) ||
-              (commandIndex === 7 && unitMenuRepairTargets.length === 0);
+            const disabled = command === '待命'
+              ? !unitMenuQuery?.commandAvailability.wait
+              : commandIndex === 1
+                ? !unitMenuQuery?.commandAvailability.attack
+                : command === '齐攻'
+                  ? !unitMenuQuery?.commandAvailability.jointAttack
+                  : command === '战法'
+                    ? !unitMenuQuery?.commandAvailability.tactic
+                    : command === '单挑'
+                      ? !unitMenuQuery?.commandAvailability.duel
+                      : command === '计略'
+                        ? !unitMenuQuery?.commandAvailability.strategy
+                        : command === '设置'
+                          ? !unitMenuQuery?.commandAvailability.facility
+                          : command === '修补'
+                            ? !unitMenuQuery?.commandAvailability.repair
+                            : true;
             const onClick =
               command === '待命' ? executeUnitWaitCommand :
               commandIndex === 1 ? executeUnitAttackCommand :
@@ -1440,8 +1379,8 @@ export function GameShell() {
               <button
                 key={command}
                 type="button"
-                className={(disabled || (commandIndex === 6 && unitMenuFacilities.length === 0)) ? 'is-disabled' : undefined}
-                disabled={disabled || (commandIndex === 6 && unitMenuFacilities.length === 0)}
+                className={disabled ? 'is-disabled' : undefined}
+                disabled={disabled}
                 onClick={commandIndex === 6 ? executeUnitFacilityCommand : onClick}
               >
                 {command}
@@ -1460,7 +1399,7 @@ export function GameShell() {
           onContextMenu={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            playRightMouseSound();
+            emitAudioEvent({ type: 'menu-right-click' });
             setUnitFacilityMenu(null);
           }}
         >
@@ -1489,12 +1428,15 @@ export function GameShell() {
           onContextMenu={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            playRightMouseSound();
+            emitAudioEvent({ type: 'menu-right-click' });
             setUnitStrategyMenu(null);
           }}
         >
           {UNIT_STRATEGIES.map((strategy) => {
-            const cost = strategyEnergyCostForUnit(unitMenuState, unitStrategyMenu.unitId, strategy.id);
+            const strategyState = pendingDeployActionPreview?.state ?? unitMenuState;
+            const cost = strategyState.units[unitStrategyMenu.unitId]
+              ? strategyEnergyCostForUnit(strategyState, unitStrategyMenu.unitId, strategy.id)
+              : strategy.cost;
             return (
               <button
                 key={strategy.id}
@@ -1518,20 +1460,17 @@ export function GameShell() {
           onContextMenu={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            playRightMouseSound();
+            emitAudioEvent({ type: 'menu-right-click' });
             setUnitTacticMenu(null);
           }}
         >
-          {tacticMenuTactics.map((tactic) => {
-            const reason = tacticMenuState
-              ? tacticUnavailableReason(tacticMenuState, unitTacticMenu.unitId, tactic, unitTacticMenu.destination)
-              : '部队无法行动';
+          {tacticMenuOptions.map(({ tactic, unavailableReason }) => {
             return (
               <button
                 key={tactic.id}
                 type="button"
-                disabled={Boolean(reason)}
-                title={reason}
+                disabled={Boolean(unavailableReason)}
+                title={unavailableReason}
                 onClick={() => selectUnitTactic(tactic.id)}
               >
                 {tactic.name}

@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runAiTurn } from '../ai';
 import { nextRandom } from '../random';
 import { createGame } from '../scenario/jingxiang208';
 import { territoryCityAt, territoryForceAt } from '../territory';
 import { settleTenDay } from '../turn';
 import type { TroopType } from '../types';
-import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
+import * as skillHandlers from '../skills/handlers';
+import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
 import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 import { damageRoll } from './shared';
@@ -536,6 +537,58 @@ describe('battle deployment and movement actions', () => {
     expect(reset.units[unit.id].moved).toBe(false);
   });
 
+  it('damages a unit when it moves onto a burning ground cell', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troops: 4000,
+      food: 6000,
+    });
+    setUniformTerrain(deployed, 'plain');
+    const unit = Object.values(deployed.units)[0];
+    readyUnitAt(deployed, unit.id, { q: 10, r: 10 }, 'sword');
+    const destination = { q: 11, r: 10 };
+    deployed.firePlots = [destination];
+
+    const next = moveUnit(deployed, 'liu', unit.id, destination);
+
+    expect(next.units[unit.id].troops).toBe(3500);
+    expect(next.battleDamageReports).toEqual([
+      expect.objectContaining({
+        unitId: unit.id,
+        q: destination.q,
+        r: destination.r,
+        amount: 500,
+        kind: 'attack',
+      }),
+    ]);
+  });
+
+  it('assigns each new burning ground cell a random duration of one to three ten-days', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units)[0];
+    readyUnitAt(state, unit.id, { q: 10, r: 10 }, 'sword');
+    const target = { q: 11, r: 10 };
+
+    const next = useFirePlot(state, 'liu', unit.id, target);
+
+    expect(next.firePlots).toEqual([
+      expect.objectContaining({
+        q: target.q,
+        r: target.r,
+        remainingTenDays: expect.any(Number),
+      }),
+    ]);
+    expect(next.firePlots![0].remainingTenDays).toBeGreaterThanOrEqual(1);
+    expect(next.firePlots![0].remainingTenDays).toBeLessThanOrEqual(3);
+  });
+
   it('builds a field facility on an adjacent legal cell and blocks movement through it', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -553,7 +606,7 @@ describe('battle deployment and movement actions', () => {
     const facility = Object.values(next.facilities ?? {})[0];
 
     expect(facility).toMatchObject({ type: 'earthwork', forceId: 'liu', q: target.q, r: target.r });
-    expect(next.units[unit.id]).toMatchObject({ acted: true });
+    expect(next.units[unit.id]).toMatchObject({ acted: true, moved: true, movementRemaining: 0 });
     expect(facilityBuildTargets(next, unit.id)).not.toContainEqual(target);
     readyUnitAt(next, unit.id, { q: 10, r: 10 }, 'sword');
     expect(() => moveUnit(next, 'liu', unit.id, target)).toThrow(/占用|通行|目标/);
@@ -672,6 +725,7 @@ describe('battle deployment and movement actions', () => {
       amount: 500,
       kind: 'repair',
     })]);
+    expect(repaired.units[unit.id]).toMatchObject({ acted: true, moved: true, movementRemaining: 0 });
     readyUnitAt(repaired, unit.id, { q: 10, r: 10 }, 'sword');
 
     const completed = repairFacility(repaired, 'liu', unit.id, 'tower');
@@ -686,7 +740,7 @@ describe('battle deployment and movement actions', () => {
     })]);
   });
 
-  it('only enables repair for adjacent own facilities that are still under construction', () => {
+  it('enables repair for own construction and public construction regardless of owner', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -700,9 +754,23 @@ describe('battle deployment and movement actions', () => {
       building: { id: 'building', type: 'arrowTower', forceId: 'liu', q: 11, r: 10, durability: 150, completed: false },
       damagedCompleted: { id: 'damagedCompleted', type: 'musicTower', forceId: 'liu', q: 10, r: 11, durability: 500, completed: true },
       enemyBuilding: { id: 'enemyBuilding', type: 'arrowTower', forceId: 'cao', q: 9, r: 10, durability: 150, completed: false },
+      enemyEarthwork: { id: 'enemyEarthwork', type: 'earthwork', forceId: 'cao', q: 10, r: 9, durability: 150, completed: false },
+      enemyFireSeed: { id: 'enemyFireSeed', type: 'fireSeed', forceId: 'cao', q: 9, r: 9, durability: 100, completed: false },
+      enemyFireBall: { id: 'enemyFireBall', type: 'fireBall', forceId: 'cao', q: 11, r: 9, durability: 100, completed: false },
     };
 
-    expect(repairableFacilities(state, unit.id).map((facility) => facility.id)).toEqual(['building']);
+    const repairableIds = repairableFacilities(state, unit.id).map((facility) => facility.id);
+    expect(repairableIds).toHaveLength(4);
+    expect(repairableIds).toEqual(expect.arrayContaining([
+      'enemyFireSeed',
+      'enemyEarthwork',
+      'building',
+      'enemyFireBall',
+    ]));
+    const repaired = repairFacility(state, 'liu', unit.id, 'enemyEarthwork');
+
+    expect(repaired.facilities?.enemyEarthwork).toMatchObject({ durability: 400, completed: true, forceId: 'cao' });
+    expect(() => repairFacility(state, 'liu', unit.id, 'enemyBuilding')).toThrow(/己方设施|宸辨柟璁炬柦/);
     expect(() => repairFacility(state, 'liu', unit.id, 'damagedCompleted')).toThrow(/修补范围|淇ˉ鑼冨洿/);
   });
 
@@ -897,8 +965,8 @@ describe('battle deployment and movement actions', () => {
     expect(seedResult.units['seed-target'].troops).toBeLessThan(3000);
     expect(seedResult.facilities?.seed).toBeUndefined();
     expect(seedResult.firePlots).toEqual(expect.arrayContaining([
-      { q: 11, r: 10 },
-      ...neighborsOf(11, 10),
+      expect.objectContaining({ q: 11, r: 10 }),
+      ...neighborsOf(11, 10).map((coord) => expect.objectContaining(coord)),
     ]));
     expect(seedResult.firePlots).toHaveLength(7);
 
@@ -933,11 +1001,33 @@ describe('battle deployment and movement actions', () => {
     const ballResult = useUnitStrategy(ballState, 'liu', ballUnit.id, 'fire', { coord: { q: 11, r: 10 } });
     expect(ballResult.units['ball-target'].troops).toBeLessThan(3000);
     expect(ballResult.facilities?.ball).toBeUndefined();
-    expect(ballResult.firePlots).toEqual([
+    expect(ballResult.firePlots?.map(({ q, r }) => ({ q, r }))).toEqual([
       { q: 11, r: 10 },
       { q: 12, r: 11 },
       { q: 13, r: 11 },
     ]);
+  });
+
+  it('ignites ordinary facilities with fire strategy and damages their durability', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units)[0];
+    readyUnitAt(state, unit.id, { q: 10, r: 10 }, 'sword');
+    state.officers['guan-yu'].stats.intelligence = 100;
+    state.facilities = {
+      tower: { id: 'tower', type: 'arrowTower', forceId: 'cao', q: 11, r: 10, durability: 700, completed: true },
+    };
+    state.seed = seedForFirstRoll((value) => value < fireStrategySuccessChance(100) / 100);
+
+    const next = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 11, r: 10 } });
+
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true, q: 11, r: 10 })]);
+    expect(next.firePlots).toContainEqual(expect.objectContaining({ q: 11, r: 10 }));
+    expect(next.facilities?.tower?.durability).toBeLessThan(700);
   });
 
   it('uses road and plain cost 4, and forest cost 6 for infantry movement', () => {
@@ -1367,6 +1457,32 @@ describe('battle deployment and movement actions', () => {
     expect(pushed.units['enemy-diagonal-thrust']).toMatchObject({ q: 12, r: 9 });
   });
 
+  it('applies ground fire damage after tactic damage when a tactic pushes a unit onto burning ground', () => {
+    const { state, attacker, target } = spearTacticState('S', 1, 10_000);
+    const fireCell = { q: 12, r: 11 };
+    state.firePlots = [{ ...fireCell, remainingTenDays: 2 }];
+
+    const next = useUnitTactic(state, 'liu', attacker.id, target.id, 'spear-thrust');
+    const reports = next.battleDamageReports ?? [];
+
+    expect(next.units[target.id]).toMatchObject(fireCell);
+    expect(reports).toHaveLength(2);
+    expect(reports[0]).toMatchObject({
+      unitId: target.id,
+      q: target.q,
+      r: target.r,
+      kind: 'attack',
+    });
+    expect(reports[1]).toMatchObject({
+      unitId: target.id,
+      q: fireCell.q,
+      r: fireCell.r,
+      amount: 500,
+      kind: 'attack',
+    });
+    expect(next.units[target.id].troops).toBe(target.troops - reports[0].amount - reports[1].amount);
+  });
+
   it('damages the unit directly behind a spear thrust target regardless of force', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -1528,12 +1644,12 @@ describe('battle deployment and movement actions', () => {
     const burning = useUnitTactic(crossbowState, 'liu', crossbow.id, 'enemy-fire', 'crossbow-fire');
 
     expect(burning.units[crossbow.id].energy).toBe(90);
-    expect(burning.firePlots).toContainEqual(targetCell);
+    expect(burning.firePlots).toContainEqual(expect.objectContaining(targetCell));
     expect(burning.units['enemy-fire'].burningTenDays).toBeUndefined();
 
     const movedEnemy = structuredClone(burning);
     movedEnemy.units['enemy-fire'].q = targetCell.q + 1;
-    expect(movedEnemy.firePlots).toContainEqual(targetCell);
+    expect(movedEnemy.firePlots).toContainEqual(expect.objectContaining(targetCell));
     expect(movedEnemy.units['enemy-fire'].burningTenDays).toBeUndefined();
 
     const cavalryState = deployUnit(createGame('liu', 1), 'liu', {
@@ -1552,6 +1668,43 @@ describe('battle deployment and movement actions', () => {
 
     expect(breakthrough.units[cavalry.id]).toMatchObject({ q: 12, r: 11, energy: 80, acted: true });
     expect(breakthrough.units['enemy-breakthrough']).toMatchObject({ q: 11, r: 10 });
+  });
+
+  it('lets fire arrow ignite a completed fire ball facility exactly two cells away', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'crossbow',
+      troops: 2000,
+      food: 3000,
+    });
+    setUniformTerrain(state, 'plain');
+    const crossbow = Object.values(state.units)[0];
+    readyUnitAt(state, crossbow.id, { q: 10, r: 10 }, 'crossbow');
+    state.facilities = {
+      ball: { id: 'ball', type: 'fireBall', forceId: 'liu', q: 12, r: 11, durability: 200, completed: true },
+      adjacentBall: { id: 'adjacentBall', type: 'fireBall', forceId: 'liu', q: 11, r: 10, durability: 200, completed: true },
+      tower: { id: 'tower', type: 'arrowTower', forceId: 'cao', q: 12, r: 10, durability: 700 },
+    };
+
+    expect(tacticTargetFacilities(state, crossbow.id, 'crossbow-fire').map((facility) => facility.id)).toEqual(['ball']);
+    expect(tacticTargetFacilities(state, crossbow.id, 'crossbow-pierce')).toEqual([]);
+
+    const ignited = useUnitTactic(state, 'liu', crossbow.id, 'ball', 'crossbow-fire');
+
+    expect(ignited.facilities?.ball).toBeUndefined();
+    expect(ignited.facilities?.adjacentBall).toBeDefined();
+    expect(ignited.units[crossbow.id]).toMatchObject({ energy: 90, acted: true });
+    expect(ignited.firePlots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ q: 12, r: 11 }),
+    ]));
+    expect(ignited.firePlots).toHaveLength(3);
+    const firePlotKeys = new Set(ignited.firePlots!.map(gridKey));
+    const linkedFirePlots = ignited.firePlots!.filter((plot, index, plots) => (
+      index === 0 || plots.some((previous, previousIndex) => previousIndex < index && neighborsOf(previous.q, previous.r).some((coord) => gridKey(coord) === gridKey(plot)))
+    ));
+    expect(linkedFirePlots).toHaveLength(3);
+    expect(neighborsOf(12, 11).some((coord) => firePlotKeys.has(gridKey(coord)))).toBe(true);
   });
 
   it('lists plot strategies and applies fire, extinguish, false report, disturb, calm, and inspire', () => {
@@ -1597,7 +1750,7 @@ describe('battle deployment and movement actions', () => {
     expect(strategyTargetUnits(state, unit.id, 'inspire').map((target) => target.id)).toEqual([unit.id]);
 
     const burned = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 10, r: 9 } });
-    expect(burned.firePlots).toContainEqual({ q: 10, r: 9 });
+    expect(burned.firePlots).toContainEqual(expect.objectContaining({ q: 10, r: 9 }));
     expect(burned.units[unit.id]).toMatchObject({ energy: 40, acted: true });
 
     const extinguished = useUnitStrategy(state, 'liu', unit.id, 'extinguish', { coord: { q: 11, r: 10 } });
@@ -1637,12 +1790,12 @@ describe('battle deployment and movement actions', () => {
 
     const next = useUnitStrategy(state, 'liu', unit.id, strategyId, selection);
 
-    expect(next.rngCursor).toBe(state.rngCursor + (strategyId === 'disturb' ? 2 : 1));
+    expect(next.rngCursor).toBe(state.rngCursor + (strategyId === 'disturb' || strategyId === 'fire' ? 2 : 1));
     expect(next.units[unit.id]).toMatchObject({ energy: 100 - cost, acted: true });
     expect(next.strategyResultReports).toEqual([expect.objectContaining({
       strategyId, label, succeeded: true, q: target.q, r: target.r,
     })]);
-    if (strategyId === 'fire') expect(next.firePlots).toContainEqual(target);
+    if (strategyId === 'fire') expect(next.firePlots).toContainEqual(expect.objectContaining(target));
     if (strategyId === 'false-report') expect(targetStatus.falseReportedTenDays).toBeUndefined();
     if (strategyId === 'false-report') expect(next.units['strategy-target'].falseReportedTenDays).toBe(1);
     if (strategyId === 'disturb') {
@@ -1768,17 +1921,17 @@ describe('battle deployment and movement actions', () => {
     };
 
     const enemyBurned = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 11, r: 10 } });
-    expect(enemyBurned.firePlots).toContainEqual({ q: 11, r: 10 });
+    expect(enemyBurned.firePlots).toContainEqual(expect.objectContaining({ q: 11, r: 10 }));
     expect(enemyBurned.units['enemy-on-fire'].troops).toBeLessThan(3000);
     expect(enemyBurned.battleDamageReports?.some((report) => report.unitId === 'enemy-on-fire')).toBe(true);
 
     const friendlyBurned = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 10, r: 9 } });
-    expect(friendlyBurned.firePlots).toContainEqual({ q: 10, r: 9 });
+    expect(friendlyBurned.firePlots).toContainEqual(expect.objectContaining({ q: 10, r: 9 }));
     expect(friendlyBurned.units['friendly-on-fire'].troops).toBeLessThan(3000);
     expect(friendlyBurned.battleDamageReports?.some((report) => report.unitId === 'friendly-on-fire')).toBe(true);
   });
 
-  it('keeps the base fire chance when an occupied target has equal intelligence', () => {
+  it('uses opposed intelligence for an enemy occupying the fire target cell', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -1800,13 +1953,13 @@ describe('battle deployment and movement actions', () => {
 
     const next = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 10, r: 9 } });
 
-    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true })]);
-    expect(next.firePlots).toContainEqual(expect.objectContaining({ q: 10, r: 9 }));
-    expect(next.units['high-intelligence-fire-target'].troops).toBeLessThan(3000);
-    expect(next.rngCursor).toBe(state.rngCursor + 2);
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
+    expect(next.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: 10, r: 9 }));
+    expect(next.units['high-intelligence-fire-target'].troops).toBe(3000);
+    expect(next.rngCursor).toBe(state.rngCursor + 1);
   });
 
-  it('does not raise the base fire chance for a lower-intelligence occupant', () => {
+  it('allows opposed intelligence to raise fire success against a weaker enemy', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -1828,10 +1981,10 @@ describe('battle deployment and movement actions', () => {
 
     const next = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 10, r: 9 } });
 
-    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
-    expect(next.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: 10, r: 9 }));
-    expect(next.units['low-intelligence-fire-target'].troops).toBe(3000);
-    expect(next.rngCursor).toBe(state.rngCursor + 1);
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true })]);
+    expect(next.firePlots).toContainEqual(expect.objectContaining({ q: 10, r: 9 }));
+    expect(next.units['low-intelligence-fire-target'].troops).toBeLessThan(3000);
+    expect(next.rngCursor).toBe(state.rngCursor + 2);
   });
 
   it('uses discord to make an adjacent enemy attack a neighboring same-force unit', () => {
@@ -2510,7 +2663,7 @@ describe('strategy officer skills', () => {
     expect(next.rngCursor).toBe(state.rngCursor + 1);
   });
 
-  it('guarantees 火神 fire against a lower-intelligence friendly occupant', () => {
+  it('does not guarantee 火神 fire against a lower-intelligence friendly occupant', () => {
     const { state, caster, target } = strategySkillState('火神');
     target.forceId = caster.forceId;
     state.officers['zhuge-liang'].stats.intelligence = 100;
@@ -2520,11 +2673,34 @@ describe('strategy officer skills', () => {
 
     const next = useUnitStrategy(state, 'liu', caster.id, 'fire', { coord: { q: target.q, r: target.r } });
 
-    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true })]);
-    expect(next.firePlots).toContainEqual(expect.objectContaining({ q: target.q, r: target.r }));
-    expect(next.units[target.id].troops).toBe(4000);
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
+    expect(next.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: target.q, r: target.r }));
+    expect(next.units[target.id].troops).toBe(5000);
     expect(next.units[caster.id]).toMatchObject({ energy: 90, acted: true });
     expect(next.rngCursor).toBe(state.rngCursor + 1);
+  });
+
+  it.each([
+    ['fireSeed', { q: 11, r: 11 }],
+    ['fireBall', { q: 12, r: 11 }],
+  ] as const)('protects an enemy 火神 unit from %s trap splash caused by fire strategy', (facilityType, targetCoord) => {
+    const { state, caster, target } = strategySkillState('无', '火神');
+    target.q = targetCoord.q;
+    target.r = targetCoord.r;
+    state.officers['zhuge-liang'].stats.intelligence = 100;
+    state.seed = seedForFirstRoll((value) => value < fireStrategySuccessChance(100) / 100);
+    state.facilities = {
+      trap: {
+        id: 'trap', type: facilityType, forceId: 'liu', q: 11, r: 10, durability: 200, completed: true,
+      },
+    };
+
+    const next = useUnitStrategy(state, 'liu', caster.id, 'fire', { coord: { q: 11, r: 10 } });
+
+    expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true })]);
+    expect(next.units[target.id].troops).toBe(5000);
+    expect(next.battleDamageReports?.some((report) => report.unitId === target.id)).toBe(false);
+    expect(next.firePlots ?? []).not.toContainEqual(expect.objectContaining(targetCoord));
   });
 
   it('doubles only 火神 immediate fire damage and leaves the later ground-fire tick at 500', () => {
@@ -2621,5 +2797,28 @@ describe('strategy officer skills', () => {
     expect(next.units[caster.id]).toMatchObject({ energy: 85, acted: true });
     expect(next.rngCursor).toBe(state.rngCursor + expectedCursor);
     expect(next.strategyResultReports).toHaveLength(1);
+  });
+
+  it('dispatches 连环 through the registered complex handler', () => {
+    const { state, caster, target } = strategySkillState('连环');
+    state.officers['zhuge-liang'].stats.intelligence = 100;
+    state.officers['cao-ren'].stats.intelligence = 1;
+    const handlerById = (skillHandlers as typeof skillHandlers & {
+      complexHandlerById?: (id: 'chainStrategy') => {
+        apply: (context: unknown) => string[];
+      };
+    }).complexHandlerById;
+    expect(handlerById).toBeTypeOf('function');
+    const handler = handlerById?.('chainStrategy');
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error('chainStrategy handler is not registered');
+    const applySpy = vi.spyOn(handler, 'apply');
+
+    try {
+      useUnitStrategy(state, 'liu', caster.id, 'disturb', { targetUnitId: target.id });
+      expect(applySpy).toHaveBeenCalledOnce();
+    } finally {
+      applySpy.mockRestore();
+    }
   });
 });

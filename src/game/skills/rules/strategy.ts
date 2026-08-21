@@ -1,8 +1,10 @@
 import type { StrategyId } from '../../battle/strategies';
 import type { ArmyUnit, GameState } from '../../types';
 import { skillConditionMatches } from '../conditions';
+import { complexHandlerById } from '../handlers';
 import { resolveUnitSkills } from '../sources';
-import { effectsOfKind, hasActiveSkill } from '../stacking';
+import { effectsOfKind } from '../stacking';
+import type { ComplexHandlerId } from '../types';
 
 const HOSTILE_UNIT_STRATEGIES = new Set<StrategyId>(['fire', 'false-report', 'disturb', 'discord']);
 
@@ -12,6 +14,7 @@ export interface StrategySkillRules {
   immune: boolean;
   fireDamageMultiplier: number;
   chain: boolean;
+  complexHandlerIds: ComplexHandlerId[];
 }
 
 export function resolveStrategySkillRules(
@@ -36,17 +39,18 @@ export function resolveStrategySkillRules(
     ? effectsOfKind(casterSkills, 'fireDamageMultiplier')
       .reduce((highest, { effect }) => Math.max(highest, effect.multiplier), 1)
     : 1;
+  const complexHandlerIds = target && target.forceId !== caster.forceId
+    ? [...new Set(effectsOfKind(casterSkills, 'complexHandler')
+      .map(({ effect }) => effect.handler)
+      .filter((handlerId) => complexHandlerById(handlerId).canApply(strategyId)))]
+    : [];
 
   return {
     energyCost: fixedCosts.length > 0 ? Math.min(baseCost, ...fixedCosts) : baseCost,
     guaranteed,
     immune,
     fireDamageMultiplier,
-    chain: Boolean(
-      target &&
-      target.forceId !== caster.forceId &&
-      (strategyId === 'false-report' || strategyId === 'disturb') &&
-      hasActiveSkill(casterSkills, '连环'),
-    ),
+    chain: complexHandlerIds.includes('chainStrategy'),
+    complexHandlerIds,
   };
 }

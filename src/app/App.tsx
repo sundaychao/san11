@@ -3,6 +3,7 @@ import { AuthScreen } from '../components/AuthScreen';
 import { GameShell } from '../components/GameShell';
 import { RoomLobbyScreen } from '../components/RoomLobbyScreen';
 import { StartScreen } from '../components/StartScreen';
+import { AudioEventProvider } from '../audio/reactAudioEventAdapter';
 import { GameProvider, useGame } from '../game/store/GameProvider';
 
 function AppContent() {
@@ -15,9 +16,11 @@ function AppContent() {
 export function App() {
   return (
     <ErrorBoundary>
-      <GameProvider>
-        <AppContent />
-      </GameProvider>
+      <AudioEventProvider>
+        <GameProvider>
+          <AppContent />
+        </GameProvider>
+      </AudioEventProvider>
     </ErrorBoundary>
   );
 }

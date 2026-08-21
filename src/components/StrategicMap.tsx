@@ -40,6 +40,7 @@ const FACILITY_RANGE: Partial<Record<FacilityType, number>> = {
   musicTower: 2,
   fortress: 3,
 };
+const FORCE_COLORED_FACILITIES = new Set<FacilityType>(['drum', 'arrowTower', 'musicTower', 'fortress']);
 
 function cellPosition(q: number, r: number) {
   return {
@@ -256,6 +257,7 @@ export function StrategicMap({
     const centerY = position.y + CELL_SIZE / 2;
     const canActThisTurn = unit.forceId === state.turnForceId && !unit.moved && !unit.acted && !unitIsIncapacitated(unit) && unit.movementRemaining > 0;
     const isAttackTarget = attackTargetUnitIdSet.has(unit.id);
+    const isFirePlotTarget = firePlotTargetKeys.has(`${unit.q},${unit.r}`);
     const forceColor = state.forces[unit.forceId].color;
     const statusFlags = [
       unit.confusedTenDays ? 'confused' : null,
@@ -279,6 +281,10 @@ export function StrategicMap({
           if (event.button === 0 || event.button === 2) dismissUnitHover();
           if (event.button !== 0) return;
           event.stopPropagation();
+          if (isFirePlotTarget) {
+            onFirePlotTargetSelect?.({ q: unit.q, r: unit.r });
+            return;
+          }
           if (isAttackTarget) {
             onAttackTargetSelect?.(unit.id);
             return;
@@ -581,17 +587,24 @@ export function StrategicMap({
           {Object.values(state.facilities ?? {}).map((facility) => {
             const position = displayCellPosition(facility.q, facility.r);
             const isFacilityTarget = attackTargetFacilityIdSet.has(facility.id);
+            const isFirePlotTarget = firePlotTargetKeys.has(`${facility.q},${facility.r}`);
             const isCompleted = facility.completed !== false;
+            const usesForceBackground = FORCE_COLORED_FACILITIES.has(facility.type);
+            const ownerColor = state.forces[facility.forceId]?.color ?? '#f6e7a6';
             return (
               <g
                 key={facility.id}
                 data-facility-id={facility.id}
                 data-facility-type={facility.type}
                 data-grid-position={`${facility.q},${facility.r}`}
-                className={`battle-facility${isFacilityTarget ? ' is-attack-target' : ''}${!isCompleted ? ' is-under-construction' : ''}`}
+                className={`battle-facility${isFacilityTarget ? ' is-attack-target' : ''}${isFirePlotTarget ? ' is-strategy-target' : ''}${!isCompleted ? ' is-under-construction' : ''}`}
                 onPointerDown={(event) => {
                   if (event.button !== 0) return;
                   event.stopPropagation();
+                  if (isFirePlotTarget) {
+                    onFirePlotTargetSelect?.({ q: facility.q, r: facility.r });
+                    return;
+                  }
                   if (isFacilityTarget) {
                     onFacilityTargetSelect?.(facility.id);
                   }
@@ -615,7 +628,11 @@ export function StrategicMap({
                   y={position.y}
                   width={CELL_SIZE}
                   height={CELL_SIZE}
-                  className="battle-facility-hit"
+                  className={`battle-facility-hit battle-facility-background${usesForceBackground ? ' is-force-colored' : ''}`}
+                  data-testid="battle-facility-background"
+                  data-facility-id={facility.id}
+                  data-facility-type={facility.type}
+                  style={usesForceBackground ? { '--force-color': ownerColor } as CSSProperties : undefined}
                 />
                 <text
                   className={`battle-facility-marker facility-${facility.type}`}

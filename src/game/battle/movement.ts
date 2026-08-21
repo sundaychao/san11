@@ -1,15 +1,16 @@
 export {
   deploymentCells,
-  movementAllowanceForProfile,
-  movementAllowanceForUnit,
   movementCells,
   unitIsIncapacitated,
-} from './legacyCore';
-export type { MovementProfile } from './legacyCore';
+} from './movementRules';
+export { movementAllowanceForProfile, movementAllowanceForUnit } from './catalog';
+export type { MovementProfile } from './catalog';
 
 import type { ForceId, GameState } from '../types';
+import { applyGroundFireDamageToUnit } from './fire';
 import { gridKey, type GridCoord } from './grid';
-import { assertUnitTurn, isLegalUnitCell, reachableCosts } from './shared';
+import { isLegalUnitCell, reachableCosts } from './movementRules';
+import { assertUnitTurn } from './shared';
 
 export function moveUnit(state: GameState, forceId: ForceId, unitId: string, destination: GridCoord): GameState {
   const unit = assertUnitTurn(state, forceId, unitId);
@@ -26,6 +27,7 @@ export function moveUnit(state: GameState, forceId: ForceId, unitId: string, des
   next.battleDamageReports = [];
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
+  applyGroundFireDamageToUnit(next, unitId, 'move-fire');
   return next;
 }
 

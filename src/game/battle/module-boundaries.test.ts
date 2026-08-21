@@ -1,18 +1,34 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { initSync, parse } from 'es-module-lexer';
+import {
+  isElementAccessExpression,
+  isIdentifier,
+  isParenthesizedExpression,
+  isPropertyAccessExpression,
+  isStringLiteral,
+  isTypeNode,
+  SyntaxKind,
+  type Identifier,
+  type Node,
+} from 'typescript/unstable/ast';
+import { API } from 'typescript/unstable/sync';
 import { describe, expect, it } from 'vitest';
 
 const modules = [
+  'catalog',
   'definitions',
   'shared',
   'movement',
+  'movementRules',
+  'targetRules',
   'facilities',
   'combat',
   'tactics',
   'strategies',
   'deployment',
+  'queries',
 ];
 
 const skillRoot = resolve('src/game/skills');
@@ -163,12 +179,215 @@ function isForbiddenModuleSpecifier(filename: string, specifier: string) {
     .some((segment) => segment === 'components' || segment === 'network' || segment === 'audio');
 }
 
+function resolveSourceDependency(filename: string, specifier: string, sourceRoot: string) {
+  if (!specifier.startsWith('.')) return null;
+  const imported = resolve(dirname(filename), specifier);
+  const extension = extname(imported);
+  const candidates = extension === '.ts' || extension === '.tsx'
+    ? [imported]
+    : extension === '.js' || extension === '.jsx'
+      ? [
+          `${imported.slice(0, -extension.length)}${extension === '.jsx' ? '.tsx' : '.ts'}`,
+          `${imported.slice(0, -extension.length)}${extension === '.jsx' ? '.ts' : '.tsx'}`,
+        ]
+      : [`${imported}.ts`, `${imported}.tsx`, resolve(imported, 'index.ts'), resolve(imported, 'index.tsx')];
+  for (const candidate of candidates) {
+    if (
+      pathIsWithin(sourceRoot, candidate) &&
+      existsSync(candidate) &&
+      statSync(candidate).isFile() &&
+      isProductionTypeScriptFile(relative(sourceRoot, candidate))
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function isOutsideSourceRoot(filename: string, specifier: string, sourceRoot: string) {
+  return specifier.startsWith('.') && !pathIsWithin(sourceRoot, resolve(dirname(filename), specifier));
+}
+
+function isPropertyOrMarkupName(identifier: Identifier) {
+  const parent = identifier.parent as Node & { name?: Node; propertyName?: Node };
+  if (parent.propertyName === identifier && parent.kind === SyntaxKind.BindingElement) return true;
+  if (parent.name !== identifier) return false;
+  return (
+    parent.kind === SyntaxKind.PropertyAccessExpression ||
+    parent.kind === SyntaxKind.PropertyAssignment ||
+    parent.kind === SyntaxKind.PropertyDeclaration ||
+    parent.kind === SyntaxKind.PropertySignature ||
+    parent.kind === SyntaxKind.MethodDeclaration ||
+    parent.kind === SyntaxKind.MethodSignature ||
+    parent.kind === SyntaxKind.GetAccessor ||
+    parent.kind === SyntaxKind.SetAccessor ||
+    parent.kind === SyntaxKind.JsxAttribute ||
+    parent.kind === SyntaxKind.ImportSpecifier ||
+    parent.kind === SyntaxKind.ExportSpecifier
+  );
+}
+
+function isRuntimeIdentifier(identifier: Identifier) {
+  if (isPropertyOrMarkupName(identifier)) return false;
+  return isRuntimeNode(identifier);
+}
+
+function isRuntimeNode(node: Node) {
+  for (let parent = node.parent; parent.kind !== SyntaxKind.SourceFile; parent = parent.parent) {
+    if (isTypeNode(parent)) return false;
+  }
+  return true;
+}
+
+type BrowserGlobalName = 'window' | 'document';
+
+interface GlobalThisBrowserReference {
+  name: BrowserGlobalName;
+  globalThis: Identifier;
+}
+
+function browserGlobalName(node: Node): BrowserGlobalName | null {
+  if ((isIdentifier(node) || isStringLiteral(node)) && (node.text === 'window' || node.text === 'document')) {
+    return node.text;
+  }
+  return null;
+}
+
+function unwrappedGlobalThis(node: Node): Identifier | null {
+  let expression = node;
+  while (isParenthesizedExpression(expression)) expression = expression.expression;
+  return isIdentifier(expression) && expression.text === 'globalThis' ? expression : null;
+}
+
+function globalThisBrowserReference(node: Node): GlobalThisBrowserReference | null {
+  if (!isRuntimeNode(node)) return null;
+
+  if (isPropertyAccessExpression(node)) {
+    const name = browserGlobalName(node.name);
+    const globalThis = unwrappedGlobalThis(node.expression);
+    return name && globalThis ? { name, globalThis } : null;
+  }
+
+  if (isElementAccessExpression(node)) {
+    const name = isStringLiteral(node.argumentExpression)
+      ? browserGlobalName(node.argumentExpression)
+      : null;
+    const globalThis = unwrappedGlobalThis(node.expression);
+    return name && globalThis ? { name, globalThis } : null;
+  }
+
+  if (node.kind !== SyntaxKind.BindingElement) return null;
+  const binding = node as Node & { name?: Node; propertyName?: Node };
+  const name = binding.propertyName ?? binding.name;
+  const declaration = node.parent.parent as Node & { initializer?: Node };
+  const globalThis = declaration.initializer ? unwrappedGlobalThis(declaration.initializer) : null;
+  const browserName = name ? browserGlobalName(name) : null;
+  return browserName && globalThis ? { name: browserName, globalThis } : null;
+}
+
+function browserGlobalReferences(filenames: readonly string[], sourceRoot: string) {
+  const references = new Map<string, string[]>();
+  if (!filenames.some((filename) => /\b(?:window|document)\b/.test(readFileSync(filename, 'utf8')))) {
+    return references;
+  }
+
+  const api = new API({ cwd: sourceRoot });
+  const snapshot = api.updateSnapshot({ openFiles: [...filenames] });
+  try {
+    for (const filename of filenames) {
+      const project = snapshot.getDefaultProjectForFile(filename);
+      const sourceFile = project?.program.getSourceFile(filename);
+      if (!project || !sourceFile) continue;
+
+      const identifiers: Identifier[] = [];
+      const globalThisReferences: GlobalThisBrowserReference[] = [];
+      const visit = (node: Node): void => {
+        const globalThisReference = globalThisBrowserReference(node);
+        if (globalThisReference) globalThisReferences.push(globalThisReference);
+        if (
+          isIdentifier(node) &&
+          (node.text === 'window' || node.text === 'document') &&
+          isRuntimeIdentifier(node)
+        ) {
+          identifiers.push(node);
+        }
+        node.forEachChild(visit);
+      };
+      sourceFile.forEachChild(visit);
+
+      const identifierSymbols = project.checker.getSymbolAtPosition(
+        filename,
+        identifiers.map((identifier) => identifier.getStart(sourceFile)),
+      );
+      const globalThisSymbols = project.checker.getSymbolAtPosition(
+        filename,
+        globalThisReferences.map((reference) => reference.globalThis.getStart(sourceFile)),
+      );
+      const globals = new Set<string>();
+      identifiers.forEach((identifier, index) => {
+        const symbol = identifierSymbols[index];
+        const hasNonLibraryDeclaration = symbol?.declarations.some((declaration) => {
+          const node = declaration.resolve(project);
+          return node !== undefined && !project.program.isSourceFileDefaultLibrary(node.getSourceFile());
+        }) ?? false;
+        if (!hasNonLibraryDeclaration) globals.add(identifier.text);
+      });
+      globalThisReferences.forEach((reference, index) => {
+        const symbol = globalThisSymbols[index];
+        const declarations = symbol?.declarations
+          .map((declaration) => declaration.resolve(project))
+          .filter((declaration): declaration is Node => declaration !== undefined) ?? [];
+        if (
+          symbol?.name === 'globalThis' &&
+          declarations.every((declaration) => project.program.isSourceFileDefaultLibrary(declaration.getSourceFile()))
+        ) {
+          globals.add(reference.name);
+        }
+      });
+      if (globals.size > 0) references.set(filename, [...globals].sort());
+    }
+  } finally {
+    snapshot.dispose();
+    api.close();
+  }
+  return references;
+}
+
 function forbiddenSkillDependencies(root = skillRoot) {
-  return skillModuleFiles(root).flatMap((filename) => (
-    moduleSpecifiers(filename)
-      .filter((specifier) => isForbiddenModuleSpecifier(filename, specifier))
-      .map((specifier) => ({ file: posixPath(relative(root, filename)), specifier }))
-  )).sort((left, right) => comparePaths(`${left.file}:${left.specifier}`, `${right.file}:${right.specifier}`));
+  const sourceRoot = resolve(root, '../..');
+  const skillFiles = skillModuleFiles(root);
+  const pending = [...skillFiles];
+  const visited = new Set<string>();
+  const forbidden: Array<{ file: string; specifier: string }> = [];
+
+  while (pending.length > 0) {
+    const filename = pending.pop()!;
+    if (visited.has(filename)) continue;
+    visited.add(filename);
+    for (const { specifier } of moduleReferences(filename)) {
+      if (isForbiddenModuleSpecifier(filename, specifier)) {
+        forbidden.push({ file: posixPath(relative(root, filename)), specifier });
+      }
+      if (isOutsideSourceRoot(filename, specifier, sourceRoot)) {
+        forbidden.push({ file: posixPath(relative(root, filename)), specifier });
+        continue;
+      }
+      const dependency = resolveSourceDependency(filename, specifier, sourceRoot);
+      if (dependency && !visited.has(dependency)) pending.push(dependency);
+    }
+  }
+
+  for (const [filename, globals] of browserGlobalReferences([...visited], sourceRoot)) {
+    for (const specifier of globals) {
+      forbidden.push({ file: posixPath(relative(root, filename)), specifier });
+    }
+  }
+
+  return forbidden
+    .filter((dependency, index, entries) => entries.findIndex((entry) => (
+      entry.file === dependency.file && entry.specifier === dependency.specifier
+    )) === index)
+    .sort((left, right) => comparePaths(`${left.file}:${left.specifier}`, `${right.file}:${right.specifier}`));
 }
 
 function withSkillFixture<T>(files: Record<string, string>, run: (root: string) => T) {
@@ -271,10 +490,166 @@ describe('battle module boundaries', () => {
     });
   });
 
+  it('follows relative static, reexported, dynamic, and type-only dependencies outside the skill root', () => {
+    withSkillFixture({
+      'entry.ts': [
+        "import '../shared/staticBridge';",
+        "export { reexported } from '../shared/reexportBridge';",
+        "void import('../shared/dynamicBridge');",
+        "import type { NetworkType } from '../shared/typeBridge';",
+      ].join('\n'),
+      '../shared/staticBridge.ts': "import '../../components/GameShell';",
+      '../shared/reexportBridge.ts': "export { reexported } from '../network/session';",
+      '../shared/dynamicBridge.ts': "void import('react');",
+      '../shared/typeBridge.ts': "export type { NetworkType } from '../network/types';",
+    }, (root) => {
+      expect(forbiddenSkillDependencies(root)).toEqual([
+        { file: '../shared/dynamicBridge.ts', specifier: 'react' },
+        { file: '../shared/reexportBridge.ts', specifier: '../network/session' },
+        { file: '../shared/staticBridge.ts', specifier: '../../components/GameShell' },
+        { file: '../shared/typeBridge.ts', specifier: '../network/types' },
+      ]);
+    });
+  });
+
+  it('follows TypeScript sources imported through Bundler-style .js and .jsx specifiers', () => {
+    withSkillFixture({
+      'entry.ts': [
+        "import '../shared/bridge.js';",
+        "export { view } from '../shared/view.jsx';",
+      ].join('\n'),
+      '../shared/bridge.ts': "import 'react';",
+      '../shared/view.tsx': 'export const view = document.body;',
+    }, (root) => {
+      expect(forbiddenSkillDependencies(root)).toEqual([
+        { file: '../shared/bridge.ts', specifier: 'react' },
+        { file: '../shared/view.tsx', specifier: 'document' },
+      ]);
+    });
+  });
+
+  it('rejects browser globals in recursively visited source dependencies', () => {
+    withSkillFixture({
+      'entry.ts': "export { bridge } from '../shared/bridge';",
+      '../shared/bridge.ts': [
+        'export function bridge() {',
+        '  window.addEventListener("resize", bridge);',
+        '  return document.body;',
+        '}',
+      ].join('\n'),
+    }, (root) => {
+      expect(forbiddenSkillDependencies(root)).toEqual([
+        { file: '../shared/bridge.ts', specifier: 'document' },
+        { file: '../shared/bridge.ts', specifier: 'window' },
+      ]);
+    });
+  });
+
+  it('rejects relative dependencies that escape the source root', () => {
+    withSkillFixture({
+      'entry.ts': "export { serverBridge } from '../../../server/bridge';",
+      '../../../server/bridge.ts': 'export const serverBridge = true;',
+    }, (root) => {
+      expect(forbiddenSkillDependencies(root)).toEqual([
+        { file: 'entry.ts', specifier: '../../../server/bridge' },
+      ]);
+    });
+  });
+
+  it('rejects runtime window and document references in skill production source', () => {
+    withSkillFixture({
+      'entry.tsx': [
+        'export function mount() {',
+        '  window.addEventListener("resize", mount);',
+        '  return document.body;',
+        '}',
+      ].join('\n'),
+    }, (root) => {
+      expect(forbiddenSkillDependencies(root)).toEqual([
+        { file: 'entry.tsx', specifier: 'document' },
+        { file: 'entry.tsx', specifier: 'window' },
+      ]);
+    });
+  });
+
+  it('rejects window and document references accessed through globalThis', () => {
+    withSkillFixture({
+      'direct.ts': 'export const browserWindow = globalThis.window;',
+      'parenthesized.ts': 'export const browserDocument = (globalThis).document;',
+      'computed.ts': [
+        "export const browserWindow = globalThis['window'];",
+        "export const browserDocument = globalThis['document'];",
+      ].join('\n'),
+      'destructured.ts': [
+        'const { window: browserWindow, document: browserDocument } = globalThis;',
+        'export { browserWindow, browserDocument };',
+      ].join('\n'),
+    }, (root) => {
+      expect(forbiddenSkillDependencies(root)).toEqual([
+        { file: 'computed.ts', specifier: 'document' },
+        { file: 'computed.ts', specifier: 'window' },
+        { file: 'destructured.ts', specifier: 'document' },
+        { file: 'destructured.ts', specifier: 'window' },
+        { file: 'direct.ts', specifier: 'window' },
+        { file: 'parenthesized.ts', specifier: 'document' },
+      ]);
+    });
+  });
+
+  it('ignores locally bound globalThis and type-only globalThis references', () => {
+    withSkillFixture({
+      'local.ts': [
+        'const globalThis = { window: "local", document: "local" };',
+        'const localWindow = globalThis.window;',
+        "const localDocument = globalThis['document'];",
+        'const { window, document } = globalThis;',
+        'export { localWindow, localDocument, window, document };',
+      ].join('\n'),
+      'type-only.ts': [
+        'type BrowserWindow = typeof globalThis.window;',
+        'type BrowserDocument = typeof globalThis.document;',
+        'export type { BrowserWindow, BrowserDocument };',
+      ].join('\n'),
+    }, (root) => {
+      expect(forbiddenSkillDependencies(root)).toEqual([]);
+    });
+  });
+
+  it('ignores property names, type members, JSX attributes, and locally bound browser names', () => {
+    withSkillFixture({
+      'entry.tsx': [
+        'declare const object: { window: string; document: string };',
+        'declare const Widget: (props: { window: string; document: string }) => unknown;',
+        'const propertyValues = [object.window, object.document];',
+        'const namedProperties = { window: "local", document: "local" };',
+        'type BrowserShape = { window: string; document: string };',
+        'function scoped(window: string, document: string) {',
+        '  const local = { window, document };',
+        '  return [window, document, local];',
+        '}',
+        'function declaredLocally() {',
+        '  const window = "local";',
+        '  const document = "local";',
+        '  return [window, document];',
+        '}',
+        'const dynamicBrowserProperty = "window";',
+        'const dynamicGlobalThisProperty = globalThis[dynamicBrowserProperty];',
+        'const view = <Widget window="local" document="local" />;',
+        'export { propertyValues, namedProperties, scoped, declaredLocally, dynamicGlobalThisProperty, view };',
+        'export type { BrowserShape };',
+      ].join('\n'),
+    }, (root) => {
+      expect(forbiddenSkillDependencies(root)).toEqual([]);
+    });
+  });
+
   it('ignores forbidden words that occur only in comments and string literals', () => {
     withSkillFixture({
       'entry.ts': [
         "const note = \"import('react') socket.io-client ../components ../network\";",
+        "const browserGlobals = 'window document';",
+        '// window.alert(document.title);',
+        '/* document.body.append(window.name); */',
         "// export { GameShell } from '../../components/GameShell';",
         "/* import io from 'socket.io-client'; */",
         'export { note };',

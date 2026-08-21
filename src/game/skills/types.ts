@@ -27,6 +27,9 @@ export type SkillEffect =
   | { kind: 'cityIncomeMultiplier'; resource: 'gold' | 'food'; multiplier: number }
   | { kind: 'complexHandler'; handler: 'chainStrategy' };
 
+export type ComplexHandlerEffect = Extract<SkillEffect, { kind: 'complexHandler' }>;
+export type ComplexHandlerId = ComplexHandlerEffect['handler'];
+
 export interface SkillDefinition {
   name: string;
   displayCategory: SkillDisplayCategory;

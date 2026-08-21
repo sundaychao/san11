@@ -9,6 +9,7 @@ export function StartScreen() {
   const [serverUrl, setServerUrl] = useState(online.serverUrl);
   const [hasRequestedRooms, setHasRequestedRooms] = useState(false);
   const onlineBusy = online.connecting || online.resumingRoom;
+  const createRoomBusy = online.resumingRoom;
 
   useEffect(() => {
     if (!auth.token || hasRequestedRooms || online.resumingRoom || online.roomId) return;
@@ -105,7 +106,7 @@ export function StartScreen() {
           </label>
         </div>
         <button type="button" onClick={() => void resumeRoom()} disabled={onlineBusy}>继续上次对战</button>
-        <button className="online-create-primary" type="button" onClick={() => void createRoom()} disabled={onlineBusy}>创建新房间</button>
+        <button className="online-create-primary" type="button" onClick={() => void createRoom()} disabled={createRoomBusy}>创建新房间</button>
         <div className="online-room-toolbar">
           <span>等待房间</span>
           <button type="button" onClick={() => void refreshRooms()} disabled={onlineBusy}>刷新房间</button>

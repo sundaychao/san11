@@ -103,6 +103,18 @@ describe('StartScreen online rooms', () => {
     expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test' });
   });
 
+  it('keeps creating a room available while the lobby connection is refreshing', async () => {
+    const user = userEvent.setup();
+    gameValue.current!.online.connecting = true;
+    render(<StartScreen />);
+
+    const createButton = screen.getByRole('button', { name: '创建新房间' });
+    expect(createButton).toBeEnabled();
+
+    await user.click(createButton);
+    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test' });
+  });
+
   it('refreshes the room list from the current server', async () => {
     const user = userEvent.setup();
     render(<StartScreen />);

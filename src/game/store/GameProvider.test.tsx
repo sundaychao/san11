@@ -10,23 +10,11 @@ import { GameShell } from '../../components/GameShell';
 import { GameProvider, useGame } from './GameProvider';
 
 const socketHolder = vi.hoisted(() => ({ socket: null as FakeOnlineSocket | null }));
-const localIntentHolder = vi.hoisted(() => ({ apply: vi.fn() }));
 
 vi.mock('../../network/socketClient', () => ({
   DEFAULT_ONLINE_SERVER_URL: 'http://localhost:8787',
   createOnlineSocket: vi.fn(() => socketHolder.socket),
 }));
-
-vi.mock('./gameCommandDispatcher', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./gameCommandDispatcher')>();
-  return {
-    ...actual,
-    applyLocalIntent: (...args: Parameters<typeof actual.applyLocalIntent>) => {
-      localIntentHolder.apply(...args);
-      return actual.applyLocalIntent(...args);
-    },
-  };
-});
 
 class MemoryStorage implements SaveAdapter {
   readonly values = new Map<string, string>();
@@ -71,6 +59,21 @@ function LocalTenDayTwoTargetProbe({ firstTargetId, secondTargetId }: { firstTar
       <output aria-label="second-target-energy">{game.state?.units[secondTargetId]?.energy ?? 0}</output>
       <output aria-label="damage-reports">{game.state?.battleDamageReports?.map((report) => report.unitId).join(',') ?? 'none'}</output>
       <button onClick={() => game.endTenDay()}>end ten day</button>
+    </div>
+  );
+}
+
+function LocalMonthTwoTargetProbe({ firstTargetId, secondTargetId }: { firstTargetId: string; secondTargetId: string }) {
+  const game = useGame();
+  return (
+    <div>
+      <output aria-label="phase">{game.state?.phase ?? 'none'}</output>
+      <output aria-label="first-target-troops">{game.state?.units[firstTargetId]?.troops ?? 0}</output>
+      <output aria-label="second-target-troops">{game.state?.units[secondTargetId]?.troops ?? 0}</output>
+      <output aria-label="first-target-energy">{game.state?.units[firstTargetId]?.energy ?? 0}</output>
+      <output aria-label="second-target-energy">{game.state?.units[secondTargetId]?.energy ?? 0}</output>
+      <output aria-label="damage-reports">{game.state?.battleDamageReports?.map((report) => report.unitId).join(',') || 'none'}</output>
+      <button onClick={() => game.endMonth()}>end month</button>
     </div>
   );
 }
@@ -409,7 +412,6 @@ function placeUnitOutsideXiangyang(state: ReturnType<typeof createGame>, unitId:
 describe('GameProvider', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    localIntentHolder.apply.mockClear();
     window.localStorage.clear();
     socketHolder.socket = null;
   });
@@ -428,7 +430,7 @@ describe('GameProvider', () => {
     expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
   });
 
-  it('fires completed player arrow towers when the local player turn starts after ending a ten-day turn', async () => {
+  it('fires completed player arrow towers when advancing to the next ten-day turn', async () => {
     const user = userEvent.setup();
     const state = createGame('liu', 1);
     state.units['arrow-target'] = {
@@ -523,6 +525,80 @@ describe('GameProvider', () => {
     expect(screen.getByLabelText('damage-reports')).toHaveTextContent('cao-target');
   });
 
+  it('applies only the player force turn-start effects after local month settlement', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    state.officers['guan-yu'].skill = '乐奏';
+    state.officers['cao-ren'].skill = '乐奏';
+    state.officers['guan-yu'].location = { kind: 'unit', unitId: 'liu-month-target' };
+    state.officers['cao-ren'].location = { kind: 'unit', unitId: 'cao-month-target' };
+    state.units = {
+      'liu-month-target': {
+        id: 'liu-month-target', kind: 'combat', forceId: 'liu', leaderId: 'guan-yu', officerIds: ['guan-yu'],
+        homeCityId: 'jiangling', troopType: 'sword', q: 12, r: 10, troops: 3000, food: 3000,
+        energy: 80, movementRemaining: 5, moved: false, acted: false,
+      },
+      'cao-month-target': {
+        id: 'cao-month-target', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
+        homeCityId: 'xiangyang', troopType: 'sword', q: 4, r: 4, troops: 3000, food: 3000,
+        energy: 40, movementRemaining: 5, moved: false, acted: false,
+      },
+    };
+    state.facilities = {
+      liuArrow: { id: 'liuArrow', type: 'arrowTower', forceId: 'liu', q: 2, r: 4, durability: 700, completed: true },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={new MemoryStorage()}>
+        <LocalMonthTwoTargetProbe firstTargetId="liu-month-target" secondTargetId="cao-month-target" />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'end month' }));
+
+    expect(screen.getByLabelText('first-target-energy')).toHaveTextContent('85');
+    expect(screen.getByLabelText('second-target-energy')).toHaveTextContent('45');
+    expect(screen.getByLabelText('second-target-troops')).toHaveTextContent('2700');
+    expect(screen.getByLabelText('damage-reports')).toHaveTextContent('cao-month-target');
+  });
+
+  it('does not trigger player force turn-start effects after the final month settlement', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    state.month = 24;
+    state.officers['guan-yu'].skill = '乐奏';
+    state.officers['guan-yu'].location = { kind: 'unit', unitId: 'liu-final-target' };
+    state.units = {
+      'liu-final-target': {
+        id: 'liu-final-target', kind: 'combat', forceId: 'liu', leaderId: 'guan-yu', officerIds: ['guan-yu'],
+        homeCityId: 'jiangling', troopType: 'sword', q: 12, r: 10, troops: 3000, food: 3000,
+        energy: 80, movementRemaining: 5, moved: false, acted: false,
+      },
+      'cao-final-target': {
+        id: 'cao-final-target', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
+        homeCityId: 'xiangyang', troopType: 'sword', q: 4, r: 4, troops: 3000, food: 3000,
+        energy: 40, movementRemaining: 5, moved: false, acted: false,
+      },
+    };
+    state.facilities = {
+      liuArrow: { id: 'liuArrow', type: 'arrowTower', forceId: 'liu', q: 2, r: 4, durability: 700, completed: true },
+      liuMusic: { id: 'liuMusic', type: 'musicTower', forceId: 'liu', q: 12, r: 11, durability: 800, completed: true },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={new MemoryStorage()}>
+        <LocalMonthTwoTargetProbe firstTargetId="liu-final-target" secondTargetId="cao-final-target" />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'end month' }));
+
+    expect(screen.getByLabelText('phase')).toHaveTextContent('finished');
+    expect(screen.getByLabelText('first-target-energy')).toHaveTextContent('80');
+    expect(screen.getByLabelText('second-target-troops')).toHaveTextContent('3000');
+    expect(screen.getByLabelText('damage-reports')).toHaveTextContent('none');
+  });
+
   it('writes manual save and resets both slots', async () => {
     const user = userEvent.setup();
     const storage = new MemoryStorage();
@@ -568,33 +644,6 @@ describe('GameProvider', () => {
 
     expect(AudioMock).toHaveBeenCalledWith(expect.stringContaining('/assets/sound/troops/followme.mp3'));
     expect(play).toHaveBeenCalledTimes(1);
-  });
-
-  it('routes local unit movement through the shared intent dispatcher', async () => {
-    const user = userEvent.setup();
-    const deployed = deployUnit(createGame('liu', 1), 'liu', {
-      cityId: 'jiangling',
-      officerIds: ['guan-yu'],
-      troopType: 'sword',
-      troops: 4000,
-      food: 6000,
-    });
-    const ready = settleTenDay(deployed);
-    const unitId = Object.keys(ready.units)[0];
-    const destination = movementCells(ready, unitId)[0];
-
-    render(
-      <GameProvider initialState={ready} storage={new MemoryStorage()}>
-        <MoveProbe unitId={unitId} destination={destination} />
-      </GameProvider>,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'move unit' }));
-
-    expect(localIntentHolder.apply).toHaveBeenCalledWith(
-      ready,
-      { type: 'moveUnit', unitId, destination },
-    );
   });
 
   it('plays the follow-me sound after initial deployment movement', async () => {

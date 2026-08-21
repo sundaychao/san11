@@ -4,18 +4,15 @@ export {
   FACILITY_BUILD_COSTS,
   movementAllowanceForProfile,
   movementAllowanceForUnit,
-  unitFacilities,
-  unitStrategies,
-  unitTactics,
-} from './legacyCore';
+} from './catalog';
 export type {
-  DeployInput,
   MovementProfile,
   StrategyId,
   StrategySelection,
   TacticId,
-  TransportInput,
   UnitFacility,
   UnitStrategy,
   UnitTactic,
-} from './legacyCore';
+} from './catalog';
+export { unitFacilities, unitStrategies, unitTactics } from './legacyCore';
+export type { DeployInput, TransportInput } from './legacyCore';

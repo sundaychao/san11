@@ -229,8 +229,14 @@ describe('online room session', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.room.state?.firePlots).toEqual([target]);
-    expect(playerState(result.room, 'guest')?.firePlots).toEqual([target]);
+    expect(result.room.state?.firePlots).toEqual([
+      expect.objectContaining({ ...target, remainingTenDays: expect.any(Number) }),
+    ]);
+    expect(result.room.state?.firePlots?.[0].remainingTenDays).toBeGreaterThanOrEqual(1);
+    expect(result.room.state?.firePlots?.[0].remainingTenDays).toBeLessThanOrEqual(3);
+    expect(playerState(result.room, 'guest')?.firePlots).toEqual([
+      expect.objectContaining({ ...target, remainingTenDays: expect.any(Number) }),
+    ]);
   });
 
   it('applies unit strategy intents in a mobile duel room', () => {

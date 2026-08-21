@@ -9,10 +9,17 @@ export type { StrategySkillRules } from './rules/strategy';
 export { facilityBuildPowerMultiplier } from './rules/facility';
 export { applyForceTurnStartSkillEffects, settleForceTurnStart } from './rules/turn';
 export { cityIncomeMultiplier, commandYieldMultiplier } from './rules/city';
-export { applyChainStrategyEffect } from './handlers';
-export type { ChainStrategyContext } from './handlers';
+export {
+  applyChainStrategyEffect,
+  canApplyChainStrategy,
+  COMPLEX_HANDLER_REGISTRY,
+  complexHandlerById,
+} from './handlers';
+export type { ChainStrategyContext, ComplexStrategyHandler } from './handlers';
 export type {
   ActiveSkill,
+  ComplexHandlerEffect,
+  ComplexHandlerId,
   SkillCondition,
   SkillDefinition,
   SkillDisplayCategory,

@@ -3,14 +3,13 @@ import { formationMovementAllowanceBonus } from '../skills/rules/movement';
 import type { ForceId, GameState } from '../types';
 import {
   DEPLOY_AP_COST,
-  deploymentCells,
   movementAllowanceForProfile,
-  spawnCellFor,
   type DeployInput,
   type TransportInput,
 } from './legacyCore';
+import { deploymentCells, spawnCellFor } from './movementRules';
 
-export { deploymentCells } from './legacyCore';
+export { deploymentCells } from './movementRules';
 export type { DeployInput, TransportInput } from './legacyCore';
 
 export function deployUnit(state: GameState, forceId: ForceId, input: DeployInput): GameState {
@@ -26,7 +25,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   const cityArmaments = armamentsOf(city?.armaments);
   const movementAllowance = movementAllowanceForProfile(troopType) + formationMovementAllowanceBonus(state, officerIds, troopType);
   if (state.phase !== 'playing') throw new Error('游戏已经结束');
-  if (state.turnForceId !== forceId) throw new Error('不是当前势力回合');
+  if (state.turnForceId !== forceId) throw new Error('不是当前势力旬');
   if (!city || city.ownerId !== forceId) throw new Error('只能从己方城市出征');
   if (input.targetCityId && !target) throw new Error('目标城市不存在');
   if (officerIds.length === 0) throw new Error('至少选择一名武将');
@@ -104,7 +103,7 @@ export function deployTransportUnit(state: GameState, forceId: ForceId, input: T
   const city = state.cities[input.cityId];
   const officer = state.officers[input.officerId];
   if (state.phase !== 'playing') throw new Error('游戏已经结束');
-  if (state.turnForceId !== forceId) throw new Error('不是当前势力回合');
+  if (state.turnForceId !== forceId) throw new Error('不是当前势力旬');
   if (!city || city.ownerId !== forceId) throw new Error('只能从己方城市输送');
   if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== city.id) throw new Error('武将不在输送城市');
   if (officer.acted) throw new Error('武将已经行动');

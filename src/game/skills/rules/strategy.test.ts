@@ -12,6 +12,7 @@ interface StrategySkillRules {
   immune: boolean;
   fireDamageMultiplier: number;
   chain: boolean;
+  complexHandlerIds: string[];
 }
 
 type ResolveStrategySkillRules = (
@@ -40,6 +41,20 @@ const resolveStrategySkillRules = (skillExports as typeof skillExports & {
 const applyChainStrategyEffect = (skillExports as typeof skillExports & {
   applyChainStrategyEffect?: ApplyChainStrategyEffect;
 }).applyChainStrategyEffect;
+
+const complexHandlerRegistry = (skillExports as typeof skillExports & {
+  COMPLEX_HANDLER_REGISTRY?: Record<string, {
+    canApply: (strategyId: StrategyId) => boolean;
+    apply: ApplyChainStrategyEffect;
+  }>;
+}).COMPLEX_HANDLER_REGISTRY;
+
+const complexHandlerById = (skillExports as typeof skillExports & {
+  complexHandlerById?: (id: string) => {
+    canApply: (strategyId: StrategyId) => boolean;
+    apply: ApplyChainStrategyEffect;
+  };
+}).complexHandlerById;
 
 function strategyFixture(casterSkill = '无', targetSkill = '无') {
   const state = createGame('liu', 1);
@@ -74,6 +89,20 @@ function rulesFor(
 }
 
 describe('strategy officer skill rules', () => {
+  it('registers every complexHandler id declared by active skill metadata', () => {
+    const metadataHandlerIds = [...new Set(STRATEGY_SKILLS
+      .flatMap((definition) => definition.effects)
+      .filter((effect) => effect.kind === 'complexHandler')
+      .map((effect) => effect.handler))].sort();
+
+    expect(complexHandlerRegistry).toBeTypeOf('object');
+    expect(Object.keys(complexHandlerRegistry ?? {}).sort()).toEqual(metadataHandlerIds);
+    expect(complexHandlerById).toBeTypeOf('function');
+    for (const handlerId of metadataHandlerIds) {
+      expect(complexHandlerById?.(handlerId)).toBe(complexHandlerRegistry?.[handlerId]);
+    }
+  });
+
   it('activates exactly 百出、火神、洞察、连环 in this strategy phase', () => {
     expect(STRATEGY_SKILLS
       .filter((definition) => definition.implementationStatus === 'active')
@@ -123,12 +152,35 @@ describe('strategy officer skill rules', () => {
 
   it('enables 连环 only for successful-status strategy kinds with a unit target', () => {
     const { state, caster, target } = strategyFixture('连环');
-    expect(rulesFor(state, caster, target, 'false-report', 15)?.chain).toBe(true);
-    expect(rulesFor(state, caster, target, 'disturb', 15)?.chain).toBe(true);
+    expect(rulesFor(state, caster, target, 'false-report', 15)).toMatchObject({
+      chain: true,
+      complexHandlerIds: ['chainStrategy'],
+    });
+    expect(rulesFor(state, caster, target, 'disturb', 15)).toMatchObject({
+      chain: true,
+      complexHandlerIds: ['chainStrategy'],
+    });
     for (const strategyId of ['fire', 'extinguish', 'calm', 'inspire', 'discord'] as const) {
       expect(rulesFor(state, caster, target, strategyId, 10)?.chain).toBe(false);
     }
     expect(rulesFor(state, caster, undefined, 'disturb', 15)?.chain).toBe(false);
+  });
+
+  it('derives 连环 activation from complexHandler metadata instead of the skill name', () => {
+    const { state, caster, target } = strategyFixture('连环');
+    const definition = STRATEGY_SKILLS.find((skill) => skill.name === '连环');
+    expect(definition).toBeDefined();
+    const originalEffects = definition?.effects ?? [];
+
+    try {
+      if (definition) definition.effects = [];
+      expect(rulesFor(state, caster, target, 'disturb', 15)).toMatchObject({
+        chain: false,
+        complexHandlerIds: [],
+      });
+    } finally {
+      if (definition) definition.effects = originalEffects;
+    }
   });
 
   it('applies the original chain target first, then adjacent enemies by unit id with one shared duration', () => {

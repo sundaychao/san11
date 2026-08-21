@@ -44,6 +44,7 @@ export type MapInteractionAction =
   | {
     type: 'open-unit-submenu';
     kind: UnitSubmenuInteraction['kind'];
+    unitId?: string;
     position?: ScreenPoint;
     destination?: GridCoord;
   }
@@ -74,7 +75,7 @@ export function reduceMapInteraction(
         ? {
           type: 'unit-submenu',
           kind: action.kind,
-          unitId: state.unitId,
+          unitId: action.unitId ?? state.unitId,
           position: action.position ?? state.position,
           destination: action.destination ?? state.destination,
           parent: state,

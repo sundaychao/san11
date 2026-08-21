@@ -1,7 +1,9 @@
 import { X } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { useGame } from '../game/store/GameProvider';
 import { ARMAMENT_LABELS } from '../game/armaments';
+import { skillDefinition } from '../game/skills';
 import type { GameState, Officer, OfficerAptitudes, Stats } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -19,6 +21,7 @@ type SortKey =
   | 'location'
   | keyof Stats
   | 'skill'
+  | 'skillDescription'
   | keyof OfficerAptitudes
   | 'status'
   | 'task'
@@ -102,6 +105,7 @@ function columnsForTab(activeTab: OfficerListTab): OfficerColumn[] {
   if (activeTab === '特技') return [
     { label: '武将', sortKey: 'name' },
     { label: '特技', sortKey: 'skill' },
+    { label: '说明', sortKey: 'skillDescription' },
   ];
   if (activeTab === '适性') return [
     { label: '武将', sortKey: 'name' },
@@ -118,6 +122,10 @@ function columnsForTab(activeTab: OfficerListTab): OfficerColumn[] {
     { label: '任务', sortKey: 'task' },
     { label: '时间', sortKey: 'time' },
   ];
+}
+
+function displaySkill(skill?: string) {
+  return skill && skill !== '无' ? skill : '';
 }
 
 function renderOfficerCells(officer: Officer, state: GameState, activeTab: OfficerListTab) {
@@ -141,7 +149,13 @@ function renderOfficerCells(officer: Officer, state: GameState, activeTab: Offic
     );
   }
   if (activeTab === '特技') {
-    return <td>{officer.skill ?? '无'}</td>;
+    const skill = displaySkill(officer.skill);
+    return (
+      <>
+        <td>{skill}</td>
+        <td className="officer-skill-description">{skill ? skillDefinition(skill)?.description ?? '暂无说明' : ''}</td>
+      </>
+    );
   }
   if (activeTab === '适性') {
     const aptitudes = officer.aptitudes ?? fallbackAptitudes;
@@ -178,7 +192,11 @@ function sortValue(officer: Officer, state: GameState, sortKey: SortKey) {
   if (sortKey === 'name') return officer.name;
   if (sortKey === 'owner') return ownershipText(officer, state);
   if (sortKey === 'location') return locationText(officer, state);
-  if (sortKey === 'skill') return officer.skill ?? '无';
+  if (sortKey === 'skill') return displaySkill(officer.skill);
+  if (sortKey === 'skillDescription') {
+    const skill = displaySkill(officer.skill);
+    return skill ? skillDefinition(skill)?.description ?? '暂无说明' : '';
+  }
   if (sortKey === 'status' || sortKey === 'task' || sortKey === 'time') return taskInfo(officer, state)[sortKey];
   if (sortKey in fallbackAptitudes) {
     const aptitudes = officer.aptitudes ?? fallbackAptitudes;
@@ -195,6 +213,7 @@ function compareSortValues(left: string | number, right: string | number, direct
 }
 
 export function OfficerListDialog({ scope = 'player', officerIds, onClose }: OfficerListDialogProps) {
+  const audio = useAudioEventAdapter();
   const { state } = useGame();
   const [activeTab, setActiveTab] = useState<OfficerListTab>(() => (officerIds?.length ? officerListTabs[1] : officerListTabs[0]));
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection } | null>(null);
@@ -226,7 +245,7 @@ export function OfficerListDialog({ scope = 'player', officerIds, onClose }: Off
   if (!state) return null;
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
       <section className="officer-list-dialog tool-panel" data-testid={officerIds?.length ? 'unit-officer-list-dialog' : undefined} role="dialog" aria-modal="true" aria-labelledby="officer-list-title">
         <header>
           <div>

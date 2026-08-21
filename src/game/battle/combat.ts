@@ -8,7 +8,7 @@ export {
 
 import type { CityId, ForceId, GameState } from '../types';
 import { normalAttackIsCritical, reduceIncomingDamageBySkills, rollRepeatNormalAttack } from '../skills/rules/combat';
-import { attackableFacilities, attackableUnits } from './legacyCore';
+import { attackableFacilities, attackableUnits } from './targetRules';
 import {
   areAdjacent,
   assertUnitTurn,

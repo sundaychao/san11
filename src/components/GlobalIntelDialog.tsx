@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import type { GameState } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -8,8 +9,9 @@ interface GlobalIntelDialogProps {
 }
 
 export function GlobalIntelDialog({ state, onClose }: GlobalIntelDialogProps) {
+  const audio = useAudioEventAdapter();
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
       <section className="intel-panel intel-panel-centered tool-panel" role="dialog" aria-modal="true" aria-labelledby="global-intel-title">
         <header>
           <div>

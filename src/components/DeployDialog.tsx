@@ -1,5 +1,6 @@
 import { AlertCircle, Swords, X } from 'lucide-react';
 import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useAudioEventAdapter, type AudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { armamentsOf, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT } from '../game/armaments';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { useGame } from '../game/store/GameProvider';
@@ -138,6 +139,7 @@ function OfficerPicker({
   onDeputy,
   onConfirm,
   onBack,
+  audio,
 }: {
   officers: Officer[];
   selectedIds: string[];
@@ -145,6 +147,7 @@ function OfficerPicker({
   onDeputy(id: string): void;
   onConfirm(): void;
   onBack(): void;
+  audio: AudioEventAdapter;
 }) {
   const leaderId = selectedIds[0];
   const deputyIds = selectedIds.slice(1);
@@ -206,7 +209,7 @@ function OfficerPicker({
   };
 
   return (
-    <div className="modal-backdrop" onContextMenu={(event) => closePopupOnContextMenu(event, onBack)}>
+    <div className="modal-backdrop" onContextMenu={(event) => closePopupOnContextMenu(event, onBack, audio)}>
       <section className="deploy-dialog officer-picker-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="officer-picker-title">
         <header>
           <div>
@@ -275,6 +278,7 @@ function OfficerPicker({
 }
 
 export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) {
+  const audio = useAudioEventAdapter();
   const { state } = useGame();
   const [officerIds, setOfficerIds] = useState<string[]>([]);
   const [troopType, setTroopType] = useState<TroopType>('sword');
@@ -348,12 +352,13 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
         onDeputy={(id) => setOfficerIds((current) => current.includes(id) ? current.filter((candidate) => candidate !== id) : [...current, id].slice(0, 3))}
         onConfirm={() => setOfficerPickerOpen(false)}
         onBack={() => setOfficerPickerOpen(false)}
+        audio={audio}
       />
     );
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
       <form ref={dialogRef} className="deploy-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="deploy-title" onSubmit={submit}>
         <header>
           <div>

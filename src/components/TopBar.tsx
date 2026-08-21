@@ -1,5 +1,6 @@
 import { LogOut, Save, SkipForward, Users } from 'lucide-react';
 import { useState } from 'react';
+import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { validateCommand } from '../game/commands';
 import { useGame } from '../game/store/GameProvider';
 import type { GameCommand, GameState } from '../game/types';
@@ -32,6 +33,7 @@ function hasLegalActions(state: GameState) {
 
 export function TopBar() {
   const { state, disconnectOnline, endMonth, endTenDay, manualSave, online } = useGame();
+  const audio = useAudioEventAdapter();
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [showOfficers, setShowOfficers] = useState(false);
   if (!state) return null;
@@ -81,7 +83,7 @@ export function TopBar() {
       </header>
       {showOfficers && <OfficerListDialog onClose={() => setShowOfficers(false)} />}
       {confirmEnd && (
-        <div className="modal-backdrop" onContextMenu={(event) => closePopupOnContextMenu(event, () => setConfirmEnd(false))}>
+        <div className="modal-backdrop" onContextMenu={(event) => closePopupOnContextMenu(event, () => setConfirmEnd(false), audio)}>
           <section className="confirm-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="end-month-title">
             <p>仍有武将和行动力可用</p>
             <h2 id="end-month-title">结束本月</h2>

@@ -38,7 +38,7 @@ describe('monthly settlement', () => {
     const state = createGame('sun', 4394);
     state.officers['lu-su'].skill = '富豪';
     const city = state.cities.changsha;
-    const baseGold = Math.round(city.commerce * 20 + city.population / 100);
+    const baseGold = city.commerce * 20 + city.population / 100;
     const first = settleMonth(state);
 
     expect(first.cities.changsha.gold).toBe(city.gold + Math.round(baseGold * 1.5));
@@ -59,7 +59,7 @@ describe('monthly settlement', () => {
     };
     state.officers['lu-su'].skill = '米道';
     const city = state.cities.changsha;
-    const baseFood = Math.round(city.agriculture * 60 + city.population / 40);
+    const baseFood = city.agriculture * 60 + city.population / 40;
     const next = settleMonth(state);
 
     expect(next.cities.changsha.food).toBe(city.food + Math.round(baseFood * 1.5));
@@ -73,6 +73,31 @@ describe('monthly settlement', () => {
     const next = settleMonth(state);
 
     expect(next.cities.changsha.food).toBe(before);
+  });
+
+  it('rounds skilled gold income only after applying the multiplier', () => {
+    const state = createGame('sun', 4394);
+    state.officers['lu-su'].skill = '富豪';
+    const city = state.cities.changsha;
+    city.commerce = 1;
+    city.population = 151;
+
+    const next = settleMonth(state);
+
+    expect(next.cities.changsha.gold).toBe(city.gold + Math.round((1 * 20 + 151 / 100) * 1.5));
+  });
+
+  it('rounds skilled quarterly food income only after applying the multiplier', () => {
+    const state = createGame('sun', 4394);
+    state.month = 3;
+    state.officers['lu-su'].skill = '米道';
+    const city = state.cities.changsha;
+    city.agriculture = 1;
+    city.population = 61;
+
+    const next = settleMonth(state);
+
+    expect(next.cities.changsha.food).toBe(city.food + Math.round((1 * 60 + 61 / 40) * 1.5));
   });
 
   it('preserves unskilled settlement values and RNG results for the same seed', () => {
@@ -153,7 +178,7 @@ describe('ten-day settlement', () => {
     };
     const city = state.cities.changsha;
     const cityFoodAfterSupply = city.food - Math.ceil((city.troops * 500) / 10000);
-    const baseQuarterlyFood = Math.round(city.agriculture * 60 + city.population / 40);
+    const baseQuarterlyFood = city.agriculture * 60 + city.population / 40;
     const skillSources = (current: typeof state) => resolveCitySkills(current, 'changsha').map((skill) => ({
       name: skill.definition.name,
       sourceOfficerIds: skill.sourceOfficerIds,
@@ -324,6 +349,69 @@ describe('ten-day settlement', () => {
         kind: 'attack',
       }),
     ]);
+  });
+
+  it('damages units that remain on burning ground when entering a new ten-day turn', () => {
+    const state = createGame('liu', 1);
+    state.units['burning-ground-target'] = {
+      id: 'burning-ground-target',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: 12,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 80,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+    state.firePlots = [{ q: 12, r: 10 }];
+
+    const next = settleTenDay(state);
+
+    expect(next.units['burning-ground-target'].troops).toBe(2500);
+    expect(next.battleDamageReports).toEqual([
+      expect.objectContaining({
+        unitId: 'burning-ground-target',
+        q: 12,
+        r: 10,
+        amount: 500,
+        kind: 'attack',
+      }),
+    ]);
+  });
+
+  it('ticks down and removes burning ground within its remaining ten-day duration', () => {
+    const state = createGame('liu', 1);
+    state.firePlots = [
+      { q: 12, r: 10, remainingTenDays: 1 },
+      { q: 13, r: 10, remainingTenDays: 2 },
+      { q: 14, r: 10 },
+    ];
+
+    const next = settleTenDay(state);
+
+    expect(next.firePlots).toEqual([
+      { q: 13, r: 10, remainingTenDays: 1 },
+      { q: 14, r: 10, remainingTenDays: 2 },
+    ]);
+  });
+
+  it('damages facilities that remain on burning ground when entering a new ten-day turn', () => {
+    const state = createGame('liu', 1);
+    state.facilities = {
+      tower: { id: 'tower', type: 'arrowTower', forceId: 'cao', q: 12, r: 10, durability: 700, completed: true },
+    };
+    state.firePlots = [{ q: 12, r: 10, remainingTenDays: 2 }];
+
+    const next = settleTenDay(state);
+
+    expect(next.facilities?.tower?.durability).toBeLessThan(700);
+    expect(next.firePlots).toEqual([{ q: 12, r: 10, remainingTenDays: 1 }]);
   });
 
   it('fires only the current player force arrow tower when entering a new ten-day turn', () => {

@@ -3,18 +3,14 @@ import {
   type PropsWithChildren,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useReducer,
   useRef,
   useState,
 } from 'react';
-import { playFireEverythingSound, playSpearThrustSound, playStartProjectSound, playTroopAttackSound, playTroopMoveSound } from '../../audio/soundEffects';
 import { runAiTurn } from '../ai';
 import type { StrategyId, StrategySelection, TacticId } from '../battle/actions';
 import type { ActionGameIntent } from '../network/intentReducer';
-import type { DeployFollowupAction, GameIntent } from '../network/intents';
-import type { AuthSessionView, OnlineRoomListItem, OnlineRoomView, OnlineSnapshot } from '../network/protocol';
+import type { DeployFollowupAction } from '../network/intents';
 import {
   clearSave,
   clearSaves,
@@ -30,45 +26,13 @@ import { settleForceTurnStart } from '../skills/rules/turn';
 import { settleMonth, settleTenDay } from '../turn';
 import type { EditableCityMarker } from '../map-editor/editor';
 import type { City, CityId, FacilityType, ForceId, GameCommand, GameState, GridCell, TroopType } from '../types';
-import { createOnlineSocket, DEFAULT_ONLINE_SERVER_URL, type OnlineSocket } from '../../network/socketClient';
+import { createGameEngine, type GameEngine } from '../engine';
 import {
-  AUTH_TOKEN_KEY,
-  clearStoredAuthSession as clearAuthSessionStorage,
-  clearStoredLastRoom,
-  readStoredAuthSession,
-  readStoredLastRoom,
-  writeStoredAuthSession,
-  writeStoredLastRoom,
-} from './authStorage';
-import { applyLocalIntent } from './gameCommandDispatcher';
-
-export interface OnlineClientState {
-  mode: 'local' | 'online';
-  connecting: boolean;
-  resumingRoom: boolean;
-  connected: boolean;
-  serverUrl: string;
-  roomId: string | null;
-  phase: OnlineRoomView['phase'] | null;
-  hostPlayerId: string | null;
-  playerId: string | null;
-  revision: number;
-  players: OnlineRoomView['players'];
-  turnPlayerIds: string[];
-  activePlayerId: string | null;
-  completedTurnPlayerIds: string[];
-  rooms: OnlineRoomListItem[];
-  tenDayReadyForceIds: ForceId[];
-  error: string | null;
-}
-
-export interface AuthClientState {
-  token: string | null;
-  userId: string | null;
-  username: string | null;
-  loading: boolean;
-  error: string | null;
-}
+  type AuthClientState,
+  type OnlineClientState,
+} from './onlineState';
+import { useOnlineSession } from './onlineSession';
+import { useAudioEventAdapter } from '../../audio/reactAudioEventAdapter';
 
 interface GameContextValue {
   state: GameState | null;
@@ -116,16 +80,6 @@ interface GameContextValue {
   clearError(): void;
 }
 
-type GameAction =
-  | { type: 'start'; state: GameState }
-  | { type: 'replace'; state: GameState }
-  | { type: 'reset' };
-
-function reducer(_state: GameState | null, action: GameAction): GameState | null {
-  if (action.type === 'start' || action.type === 'replace') return action.state;
-  return null;
-}
-
 const GameContext = createContext<GameContextValue | null>(null);
 
 interface GameProviderProps extends PropsWithChildren {
@@ -136,21 +90,6 @@ interface GameProviderProps extends PropsWithChildren {
 function browserStorage(): SaveAdapter {
   if (typeof window === 'undefined') throw new Error('浏览器存储不可用');
   return window.localStorage;
-}
-
-function storedAuthSession(): Pick<AuthClientState, 'token' | 'userId' | 'username'> {
-  if (typeof window === 'undefined') return { token: null, userId: null, username: null };
-  const session = readStoredAuthSession(window.localStorage);
-  if (session) return session;
-  return {
-    token: window.localStorage.getItem(AUTH_TOKEN_KEY),
-    userId: null,
-    username: null,
-  };
-}
-
-function isAuthExpired(reason: string) {
-  return reason.includes('请先登录') || reason.includes('登录') || reason.includes('鐧诲綍');
 }
 
 function runOpponentTurns(state: GameState) {
@@ -184,7 +123,8 @@ function applyEditorMapToState(state: GameState, map: { grid: GridCell[]; cities
 
 export function GameProvider({ children, initialState = null, storage: storageProp }: GameProviderProps) {
   const storage = storageProp ?? browserStorage();
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const engineRef = useRef<GameEngine | null>(initialState ? createGameEngine(initialState, initialState.playerForceId) : null);
+  const [state, setState] = useState<GameState | null>(() => initialState ? structuredClone(initialState) : null);
   const [selectedCityId, setSelectedCityId] = useState<CityId | null>(() => (
     initialState
       ? Object.values(initialState.cities).find((city) => city.ownerId === initialState.playerForceId)?.id ?? null
@@ -192,467 +132,59 @@ export function GameProvider({ children, initialState = null, storage: storagePr
   ));
   const [error, setError] = useState<string | null>(null);
   const [saveRevision, setSaveRevision] = useState(0);
-  const [online, setOnline] = useState<OnlineClientState>({
-    mode: 'local',
-    connecting: false,
-    resumingRoom: Boolean(storedAuthSession().token && readStoredLastRoom(storage)),
-    connected: false,
-    serverUrl: DEFAULT_ONLINE_SERVER_URL,
-    roomId: null,
-    phase: null,
-    hostPlayerId: null,
-    playerId: null,
-    revision: 0,
-    players: [],
-    turnPlayerIds: [],
-    activePlayerId: null,
-    completedTurnPlayerIds: [],
-    rooms: [],
-    tenDayReadyForceIds: [],
-    error: null,
-  });
-  const [auth, setAuth] = useState<AuthClientState>(() => ({
-    ...storedAuthSession(),
-    loading: false,
-    error: null,
-  }));
-  const socketRef = useRef<OnlineSocket | null>(null);
-  const attemptedResumeRef = useRef(false);
-  const onlineRef = useRef(online);
-  const authRef = useRef(auth);
-  onlineRef.current = online;
-  authRef.current = auth;
+  const { emit: emitAudioEvent } = useAudioEventAdapter();
 
-  const applyAuthSession = useCallback((session: AuthSessionView) => {
-    if (typeof window !== 'undefined') {
-      writeStoredAuthSession(window.localStorage, session);
+  const replaceGameState = useCallback((nextState: GameState | null) => {
+    if (!nextState) {
+      engineRef.current = null;
+      setState(null);
+      return null;
     }
-    setAuth({
-      token: session.token,
-      userId: session.userId,
-      username: session.username,
-      loading: false,
-      error: null,
-    });
+    if (!engineRef.current) engineRef.current = createGameEngine(nextState, nextState.playerForceId);
+    const snapshot = engineRef.current.replace(nextState);
+    setState(snapshot);
+    return snapshot;
   }, []);
 
-  const applyOnlineSnapshot = useCallback((snapshot: OnlineSnapshot) => {
-    writeStoredLastRoom(storage, {
-      serverUrl: onlineRef.current.serverUrl,
-      roomId: snapshot.room.id,
-    });
-    if (snapshot.state) {
-      dispatch({ type: 'replace', state: snapshot.state });
-      setSelectedCityId(Object.values(snapshot.state.cities).find((city) => city.ownerId === snapshot.state?.playerForceId)?.id ?? null);
+  const dispatchGameIntent = useCallback((intent: ActionGameIntent) => {
+    const engine = engineRef.current;
+    if (!engine) throw new Error('尚未开始游戏');
+    const next = engine.dispatch(intent);
+    setState(next);
+    return next;
+  }, []);
+
+  const applyOnlineSnapshotState = useCallback((snapshotState: GameState | null) => {
+    if (snapshotState) {
+      replaceGameState(snapshotState);
+      setSelectedCityId(Object.values(snapshotState.cities).find((city) => city.ownerId === snapshotState.playerForceId)?.id ?? null);
     } else {
-      dispatch({ type: 'reset' });
+      replaceGameState(null);
       setSelectedCityId(null);
     }
-    setError(null);
-    setOnline((current) => ({
-      ...current,
-      mode: 'online',
-      connecting: false,
-      resumingRoom: false,
-      connected: true,
-      roomId: snapshot.room.id,
-      phase: snapshot.room.phase,
-      hostPlayerId: snapshot.room.hostPlayerId,
-      playerId: snapshot.playerId,
-      revision: snapshot.room.revision,
-      players: snapshot.room.players,
-      turnPlayerIds: snapshot.room.turnPlayerIds,
-      activePlayerId: snapshot.room.activePlayerId,
-      completedTurnPlayerIds: snapshot.room.completedTurnPlayerIds,
-      rooms: [],
-      tenDayReadyForceIds: snapshot.room.tenDayReadyForceIds,
-      error: null,
-    }));
-  }, [storage]);
+  }, [replaceGameState]);
 
-  const disconnectOnline = useCallback(() => {
-    const socket = socketRef.current;
-    const token = authRef.current.token;
-    const roomId = onlineRef.current.roomId;
-    if (socket && token && roomId) {
-      socket.emit('room:leave', { token, roomId }, () => undefined);
-    }
-    socket?.disconnect();
-    socketRef.current = null;
-    clearStoredLastRoom(storage);
-    setOnline({
-      mode: 'local',
-      connecting: false,
-      resumingRoom: false,
-      connected: false,
-      serverUrl: DEFAULT_ONLINE_SERVER_URL,
-      roomId: null,
-      phase: null,
-      hostPlayerId: null,
-      playerId: null,
-      revision: 0,
-      players: [],
-      turnPlayerIds: [],
-      activePlayerId: null,
-      completedTurnPlayerIds: [],
-      rooms: [],
-      tenDayReadyForceIds: [],
-      error: null,
-    });
-  }, [storage]);
-
-  const expireAuthSession = useCallback((message: string) => {
-    if (typeof window !== 'undefined') clearAuthSessionStorage(window.localStorage);
-    clearStoredLastRoom(storage);
-    socketRef.current?.disconnect();
-    socketRef.current = null;
-    setAuth({ token: null, userId: null, username: null, loading: false, error: message });
-    setOnline({
-      mode: 'local',
-      connecting: false,
-      resumingRoom: false,
-      connected: false,
-      serverUrl: DEFAULT_ONLINE_SERVER_URL,
-      roomId: null,
-      phase: null,
-      hostPlayerId: null,
-      playerId: null,
-      revision: 0,
-      players: [],
-      turnPlayerIds: [],
-      activePlayerId: null,
-      completedTurnPlayerIds: [],
-      rooms: [],
-      tenDayReadyForceIds: [],
-      error: message,
-    });
-  }, [storage]);
-
-  const connectOnlineSocket = useCallback((serverUrl: string) => new Promise<OnlineSocket>((resolve, reject) => {
-    socketRef.current?.disconnect();
-    const socket = createOnlineSocket(serverUrl);
-    socketRef.current = socket;
-    setOnline((current) => ({ ...current, mode: 'online', connecting: true, connected: false, serverUrl, error: null }));
-
-    const cleanup = () => {
-      socket.off('connect', onConnect);
-      socket.off('connect_error', onConnectError);
-    };
-    const onConnect = () => {
-      cleanup();
-      setOnline((current) => ({ ...current, connecting: false, connected: true, error: null }));
-      resolve(socket);
-    };
-    const onConnectError = (connectError: Error) => {
-      cleanup();
-      socket.disconnect();
-      setOnline((current) => ({ ...current, connecting: false, connected: false, error: connectError.message }));
-      reject(connectError);
-    };
-
-    socket.on('connect', onConnect);
-    socket.on('connect_error', onConnectError);
-    socket.on('disconnect', () => {
-      setOnline((current) => current.mode === 'online' ? { ...current, connected: false } : current);
-    });
-    socket.on('room:list:update', (update) => {
-      setOnline((current) => ({
-        ...current,
-        mode: 'online',
-        rooms: update.rooms,
-        error: null,
-      }));
-    });
-    socket.on('room:update', applyOnlineSnapshot);
-    socket.connect();
-  }), [applyOnlineSnapshot]);
-
-  useEffect(() => {
-    const token = auth.token;
-    if (!token || attemptedResumeRef.current) return;
-    attemptedResumeRef.current = true;
-    const lastRoom = readStoredLastRoom(storage);
-    if (!lastRoom) return;
-
-    void (async () => {
-      try {
-        setOnline((current) => ({
-          ...current,
-          mode: 'online',
-          connecting: true,
-          resumingRoom: true,
-          serverUrl: lastRoom.serverUrl,
-          error: null,
-        }));
-        const socket = await connectOnlineSocket(lastRoom.serverUrl);
-        await new Promise<void>((resolve, reject) => {
-          socket.emit('auth:session', { token }, (response) => {
-            if (!response.ok) {
-              expireAuthSession(response.reason);
-              reject(new Error(response.reason));
-              return;
-            }
-            applyAuthSession(response.session);
-            resolve();
-          });
-        });
-        await new Promise<void>((resolve, reject) => {
-          socket.emit('room:resume', { token, roomId: lastRoom.roomId }, (response) => {
-            if (!response.ok) {
-              setOnline((current) => ({ ...current, error: response.reason }));
-              reject(new Error(response.reason));
-              return;
-            }
-            applyOnlineSnapshot(response.snapshot);
-            resolve();
-          });
-        });
-      } catch {
-        setOnline((current) => ({ ...current, connecting: false, resumingRoom: false }));
-      }
-    })();
-  }, [applyAuthSession, applyOnlineSnapshot, auth.token, connectOnlineSocket, expireAuthSession, storage]);
-
-  const registerAccount = useCallback(async (input: { username: string; password: string; serverUrl?: string }) => {
-    setAuth((current) => ({ ...current, loading: true, error: null }));
-    try {
-      const socket = await connectOnlineSocket(input.serverUrl ?? onlineRef.current.serverUrl);
-      await new Promise<void>((resolve, reject) => {
-        socket.emit('auth:register', { username: input.username, password: input.password }, (response) => {
-          if (!response.ok) {
-            setAuth((current) => ({ ...current, loading: false, error: response.reason }));
-            reject(new Error(response.reason));
-            return;
-          }
-          applyAuthSession(response.session);
-          resolve();
-        });
-      });
-    } catch (authError) {
-      const message = authError instanceof Error ? authError.message : '注册失败';
-      setAuth((current) => ({ ...current, loading: false, error: message }));
-      throw authError;
-    }
-  }, [applyAuthSession, connectOnlineSocket]);
-
-  const loginAccount = useCallback(async (input: { username: string; password: string; serverUrl?: string }) => {
-    setAuth((current) => ({ ...current, loading: true, error: null }));
-    try {
-      const socket = await connectOnlineSocket(input.serverUrl ?? onlineRef.current.serverUrl);
-      await new Promise<void>((resolve, reject) => {
-        socket.emit('auth:login', { username: input.username, password: input.password }, (response) => {
-          if (!response.ok) {
-            setAuth((current) => ({ ...current, loading: false, error: response.reason }));
-            reject(new Error(response.reason));
-            return;
-          }
-          applyAuthSession(response.session);
-          resolve();
-        });
-      });
-    } catch (authError) {
-      const message = authError instanceof Error ? authError.message : '登录失败';
-      setAuth((current) => ({ ...current, loading: false, error: message }));
-      throw authError;
-    }
-  }, [applyAuthSession, connectOnlineSocket]);
-
-  const logoutAccount = useCallback(() => {
-    const token = authRef.current.token;
-    if (token) socketRef.current?.emit('auth:logout', { token }, () => undefined);
-    if (typeof window !== 'undefined') clearAuthSessionStorage(window.localStorage);
-    setAuth({ token: null, userId: null, username: null, loading: false, error: null });
-    disconnectOnline();
-  }, [disconnectOnline]);
-
-  const loadOnlineRooms = useCallback(async (input: { serverUrl?: string } = {}) => {
-    if (onlineRef.current.resumingRoom) return;
-    const token = authRef.current.token;
-    if (!token) {
-      const message = '请先登录';
-      setAuth((current) => ({ ...current, error: message }));
-      throw new Error(message);
-    }
-    const socket = await connectOnlineSocket(input.serverUrl ?? onlineRef.current.serverUrl);
-    await new Promise<void>((resolve, reject) => {
-      socket.emit('room:list', { token }, (response) => {
-        if (!response.ok) {
-          if (isAuthExpired(response.reason)) expireAuthSession(response.reason);
-          setOnline((current) => ({ ...current, connecting: false, error: response.reason }));
-          reject(new Error(response.reason));
-          return;
-        }
-        setOnline((current) => ({
-          ...current,
-          mode: 'online',
-          connecting: false,
-          connected: true,
-          rooms: response.rooms,
-          error: null,
-        }));
-        resolve();
-      });
-    });
-  }, [connectOnlineSocket, expireAuthSession]);
-
-  const createOnlineRoom = useCallback(async (input: { serverUrl?: string; seed?: number }) => {
-    const token = authRef.current.token;
-    if (!token) {
-      const message = '请先登录';
-      setAuth((current) => ({ ...current, error: message }));
-      throw new Error(message);
-    }
-    const socket = await connectOnlineSocket(input.serverUrl ?? onlineRef.current.serverUrl);
-    await new Promise<void>((resolve, reject) => {
-      socket.emit('room:create', { token, seed: input.seed }, (response) => {
-        if (!response.ok) {
-          if (isAuthExpired(response.reason)) expireAuthSession(response.reason);
-          setOnline((current) => ({ ...current, connecting: false, error: response.reason }));
-          reject(new Error(response.reason));
-          return;
-        }
-        applyOnlineSnapshot(response.snapshot);
-        resolve();
-      });
-    });
-  }, [applyOnlineSnapshot, connectOnlineSocket, expireAuthSession]);
-
-  const joinOnlineRoom = useCallback(async (input: { roomId: string; serverUrl?: string }) => {
-    const token = authRef.current.token;
-    if (!token) {
-      const message = '请先登录';
-      setAuth((current) => ({ ...current, error: message }));
-      throw new Error(message);
-    }
-    const socket = await connectOnlineSocket(input.serverUrl ?? onlineRef.current.serverUrl);
-    await new Promise<void>((resolve, reject) => {
-      socket.emit('room:join', {
-        token,
-        roomId: input.roomId.trim().toUpperCase(),
-      }, (response) => {
-        if (!response.ok) {
-          if (isAuthExpired(response.reason)) expireAuthSession(response.reason);
-          setOnline((current) => ({ ...current, connecting: false, error: response.reason }));
-          reject(new Error(response.reason));
-          return;
-        }
-        applyOnlineSnapshot(response.snapshot);
-        resolve();
-      });
-    });
-  }, [applyOnlineSnapshot, connectOnlineSocket, expireAuthSession]);
-
-  const resumeOnlineRoom = useCallback(async (input: { serverUrl?: string; roomId?: string } = {}) => {
-    const token = authRef.current.token;
-    if (!token) {
-      const message = '请先登录';
-      setAuth((current) => ({ ...current, error: message }));
-      throw new Error(message);
-    }
-    setOnline((current) => ({ ...current, resumingRoom: true }));
-    try {
-      const socket = await connectOnlineSocket(input.serverUrl ?? onlineRef.current.serverUrl);
-      await new Promise<void>((resolve, reject) => {
-        socket.emit('room:resume', {
-          token,
-          ...(input.roomId ? { roomId: input.roomId.trim().toUpperCase() } : {}),
-        }, (response) => {
-          if (!response.ok) {
-            if (isAuthExpired(response.reason)) expireAuthSession(response.reason);
-            setOnline((current) => ({ ...current, connecting: false, resumingRoom: false, error: response.reason }));
-            reject(new Error(response.reason));
-            return;
-          }
-          applyOnlineSnapshot(response.snapshot);
-          resolve();
-        });
-      });
-    } catch (resumeError) {
-      setOnline((current) => ({ ...current, connecting: false, resumingRoom: false }));
-      throw resumeError;
-    }
-  }, [applyOnlineSnapshot, connectOnlineSocket, expireAuthSession]);
-
-  const selectOnlineForce = useCallback(async (forceId: ForceId) => {
-    const socket = socketRef.current;
-    const current = onlineRef.current;
-    const token = authRef.current.token;
-    if (!socket || !current.roomId || !token) {
-      const message = '尚未连接联网房间';
-      setOnline((value) => ({ ...value, error: message }));
-      throw new Error(message);
-    }
-    const roomId = current.roomId;
-    await new Promise<void>((resolve, reject) => {
-      socket.emit('room:selectForce', {
-        token,
-        roomId,
-        forceId,
-      }, (response) => {
-        if (!response.ok) {
-          if (isAuthExpired(response.reason)) expireAuthSession(response.reason);
-          setOnline((value) => ({ ...value, error: response.reason }));
-          reject(new Error(response.reason));
-          return;
-        }
-        applyOnlineSnapshot(response.snapshot);
-        resolve();
-      });
-    });
-  }, [applyOnlineSnapshot, expireAuthSession]);
-
-  const startOnlineGame = useCallback(async () => {
-    const socket = socketRef.current;
-    const current = onlineRef.current;
-    const token = authRef.current.token;
-    if (!socket || !current.roomId || !token) {
-      const message = '尚未连接联网房间';
-      setOnline((value) => ({ ...value, error: message }));
-      throw new Error(message);
-    }
-    const roomId = current.roomId;
-    await new Promise<void>((resolve, reject) => {
-      socket.emit('room:startGame', {
-        token,
-        roomId,
-      }, (response) => {
-        if (!response.ok) {
-          if (isAuthExpired(response.reason)) expireAuthSession(response.reason);
-          setOnline((value) => ({ ...value, error: response.reason }));
-          reject(new Error(response.reason));
-          return;
-        }
-        applyOnlineSnapshot(response.snapshot);
-        resolve();
-      });
-    });
-  }, [applyOnlineSnapshot, expireAuthSession]);
-
-  const sendOnlineIntent = useCallback((intent: GameIntent, afterSuccess?: () => void) => {
-    const socket = socketRef.current;
-    const current = onlineRef.current;
-    const token = authRef.current.token;
-    if (!socket || !current.roomId || !current.playerId || !token) {
-      setOnline((value) => ({ ...value, error: '尚未连接联网房间' }));
-      return;
-    }
-    socket.emit('game:intent', {
-      roomId: current.roomId,
-      token,
-      requestId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      baseRevision: current.revision,
-      intent,
-    }, (response) => {
-      if (response.ok) {
-        if (response.snapshot) applyOnlineSnapshot(response.snapshot);
-        afterSuccess?.();
-        return;
-      }
-      if (response.snapshot) applyOnlineSnapshot(response.snapshot);
-      setOnline((value) => ({ ...value, error: response.reason }));
-      setError(response.reason);
-    });
-  }, [applyOnlineSnapshot]);
+  const {
+    online,
+    auth,
+    isOnline,
+    registerAccount,
+    loginAccount,
+    logoutAccount,
+    loadOnlineRooms,
+    createOnlineRoom,
+    joinOnlineRoom,
+    resumeOnlineRoom,
+    selectOnlineForce,
+    startOnlineGame,
+    disconnectOnline,
+    sendOnlineIntent,
+    setOnlineError,
+  } = useOnlineSession({
+    storage,
+    applySnapshotState: applyOnlineSnapshotState,
+    setError,
+  });
 
   const persist = useCallback((slot: SaveSlot, next: GameState) => {
     writeSave(storage, slot, next);
@@ -662,33 +194,32 @@ export function GameProvider({ children, initialState = null, storage: storagePr
   const startGame = useCallback((forceId: ForceId, seed = Date.now()) => {
     disconnectOnline();
     const next = createGame(forceId, seed);
-    dispatch({ type: 'start', state: next });
+    replaceGameState(next);
     setSelectedCityId(Object.values(next.cities).find((city) => city.ownerId === forceId)?.id ?? null);
     setError(null);
     persist('auto', next);
-  }, [disconnectOnline, persist]);
+  }, [disconnectOnline, persist, replaceGameState]);
 
   const loadGame = useCallback((slot: SaveSlot) => {
     const result = loadSave(storage, slot);
     if (result.ok) {
-      dispatch({ type: 'replace', state: result.state });
+      replaceGameState(result.state);
       setSelectedCityId(Object.values(result.state.cities).find((city) => city.ownerId === result.state.playerForceId)?.id ?? null);
       setError(null);
     } else if (result.reason !== '没有存档') {
       setError(result.reason);
     }
     return result;
-  }, [storage]);
+  }, [replaceGameState, storage]);
 
   const issueCommand = useCallback((command: GameCommand) => {
-    if (onlineRef.current.mode === 'online') {
+    if (isOnline()) {
       sendOnlineIntent({ type: 'issueCommand', command });
       return;
     }
     if (!state) throw new Error('尚未开始游戏');
     try {
-      const next = applyLocalIntent(state, { type: 'issueCommand', command });
-      dispatch({ type: 'replace', state: next });
+      const next = dispatchGameIntent({ type: 'issueCommand', command });
       setError(null);
       persist('auto', next);
     } catch (commandError) {
@@ -696,13 +227,11 @@ export function GameProvider({ children, initialState = null, storage: storagePr
       setError(message);
       throw commandError;
     }
-  }, [persist, sendOnlineIntent, state]);
+  }, [dispatchGameIntent, isOnline, persist, sendOnlineIntent, state]);
 
-  const applyBattleAction = useCallback((action: (current: GameState) => GameState, afterSuccess?: () => void) => {
-    if (!state) throw new Error('尚未开始游戏');
+  const dispatchLocalIntent = useCallback((intent: ActionGameIntent, afterSuccess?: () => void) => {
     try {
-      const next = action(state);
-      dispatch({ type: 'replace', state: next });
+      const next = dispatchGameIntent(intent);
       setError(null);
       persist('auto', next);
       afterSuccess?.();
@@ -711,85 +240,79 @@ export function GameProvider({ children, initialState = null, storage: storagePr
       setError(message);
       throw battleError;
     }
-  }, [persist, state]);
+  }, [dispatchGameIntent, persist]);
 
   const dispatchIntent = useCallback((intent: ActionGameIntent, afterSuccess?: () => void) => {
-    if (onlineRef.current.mode === 'online') {
+    if (isOnline()) {
       sendOnlineIntent(intent, afterSuccess);
       return;
     }
-    applyBattleAction((current) => applyLocalIntent(current, intent), afterSuccess);
-  }, [applyBattleAction, sendOnlineIntent]);
+    dispatchLocalIntent(intent, afterSuccess);
+  }, [dispatchLocalIntent, isOnline, sendOnlineIntent]);
 
   const deployBattleUnit = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; gold?: number; food: number }) => {
-    dispatchIntent({ type: 'deployUnit', input }, playTroopMoveSound);
-  }, [dispatchIntent]);
+    dispatchIntent({ type: 'deployUnit', input }, () => emitAudioEvent({ type: 'unit-moved' }));
+  }, [dispatchIntent, emitAudioEvent]);
 
-  const afterDeployActionSound = useCallback((action: DeployFollowupAction) => {
-    if (action.type === 'wait') playTroopMoveSound();
-    if (action.type === 'attackUnit' || action.type === 'attackFacility' || action.type === 'attackCity') playTroopAttackSound();
-    if (action.type === 'useUnitTactic' && action.tacticId === 'spear-thrust') playSpearThrustSound();
-    if (action.type === 'useUnitStrategy' && action.strategyId === 'fire') playFireEverythingSound();
-    if (action.type === 'buildFacility' || action.type === 'repairFacility') playStartProjectSound();
-  }, []);
+  const afterDeployActionAudio = useCallback((action: DeployFollowupAction) => {
+    if (action.type === 'wait') emitAudioEvent({ type: 'unit-waited' });
+    if (action.type === 'attackUnit' || action.type === 'attackFacility' || action.type === 'attackCity') emitAudioEvent({ type: 'unit-attacked' });
+    if (action.type === 'useUnitTactic' && action.tacticId === 'spear-thrust') emitAudioEvent({ type: 'spear-thrust-used' });
+    if (action.type === 'useUnitStrategy' && action.strategyId === 'fire') emitAudioEvent({ type: 'fire-used' });
+    if (action.type === 'buildFacility' || action.type === 'repairFacility') emitAudioEvent({ type: 'project-started' });
+  }, [emitAudioEvent]);
 
   const deployBattleUnitAction = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction) => {
-    const afterSuccess = () => afterDeployActionSound(action);
+    const afterSuccess = () => afterDeployActionAudio(action);
     dispatchIntent({ type: 'deployUnitAction', input, action }, afterSuccess);
-  }, [afterDeployActionSound, dispatchIntent]);
+  }, [afterDeployActionAudio, dispatchIntent]);
 
   const deployTransport = useCallback((input: { cityId: CityId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }) => {
     dispatchIntent({ type: 'deployTransportUnit', input });
   }, [dispatchIntent]);
 
   const moveBattleUnit = useCallback((unitId: string, destination: { q: number; r: number }) => {
-    dispatchIntent({ type: 'moveUnit', unitId, destination }, playTroopMoveSound);
-  }, [dispatchIntent]);
+    dispatchIntent({ type: 'moveUnit', unitId, destination }, () => emitAudioEvent({ type: 'unit-moved' }));
+  }, [dispatchIntent, emitAudioEvent]);
 
   const attackBattleUnit = useCallback((attackerId: string, targetId: string, destination?: GridCoord) => {
-    dispatchIntent({ type: 'attackUnit', attackerId, targetId, destination }, () => {
-      playTroopAttackSound();
-    });
-  }, [dispatchIntent]);
+    dispatchIntent({ type: 'attackUnit', attackerId, targetId, destination }, () => emitAudioEvent({ type: 'unit-attacked' }));
+  }, [dispatchIntent, emitAudioEvent]);
 
   const attackBattleFacility = useCallback((attackerId: string, facilityId: string, destination?: GridCoord) => {
-    dispatchIntent({ type: 'attackFacility', attackerId, facilityId, destination }, () => {
-      playTroopAttackSound();
-    });
-  }, [dispatchIntent]);
+    dispatchIntent({ type: 'attackFacility', attackerId, facilityId, destination }, () => emitAudioEvent({ type: 'unit-attacked' }));
+  }, [dispatchIntent, emitAudioEvent]);
 
   const useBattleTactic = useCallback((attackerId: string, targetId: string, tacticId: TacticId, destination?: GridCoord) => {
     dispatchIntent({ type: 'useUnitTactic', attackerId, targetId, tacticId, destination }, () => {
-      if (tacticId === 'spear-thrust') playSpearThrustSound();
+      if (tacticId === 'spear-thrust') emitAudioEvent({ type: 'spear-thrust-used' });
     });
-  }, [dispatchIntent]);
+  }, [dispatchIntent, emitAudioEvent]);
 
   const useBattleStrategy = useCallback((unitId: string, strategyId: StrategyId, selection: StrategySelection, destination?: GridCoord) => {
-    const afterSuccess = strategyId === 'fire' ? playFireEverythingSound : undefined;
+    const afterSuccess = strategyId === 'fire' ? () => emitAudioEvent({ type: 'fire-used' }) : undefined;
     dispatchIntent({ type: 'useUnitStrategy', unitId, strategyId, selection, destination }, afterSuccess);
-  }, [dispatchIntent]);
+  }, [dispatchIntent, emitAudioEvent]);
 
   const useBattleFirePlot = useCallback((unitId: string, target: GridCoord, destination?: GridCoord) => {
-    dispatchIntent({ type: 'useFirePlot', unitId, target, destination }, playFireEverythingSound);
-  }, [dispatchIntent]);
+    dispatchIntent({ type: 'useFirePlot', unitId, target, destination }, () => emitAudioEvent({ type: 'fire-used' }));
+  }, [dispatchIntent, emitAudioEvent]);
 
   const buildBattleFacility = useCallback((unitId: string, facilityType: FacilityType, target: GridCoord, destination?: GridCoord) => {
-    dispatchIntent({ type: 'buildFacility', unitId, facilityType, target, destination }, playStartProjectSound);
-  }, [dispatchIntent]);
+    dispatchIntent({ type: 'buildFacility', unitId, facilityType, target, destination }, () => emitAudioEvent({ type: 'project-started' }));
+  }, [dispatchIntent, emitAudioEvent]);
 
   const repairBattleFacility = useCallback((unitId: string, facilityId: string, destination?: GridCoord) => {
-    dispatchIntent({ type: 'repairFacility', unitId, facilityId, destination }, playStartProjectSound);
-  }, [dispatchIntent]);
+    dispatchIntent({ type: 'repairFacility', unitId, facilityId, destination }, () => emitAudioEvent({ type: 'project-started' }));
+  }, [dispatchIntent, emitAudioEvent]);
 
   const dismantleBattleFacility = useCallback((facilityId: string) => {
     dispatchIntent({ type: 'dismantleFacility', facilityId });
   }, [dispatchIntent]);
 
   const attackBattleCity = useCallback((attackerId: string, cityId: CityId, destination?: GridCoord) => {
-    dispatchIntent({ type: 'attackCity', attackerId, cityId, destination }, () => {
-      playTroopAttackSound();
-    });
-  }, [dispatchIntent]);
+    dispatchIntent({ type: 'attackCity', attackerId, cityId, destination }, () => emitAudioEvent({ type: 'unit-attacked' }));
+  }, [dispatchIntent, emitAudioEvent]);
 
   const waitBattleUnit = useCallback((unitId: string) => {
     dispatchIntent({ type: 'waitUnit', unitId });
@@ -798,55 +321,56 @@ export function GameProvider({ children, initialState = null, storage: storagePr
   const applyMapEditorMap = useCallback((map: { grid: GridCell[]; cities: EditableCityMarker[] }) => {
     if (!state) throw new Error('尚未开始游戏');
     const next = applyEditorMapToState(state, map);
-    dispatch({ type: 'replace', state: next });
+    replaceGameState(next);
     setSelectedCityId(Object.values(next.cities).find((city) => city.ownerId === next.playerForceId)?.id ?? null);
     setError(null);
     persist('auto', next);
-  }, [persist, state]);
+  }, [persist, replaceGameState, state]);
 
   const endMonth = useCallback(() => {
-    if (onlineRef.current.mode === 'online') {
+    if (isOnline()) {
       sendOnlineIntent({ type: 'endTenDay' });
       return;
     }
     if (!state) return;
     let next = runOpponentTurns(state);
     next = settleMonth(next);
-    dispatch({ type: 'replace', state: next });
+    if (next.phase !== 'finished') settleForceTurnStart(next, next.playerForceId);
+    replaceGameState(next);
     setError(null);
     persist('auto', next);
-  }, [persist, sendOnlineIntent, state]);
+  }, [isOnline, persist, replaceGameState, sendOnlineIntent, state]);
 
   const endTenDay = useCallback(() => {
-    if (onlineRef.current.mode === 'online') {
+    if (isOnline()) {
       sendOnlineIntent({ type: 'endTenDay' });
       return;
     }
     if (!state) return;
     const next = settleTenDay(runOpponentTurns(state));
-    dispatch({ type: 'replace', state: next });
+    replaceGameState(next);
     setError(null);
     persist('auto', next);
-  }, [persist, sendOnlineIntent, state]);
+  }, [isOnline, persist, replaceGameState, sendOnlineIntent, state]);
 
   const manualSave = useCallback(() => {
-    if (onlineRef.current.mode === 'online') {
+    if (isOnline()) {
       const message = '联网模式由服务器自动保存';
       setError(message);
-      setOnline((current) => ({ ...current, error: message }));
+      setOnlineError(message);
       return;
     }
     if (!state) return;
     persist('manual', state);
-  }, [persist, state]);
+  }, [isOnline, persist, setOnlineError, state]);
 
   const resetGame = useCallback(() => {
     clearSaves(storage);
-    dispatch({ type: 'reset' });
+    replaceGameState(null);
     setSelectedCityId(null);
     setError(null);
     setSaveRevision((value) => value + 1);
-  }, [storage]);
+  }, [replaceGameState, storage]);
 
   const clearSaveSlot = useCallback((slot: SaveSlot) => {
     clearSave(storage, slot);

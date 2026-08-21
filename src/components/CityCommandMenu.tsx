@@ -1,6 +1,6 @@
 import { Building2, ChevronRight, Swords, Users } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
-import { playClickOnSound, playRightMouseSound } from '../audio/soundEffects';
+import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { COMMAND_AP } from '../game/commands';
 import type { CityId, GameCommand } from '../game/types';
@@ -43,6 +43,7 @@ interface CityCommandMenuProps {
 }
 
 export function CityCommandMenu({ cityId, actionPoints, position, onClose, onCommand, onDeploy, onTransport }: CityCommandMenuProps) {
+  const audio = useAudioEventAdapter();
   const [activeSection, setActiveSection] = useState<MenuSection | null>(null);
   const menuRef = useRef<HTMLElement>(null);
 
@@ -72,13 +73,13 @@ export function CityCommandMenu({ cityId, actionPoints, position, onClose, onCom
     const handleContextMenu = (event: globalThis.MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
-      playRightMouseSound();
+      audio.emit({ type: 'menu-right-click' });
       closeCurrentLevel();
     };
 
     document.addEventListener('contextmenu', handleContextMenu, true);
     return () => document.removeEventListener('contextmenu', handleContextMenu, true);
-  }, [closeCurrentLevel]);
+  }, [audio, closeCurrentLevel]);
 
   useEffect(() => {
     const handlePointerDown = (event: globalThis.PointerEvent) => {
@@ -102,7 +103,7 @@ export function CityCommandMenu({ cityId, actionPoints, position, onClose, onCom
       data-testid="city-command-menu"
       style={{ left: position.x, top: position.y } as CSSProperties}
       aria-label="城池命令菜单"
-      onContextMenu={(event) => closePopupOnContextMenu(event, closeCurrentLevel)}
+      onContextMenu={(event) => closePopupOnContextMenu(event, closeCurrentLevel, audio)}
     >
       <div className="city-command-primary">
         {SECTIONS.map(({ id, label, Icon }) => (
@@ -112,7 +113,7 @@ export function CityCommandMenu({ cityId, actionPoints, position, onClose, onCom
             data-testid={`city-command-section-${id}`}
             className={activeSection === id ? 'is-active' : ''}
             onClick={() => {
-              playClickOnSound();
+              audio.emit({ type: 'menu-click-on' });
               setActiveSection(id);
             }}
           >

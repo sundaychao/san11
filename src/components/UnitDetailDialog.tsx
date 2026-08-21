@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { TROOP_LABELS } from '../game/armaments';
 import { effectiveUnitAbilities, fireStrategySuccessChance, tacticCriticalChance } from '../game/battle/actions';
 import type { ArmyUnit, GameState } from '../game/types';
@@ -27,6 +28,7 @@ function unitStatus(unit: ArmyUnit) {
 }
 
 export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps) {
+  const audio = useAudioEventAdapter();
   const officerIds = unit.officerIds ?? [unit.leaderId];
   const officers = officerIds.map((id) => state.officers[id]).filter(Boolean);
   const leader = officers[0];
@@ -38,7 +40,7 @@ export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps
   const fireChance = `${fireStrategySuccessChance(abilities.intelligence.value)}%`;
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
       <section className="unit-detail-dialog tool-panel" data-testid="unit-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="unit-detail-title">
         <header>
           <div>

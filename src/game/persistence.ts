@@ -216,7 +216,12 @@ function validFirePlot(value: unknown): value is FirePlot {
   if (!value || typeof value !== 'object') return false;
   const plot = value as Partial<FirePlot>;
   return Number.isInteger(plot.q) && plot.q! >= 0 &&
-    Number.isInteger(plot.r) && plot.r! >= 0;
+    Number.isInteger(plot.r) && plot.r! >= 0 &&
+    (plot.remainingTenDays === undefined || (
+      Number.isInteger(plot.remainingTenDays) &&
+      plot.remainingTenDays >= 1 &&
+      plot.remainingTenDays <= 3
+    ));
 }
 
 function validFacility(value: unknown): value is Facility {

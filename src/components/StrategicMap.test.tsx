@@ -207,6 +207,33 @@ describe('StrategicMap', () => {
     expect(screen.getByTestId('map-cell-10-11')).not.toHaveClass('is-facility-occupied');
   });
 
+  it('uses the owning force color for support facility backgrounds', () => {
+    const state = createGame('liu', 1);
+    state.facilities = {
+      drum: { id: 'drum', type: 'drum', forceId: 'liu', q: 10, r: 10, durability: 800 },
+      tower: { id: 'tower', type: 'arrowTower', forceId: 'cao', q: 11, r: 10, durability: 700 },
+      music: { id: 'music', type: 'musicTower', forceId: 'sun', q: 12, r: 10, durability: 800 },
+      fortress: { id: 'fortress', type: 'fortress', forceId: 'biao', q: 13, r: 10, durability: 1200 },
+      wall: { id: 'wall', type: 'earthwork', forceId: 'liu', q: 14, r: 10, durability: 400 },
+    };
+
+    renderGame(state);
+
+    const backgrounds = screen.getAllByTestId('battle-facility-background');
+    const byId = (id: string) => backgrounds.find((node) => node.getAttribute('data-facility-id') === id)!;
+
+    expect(byId('drum')).toHaveClass('is-force-colored');
+    expect(byId('drum').getAttribute('style')).toContain(`--force-color: ${state.forces.liu.color}`);
+    expect(byId('tower')).toHaveClass('is-force-colored');
+    expect(byId('tower').getAttribute('style')).toContain(`--force-color: ${state.forces.cao.color}`);
+    expect(byId('music')).toHaveClass('is-force-colored');
+    expect(byId('music').getAttribute('style')).toContain(`--force-color: ${state.forces.sun.color}`);
+    expect(byId('fortress')).toHaveClass('is-force-colored');
+    expect(byId('fortress').getAttribute('style')).toContain(`--force-color: ${state.forces.biao.color}`);
+    expect(byId('wall')).not.toHaveClass('is-force-colored');
+    expect(byId('wall')).not.toHaveAttribute('style');
+  });
+
   it('shows arrow tower automatic damage numbers from battle reports', () => {
     const state = createGame('liu', 1);
     state.units['arrow-target'] = {

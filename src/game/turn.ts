@@ -1,6 +1,7 @@
 import { clamp } from './commands';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
 import { movementAllowanceForUnit, unitSupplyMultiplier } from './battle/actions';
+import { applyGroundFireDamageToFacilities, applyGroundFireDamageToUnits } from './battle/fire';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
 import { movementAllowanceBonus } from './skills/rules/movement';
@@ -60,10 +61,10 @@ export function settleMonth(state: GameState): GameState {
   const shouldSettleQuarterFood = isQuarterStartMonth(enteringMonth);
 
   for (const city of Object.values(next.cities)) {
-    const baseGold = Math.round(city.commerce * 20 + city.population / 100);
+    const baseGold = city.commerce * 20 + city.population / 100;
     city.gold += Math.round(baseGold * cityIncomeMultiplier(next, city.id, 'gold'));
     if (shouldSettleQuarterFood) {
-      const baseFood = Math.round(city.agriculture * 60 + city.population / 40);
+      const baseFood = city.agriculture * 60 + city.population / 40;
       city.food += Math.round(baseFood * cityIncomeMultiplier(next, city.id, 'food'));
     }
     city.population += Math.floor((city.population * 0.005 * city.order) / 100);
@@ -139,6 +140,12 @@ function tickUnitStatus(unit: ArmyUnit, key: 'confusedTenDays' | 'falseReportedT
   else delete unit[key];
 }
 
+function settleFirePlots(next: GameState) {
+  next.firePlots = (next.firePlots ?? [])
+    .map((plot) => ({ ...plot, remainingTenDays: (plot.remainingTenDays ?? 3) - 1 }))
+    .filter((plot) => plot.remainingTenDays > 0);
+}
+
 function settleOfficerTransfers(next: GameState) {
   for (const officer of Object.values(next.officers)) {
     if (officer.location.kind !== 'transfer') continue;
@@ -198,6 +205,9 @@ export function settleTenDay(state: GameState): GameState {
   clearTransientBattleReports(next);
   for (const city of Object.values(next.cities)) settleCitySupply(city);
   for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
+  applyGroundFireDamageToUnits(next, 'ten-day-fire');
+  applyGroundFireDamageToFacilities(next);
+  settleFirePlots(next);
   settleForceTurnStart(next, state.playerForceId);
   settleOfficerTransfers(next);
   settleOfficerTasks(next);

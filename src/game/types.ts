@@ -127,6 +127,7 @@ export interface StrategyResultReport {
 export interface FirePlot {
   q: number;
   r: number;
+  remainingTenDays?: number;
 }
 
 export type FacilityType = 'drum' | 'arrowTower' | 'musicTower' | 'fortress' | 'earthwork' | 'fireSeed' | 'fireBall';

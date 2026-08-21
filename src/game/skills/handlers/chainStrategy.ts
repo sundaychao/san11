@@ -4,6 +4,10 @@ import type { GameState } from '../../types';
 
 const CHAINABLE_STRATEGIES = new Set<StrategyId>(['false-report', 'disturb']);
 
+export function canApplyChainStrategy(strategyId: StrategyId): boolean {
+  return CHAINABLE_STRATEGIES.has(strategyId);
+}
+
 export interface ChainStrategyContext {
   state: GameState;
   casterId: string;
@@ -21,7 +25,7 @@ export function applyChainStrategyEffect({
   sharedDuration,
   applySuccessfulStatus,
 }: ChainStrategyContext): string[] {
-  if (!CHAINABLE_STRATEGIES.has(strategyId)) return [];
+  if (!canApplyChainStrategy(strategyId)) return [];
   const caster = state.units[casterId];
   const originalTarget = state.units[originalTargetId];
   if (!caster || !originalTarget || originalTarget.forceId === caster.forceId) return [];

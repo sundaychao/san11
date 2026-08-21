@@ -1,5 +1,6 @@
 import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
 import { COMMAND_AP, COMMAND_LABELS, transferDuration, validateCommand } from '../game/commands';
 import { useGame } from '../game/store/GameProvider';
@@ -14,6 +15,7 @@ interface CommandDialogProps {
 
 export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
   const { state, issueCommand } = useGame();
+  const audio = useAudioEventAdapter();
   const [officerId, setOfficerId] = useState('');
   const [focus, setFocus] = useState<'commerce' | 'agriculture'>('commerce');
   const [armamentType, setArmamentType] = useState<ArmamentType>('spear');
@@ -110,7 +112,7 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
               : '人员调动';
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
       <form ref={dialogRef} className="command-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="command-title" onSubmit={submit} onKeyDown={handleDialogKeyDown}>
         <header>
           <div><p>{city.name}政务 · 行动力 {COMMAND_AP[type]}</p><h2 id="command-title">{label}</h2></div>

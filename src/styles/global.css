@@ -147,8 +147,10 @@ button { color: inherit; }
 .battle-grid-overlay { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; pointer-events: auto; }
 .battle-unit-layer { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .battle-facility-hit { pointer-events: auto; cursor: help; fill: transparent; }
+.battle-facility-hit.is-force-colored { fill: var(--force-color); fill-opacity: 0.72; stroke: rgba(255, 244, 205, 0.62); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
 .battle-facility-marker { pointer-events: auto; cursor: help; fill: #f6e7a6; font-size: 15px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 3px; vector-effect: non-scaling-stroke; }
-.battle-facility.is-attack-target .battle-facility-hit { cursor: pointer; fill: rgba(246, 217, 113, 0.14); stroke: rgba(255, 237, 154, 0.84); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.battle-facility.is-attack-target .battle-facility-hit { cursor: pointer; stroke: rgba(255, 237, 154, 0.84); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.battle-facility.is-attack-target .battle-facility-hit:not(.is-force-colored) { fill: rgba(246, 217, 113, 0.14); }
 .battle-facility.is-under-construction .battle-facility-marker { opacity: 0.72; }
 .facility-construction-label { pointer-events: none; fill: #f4e7bc; font-size: 8px; font-weight: 800; text-anchor: end; paint-order: stroke; stroke: rgba(9, 21, 20, 0.92); stroke-width: 2px; vector-effect: non-scaling-stroke; }
 .facility-range-cell { pointer-events: none; fill: rgba(244, 237, 217, 0.24); stroke: rgba(255, 250, 218, 0.42); stroke-width: 0.9; vector-effect: non-scaling-stroke; }
@@ -460,6 +462,7 @@ button { color: inherit; }
 .officer-table thead button:hover, .officer-table thead button:focus-visible, .officer-table thead button.is-active { color: #fff6d6; outline: none; }
 .officer-table th:first-child, .officer-table td:first-child { text-align: left; }
 .officer-table tbody th { color: #fff6d6; font-size: 13px; }
+.officer-table .officer-skill-description { min-width: 280px; color: var(--muted); text-align: left; white-space: normal; }
 .officer-table tbody tr:hover { background: rgba(197, 173, 111, 0.12); }
 .city-panel h2, .event-log h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; letter-spacing: 0; }
 .city-heading { display: grid; grid-template-columns: 5px 1fr auto auto; gap: 10px; align-items: center; padding-bottom: 13px; border-bottom: 1px solid var(--line); }

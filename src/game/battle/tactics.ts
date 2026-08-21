@@ -1,6 +1,7 @@
 export {
   requiredAptitudeForTactic,
   tacticTier,
+  tacticTargetFacilities,
   tacticTargetUnits,
   unitCanUseTactic,
   unitTactics,

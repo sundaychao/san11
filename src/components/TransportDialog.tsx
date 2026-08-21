@@ -1,5 +1,6 @@
 import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { useGame } from '../game/store/GameProvider';
 import type { CityId } from '../game/types';
@@ -26,6 +27,7 @@ function toAmount(value: string) {
 
 export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogProps) {
   const { state } = useGame();
+  const audio = useAudioEventAdapter();
   const [officerId, setOfficerId] = useState('');
   const [troops, setTroops] = useState<string | null>(null);
   const [gold, setGold] = useState<string | null>(null);
@@ -80,7 +82,7 @@ export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogP
   };
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose)}>
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
       <form ref={dialogRef} className="deploy-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="transport-title" onSubmit={submit}>
         <header>
           <div>
