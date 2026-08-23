@@ -8,7 +8,7 @@ import { territoryCityAt } from '../territory';
 import { coordsWithinRange, gridKey, isSameCoord, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { allCityKeys, cellAt, cityCenter, deploymentCells, isLegalUnitCell, occupiedFacilityKeys, occupiedUnitKeys, reachableCosts, spawnCellFor, unitIsIncapacitated } from './movementRules';
 import { areAdjacent, attackableCities, attackableFacilities, attackableUnits, gridDistanceWithin, isCityInAttackRange, jointAttackableUnits } from './targetRules';
-import { effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance } from './officerAbilities';
+import { effectiveNavyAptitude, effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance } from './officerAbilities';
 import {
   ARROW_TOWER_DAMAGE,
   DEFENSE_MAX_TROOPS,
@@ -24,8 +24,11 @@ import {
   FORTRESS_DAMAGE_MULTIPLIER,
   FORTRESS_RANGE,
   FORTRESS_SUPPLY_MULTIPLIER,
+  NAVAL_TACTIC_IDS,
   PUBLIC_REPAIRABLE_FACILITY_TYPES,
   SPACING_LIMITED_FACILITY_TYPES,
+  SHIP_WATER_ATTACK_MULTIPLIER,
+  SHIP_WATER_DEFENSE_MULTIPLIER,
   STRATEGIES,
   TACTIC_APTITUDE_DAMAGE,
   TACTIC_REQUIRED_APTITUDE,
@@ -53,6 +56,7 @@ export interface DeployInput {
   officerIds?: string[];
   targetCityId?: CityId;
   troopType?: TroopType;
+  vehicle?: 'boat' | 'ship';
   destination?: GridCoord;
   troops: number;
   gold?: number;
@@ -127,7 +131,7 @@ function isInLimitedFacilitySpacing(state: GameState, coord: GridCoord, facility
 
 function isBuildableFacilityCell(state: GameState, coord: GridCoord, facilityType?: FacilityType) {
   const cell = cellAt(state, coord);
-  if (!cell || ['mountain', 'deepWater'].includes(cell.terrain)) return false;
+  if (!cell || ['mountain', 'water'].includes(cell.terrain)) return false;
   const key = gridKey(coord);
   return !allCityKeys(state).has(key) &&
     !occupiedUnitKeys(state).has(key) &&
@@ -287,12 +291,19 @@ function damageForRoll(
   );
   const rawDamage = 240 + attackScore;
   const randomModifier = 0.92 + rollValue * 0.16;
+  const attackerOnWater = unitTerrain(state, attacker) === 'water';
+  const attackerShipModifier = attacker.vehicle === 'ship' && attackerOnWater ? SHIP_WATER_ATTACK_MULTIPLIER : 1;
+  const defenderShipModifier = defender && defender.vehicle === 'ship' && unitTerrain(state, defender) === 'water'
+    ? SHIP_WATER_DEFENSE_MULTIPLIER
+    : 1;
   const damage = Math.round(
     rawDamage *
     leadershipModifier *
     TERRAIN_DEFENSE[defenderTerrain] *
     randomModifier *
     facilityDamageMultiplier(state, attacker) *
+    attackerShipModifier *
+    defenderShipModifier *
     (counter ? 0.6 : 1),
   );
   return Math.min(2200, Math.max(120, damage));
@@ -334,10 +345,17 @@ export function removeUnit(next: GameState, unit: ArmyUnit, looter?: ArmyUnit) {
   }
 }
 
+function unitIsOnWater(state: GameState, unit: ArmyUnit) {
+  return unitTerrain(state, unit) === 'water';
+}
+
 export function unitTactics(state: GameState, unitId: string): UnitTactic[] {
   const unit = state.units[unitId];
   if (!unit || unit.kind === 'transport') return [];
-  return (TACTICS_BY_TROOP[unit.troopType ?? 'sword'] ?? []).map((id) => TACTICS[id]);
+  const troopTactics = (TACTICS_BY_TROOP[unit.troopType ?? 'sword'] ?? []).map((id) => TACTICS[id]);
+  return unitIsOnWater(state, unit)
+    ? [...troopTactics, ...NAVAL_TACTIC_IDS.map((id) => TACTICS[id])]
+    : troopTactics;
 }
 
 export function tacticTier(tacticId: TacticId): 1 | 2 | 3 {
@@ -345,6 +363,8 @@ export function tacticTier(tacticId: TacticId): 1 | 2 | 3 {
     const index = tacticIds?.indexOf(tacticId) ?? -1;
     if (index >= 0) return (index + 1) as 1 | 2 | 3;
   }
+  const navalIndex = NAVAL_TACTIC_IDS.indexOf(tacticId);
+  if (navalIndex >= 0) return (navalIndex + 1) as 1 | 2 | 3;
   throw new Error('战法不存在');
 }
 
@@ -356,17 +376,25 @@ export function unitCanUseTactic(state: GameState, unitId: string, tacticId: Tac
   const unit = state.units[unitId];
   const tactic = TACTICS[tacticId];
   if (!unit || (unit.kind ?? 'combat') !== 'combat' || !tactic) return false;
-  if (tactic.troopType !== unit.troopType) return false;
-  const grade = effectiveUnitAbilities(state, unit).aptitude.grade;
+  const grade = tactic.troopType === 'naval'
+    ? effectiveNavyAptitude(state, unit).grade
+    : effectiveUnitAbilities(state, unit).aptitude.grade;
+  if (tactic.troopType === 'naval' && !unitIsOnWater(state, unit)) return false;
+  if (tactic.troopType !== 'naval' && tactic.troopType !== unit.troopType) return false;
   return maxTacticTier(grade) >= tacticTier(tacticId);
 }
 
 export function tacticTargetUnits(state: GameState, attackerId: string, tacticId: TacticId, origin?: GridCoord): ArmyUnit[] {
   const attacker = state.units[attackerId];
   const tactic = TACTICS[tacticId];
-  if (!attacker || attacker.kind === 'transport' || !tactic || tactic.troopType !== (attacker.troopType ?? 'sword')) return [];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
-  const minRange = tacticId === 'crossbow-fire' || tacticId === 'crossbow-pierce' ? 2 : 1;
+  if (!attacker || attacker.kind === 'transport' || !tactic) return [];
+  if (tactic.troopType === 'naval') {
+    if (!unitIsOnWater(state, attackerAtOrigin)) return [];
+  } else if (tactic.troopType !== (attacker.troopType ?? 'sword')) {
+    return [];
+  }
+  const minRange = tacticId === 'crossbow-fire' || tacticId === 'crossbow-pierce' || tacticId === 'ship-fire' ? 2 : 1;
   return Object.values(state.units)
     .filter((unit) => {
       if (unit.id === attacker.id || unit.forceId === attacker.forceId) return false;
@@ -382,8 +410,13 @@ export function tacticTargetUnits(state: GameState, attackerId: string, tacticId
 export function tacticTargetFacilities(state: GameState, attackerId: string, tacticId: TacticId, origin?: GridCoord): Facility[] {
   const attacker = state.units[attackerId];
   const tactic = TACTICS[tacticId];
-  if (!attacker || attacker.kind === 'transport' || !tactic || tactic.troopType !== (attacker.troopType ?? 'sword')) return [];
-  if (tacticId !== 'crossbow-fire') return [];
+  if (!attacker || attacker.kind === 'transport' || !tactic) return [];
+  if (tactic.troopType === 'naval') {
+    if (!unitIsOnWater(state, origin ? { ...attacker, q: origin.q, r: origin.r } : attacker)) return [];
+  } else if (tactic.troopType !== (attacker.troopType ?? 'sword')) {
+    return [];
+  }
+  if (tacticId !== 'crossbow-fire' && tacticId !== 'ship-fire') return [];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
   return Object.values(state.facilities ?? {})
     .filter((facility) => (
@@ -574,7 +607,7 @@ function tacticAffectedUnits(next: GameState, attacker: ArmyUnit, target: ArmyUn
     return Object.values(next.units)
       .filter((unit) => unit.id === target.id || unit.id === middle?.id);
   }
-  if (tactic.id === 'crossbow-volley') {
+  if (tactic.id === 'crossbow-volley' || tactic.id === 'ship-whirl') {
     return Object.values(next.units).filter((unit) => unit.id === target.id || gridDistanceWithin(target, unit, 1) <= 1);
   }
   return [target];
@@ -618,7 +651,7 @@ function applyTacticPositionEffect(next: GameState, attackerId: string, targetId
   const target = next.units[targetId];
   if (!attacker || !target) return;
 
-  if (tactic.id === 'spear-thrust') {
+  if (tactic.id === 'spear-thrust' || tactic.id === 'ship-ram') {
     const destination = projectBeyond(attacker, target);
     if (destination) tryMoveUnit(next, targetId, destination);
   } else if (tactic.id === 'spear-double') {
@@ -653,13 +686,18 @@ function applyTacticPositionEffect(next: GameState, attackerId: string, targetId
 export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: string, targetId: string, tacticId: TacticId): GameState {
   const attacker = assertUnitTurn(state, forceId, attackerId);
   const tactic = TACTICS[tacticId];
-  if (!tactic || tactic.troopType !== (attacker.troopType ?? 'sword')) throw new Error('部队不能使用该战法');
+  if (!tactic) throw new Error('部队不能使用该战法');
+  if (tactic.troopType === 'naval') {
+    if (!unitIsOnWater(state, attacker)) throw new Error('部队不在水域，无法使用水军战法');
+  } else if (tactic.troopType !== (attacker.troopType ?? 'sword')) {
+    throw new Error('部队不能使用该战法');
+  }
   if (!unitCanUseTactic(state, attackerId, tacticId)) {
-    const troopLabel = TROOP_LABEL[attacker.troopType ?? 'sword'] ?? '部队';
+    const troopLabel = tactic.troopType === 'naval' ? '水军' : TROOP_LABEL[attacker.troopType ?? 'sword'] ?? '部队';
     throw new Error(`需要${troopLabel}适性 ${requiredAptitudeForTactic(tacticId)}`);
   }
   const target = state.units[targetId];
-  if (!target && tacticId === 'crossbow-fire') return useFireArrowFacilityTactic(state, attacker, targetId, tactic);
+  if (!target && (tacticId === 'crossbow-fire' || tacticId === 'ship-fire')) return useFireArrowFacilityTactic(state, attacker, targetId, tactic);
   if (!target) throw new Error('目标部队不存在');
   if (attacker.energy < tactic.cost) throw new Error('气力不足');
   if (!tacticTargetUnits(state, attackerId, tacticId).some((unit) => unit.id === targetId)) throw new Error('目标不在战法范围');
@@ -670,7 +708,9 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
   const nextAttacker = next.units[attackerId];
   const nextTarget = next.units[targetId];
   const abilities = effectiveUnitAbilities(next, nextAttacker);
-  const aptitude = abilities.aptitude.grade!;
+  const aptitude = tactic.troopType === 'naval'
+    ? effectiveNavyAptitude(next, nextAttacker).grade!
+    : abilities.aptitude.grade!;
   const criticalMode = tacticCriticalMode(next, nextAttacker, nextTarget, tacticId);
   let critical = criticalMode === 'guaranteed';
   if (criticalMode === 'normal') {
@@ -684,6 +724,12 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
     : [];
   for (const affectedUnit of affected) {
     applyTacticDamage(next, nextAttacker, affectedUnit, tactic, aptitude, critical);
+  }
+  if (tactic.id === 'ship-fire') {
+    for (const affectedUnit of affected) {
+      const burningUnit = next.units[affectedUnit.id];
+      if (burningUnit) burningUnit.burningTenDays = 2;
+    }
   }
   if (fireArrowCells.length > 0) igniteGroundFire(next, fireArrowCells, nextAttacker);
   if (next.units[targetId]) applyTacticPositionEffect(next, attackerId, targetId, tactic);

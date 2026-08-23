@@ -139,8 +139,8 @@ button { color: inherit; }
 .icon-button { width: 40px; padding: 0; border: 1px solid var(--line); background: transparent; }
 .next-month { padding: 0 16px; border: 1px solid var(--gold-line); background: var(--gold); color: var(--ink); font-size: 13px; font-weight: 700; }
 .icon-button svg, .next-month svg { width: 18px; }
-.map-region { position: relative; min-width: 0; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; background: #5f6d5f; }
-.map-region:active { cursor: grabbing; }
+.map-region { position: relative; min-width: 0; min-height: 0; overflow: hidden; touch-action: none; cursor: default; background: #5f6d5f; }
+.map-region:active { cursor: default; }
 .map-content { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: center; will-change: transform; }
 .map-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; user-select: none; opacity: 0.92; }
 .map-region.is-editing .map-image { opacity: 0.62; filter: saturate(0.9) contrast(0.92) brightness(0.92); }
@@ -176,8 +176,8 @@ button { color: inherit; }
 .terrain-forest { fill: rgba(42, 135, 56, 0.42); stroke: rgba(129, 214, 118, 0.5); }
 .terrain-hill { fill: rgba(160, 103, 54, 0.42); stroke: rgba(226, 170, 91, 0.5); }
 .terrain-mountain { fill: rgba(50, 54, 55, 0.48); stroke: rgba(205, 210, 202, 0.48); }
-.terrain-shallowWater { fill: rgba(38, 125, 168, 0.45); stroke: rgba(126, 213, 238, 0.52); }
-.terrain-deepWater { fill: rgba(16, 57, 99, 0.58); stroke: rgba(86, 148, 196, 0.66); }
+.terrain-shallowWater, .terrain-deepWater { fill: rgba(38, 125, 168, 0.45); stroke: rgba(126, 213, 238, 0.52); }
+.terrain-water { fill: rgba(38, 125, 168, 0.48); stroke: rgba(126, 213, 238, 0.55); }
 .battle-cell.is-facility-occupied { fill: rgba(18, 24, 23, 0.58); stroke: rgba(255, 237, 154, 0.56); stroke-width: 0.9; }
 .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 42%, transparent); stroke: rgba(255, 244, 205, 0.58); stroke-width: 1.3; vector-effect: non-scaling-stroke; pointer-events: auto; cursor: pointer; }
 .battle-grid-overlay.is-editing .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 78%, rgba(255, 231, 145, 0.62)); stroke: rgba(255, 250, 188, 1); stroke-width: 2.3; pointer-events: none; cursor: crosshair; }
@@ -206,6 +206,8 @@ button { color: inherit; }
 .troop-crossbow { --troop-tone: #8f6f9f; }
 .troop-cavalry { --troop-tone: #c06a4b; }
 .troop-siege { --troop-tone: #879099; }
+.vehicle-boat { --troop-tone: #6f9c8f; }
+.vehicle-ship { --troop-tone: #5d8aa8; }
 .battle-unit-troops { fill: #fff6d6; font-size: 8px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 2px; }
 .battle-unit-leader-name { fill: #fff6d6; font-size: 11px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 3px; vector-effect: non-scaling-stroke; }
 .city-marker-layer { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
@@ -549,8 +551,16 @@ button { color: inherit; }
 .deploy-troop-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .deploy-troop-grid button { min-height: 64px; display: grid; place-items: center; gap: 3px; padding: 6px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.06); cursor: pointer; }
 .deploy-troop-grid button:hover, .deploy-troop-grid button:focus-visible, .deploy-troop-grid button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.22); outline: none; }
+.deploy-troop-grid button:disabled { opacity: 0.4; cursor: not-allowed; border-color: var(--line); background: rgba(244, 237, 217, 0.03); }
+.deploy-troop-grid button:disabled svg { color: var(--muted); }
 .deploy-troop-grid svg { width: 18px; height: 18px; color: var(--gold); }
 .deploy-troop-grid small { color: var(--muted); font: 10px Consolas, "Courier New", monospace; }
+.deploy-section-label { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.vehicle-grid { grid-template-columns: repeat(2, 1fr); margin-top: 4px; }
+.vehicle-grid button { min-height: 38px; gap: 2px; padding: 4px 6px; }
+.vehicle-grid svg { width: 14px; height: 14px; }
+.vehicle-grid button span { font-size: 12px; }
+.vehicle-grid small { font-size: 9px; }
 .deploy-right { display: grid; align-content: start; gap: 11px; }
 .deploy-right h3 { margin: 0; color: var(--gold); font-size: 13px; font-weight: 600; }
 .deploy-ability { display: grid; grid-template-columns: 1fr 56px; gap: 5px 10px; padding: 10px; border: 1px solid rgba(146, 136, 115, 0.65); font-variant-numeric: tabular-nums; }

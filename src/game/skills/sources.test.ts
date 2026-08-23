@@ -51,7 +51,7 @@ describe('skill sources', () => {
   it('resolves registered non-blocked definitions but ignores unknown and blocked officer skills', () => {
     const state = createGame('liu', 1);
     state.officers['liu-bei'].skill = '神将';
-    state.officers['guan-yu'].skill = '强袭';
+    state.officers['guan-yu'].skill = '捕缚';
     state.officers['zhang-fei'].skill = '不存在的特技';
 
     expect(resolveOfficerSkills(state, ['liu-bei', 'guan-yu', 'zhang-fei'])).toMatchObject([

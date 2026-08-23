@@ -24,6 +24,11 @@ const TROOP_TEXTURES: Record<TroopType, { glyph: string; label: string }> = {
   siege: { glyph: '械', label: '兵器' },
 };
 
+const VEHICLE_TEXTURES: Record<'boat' | 'ship', { glyph: string; label: string }> = {
+  boat: { glyph: '舟', label: '小舟' },
+  ship: { glyph: '船', label: '楼船' },
+};
+
 const FACILITY_GLYPHS: Partial<Record<FacilityType, string>> = {
   drum: '鼓',
   arrowTower: '箭',
@@ -252,7 +257,14 @@ export function StrategicMap({
     const leaderName = state.officers[unit.leaderId]?.name ?? '';
     const troopType = unit.troopType ?? 'sword';
     const unitKind = unit.kind ?? 'combat';
-    const texture = unitKind === 'transport' ? { glyph: '输', label: '输送队' } : TROOP_TEXTURES[troopType];
+    const vehicle = unit.vehicle;
+    const terrain = state.grid.find((cell) => cell.q === unit.q && cell.r === unit.r)?.terrain;
+    const onWater = terrain === 'water';
+    const texture = unitKind === 'transport'
+      ? { glyph: '输', label: '输送队' }
+      : onWater && vehicle
+        ? VEHICLE_TEXTURES[vehicle]
+        : TROOP_TEXTURES[troopType];
     const centerX = position.x + CELL_SIZE / 2;
     const centerY = position.y + CELL_SIZE / 2;
     const canActThisTurn = unit.forceId === state.turnForceId && !unit.moved && !unit.acted && !unitIsIncapacitated(unit) && unit.movementRemaining > 0;
@@ -272,9 +284,10 @@ export function StrategicMap({
         data-grid-position={`${unit.q},${unit.r}`}
         data-troop-type={troopType}
         data-unit-kind={unitKind}
+        data-vehicle={onWater ? (vehicle ?? undefined) : undefined}
         data-force-id={unit.forceId}
         data-unit-status={statusFlags || undefined}
-        className={`battle-unit-marker troop-${troopType} unit-${unitKind}${selectedUnitId === unit.id ? ' is-selected' : ''}${statusFlags ? ' has-status' : ''}`}
+        className={`battle-unit-marker troop-${troopType} unit-${unitKind}${onWater && vehicle ? ` vehicle-${vehicle}` : ''}${selectedUnitId === unit.id ? ' is-selected' : ''}${statusFlags ? ' has-status' : ''}`}
         style={{ '--force-color': forceColor } as CSSProperties}
         aria-label={`${leaderName} ${texture.label}`}
         onPointerDown={(event) => {

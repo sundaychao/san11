@@ -34,7 +34,7 @@ describe('battle scenario state', () => {
     }
   });
 
-  it('creates deterministic terrain cells with passable routes and blocked mountains or water', () => {
+  it('creates deterministic terrain cells with passable routes and blocked mountains', () => {
     const grid = createBattleGrid();
 
     expect(grid.find((cell) => cell.terrain === 'road')).toBeTruthy();
@@ -42,7 +42,6 @@ describe('battle scenario state', () => {
     expect(grid.find((cell) => cell.terrain === 'forest')).toBeTruthy();
     expect(grid.find((cell) => cell.terrain === 'hill')).toBeTruthy();
     expect(grid.find((cell) => cell.terrain === 'mountain')).toBeTruthy();
-    expect(grid.find((cell) => cell.terrain === 'shallowWater')).toBeTruthy();
-    expect(grid.find((cell) => cell.terrain === 'deepWater')).toBeTruthy();
+    expect(grid.find((cell) => cell.terrain === 'water')).toBeTruthy();
   });
 });

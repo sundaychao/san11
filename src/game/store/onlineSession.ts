@@ -46,6 +46,16 @@ function isAuthExpired(reason: string) {
   return reason.includes('请先登录') || reason.includes('登录') || reason.includes('鐧诲綍');
 }
 
+function withTimeout<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('联网请求超时')), milliseconds);
+    promise.then(
+      (value) => { window.clearTimeout(timer); resolve(value); },
+      (error) => { window.clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 export function useOnlineSession({ storage, applySnapshotState, setError }: UseOnlineSessionOptions) {
   const savedAuth = storedAuthSession(storage);
   const [online, setOnline] = useState<OnlineClientState>(() => createOnlineClientState({
@@ -57,7 +67,7 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
       : createUnauthenticatedAuthState()
   ));
   const socketRef = useRef<OnlineSocket | null>(null);
-  const attemptedResumeRef = useRef(false);
+  const resumeTokenRef = useRef(0);
   const onlineRef = useRef(online);
   const authRef = useRef(auth);
   onlineRef.current = online;
@@ -97,6 +107,7 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
   }, [applySnapshotState, setError, storage]);
 
   const disconnectOnline = useCallback(() => {
+    resumeTokenRef.current += 1;
     const socket = socketRef.current;
     const token = authRef.current.token;
     const roomId = onlineRef.current.roomId;
@@ -105,7 +116,8 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
     socketRef.current = null;
     clearStoredLastRoom(storage);
     setOnline(createOfflineOnlineState());
-  }, [storage]);
+    applySnapshotState(null);
+  }, [applySnapshotState, storage]);
 
   const expireAuthSession = useCallback((message: string) => {
     clearStoredAuthSession(authStorage(storage));
@@ -122,18 +134,30 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
     socketRef.current = socket;
     setOnline((current) => ({ ...current, mode: 'online', connecting: true, connected: false, serverUrl, error: null }));
 
+    const connectTimer = window.setTimeout(() => {
+      if (socketRef.current !== socket) return;
+      cleanup();
+      socket.disconnect();
+      socketRef.current = null;
+      setOnline((current) => ({ ...current, connecting: false, connected: false, error: '连接服务器超时' }));
+      reject(new Error('连接服务器超时'));
+    }, 6000);
     const cleanup = () => {
+      window.clearTimeout(connectTimer);
       socket.off('connect', onConnect);
       socket.off('connect_error', onConnectError);
     };
     const onConnect = () => {
+      if (socketRef.current !== socket) return;
       cleanup();
       setOnline((current) => ({ ...current, connecting: false, connected: true, error: null }));
       resolve(socket);
     };
     const onConnectError = (connectError: Error) => {
+      if (socketRef.current !== socket) return;
       cleanup();
       socket.disconnect();
+      socketRef.current = null;
       setOnline((current) => ({ ...current, connecting: false, connected: false, error: connectError.message }));
       reject(connectError);
     };
@@ -141,28 +165,35 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
     socket.on('connect', onConnect);
     socket.on('connect_error', onConnectError);
     socket.on('disconnect', () => {
+      if (socketRef.current !== socket) return;
       setOnline((current) => current.mode === 'online' ? { ...current, connected: false } : current);
     });
     socket.on('room:list:update', (update) => {
+      if (socketRef.current !== socket) return;
       setOnline((current) => ({ ...current, mode: 'online', rooms: update.rooms, error: null }));
     });
-    socket.on('room:update', applyOnlineSnapshot);
+    socket.on('room:update', (snapshot) => {
+      if (socketRef.current !== socket) return;
+      applyOnlineSnapshot(snapshot);
+    });
     socket.connect();
   }), [applyOnlineSnapshot]);
 
   useEffect(() => {
     const token = auth.token;
-    if (!token || attemptedResumeRef.current) return;
-    attemptedResumeRef.current = true;
     const lastRoom = readStoredLastRoom(storage);
-    if (!lastRoom) return;
+    if (!token || !lastRoom) return;
+
+    const resumeToken = resumeTokenRef.current + 1;
+    resumeTokenRef.current = resumeToken;
+    let resumeSocket: OnlineSocket | null = null;
 
     void (async () => {
       try {
         setOnline((current) => ({ ...current, mode: 'online', connecting: true, resumingRoom: true, serverUrl: lastRoom.serverUrl, error: null }));
-        const socket = await connectOnlineSocket(lastRoom.serverUrl);
-        await new Promise<void>((resolve, reject) => {
-          socket.emit('auth:session', { token }, (response) => {
+        resumeSocket = await withTimeout(connectOnlineSocket(lastRoom.serverUrl), 8000);
+        await withTimeout(new Promise<void>((resolve, reject) => {
+          resumeSocket!.emit('auth:session', { token }, (response) => {
             if (!response.ok) {
               expireAuthSession(response.reason);
               reject(new Error(response.reason));
@@ -171,9 +202,9 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
             applyAuthSession(response.session);
             resolve();
           });
-        });
-        await new Promise<void>((resolve, reject) => {
-          socket.emit('room:resume', { token, roomId: lastRoom.roomId }, (response) => {
+        }), 8000);
+        await withTimeout(new Promise<void>((resolve, reject) => {
+          resumeSocket!.emit('room:resume', { token, roomId: lastRoom.roomId }, (response) => {
             if (!response.ok) {
               setOnline((current) => ({ ...current, error: response.reason }));
               reject(new Error(response.reason));
@@ -182,8 +213,11 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
             applyOnlineSnapshot(response.snapshot);
             resolve();
           });
-        });
+        }), 8000);
       } catch {
+        if (resumeToken !== resumeTokenRef.current) return;
+        resumeSocket?.disconnect();
+        if (socketRef.current === resumeSocket) socketRef.current = null;
         setOnline((current) => ({ ...current, connecting: false, resumingRoom: false }));
       }
     })();
@@ -269,6 +303,8 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
 
   const createOnlineRoom = useCallback(async (input: { serverUrl?: string; seed?: number }) => {
     const token = requireToken();
+    resumeTokenRef.current += 1;
+    setOnline((current) => ({ ...current, resumingRoom: false, error: null }));
     const socket = await connectOnlineSocket(input.serverUrl ?? onlineRef.current.serverUrl);
     await new Promise<void>((resolve, reject) => {
       socket.emit('room:create', { token, seed: input.seed }, (response) => {
@@ -303,10 +339,11 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
 
   const resumeOnlineRoom = useCallback(async (input: { serverUrl?: string; roomId?: string } = {}) => {
     const token = requireToken();
+    resumeTokenRef.current += 1;
     setOnline((current) => ({ ...current, resumingRoom: true }));
     try {
       const socket = await connectOnlineSocket(input.serverUrl ?? onlineRef.current.serverUrl);
-      await new Promise<void>((resolve, reject) => {
+      await withTimeout(new Promise<void>((resolve, reject) => {
         socket.emit('room:resume', { token, ...(input.roomId ? { roomId: input.roomId.trim().toUpperCase() } : {}) }, (response) => {
           if (!response.ok) {
             if (isAuthExpired(response.reason)) expireAuthSession(response.reason);
@@ -317,8 +354,10 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
           applyOnlineSnapshot(response.snapshot);
           resolve();
         });
-      });
+      }), 8000);
     } catch (resumeError) {
+      socketRef.current?.disconnect();
+      socketRef.current = null;
       setOnline((current) => ({ ...current, connecting: false, resumingRoom: false }));
       throw resumeError;
     }

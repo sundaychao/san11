@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GameDatabase } from './database';
 import { RoomManager } from './roomManager';
 
@@ -13,6 +13,7 @@ async function database() {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   if (tempDir) await rm(tempDir, { recursive: true, force: true });
   tempDir = null;
 });
@@ -41,7 +42,9 @@ describe('RoomManager room list', () => {
     ]);
   });
 
-  it('removes lobby players on disconnect and deletes empty lobby rooms', () => {
+  it('keeps lobby players for the disconnect grace period and removes them after it expires', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
     const manager = new RoomManager();
     const room = manager.createRoom({ playerId: 'host', playerName: 'Host', seed: 1 });
     manager.joinRoom({ roomId: room.room.id, playerId: 'guest', playerName: 'Guest' });
@@ -49,11 +52,12 @@ describe('RoomManager room list', () => {
     const guestResult = manager.disconnectPlayer('guest');
 
     expect(guestResult?.removed).toBe(false);
+    expect(manager.roomForPlayer('guest')).not.toBeNull();
     expect(manager.listLobbyRooms()).toEqual([
       {
         id: room.room.id,
         hostName: 'Host',
-        playerCount: 1,
+        playerCount: 2,
         maxPlayers: 2,
         selectedForceIds: [],
       },
@@ -61,8 +65,16 @@ describe('RoomManager room list', () => {
 
     const hostResult = manager.disconnectPlayer('host');
 
-    expect(hostResult?.removed).toBe(true);
+    expect(hostResult?.removed).toBe(false);
     expect(manager.listLobbyRooms()).toEqual([]);
+
+    vi.setSystemTime(new Date('2026-01-01T00:01:01Z'));
+    manager.pruneExpiredLobbyDisconnects();
+
+    expect(manager.roomForPlayer('guest')).toBeNull();
+    expect(manager.roomForPlayer('host')).toBeNull();
+    expect(manager.listLobbyRooms()).toEqual([]);
+    vi.useRealTimers();
   });
 
   it('keeps playing rooms when players disconnect', () => {
@@ -99,6 +111,25 @@ describe('RoomManager room list', () => {
 
     expect(hostResult?.removed).toBe(true);
     expect(manager.roomForPlayer('host')).toBeNull();
+  });
+
+  it('creates a new room for a player still stranded in an old room', () => {
+    const manager = new RoomManager();
+    const room = manager.createRoom({ playerId: 'host', playerName: 'Host', seed: 1 });
+    manager.joinRoom({ roomId: room.room.id, playerId: 'guest', playerName: 'Guest' });
+    manager.selectForce({ roomId: room.room.id, playerId: 'host', forceId: 'liu' });
+    manager.selectForce({ roomId: room.room.id, playerId: 'guest', forceId: 'cao' });
+    manager.startRoom({ roomId: room.room.id, playerId: 'host' });
+    manager.disconnectPlayer('guest');
+
+    const fresh = manager.createRoom({ playerId: 'guest', playerName: 'Guest', seed: 2 });
+
+    expect(fresh.room.id).not.toBe(room.room.id);
+    expect(fresh.room.players.some((player) => player.id === 'guest')).toBe(true);
+    expect(manager.roomForPlayer('guest')?.id).toBe(fresh.room.id);
+    expect(manager.roomForPlayer('guest')?.players.guest.connected).toBe(true);
+    const oldRoom = (manager as unknown as { rooms: Map<string, { players: Record<string, unknown> }> }).rooms.get(room.room.id);
+    expect(oldRoom?.players.guest).toBeUndefined();
   });
 
   it('restores a saved playing room from the database and resumes the player', async () => {

@@ -55,8 +55,7 @@ const TERRAIN_LABELS: Record<TerrainType, string> = {
   forest: '森林',
   hill: '丘陵',
   mountain: '高山',
-  shallowWater: '浅水',
-  deepWater: '深水',
+  water: '水域',
 };
 
 function downloadTextFile(filename: string, content: string) {

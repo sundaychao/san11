@@ -26,21 +26,20 @@ const INFANTRY_TERRAIN_COST: Record<TerrainType, number> = {
   forest: 6,
   hill: 6,
   mountain: Number.POSITIVE_INFINITY,
-  shallowWater: 6,
-  deepWater: Number.POSITIVE_INFINITY,
+  water: 6,
 };
 
 const CAVALRY_TERRAIN_COST: Record<TerrainType, number> = {
   ...INFANTRY_TERRAIN_COST,
   forest: 8,
-  shallowWater: 8,
+  water: 8,
 };
 
 const SIEGE_TERRAIN_COST: Record<TerrainType, number> = {
   ...INFANTRY_TERRAIN_COST,
   forest: 8,
   hill: 8,
-  shallowWater: 8,
+  water: 8,
 };
 
 export const TERRAIN_COST_BY_PROFILE: Record<MovementProfile, Record<TerrainType, number>> = {
@@ -53,20 +52,23 @@ export const TERRAIN_COST_BY_PROFILE: Record<MovementProfile, Record<TerrainType
   siege: SIEGE_TERRAIN_COST,
 };
 
+export const SHIP_WATER_COST = 4;
+export const SHIP_WATER_ATTACK_MULTIPLIER = 1.1;
+export const SHIP_WATER_DEFENSE_MULTIPLIER = 0.9;
+
 export const TERRAIN_DEFENSE: Record<TerrainType, number> = {
   road: 1,
   plain: 1,
   forest: 0.85,
   hill: 0.8,
   mountain: 1,
-  shallowWater: 0.95,
-  deepWater: 1,
+  water: 0.95,
 };
 
 export interface UnitTactic {
   id: TacticId;
   name: string;
-  troopType: Exclude<TroopType, 'sword' | 'siege'>;
+  troopType: TroopType | 'naval';
   cost: number;
   range: number;
   power: number;
@@ -84,7 +86,10 @@ export type TacticId =
   | 'crossbow-volley'
   | 'cavalry-charge'
   | 'cavalry-breakthrough'
-  | 'cavalry-rush';
+  | 'cavalry-rush'
+  | 'ship-ram'
+  | 'ship-fire'
+  | 'ship-whirl';
 
 export const TACTICS: Record<TacticId, UnitTactic> = {
   'spear-thrust': { id: 'spear-thrust', name: '突刺', troopType: 'spear', cost: 15, range: 1, power: 1.18 },
@@ -99,6 +104,9 @@ export const TACTICS: Record<TacticId, UnitTactic> = {
   'cavalry-charge': { id: 'cavalry-charge', name: '突击', troopType: 'cavalry', cost: 15, range: 1, power: 1.4 },
   'cavalry-breakthrough': { id: 'cavalry-breakthrough', name: '突破', troopType: 'cavalry', cost: 20, range: 1, power: 1.45 },
   'cavalry-rush': { id: 'cavalry-rush', name: '突进', troopType: 'cavalry', cost: 25, range: 1, power: 1.5 },
+  'ship-ram': { id: 'ship-ram', name: '冲角', troopType: 'naval', cost: 15, range: 1, power: 1.22 },
+  'ship-fire': { id: 'ship-fire', name: '火箭', troopType: 'naval', cost: 20, range: 2, power: 1.18 },
+  'ship-whirl': { id: 'ship-whirl', name: '回旋', troopType: 'naval', cost: 30, range: 1, power: 1.3 },
 };
 
 export const TACTICS_BY_TROOP: Partial<Record<TroopType, TacticId[]>> = {
@@ -107,6 +115,8 @@ export const TACTICS_BY_TROOP: Partial<Record<TroopType, TacticId[]>> = {
   crossbow: ['crossbow-fire', 'crossbow-pierce', 'crossbow-volley'],
   cavalry: ['cavalry-charge', 'cavalry-breakthrough', 'cavalry-rush'],
 };
+
+export const NAVAL_TACTIC_IDS: TacticId[] = ['ship-ram', 'ship-fire', 'ship-whirl'];
 
 export const TACTIC_REQUIRED_APTITUDE: Record<1 | 2 | 3, AptitudeGrade> = {
   1: 'B',
@@ -193,6 +203,10 @@ export function movementAllowanceForUnit(unit: Pick<ArmyUnit, 'kind' | 'troopTyp
   return movementAllowanceForProfile(movementProfileForUnit(unit));
 }
 
-export function movementCostForCell(cell: GridCell | undefined, profile: MovementProfile = 'sword') {
-  return cell ? TERRAIN_COST_BY_PROFILE[profile][cell.terrain] : Number.POSITIVE_INFINITY;
+export function movementCostForCell(cell: GridCell | undefined, profile: MovementProfile = 'sword', vehicle?: 'boat' | 'ship') {
+  if (!cell) return Number.POSITIVE_INFINITY;
+  if (vehicle === 'ship' && cell.terrain === 'water') {
+    return SHIP_WATER_COST;
+  }
+  return TERRAIN_COST_BY_PROFILE[profile][cell.terrain];
 }

@@ -215,7 +215,7 @@ describe('battle deployment and movement actions', () => {
 
     expect(movementCells(state, 'test')).toContainEqual({ q: 2, r: 0 });
     expect(movementCells(state, 'test')).not.toContainEqual({ q: 1, r: 1 });
-    for (const cell of state.grid) cell.terrain = 'shallowWater';
+    for (const cell of state.grid) cell.terrain = 'water';
     expect(movementCells(state, 'test')).not.toContainEqual({ q: 2, r: 0 });
 
     for (const cell of state.grid) cell.terrain = 'road';
@@ -1077,7 +1077,7 @@ describe('battle deployment and movement actions', () => {
     expect(hasCoord(forestTargets, { q: 13, r: 10 })).toBe(true);
     expect(hasCoord(forestTargets, { q: 14, r: 10 })).toBe(false);
 
-    setUniformTerrain(deployed, 'shallowWater');
+    setUniformTerrain(deployed, 'water');
     const waterTargets = movementCells(deployed, unit.id);
 
     expect(hasCoord(waterTargets, { q: 13, r: 10 })).toBe(true);
@@ -1109,7 +1109,7 @@ describe('battle deployment and movement actions', () => {
     expect(hasCoord(siegeTargets, { q: 13, r: 10 })).toBe(false);
   });
 
-  it('allows units to move into shallow water but not deep water', () => {
+  it('allows units to move into water', () => {
     const deployed = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -1123,13 +1123,10 @@ describe('battle deployment and movement actions', () => {
     deployed.units[unit.id].moved = false;
     deployed.units[unit.id].movementRemaining = 20;
 
-    const shallow = deployed.grid.find((cell) => cell.q === 27 && cell.r === 9);
-    const deep = deployed.grid.find((cell) => cell.q === 28 && cell.r === 10);
+    const water = deployed.grid.find((cell) => cell.q === 28 && cell.r === 10);
 
-    expect(shallow?.terrain).toBe('shallowWater');
-    expect(deep?.terrain).toBe('deepWater');
-    expect(moveUnit(deployed, 'liu', unit.id, shallow!).units[unit.id]).toMatchObject({ q: shallow!.q, r: shallow!.r });
-    expect(() => moveUnit(deployed, 'liu', unit.id, deep!)).toThrow(/通行|占用|目标/);
+    expect(water?.terrain).toBe('water');
+    expect(moveUnit(deployed, 'liu', unit.id, water!).units[unit.id]).toMatchObject({ q: water!.q, r: water!.r });
   });
 
   it('lists tactics for each supported troop type', () => {
@@ -1140,6 +1137,7 @@ describe('battle deployment and movement actions', () => {
       troops: 3000,
       food: 3000,
     });
+    setUniformTerrain(state, 'plain');
     const unit = Object.values(state.units)[0];
 
     state.units[unit.id].troopType = 'spear';

@@ -131,7 +131,7 @@ function validGridCell(value: unknown): value is GridCell {
   const cell = value as Partial<GridCell>;
   return Number.isInteger(cell.q) && cell.q! >= 0 &&
     Number.isInteger(cell.r) && cell.r! >= 0 &&
-    ['road', 'plain', 'forest', 'hill', 'mountain', 'shallowWater', 'deepWater'].includes(cell.terrain!);
+    ['road', 'plain', 'forest', 'hill', 'mountain', 'water'].includes(cell.terrain!);
 }
 
 function validUnit(value: unknown): value is ArmyUnit {
@@ -144,6 +144,7 @@ function validUnit(value: unknown): value is ArmyUnit {
     typeof unit.leaderId === 'string' &&
     CITY_IDS.includes(unit.homeCityId!) &&
     (unit.troopType === undefined || TROOP_TYPES.includes(unit.troopType)) &&
+    (unit.vehicle === undefined || unit.vehicle === 'boat' || unit.vehicle === 'ship') &&
     (unit.gold === undefined || validResource(unit.gold)) &&
     Number.isInteger(unit.q) &&
     Number.isInteger(unit.r) &&

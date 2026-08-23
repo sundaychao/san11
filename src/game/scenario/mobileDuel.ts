@@ -9,14 +9,15 @@ const TOP_CITY_ID: CityId = 'xiangyang';
 const BOTTOM_CITY_ID: CityId = 'jiangling';
 const TOP_CITY_CENTER = { q: 8, r: 3 };
 const BOTTOM_CITY_CENTER = { q: 8, r: 29 };
-const CENTER_ROAD_R = Math.floor(MOBILE_DUEL_GRID_HEIGHT / 2);
+const RIVER_START_R = 13;
+const RIVER_HEIGHT = 7;
 
 function createMobileDuelGrid(): GridCell[] {
   const cells: GridCell[] = [];
   for (let r = 0; r < MOBILE_DUEL_GRID_HEIGHT; r += 1) {
     for (let q = 0; q < MOBILE_DUEL_GRID_WIDTH; q += 1) {
-      const onCenterRoad = q === 8 || (r === CENTER_ROAD_R && q >= 4 && q <= 12);
-      cells.push({ q, r, terrain: onCenterRoad ? 'road' : 'plain' });
+      const inRiver = r >= RIVER_START_R && r < RIVER_START_R + RIVER_HEIGHT;
+      cells.push({ q, r, terrain: inRiver ? 'water' : 'plain' });
     }
   }
   return cells;
@@ -41,7 +42,7 @@ function cityForDuel(base: City, ownerId: ForceId, center: { q: number; r: numbe
     gridR: center.r,
     maxDurability: 3000,
     durability: 3000,
-    armaments: initialArmaments(),
+    armaments: { ...initialArmaments(), ship: 2000 },
   };
 }
 

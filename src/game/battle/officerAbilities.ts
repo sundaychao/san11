@@ -78,6 +78,16 @@ export function effectiveUnitAbilities(state: GameState, unit: ArmyUnit): Effect
   };
 }
 
+export function effectiveNavyAptitude(state: GameState, unit: ArmyUnit): SourcedAptitude {
+  const officers = formationOfficers(state, unit);
+  const aptitudeOfficer = officers.length > 0
+    ? firstMaximum(officers, (officer) => APTITUDE_RANK[(officer.aptitudes ?? DEFAULT_OFFICER_APTITUDES).navy])
+    : null;
+  return aptitudeOfficer
+    ? { grade: (aptitudeOfficer.aptitudes ?? DEFAULT_OFFICER_APTITUDES).navy, officerId: aptitudeOfficer.id }
+    : { grade: null, officerId: null };
+}
+
 export function maxTacticTier(grade: AptitudeGrade | null): 0 | 1 | 2 | 3 {
   return grade === 'S' ? 3 : grade === 'A' ? 2 : grade === 'B' ? 1 : 0;
 }

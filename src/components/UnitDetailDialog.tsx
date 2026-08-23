@@ -1,6 +1,6 @@
 import { X } from 'lucide-react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { TROOP_LABELS } from '../game/armaments';
+import { TROOP_LABELS, VEHICLE_LABELS } from '../game/armaments';
 import { effectiveUnitAbilities, fireStrategySuccessChance, tacticCriticalChance } from '../game/battle/actions';
 import type { ArmyUnit, GameState } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
@@ -19,6 +19,10 @@ function unitName(unit: ArmyUnit, state: GameState) {
 function unitKind(unit: ArmyUnit) {
   if (unit.kind === 'transport') return '输送队';
   return TROOP_LABELS[unit.troopType ?? 'sword'];
+}
+
+function unitVehicle(unit: ArmyUnit) {
+  return unit.vehicle ? VEHICLE_LABELS[unit.vehicle] : null;
 }
 
 function unitStatus(unit: ArmyUnit) {
@@ -76,6 +80,7 @@ export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps
           <div><dt>势力</dt><dd>{state.forces[unit.forceId].name}</dd></div>
           <div><dt>军团</dt><dd>{state.cities[unit.homeCityId].name}</dd></div>
           <div><dt>兵种</dt><dd>{unitKind(unit)}</dd></div>
+          {unitVehicle(unit) && <div><dt>工具</dt><dd>{unitVehicle(unit)}</dd></div>}
           <div><dt>坐标</dt><dd>{unit.q},{unit.r}</dd></div>
           <div><dt>士兵</dt><dd>{unit.troops.toLocaleString('en-US')}</dd></div>
           <div><dt>士气</dt><dd>{unit.energy}</dd></div>

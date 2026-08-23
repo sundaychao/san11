@@ -25,8 +25,12 @@ export const MOVEMENT_SKILLS: SkillDefinition[] = [
     { kind: 'movementAllowance', add: 5, excludeKinds: ['transport'], troopTypes: ['sword', 'spear', 'halberd', 'crossbow', 'cavalry'] },
   ]),
   movementSkill('长驱', '骑兵移动力增加'),
-  movementSkill('推进', '水上移动忽略敌方ZOC', [], ['navy']),
-  movementSkill('操舵', '水上移动力增加', [], ['navy']),
+  activeMovementSkill('推进', '水上移动忽略敌方ZOC', [
+    { kind: 'ignoreEnemyZoc', terrain: 'water' },
+  ]),
+  activeMovementSkill('操舵', '水上移动力增加', [
+    { kind: 'movementAllowance', add: 6, waterOnly: true },
+  ]),
   movementSkill('踏破', '降低栈道、落石等地形伤害'),
   movementSkill('运搬', '运输部队移动力增加'),
   movementSkill('解毒', '免受毒泉伤害'),

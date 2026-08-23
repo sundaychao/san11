@@ -21,7 +21,9 @@ export const ATTACK_SKILLS: SkillDefinition[] = [
   attackSkill('昂扬', '击破敌军后恢复气力'),
   activeAttackSkill('连战', '普通攻击有50%概率连续攻击两次', [{ kind: 'repeatNormalAttack', chance: 0.5 }]),
   attackSkill('急袭', '陆地普通攻击时有50%概率不受反击伤害'),
-  attackSkill('强袭', '水上普通攻击时有50%概率不受反击伤害', [], ['navy']),
+  activeAttackSkill('强袭', '水上普通攻击时有50%概率不受反击伤害', [
+    { kind: 'noCounterAttack', chance: 0.5, terrain: 'water' },
+  ]),
   attackSkill('乱战', '森林地形攻击时必定暴击'),
   attackSkill('攻城', '增加对城市和设施的耐久伤害'),
   attackSkill('掎角', '一齐攻击时有概率使敌军混乱'),
@@ -37,7 +39,9 @@ export const ATTACK_SKILLS: SkillDefinition[] = [
   attackSkill('戟将', '戟兵战法攻击武力较低目标时必定暴击'),
   attackSkill('弓将', '弩兵战法攻击武力较低目标时必定暴击'),
   attackSkill('骑将', '骑兵战法攻击武力较低目标时必定暴击'),
-  attackSkill('水将', '水军战法攻击武力较低目标时必定暴击', [], ['navy']),
+  activeAttackSkill('水将', '水军战法攻击武力较低目标时必定暴击', [
+    { kind: 'tacticCritical', condition: { kind: 'targetWarLower' }, navalOnly: true },
+  ]),
   attackSkill('勇将', '全部战法攻击武力较低目标时必定暴击'),
   activeAttackSkill('神将', '普通攻击和全部战法攻击武力较低目标时必定暴击', [
     { kind: 'normalAttackCritical', condition: { kind: 'targetWarLower' } },
@@ -49,7 +53,9 @@ export const ATTACK_SKILLS: SkillDefinition[] = [
   attackSkill('弓神', '弩兵战法必定暴击'),
   attackSkill('骑神', '骑兵战法必定暴击'),
   attackSkill('工神', '兵器战法必定暴击'),
-  attackSkill('水神', '水军战法必定暴击', [], ['navy']),
+  activeAttackSkill('水神', '水军战法必定暴击', [
+    { kind: 'tacticCritical', condition: { kind: 'always' }, navalOnly: true },
+  ]),
   attackSkill('霸王', '全部战法必定暴击'),
   attackSkill('疾走', '骑兵战法攻击能力较低目标时必定使其混乱'),
   attackSkill('射手', '弩兵可对森林中的目标施展战法'),

@@ -18,6 +18,7 @@ import type { GameDatabase } from './database';
 type AuthenticatedGameIntentPayload = GameIntentPayload & { playerId: string };
 
 const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const LOBBY_DISCONNECT_GRACE_MS = 60_000;
 
 function createRoomCode(existing: Set<string>) {
   for (let attempt = 0; attempt < 1000; attempt += 1) {
@@ -76,6 +77,8 @@ export class RoomManager {
   private readonly rooms = new Map<string, OnlineRoom>();
 
   private readonly playerRooms = new Map<string, string>();
+
+  private readonly lobbyDisconnectTimes = new Map<string, number>();
 
   private readonly db: GameDatabase | null;
 
@@ -154,7 +157,16 @@ export class RoomManager {
     return { room: next, removed: false };
   }
 
+  private leaveAnyCurrentRoom(playerId: string) {
+    const currentRoomId = this.playerRooms.get(playerId);
+    if (!currentRoomId) return;
+    const currentRoom = this.rooms.get(currentRoomId);
+    if (currentRoom?.players[playerId]) this.removePlayerFromRoom(currentRoom, playerId);
+  }
+
   createRoom(input: { playerId: string; playerName: string; seed?: number }) {
+    this.pruneExpiredLobbyDisconnects();
+    this.leaveAnyCurrentRoom(input.playerId);
     const roomId = createRoomCode(new Set(this.rooms.keys()));
     const room = createOnlineRoom({
       roomId,
@@ -169,11 +181,14 @@ export class RoomManager {
   }
 
   joinRoom(input: { roomId: string; playerId: string; playerName: string }) {
+    this.pruneExpiredLobbyDisconnects();
     const current = this.rooms.get(input.roomId.toUpperCase());
     if (!current) throw new Error('房间不存在');
+    this.leaveAnyCurrentRoom(input.playerId);
     const room = joinOnlineRoom(current, { playerId: input.playerId, playerName: input.playerName });
     this.rooms.set(room.id, room);
     this.playerRooms.set(input.playerId, room.id);
+    this.lobbyDisconnectTimes.delete(`${room.id}:${input.playerId}`);
     this.saveRoom(room);
     return snapshotFor(room, input.playerId);
   }
@@ -197,6 +212,7 @@ export class RoomManager {
   }
 
   listLobbyRooms(): OnlineRoomListItem[] {
+    this.pruneExpiredLobbyDisconnects();
     return [...this.rooms.values()]
       .filter((room) => room.phase === 'lobby' && connectedPlayerCount(room) > 0)
       .map((room) => ({
@@ -216,6 +232,7 @@ export class RoomManager {
   }
 
   resumeRoom(input: { playerId: string; roomId?: string }) {
+    this.pruneExpiredLobbyDisconnects();
     const room = input.roomId
       ? this.rooms.get(input.roomId.toUpperCase()) ?? null
       : this.roomForPlayer(input.playerId);
@@ -224,6 +241,7 @@ export class RoomManager {
     const next = setPlayerConnected(room, input.playerId, true);
     this.rooms.set(next.id, next);
     this.playerRooms.set(input.playerId, next.id);
+    this.lobbyDisconnectTimes.delete(`${next.id}:${input.playerId}`);
     this.saveRoom(next);
     return snapshotFor(next, input.playerId);
   }
@@ -233,13 +251,42 @@ export class RoomManager {
     if (!room) return null;
 
     if (room.phase === 'lobby') {
-      return this.removePlayerFromRoom(room, playerId);
+      const next = setPlayerConnected(room, playerId, false);
+      this.lobbyDisconnectTimes.set(`${room.id}:${playerId}`, Date.now());
+      this.rooms.set(next.id, next);
+      this.saveRoom(next);
+      return { room: next, removed: false };
     }
 
     const next = setPlayerConnected(room, playerId, false);
     this.rooms.set(next.id, next);
     this.saveRoom(next);
     return { room: next, removed: false };
+  }
+
+  pruneExpiredLobbyDisconnects() {
+    const now = Date.now();
+    const expiredByRoom = new Map<string, string[]>();
+    for (const [key, disconnectedAt] of this.lobbyDisconnectTimes) {
+      if (now - disconnectedAt < LOBBY_DISCONNECT_GRACE_MS) continue;
+      const separatorIndex = key.lastIndexOf(':');
+      const roomId = key.slice(0, separatorIndex);
+      const playerId = key.slice(separatorIndex + 1);
+      const expired = expiredByRoom.get(roomId) ?? [];
+      expired.push(playerId);
+      expiredByRoom.set(roomId, expired);
+    }
+
+    for (const [roomId, playerIds] of expiredByRoom) {
+      const room = this.rooms.get(roomId);
+      if (!room) continue;
+      for (const playerId of playerIds) {
+        this.lobbyDisconnectTimes.delete(`${roomId}:${playerId}`);
+        if (room.players[playerId]) this.removePlayerFromRoom(room, playerId);
+      }
+    }
+
+    return [...expiredByRoom.keys()];
   }
 
   leavePlayer(playerId: string, roomId?: string) {

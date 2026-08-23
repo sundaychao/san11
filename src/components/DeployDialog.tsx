@@ -11,6 +11,7 @@ export interface DeployConfirmInput {
   cityId: CityId;
   officerIds: string[];
   troopType: TroopType;
+  vehicle: 'boat' | 'ship';
   troops: number;
   gold: number;
   food: number;
@@ -29,6 +30,10 @@ const TROOP_TYPES: Array<{ id: TroopType; label: string; attack: number; defense
   { id: 'crossbow', label: '弩兵', attack: 36, defense: 28, movement: 19 },
   { id: 'cavalry', label: '骑兵', attack: 42, defense: 27, movement: 30 },
   { id: 'siege', label: '兵器', attack: 28, defense: 24, movement: 16 },
+];
+const VEHICLE_TYPES: Array<{ id: 'boat' | 'ship'; label: string }> = [
+  { id: 'boat', label: '小舟' },
+  { id: 'ship', label: '楼船' },
 ];
 type OfficerPickerView = 'ability' | 'skill' | 'aptitude';
 type OfficerPickerSortDirection = 'desc' | 'asc';
@@ -49,7 +54,7 @@ const aptitudeRank: Record<OfficerAptitudes[keyof OfficerAptitudes], number> = {
   B: 2,
   C: 1,
 };
-type DeployAptitudeTroop = Extract<TroopType, 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'siege'>;
+type DeployAptitudeTroop = keyof OfficerAptitudes;
 
 function toAmount(value: string) {
   const amount = Number(value);
@@ -71,7 +76,7 @@ function officerAbility(officer: Officer | undefined, troopType: TroopType) {
 function aptitudeScoreForTroop(officer: Officer, troopType: TroopType) {
   if (troopType === 'sword') return 0;
   const aptitudes = officer.aptitudes ?? fallbackAptitudes;
-  return aptitudeRank[aptitudes[troopType as DeployAptitudeTroop]];
+  return aptitudeRank[aptitudes[troopType as keyof OfficerAptitudes]];
 }
 
 function compareDeployRecommendation(left: Officer, right: Officer, troopType: TroopType) {
@@ -282,6 +287,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const { state } = useGame();
   const [officerIds, setOfficerIds] = useState<string[]>([]);
   const [troopType, setTroopType] = useState<TroopType>('sword');
+  const [vehicle, setVehicle] = useState<'boat' | 'ship'>('boat');
   const [troops, setTroops] = useState('');
   const [gold, setGold] = useState('');
   const [food, setFood] = useState('');
@@ -305,7 +311,12 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const armamentType = TROOP_ARMAMENT[troopType];
   const cityArmaments = armamentsOf(city.armaments);
   const armamentStock = armamentType ? cityArmaments[armamentType] : null;
-  const troopMax = Math.min(10000, Math.max(0, city.troops - 500), armamentStock ?? Number.POSITIVE_INFINITY);
+  const shipStock = cityArmaments.ship;
+  const troopMax = Math.min(
+    10000,
+    Math.max(0, city.troops - 500),
+    armamentStock ?? Number.POSITIVE_INFINITY,
+  );
   const activeTroops = String(Math.min(troopMax, Math.max(0, toAmount(troops || String(Math.min(4000, troopMax))))));
   const goldMax = Math.max(0, city.gold);
   const activeGold = String(Math.min(goldMax, Math.max(0, toAmount(gold || String(Math.min(1000, goldMax))))));
@@ -323,6 +334,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
     !Number.isInteger(goldAmount) || goldAmount < 0 || goldAmount > city.gold ? '资金不足' : '',
     !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > city.food ? '兵粮不足' : '',
     armamentType && armamentStock !== null && armamentStock < troopAmount ? `${TROOP_LABELS[troopType]}兵装不足` : '',
+    vehicle === 'ship' && shipStock < 1 ? '楼船兵装不足' : '',
   ].filter(Boolean);
 
   const submit = (event: FormEvent) => {
@@ -333,6 +345,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
         cityId,
         officerIds: activeOfficerIds,
         troopType,
+        vehicle,
         troops: troopAmount,
         gold: goldAmount,
         food: foodAmount,
@@ -401,6 +414,24 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
                 <small>{TROOP_ARMAMENT[type.id] ? `${cityArmaments[TROOP_ARMAMENT[type.id]!]}` : '不限'}</small>
               </button>
             ))}
+          </div>
+
+          <span className="deploy-section-label">交通工具</span>
+          <div className="deploy-troop-grid vehicle-grid" aria-label="交通工具选择">
+            {VEHICLE_TYPES.map((item) => {
+              const disabled = item.id === 'ship' && shipStock < 1;
+              return (
+                <button key={item.id} type="button" aria-label={item.label} disabled={disabled} className={`${vehicle === item.id ? 'is-active' : ''}${disabled ? 'is-disabled' : ''}`} onClick={() => {
+                  if (disabled) return;
+                  setVehicle(item.id);
+                  setSubmitError(null);
+                }}>
+                  <Swords aria-hidden="true" />
+                  <span>{item.label}</span>
+                  <small>{item.id === 'ship' ? `${shipStock}` : '免费'}</small>
+                </button>
+              );
+            })}
           </div>
 
           <div className="amount-grid deploy-ranges">

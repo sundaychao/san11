@@ -2,6 +2,7 @@ import { clamp } from './commands';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
 import { movementAllowanceForUnit, unitSupplyMultiplier } from './battle/actions';
 import { applyGroundFireDamageToFacilities, applyGroundFireDamageToUnits } from './battle/fire';
+import { cellAt } from './battle/movementRules';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
 import { movementAllowanceBonus } from './skills/rules/movement';
@@ -107,6 +108,23 @@ function settleCitySupply(city: City) {
   city.food = Math.max(0, city.food - foodCost);
 }
 
+function settleUnitBurning(next: GameState, unit: ArmyUnit) {
+  if (!unit.burningTenDays) return;
+  const burnDamage = Math.max(200, Math.ceil(unit.troops * 0.05));
+  unit.troops = Math.max(0, unit.troops - burnDamage);
+  next.battleDamageReports ??= [];
+  next.battleDamageReports.push({
+    id: `burn-${next.month}-${next.tenDay}-${unit.id}-${next.battleDamageReports.length}`,
+    unitId: unit.id,
+    q: unit.q,
+    r: unit.r,
+    amount: burnDamage,
+    kind: 'attack',
+    label: '火伤',
+  });
+  if (unit.troops <= 0) removeUnit(next, unit);
+}
+
 function settleUnitSupply(next: GameState, unit: ArmyUnit) {
   const baseFoodCost = Math.max(0, Math.ceil((unit.troops * UNIT_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
   const foodCost = Math.ceil(baseFoodCost * unitSupplyMultiplier(next, unit));
@@ -124,7 +142,10 @@ function settleUnitSupply(next: GameState, unit: ArmyUnit) {
     return;
   }
 
-  unit.movementRemaining = movementAllowanceForUnit(unit) + movementAllowanceBonus(next, unit);
+  settleUnitBurning(next, unit);
+  if (unit.troops <= 0) return;
+
+  unit.movementRemaining = movementAllowanceForUnit(unit) + movementAllowanceBonus(next, unit, cellAt(next, unit)?.terrain);
   unit.moved = false;
   unit.acted = false;
   tickUnitStatus(unit, 'confusedTenDays');

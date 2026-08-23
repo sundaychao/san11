@@ -31,8 +31,7 @@ const TERRAIN_TOOLS: Array<{ tool: TerrainType; label: string; icon: typeof Brus
   { tool: 'forest', label: '森林', icon: Brush },
   { tool: 'hill', label: '丘陵', icon: Mountain },
   { tool: 'mountain', label: '高山', icon: Mountain },
-  { tool: 'shallowWater', label: '浅水', icon: Waves },
-  { tool: 'deepWater', label: '深水', icon: Waves },
+  { tool: 'water', label: '水域', icon: Waves },
 ];
 
 export function MapEditorPanel({

@@ -109,14 +109,11 @@ describe('map editor core', () => {
 
     const masks = exportTerrainMaskSvgs(state);
 
-    expect(Object.keys(masks)).toEqual(['water', 'shallowWater', 'mountain', 'forest', 'road', 'city']);
+    expect(Object.keys(masks)).toEqual(['water', 'mountain', 'forest', 'road', 'city']);
     expect(masks.water.filename).toBe('mask-water.svg');
     expect(masks.water.content).toContain('data-export="terrain-mask"');
     expect(masks.water.content).toContain('data-mask-layer="water"');
-    expect(masks.water.content).toContain('data-source-terrain="deepWater"');
-    expect(masks.shallowWater.filename).toBe('mask-shallow-water.svg');
-    expect(masks.shallowWater.content).toContain('data-mask-layer="shallowWater"');
-    expect(masks.shallowWater.content).toContain('data-source-terrain="shallowWater"');
+    expect(masks.water.content).toContain('data-source-terrain="water"');
     expect(masks.mountain.content).toContain('data-source-terrain="mountain"');
     expect(masks.forest.content).toContain('data-source-terrain="forest"');
     expect(masks.road.content).toContain('data-source-terrain="road"');

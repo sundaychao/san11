@@ -1,6 +1,6 @@
 import type { ArmyUnit, City, Facility, GameState } from '../types';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
-import { cityCenter, unitIsIncapacitated } from './movementRules';
+import { cellAt, cityCenter, unitIsIncapacitated } from './movementRules';
 
 export function areAdjacent(a: GridCoord, b: GridCoord) {
   return neighborsOf(a.q, a.r).some((coord) => coord.q === b.q && coord.r === b.r);
@@ -28,24 +28,25 @@ export function gridDistanceWithin(from: GridCoord, to: GridCoord, maxDistance: 
   return Number.POSITIVE_INFINITY;
 }
 
-export function unitAttackRange(unit: ArmyUnit) {
+export function unitAttackRange(state: GameState, unit: ArmyUnit) {
+  if (cellAt(state, unit)?.terrain === 'water') return 2;
   return ['crossbow', 'siege'].includes(unit.troopType ?? 'sword') ? 2 : 1;
 }
 
-function isUnitInAttackRange(attacker: ArmyUnit, target: ArmyUnit) {
-  const range = unitAttackRange(attacker);
+function isUnitInAttackRange(state: GameState, attacker: ArmyUnit, target: ArmyUnit) {
+  const range = unitAttackRange(state, attacker);
   return gridDistanceWithin(attacker, target, range) <= range;
 }
 
-export function isCityInAttackRange(attacker: ArmyUnit, city: City) {
-  const range = unitAttackRange(attacker);
+export function isCityInAttackRange(state: GameState, attacker: ArmyUnit, city: City) {
+  const range = unitAttackRange(state, attacker);
   return sevenCellCityFootprint(cityCenter(city)).some((coord) => (
     gridDistanceWithin(attacker, coord, range) <= range
   ));
 }
 
-function isFacilityInAttackRange(attacker: ArmyUnit, facility: Facility) {
-  const range = unitAttackRange(attacker);
+function isFacilityInAttackRange(state: GameState, attacker: ArmyUnit, facility: Facility) {
+  const range = unitAttackRange(state, attacker);
   return gridDistanceWithin(attacker, facility, range) <= range;
 }
 
@@ -57,9 +58,9 @@ export function attackableUnits(state: GameState, attackerId: string, origin?: G
   const attacker = state.units[attackerId];
   if (!attacker || attacker.kind === 'transport') return [];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
-  const range = unitAttackRange(attackerAtOrigin);
+  const range = unitAttackRange(state, attackerAtOrigin);
   return Object.values(state.units)
-    .filter((unit) => unit.id !== attacker.id && unit.forceId !== attacker.forceId && isUnitInAttackRange(attackerAtOrigin, unit))
+    .filter((unit) => unit.id !== attacker.id && unit.forceId !== attacker.forceId && isUnitInAttackRange(state, attackerAtOrigin, unit))
     .sort((a, b) => (
       gridDistanceWithin(attackerAtOrigin, a, range) - gridDistanceWithin(attackerAtOrigin, b, range) ||
       a.id.localeCompare(b.id)
@@ -70,9 +71,9 @@ export function attackableCities(state: GameState, attackerId: string, origin?: 
   const attacker = state.units[attackerId];
   if (!attacker || attacker.kind === 'transport') return [];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
-  const range = unitAttackRange(attackerAtOrigin);
+  const range = unitAttackRange(state, attackerAtOrigin);
   return Object.values(state.cities)
-    .filter((city) => city.ownerId !== attacker.forceId && isCityInAttackRange(attackerAtOrigin, city))
+    .filter((city) => city.ownerId !== attacker.forceId && isCityInAttackRange(state, attackerAtOrigin, city))
     .sort((a, b) => (
       Math.min(...sevenCellCityFootprint(cityCenter(a)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, range))) -
       Math.min(...sevenCellCityFootprint(cityCenter(b)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, range))) ||
@@ -84,9 +85,9 @@ export function attackableFacilities(state: GameState, attackerId: string, origi
   const attacker = state.units[attackerId];
   if (!attacker || attacker.kind === 'transport') return [];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
-  const range = unitAttackRange(attackerAtOrigin);
+  const range = unitAttackRange(state, attackerAtOrigin);
   return Object.values(state.facilities ?? {})
-    .filter((facility) => facility.forceId !== attacker.forceId && isFacilityInAttackRange(attackerAtOrigin, facility))
+    .filter((facility) => facility.forceId !== attacker.forceId && isFacilityInAttackRange(state, attackerAtOrigin, facility))
     .sort((a, b) => (
       gridDistanceWithin(attackerAtOrigin, a, range) - gridDistanceWithin(attackerAtOrigin, b, range) ||
       a.id.localeCompare(b.id)

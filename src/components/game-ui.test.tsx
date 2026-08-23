@@ -1143,13 +1143,12 @@ describe('game interface shell', () => {
 
       expect(downloads.downloadedNames).toEqual([
         'mask-water.svg',
-        'mask-shallow-water.svg',
         'mask-mountain.svg',
         'mask-forest.svg',
         'mask-road.svg',
         'mask-city.svg',
       ]);
-      expect(downloads.createObjectUrl).toHaveBeenCalledTimes(6);
+      expect(downloads.createObjectUrl).toHaveBeenCalledTimes(5);
       const firstMask = downloads.createObjectUrl.mock.calls[0][0] as Blob;
       await expect(firstMask.text()).resolves.toContain('data-mask-layer="water"');
     } finally {

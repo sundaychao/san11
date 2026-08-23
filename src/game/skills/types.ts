@@ -11,12 +11,13 @@ export type SkillCondition =
   | { kind: 'troopsBelow'; amount: number };
 
 export type SkillEffect =
-  | { kind: 'movementAllowance'; add: number; troopTypes?: TroopType[]; excludeKinds?: Array<'transport'> }
+  | { kind: 'movementAllowance'; add: number; troopTypes?: TroopType[]; excludeKinds?: Array<'transport'>; waterOnly?: boolean }
   | { kind: 'ignoreEnemyZoc'; terrain: 'land' | 'water' }
-  | { kind: 'tacticCritical'; condition: SkillCondition; troopTypes?: TroopType[]; excludeTroopTypes?: TroopType[] }
+  | { kind: 'tacticCritical'; condition: SkillCondition; troopTypes?: TroopType[]; excludeTroopTypes?: TroopType[]; navalOnly?: boolean }
   | { kind: 'normalAttackCritical'; condition: SkillCondition }
   | { kind: 'repeatNormalAttack'; chance: number }
   | { kind: 'negateIncomingDamage'; chance: number; condition: SkillCondition; sources: Array<'normalAttack' | 'counter' | 'tactic'> }
+  | { kind: 'noCounterAttack'; chance: number; terrain: 'land' | 'water' }
   | { kind: 'strategyEnergyCost'; set: number }
   | { kind: 'strategyGuaranteed'; strategyIds: StrategyId[]; condition: SkillCondition }
   | { kind: 'strategyImmunity'; strategyIds: StrategyId[] | 'all' }

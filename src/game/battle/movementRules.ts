@@ -1,4 +1,4 @@
-import { unitIgnoresEnemyZoc } from '../skills/rules/movement';
+import { unitIgnoresEnemyZocTerrain } from '../skills/rules/movement';
 import type { ArmyUnit, City, CityId, Facility, ForceId, GameState, GridCell } from '../types';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { movementAllowanceForProfile, movementCostForCell, movementProfileForUnit, ZOC_FACILITY_TYPES, type MovementProfile } from './catalog';
@@ -69,8 +69,8 @@ function controlledZoneKeysForForce(state: GameState, forceId: ForceId) {
   return keys;
 }
 
-function movementCost(state: GameState, coord: GridCoord, profile: MovementProfile = 'sword') {
-  return movementCostForCell(cellAt(state, coord), profile);
+function movementCost(state: GameState, coord: GridCoord, profile: MovementProfile = 'sword', vehicle?: 'boat' | 'ship') {
+  return movementCostForCell(cellAt(state, coord), profile, vehicle);
 }
 
 export function isLegalUnitCell(state: GameState, coord: GridCoord, ignoredUnitId?: string, profile: MovementProfile = 'sword') {
@@ -104,7 +104,7 @@ function reachableCostsFrom(
   start: GridCoord,
   movementBudget: number,
   profile: MovementProfile,
-  options: { ignoredUnitId?: string; allowedCityTransitKeys?: Set<string>; movingForceId?: ForceId; ignoreEnemyZoc?: boolean } = {},
+  options: { ignoredUnitId?: string; allowedCityTransitKeys?: Set<string>; movingForceId?: ForceId; ignoreEnemyZoc?: 'land' | 'water' | null; vehicle?: 'boat' | 'ship' } = {},
 ) {
   const startKey = gridKey(start);
   const costs = new Map<string, number>([[startKey, 0]]);
@@ -118,17 +118,19 @@ function reachableCostsFrom(
     const current = frontier.shift()!;
     const currentKey = gridKey(current);
     const currentTerrain = cellAt(state, current)?.terrain;
-    const ignoresLandZoc = options.ignoreEnemyZoc === true &&
-      currentTerrain !== undefined &&
-      currentTerrain !== 'shallowWater' &&
-      currentTerrain !== 'deepWater';
-    if (currentKey !== startKey && zocKeys.has(currentKey) && !ignoresLandZoc) continue;
+    const isWater = currentTerrain === 'water';
+    const ignoresZocHere = options.ignoreEnemyZoc === 'land'
+      ? !isWater
+      : options.ignoreEnemyZoc === 'water'
+        ? isWater
+        : false;
+    if (currentKey !== startKey && zocKeys.has(currentKey) && !ignoresZocHere) continue;
 
     const currentCost = costs.get(currentKey)!;
     for (const neighbor of neighborsOf(current.q, current.r)) {
       const key = gridKey(neighbor);
       const canTransitCity = options.allowedCityTransitKeys?.has(key) ?? false;
-      const terrainCost = movementCost(state, neighbor, profile);
+      const terrainCost = movementCost(state, neighbor, profile, options.vehicle);
       if (!Number.isFinite(terrainCost)) continue;
       if (!canTransitCity && cityKeys.has(key)) continue;
       if (unitKeys.has(key)) continue;
@@ -148,7 +150,8 @@ export function reachableCosts(state: GameState, unit: ArmyUnit) {
   return reachableCostsFrom(state, unit, unit.movementRemaining, movementProfileForUnit(unit), {
     ignoredUnitId: unit.id,
     movingForceId: unit.forceId,
-    ignoreEnemyZoc: unitIgnoresEnemyZoc(state, unit),
+    ignoreEnemyZoc: unitIgnoresEnemyZocTerrain(state, unit),
+    vehicle: unit.vehicle,
   });
 }
 
@@ -164,7 +167,7 @@ export function movementCells(state: GameState, unitId: string): GridCoord[] {
     .sort((a, b) => a.q - b.q || a.r - b.r);
 }
 
-export function deploymentCells(state: GameState, cityId: CityId, movement?: number, profile: MovementProfile = 'sword'): GridCoord[] {
+export function deploymentCells(state: GameState, cityId: CityId, movement?: number, profile: MovementProfile = 'sword', vehicle?: 'boat' | 'ship'): GridCoord[] {
   const city = state.cities[cityId];
   if (!city) return [];
   const movementBudget = movement ?? movementAllowanceForProfile(profile);
@@ -174,6 +177,7 @@ export function deploymentCells(state: GameState, cityId: CityId, movement?: num
   const costs = reachableCostsFrom(state, start, movementBudget, profile, {
     allowedCityTransitKeys: ownCityKeys,
     movingForceId: city.ownerId,
+    vehicle,
   });
 
   return [...costs.entries()]

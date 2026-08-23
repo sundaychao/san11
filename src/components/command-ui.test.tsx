@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { initialArmaments } from '../game/armaments';
 import { deployTransportUnit, deployUnit, movementCells } from '../game/battle/actions';
 import { movementAllowanceForProfile } from '../game/battle/definitions';
 import { deploymentCells } from '../game/battle/deployment';
@@ -397,6 +398,10 @@ describe('command interface', () => {
     const dialog = screen.getByRole('dialog', { name: '出征编制' });
     expect(within(dialog).getByLabelText('主将')).toBeVisible();
     expect(within(dialog).queryByLabelText('目标城池')).not.toBeInTheDocument();
+    const shipButton = within(dialog).getByRole('button', { name: '楼船' });
+    expect(shipButton).toBeVisible();
+    expect(shipButton).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: '小舟' })).toBeEnabled();
     await user.selectOptions(within(dialog).getByLabelText('兵种'), 'spear');
     const confirmedDialog = await chooseDeployLeader(user, '刘备');
     await user.click(within(confirmedDialog).getByRole('button', { name: '确定出征' }));
@@ -413,6 +418,25 @@ describe('command interface', () => {
     expect(within(unitMarker).getByText('枪')).toBeVisible();
     expect(within(unitMarker).getByText('刘备')).toBeVisible();
     expect(within(unitMarker).getByText('4,000')).toBeVisible();
+  });
+
+  it('enables the ship vehicle button and shows its stock when the city has ships', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    state.cities['jiangling'].armaments = { ...initialArmaments(), ship: 3 };
+    renderState(state);
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    await user.click(within(menu).getByRole('button', { name: '出征' }));
+
+    const dialog = screen.getByRole('dialog', { name: '出征编制' });
+    const shipButton = within(dialog).getByRole('button', { name: '楼船' });
+    expect(shipButton).toBeEnabled();
+    expect(shipButton).toHaveTextContent('3');
   });
 
   it('opens the strategy menu for Ma Su during the first deployment action', async () => {

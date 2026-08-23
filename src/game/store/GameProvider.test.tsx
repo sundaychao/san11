@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildFacility, deployUnit, deploymentCells, firePlotCells, movementCells, type TacticId } from '../battle/actions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from '../battle/grid';
@@ -1275,6 +1276,55 @@ describe('GameProvider', () => {
     expect(screen.getByLabelText('room')).toHaveTextContent('none');
   });
 
+  it('creates a fresh room after leaving the previous room', async () => {
+    const user = userEvent.setup();
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+
+    render(<GameProvider storage={new MemoryStorage()}><OnlineProbe /></GameProvider>);
+
+    await user.click(screen.getByRole('button', { name: 'create room' }));
+    expect(screen.getByLabelText('room')).toHaveTextContent('ABCD');
+
+    await user.click(screen.getByRole('button', { name: 'leave room' }));
+    expect(screen.getByLabelText('room')).toHaveTextContent('none');
+    expect(screen.getByLabelText('resuming')).toHaveTextContent('no');
+
+    await user.click(screen.getByRole('button', { name: 'create room' }));
+
+    expect(socket.emitted.filter((entry) => entry.event === 'room:create')).toHaveLength(2);
+    expect(screen.getByLabelText('room')).toHaveTextContent('ABCD');
+    expect(screen.getByLabelText('resuming')).toHaveTextContent('no');
+  });
+
+  it('clears the battle state when leaving a started online room', async () => {
+    const user = userEvent.setup();
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+
+    render(<GameProvider storage={new MemoryStorage()}><OnlineProbe /></GameProvider>);
+
+    await user.click(screen.getByRole('button', { name: 'create room' }));
+    await user.click(screen.getByRole('button', { name: 'start online' }));
+    expect(screen.getByLabelText('state')).toHaveTextContent('liu');
+
+    await user.click(screen.getByRole('button', { name: 'leave room' }));
+
+    expect(screen.getByLabelText('state')).toHaveTextContent('none');
+    expect(screen.getByLabelText('room')).toHaveTextContent('none');
+    expect(screen.getByLabelText('resuming')).toHaveTextContent('no');
+  });
+
   it('loads lobby rooms from the online server', async () => {
     const user = userEvent.setup();
     const socket = new FakeOnlineSocket();
@@ -1446,5 +1496,32 @@ describe('GameProvider', () => {
     ]);
     expect(screen.getByLabelText('room')).toHaveTextContent('ABCD');
     expect(screen.getByLabelText('state')).toHaveTextContent('liu');
+  });
+
+  it('resumes the stored room even under StrictMode double mounting', async () => {
+    const socket = new FakeOnlineSocket();
+    socketHolder.socket = socket;
+    const storage = new MemoryStorage();
+    window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
+      token: 'token',
+      userId: 'host',
+      username: 'Host',
+    }));
+    storage.setItem('jingxiang-208-last-online-room-v1', JSON.stringify({
+      serverUrl: 'http://server.test',
+      roomId: 'ABCD',
+    }));
+
+    render(
+      <StrictMode>
+        <GameProvider storage={storage}><OnlineProbe /></GameProvider>
+      </StrictMode>,
+    );
+    await screen.findByText('liu');
+
+    expect(screen.getByLabelText('room')).toHaveTextContent('ABCD');
+    expect(screen.getByLabelText('phase')).toHaveTextContent('playing');
+    expect(screen.getByLabelText('state')).toHaveTextContent('liu');
+    expect(screen.getByLabelText('resuming')).toHaveTextContent('no');
   });
 });

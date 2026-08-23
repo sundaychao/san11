@@ -1,4 +1,4 @@
-import type { ArmamentType, CityArmaments, Officer, TroopType } from './types';
+import type { ArmamentType, CityArmaments, Officer, TroopType, VehicleType } from './types';
 
 export const ARMAMENT_TYPES: ArmamentType[] = ['spear', 'halberd', 'crossbow', 'cavalry', 'ram', 'tower', 'ship'];
 export const DELAYED_ARMAMENT_TYPES: ArmamentType[] = ['ram', 'tower', 'ship'];
@@ -48,6 +48,11 @@ export const TROOP_MOVEMENT: Record<TroopType, number> = {
   crossbow: 19,
   cavalry: 30,
   siege: 16,
+};
+
+export const VEHICLE_LABELS: Record<VehicleType, string> = {
+  boat: '小舟',
+  ship: '楼船',
 };
 
 export const TRANSPORT_MOVEMENT = 20;

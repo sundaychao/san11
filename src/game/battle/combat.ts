@@ -7,7 +7,7 @@ export {
 } from './legacyCore';
 
 import type { CityId, ForceId, GameState } from '../types';
-import { normalAttackIsCritical, reduceIncomingDamageBySkills, rollRepeatNormalAttack } from '../skills/rules/combat';
+import { normalAttackIsCritical, reduceIncomingDamageBySkills, rollNoCounterAttack, rollRepeatNormalAttack } from '../skills/rules/combat';
 import { attackableFacilities, attackableUnits } from './targetRules';
 import {
   areAdjacent,
@@ -76,7 +76,8 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
   if (rollRepeatNormalAttack(next, nextAttacker)) {
     if (!applyNormalAttackHit(next, attackerId, targetId, critical)) return next;
   }
-  if (areAdjacent(nextTarget, nextAttacker)) {
+  const attackerTerrain = unitTerrain(next, nextAttacker);
+  if (areAdjacent(nextTarget, nextAttacker) && !rollNoCounterAttack(next, nextAttacker, attackerTerrain)) {
     const rolledCounterDamage = damageRoll(next, nextTarget, unitTerrain(next, nextAttacker), true, nextAttacker);
     const fortifiedCounterDamage = reduceUnitDamageByFortress(next, nextAttacker, rolledCounterDamage);
     const counterDamage = reduceIncomingDamageBySkills(next, nextAttacker, fortifiedCounterDamage, 'counter');
@@ -117,7 +118,7 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   if (!city) throw new Error('城市不存在');
   if (city.ownerId === forceId) throw new Error('不能攻击己方城市');
   if (attacker.energy < 10) throw new Error('气力不足');
-  if (!isCityInAttackRange(attacker, city)) throw new Error('城市不在攻击范围');
+  if (!isCityInAttackRange(state, attacker, city)) throw new Error('城市不在攻击范围');
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];
   const nextCity = next.cities[cityId];

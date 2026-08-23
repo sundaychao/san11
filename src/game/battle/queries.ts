@@ -82,7 +82,8 @@ function unavailableTacticReason(state: GameState, unitId: string, tactic: UnitT
   const unit = state.units[unitId];
   if (!unit) return '部队无法行动';
   if (!unitCanUseTactic(state, unitId, tactic.id)) {
-    return `需要${TROOP_LABELS[tactic.troopType]}适性 ${requiredAptitudeForTactic(tactic.id)}`;
+    const troopLabel = tactic.troopType === 'naval' ? '水军' : TROOP_LABELS[tactic.troopType];
+    return `需要${troopLabel}适性 ${requiredAptitudeForTactic(tactic.id)}`;
   }
   if (unit.acted) return '部队已行动';
   if (unitIsIncapacitated(unit)) return '部队无法行动';

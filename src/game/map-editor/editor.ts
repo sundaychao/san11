@@ -25,7 +25,7 @@ export interface MapEditorState {
 
 export type MapEditorTool = TerrainType | 'city';
 
-export type TerrainMaskLayer = 'water' | 'shallowWater' | 'mountain' | 'forest' | 'road' | 'city';
+export type TerrainMaskLayer = 'water' | 'mountain' | 'forest' | 'road' | 'city';
 
 export interface TerrainMaskExport {
   filename: string;
@@ -47,8 +47,7 @@ const TERRAIN_COLORS: Record<TerrainType, string> = {
   forest: '#2f5f3a',
   hill: '#696851',
   mountain: '#303837',
-  shallowWater: '#2c6570',
-  deepWater: '#173947',
+  water: '#1e4c60',
 };
 
 const TERRAIN_CONTROL_COLORS: Record<TerrainType, string> = {
@@ -57,15 +56,13 @@ const TERRAIN_CONTROL_COLORS: Record<TerrainType, string> = {
   forest: '#245a34',
   hill: '#7b744f',
   mountain: '#2d3332',
-  shallowWater: '#2c6f80',
-  deepWater: '#12394d',
+  water: '#1f546e',
 };
 
 const CELL_SIZE = 24;
 
 const TERRAIN_MASK_LAYERS: Array<{ layer: TerrainMaskLayer; filename: string; terrain?: TerrainType }> = [
-  { layer: 'water', filename: 'mask-water.svg', terrain: 'deepWater' },
-  { layer: 'shallowWater', filename: 'mask-shallow-water.svg', terrain: 'shallowWater' },
+  { layer: 'water', filename: 'mask-water.svg', terrain: 'water' },
   { layer: 'mountain', filename: 'mask-mountain.svg', terrain: 'mountain' },
   { layer: 'forest', filename: 'mask-forest.svg', terrain: 'forest' },
   { layer: 'road', filename: 'mask-road.svg', terrain: 'road' },
@@ -104,7 +101,7 @@ function cellPosition(q: number, r: number) {
 }
 
 function isTerrain(value: unknown): value is TerrainType {
-  return value === 'road' || value === 'plain' || value === 'forest' || value === 'hill' || value === 'mountain' || value === 'shallowWater' || value === 'deepWater';
+  return value === 'road' || value === 'plain' || value === 'forest' || value === 'hill' || value === 'mountain' || value === 'water';
 }
 
 function isGridCell(value: unknown): value is GridCell {
