@@ -59,9 +59,9 @@ function cellPosition(q: number, r: number) {
   };
 }
 
-function clampScale(value: number) {
-  return Math.min(2.4, Math.max(0.85, Math.round(value * 100) / 100));
-}
+const MIN_SCALE = 0.85;
+const VIEWPORT_CULL_THRESHOLD = 1500;
+const MAX_TERRAIN_CELLS = 4000;
 
 interface StrategicMapProps {
   onCityMenu?(cityId: CityId, position: { x: number; y: number }): void;
@@ -167,6 +167,8 @@ export function StrategicMap({
   const gridHeight = state.gridHeight ?? DEFAULT_GRID_HEIGHT;
   const worldWidth = gridWidth * CELL_SIZE;
   const worldHeight = gridHeight * CELL_SIZE;
+  const maxScale = Math.max(2.4, Math.ceil(Math.max(gridWidth, gridHeight) / 20));
+  const clampScale = (value: number) => Math.min(maxScale, Math.max(MIN_SCALE, Math.round(value * 100) / 100));
   const zoomStyle = (): CSSProperties => {
     const scale = view.scale;
     const width = viewport ? Math.max(1, Math.round(viewport.width * scale)) : '100%';
@@ -242,7 +244,7 @@ export function StrategicMap({
   const BUFFER = 3;
   let visibleCells = displayGrid;
   const effectiveViewport = viewport ?? { width: 1280, height: 720 };
-  if (displayGrid.length > 10000) {
+  if (displayGrid.length > VIEWPORT_CULL_THRESHOLD) {
     const cssWidth = effectiveViewport.width * view.scale;
     const cssHeight = effectiveViewport.height * view.scale;
     const left = effectiveViewport.width * (1 - view.scale) / 2 + view.x;
@@ -253,6 +255,7 @@ export function StrategicMap({
     const rMax = Math.ceil((effectiveViewport.height - top) * gridHeight / cssHeight) + BUFFER;
     visibleCells = displayGrid.filter((cell) => cell.q >= qMin && cell.q <= qMax && cell.r >= rMin && cell.r <= rMax);
   }
+  const renderTerrainByScale = visibleCells.length <= MAX_TERRAIN_CELLS;
   const deployTargetKeys = new Set(deployTargets.map((coord) => `${coord.q},${coord.r}`));
   const deployMode = deployTargetKeys.size > 0;
   const moveTargetKeys = new Set(moveTargets.map((coord) => `${coord.q},${coord.r}`));
@@ -271,13 +274,33 @@ export function StrategicMap({
   }
   const moveMode = moveTargetKeys.size > 0;
   const firePlotMode = firePlotTargetKeys.size > 0;
+  const renderTerrain = renderTerrainByScale;
+  // 全图视图下地形格子不渲染时，模式目标格子（部署/移动/火计）仍需独立渲染，否则玩家无法看到可点击目标
+  const modeTargetCells = !renderTerrain && (deployMode || moveMode || firePlotMode)
+    ? (() => {
+        const cellByKey = new Map(displayGrid.map((cell) => [gridKey(cell), cell]));
+        const seen = new Set<string>();
+        const cells: GridCell[] = [];
+        for (const coord of [...deployTargets, ...moveTargets, ...firePlotTargets]) {
+          const key = gridKey(coord);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const cell = cellByKey.get(key);
+          if (cell) cells.push(cell);
+        }
+        return cells;
+      })()
+    : [];
+  const cellsToRender = renderTerrain ? visibleCells : modeTargetCells;
   const selectedDeployKey = selectedDeployTarget ? `${selectedDeployTarget.q},${selectedDeployTarget.r}` : null;
-  const displayGridKeys = new Set(displayGrid.map(gridKey));
   const hoveredFacility = hoveredFacilityId ? state.facilities?.[hoveredFacilityId] : undefined;
   const hoveredFacilityRange = hoveredFacility && hoveredFacility.completed !== false ? FACILITY_RANGE[hoveredFacility.type] : undefined;
   const facilityRangeCells = hoveredFacility && hoveredFacilityRange
-    ? coordsWithinRange(hoveredFacility, hoveredFacilityRange)
-      .filter((coord) => displayGridKeys.has(gridKey(coord)) && (coord.q !== hoveredFacility.q || coord.r !== hoveredFacility.r))
+    ? (() => {
+        const keys = new Set(displayGrid.map(gridKey));
+        return coordsWithinRange(hoveredFacility, hoveredFacilityRange)
+          .filter((coord) => keys.has(gridKey(coord)) && (coord.q !== hoveredFacility.q || coord.r !== hoveredFacility.r));
+      })()
     : [];
   const dismissUnitHover = () => onUnitLeave?.();
   const dismissCityHover = () => onCityLeave?.();
@@ -521,7 +544,7 @@ export function StrategicMap({
           />
         )}
         <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}${moveMode ? ' is-moving' : ''}${firePlotMode ? ' is-strategy-targeting' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${worldWidth} ${worldHeight}`} aria-hidden="true" style={zoomStyle()}>
-          {visibleCells.map((cell) => {
+          {cellsToRender.map((cell) => {
             const position = displayCellPosition(cell.q, cell.r);
             const cellKey = `${cell.q},${cell.r}`;
             const isDeployTarget = deployTargetKeys.has(cellKey);

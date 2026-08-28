@@ -30,6 +30,15 @@ function renderGame(state = createGame('liu', 1)) {
   );
 }
 
+function zoomToTerrain() {
+  // china42 大地图（200×200）默认全图视图下地形格子过小、数量过多，不渲染；
+  // 放大到 scale=4 后可见格子数低于阈值，地形与交互格子开始渲染。
+  const viewport = screen.getByTestId('map-viewport');
+  for (let i = 0; i < 20; i += 1) {
+    fireEvent.wheel(viewport, { deltaY: -120 });
+  }
+}
+
 async function chooseDeployLeader(user: ReturnType<typeof userEvent.setup>, officerName = '刘备') {
   const deployDialog = screen.getByRole('dialog', { name: '出征编制' });
   await user.click(within(deployDialog).getByRole('button', { name: '选择武将' }));
@@ -65,10 +74,17 @@ describe('StrategicMap', { timeout: 30000 }, () => {
   it('opens a city menu when the underlying map cell is clicked inside its seven-cell footprint', () => {
     const state = createGame('liu', 1);
     renderGame(state);
+    zoomToTerrain();
 
     const city = state.cities.jiangling;
-    const mapCell = screen.getByTestId(`map-cell-${city.gridQ + 1}-${city.gridR}`);
-    fireEvent.pointerDown(mapCell, { button: 0, buttons: 1, clientX: 260, clientY: 190 });
+    const footprintMapCell = screen.getAllByTestId(/^map-cell-/).find((node) => {
+      const match = node.getAttribute('data-testid')!.match(/^map-cell-(\d+)-(\d+)$/)!;
+      const q = Number(match[1]);
+      const r = Number(match[2]);
+      return Math.abs(q - city.gridQ) <= 1 && Math.abs(r - city.gridR) <= 1;
+    });
+    expect(footprintMapCell).toBeTruthy();
+    fireEvent.pointerDown(footprintMapCell!, { button: 0, buttons: 1, clientX: 260, clientY: 190 });
 
     expect(screen.getByRole('heading', { name: city.name })).toBeVisible();
     expect(screen.getByTestId('city-command-menu')).toBeVisible();
@@ -140,6 +156,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
   it('shows the hovered grid coordinate at the bottom center of the interface', async () => {
     const user = userEvent.setup();
     renderGame();
+    zoomToTerrain();
 
     const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
     expect(jianglingMarker).toBeTruthy();
@@ -165,8 +182,9 @@ describe('StrategicMap', { timeout: 30000 }, () => {
 
   it('shows coordinates and terrain while hovering the normal map grid', () => {
     renderGame();
+    zoomToTerrain();
 
-    const mapCell = screen.getByTestId('map-cell-0-0');
+    const mapCell = screen.getAllByTestId(/^map-cell-/)[0];
     fireEvent.pointerEnter(mapCell);
 
     expect(screen.getByTestId('hover-coordinate')).toBeInTheDocument();
@@ -198,14 +216,16 @@ describe('StrategicMap', { timeout: 30000 }, () => {
 
   it('darkens map cells occupied by facilities', () => {
     const state = createGame('liu', 1);
+    // 放在地图中心区域，保证放大后可见
     state.facilities = {
-      tower: { id: 'tower', type: 'arrowTower', forceId: 'liu', q: 10, r: 10, durability: 700 },
+      tower: { id: 'tower', type: 'arrowTower', forceId: 'liu', q: 100, r: 100, durability: 700 },
     };
 
     renderGame(state);
+    zoomToTerrain();
 
-    expect(screen.getByTestId('map-cell-10-10')).toHaveClass('is-facility-occupied');
-    expect(screen.getByTestId('map-cell-10-11')).not.toHaveClass('is-facility-occupied');
+    expect(screen.getByTestId('map-cell-100-100')).toHaveClass('is-facility-occupied');
+    expect(screen.getByTestId('map-cell-100-101')).not.toHaveClass('is-facility-occupied');
   });
 
   it('uses the owning force color for support facility backgrounds', () => {
@@ -437,6 +457,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
       food: 6000,
     });
     renderGame(settleTenDay(deployed));
+    zoomToTerrain();
 
     expect(screen.getByTestId('battle-unit-ready-badge')).toBeInTheDocument();
 

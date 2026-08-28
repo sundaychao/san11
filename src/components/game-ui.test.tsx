@@ -16,6 +16,15 @@ function cssRule(selector: string) {
   return css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
 }
 
+function zoomToTerrain() {
+  // china42 大地图（200×200）默认全图视图下地形格子过小不渲染；
+  // 放大到 scale=4 后可见格子数低于阈值，地形与交互格子开始渲染。
+  const viewport = screen.getByTestId('map-viewport');
+  for (let i = 0; i < 20; i += 1) {
+    fireEvent.wheel(viewport, { deltaY: -120 });
+  }
+}
+
 function mockFileDownloads() {
   const originalCreateObjectUrl = URL.createObjectURL;
   const originalRevokeObjectUrl = URL.revokeObjectURL;
@@ -972,6 +981,7 @@ describe('game interface shell', () => {
       </GameProvider>,
     );
 
+    zoomToTerrain();
     await user.click(screen.getByRole('button', { name: '地图编辑' }));
     const editor = screen.getByRole('region', { name: '地图编辑器' });
     expect(editor).toBeVisible();
@@ -984,9 +994,9 @@ describe('game interface shell', () => {
     expect(within(editor).getByText('AI 生成图片后，直接选择图片文件；编辑器会自动显示底图并进入校准模式。')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: '高山' }));
-    fireEvent.pointerDown(screen.getByTestId('editor-cell-0-0'), { button: 0, buttons: 1 });
+    fireEvent.pointerDown(screen.getByTestId('editor-cell-100-100'), { button: 0, buttons: 1 });
     await user.click(screen.getByRole('button', { name: '城市' }));
-    fireEvent.pointerDown(screen.getByTestId('editor-cell-4-4'), { button: 0, buttons: 1 });
+    fireEvent.pointerDown(screen.getByTestId('editor-cell-104-100'), { button: 0, buttons: 1 });
 
     await user.click(screen.getByRole('button', { name: '导出最终游戏地图 JSON' }));
     const exportOutput = screen.getByTestId('map-editor-export');
@@ -994,13 +1004,13 @@ describe('game interface shell', () => {
 
     expect(exportValue).toContain('"terrain": "mountain"');
     expect(exportValue).toContain('"cities"');
-    expect(exportValue).toContain('"q": 4');
+    expect(exportValue).toContain('"q": 104');
 
     await user.click(screen.getByRole('button', { name: '导出 AI 控制图' }));
     const terrainControlValue = (exportOutput as HTMLTextAreaElement).value;
     expect(terrainControlValue).toContain('data-export="terrain-control"');
     expect(terrainControlValue).toContain('data-cell-shape="staggered-square-even-columns-up-half"');
-    expect(terrainControlValue).toContain('data-q="0" data-r="0"');
+    expect(terrainControlValue).toContain('data-q="100" data-r="100"');
     clickSpy.mockRestore();
   });
 
@@ -1012,6 +1022,7 @@ describe('game interface shell', () => {
       </GameProvider>,
     );
 
+    zoomToTerrain();
     await user.click(screen.getByTestId('map-editor-toggle-button'));
     const editor = screen.getByTestId('map-editor-panel');
 
@@ -1029,6 +1040,7 @@ describe('game interface shell', () => {
       </GameProvider>,
     );
 
+    zoomToTerrain();
     await user.click(screen.getByRole('button', { name: '地图编辑' }));
     await user.click(screen.getByRole('checkbox', { name: '显示生成地图，进入校准模式' }));
     fireEvent.change(screen.getByLabelText('底图地址'), { target: { value: 'exports/watercolor-map-realistic-preview.png' } });
@@ -1037,12 +1049,12 @@ describe('game interface shell', () => {
     expect(mapImage).toHaveAttribute('src', 'exports/watercolor-map-realistic-preview.png');
 
     await user.click(screen.getByRole('button', { name: '森林' }));
-    fireEvent.pointerDown(screen.getByTestId('editor-cell-0-0'), { button: 0, buttons: 1 });
+    fireEvent.pointerDown(screen.getByTestId('editor-cell-100-100'), { button: 0, buttons: 1 });
     await user.click(screen.getByRole('button', { name: '导出最终游戏地图 JSON' }));
 
     const json = JSON.parse((screen.getByTestId('map-editor-export') as HTMLTextAreaElement).value);
     expect(json.backgroundImage).toBe('exports/watercolor-map-realistic-preview.png');
-    expect(json.grid.find((cell: { q: number; r: number; terrain: string }) => cell.q === 0 && cell.r === 0)?.terrain).toBe('forest');
+    expect(json.grid.find((cell: { q: number; r: number; terrain: string }) => cell.q === 100 && cell.r === 100)?.terrain).toBe('forest');
   });
 
   it('uploads a generated map image and enters calibration mode automatically', async () => {
@@ -1056,6 +1068,7 @@ describe('game interface shell', () => {
         </GameProvider>,
       );
 
+      zoomToTerrain();
       await user.click(screen.getByRole('button', { name: '地图编辑' }));
       const upload = screen.getByLabelText('选择 AI 生成的地图图片');
       const file = new File(['fake image'], 'watercolor-map.png', { type: 'image/png' });
@@ -1081,7 +1094,7 @@ describe('game interface shell', () => {
       height: gridHeight,
       backgroundImage: '',
       grid: base.grid.map((cell) => (
-        cell.q === 0 && cell.r === 0 ? { ...cell, terrain: 'forest' } : cell
+        cell.q === 100 && cell.r === 100 ? { ...cell, terrain: 'forest' } : cell
       )),
       cities: [{ id: 'jiangling', label: '江陵', q: 10, r: 12 }],
     };
@@ -1091,6 +1104,7 @@ describe('game interface shell', () => {
       </GameProvider>,
     );
 
+    zoomToTerrain();
     await user.click(screen.getByRole('button', { name: '地图编辑' }));
     await user.upload(
       screen.getByLabelText('导入最终游戏地图 JSON'),
@@ -1098,11 +1112,12 @@ describe('game interface shell', () => {
     );
 
     await waitFor(() => expect(screen.getByText('已导入最终游戏地图 JSON，并应用到当前游戏地图。')).toBeVisible());
-    expect(screen.getByTestId('editor-cell-0-0')).toHaveClass('terrain-forest');
+    expect(screen.getByTestId('editor-cell-100-100')).toHaveClass('terrain-forest');
 
     await user.click(screen.getByRole('button', { name: '关闭' }));
+    zoomToTerrain();
 
-    expect(screen.getByTestId('map-cell-0-0')).toHaveClass('terrain-forest');
+    expect(screen.getByTestId('map-cell-100-100')).toHaveClass('terrain-forest');
   });
 
   it('downloads the terrain control svg when exporting the terrain map', async () => {
@@ -1116,6 +1131,7 @@ describe('game interface shell', () => {
         </GameProvider>,
       );
 
+      zoomToTerrain();
       await user.click(screen.getByRole('button', { name: '地图编辑' }));
       await user.click(screen.getByRole('button', { name: '导出 AI 控制图' }));
 
@@ -1140,6 +1156,7 @@ describe('game interface shell', () => {
         </GameProvider>,
       );
 
+      zoomToTerrain();
       await user.click(screen.getByRole('button', { name: '地图编辑' }));
       await user.click(screen.getByRole('button', { name: '导出 AI 分层遮罩' }));
 
