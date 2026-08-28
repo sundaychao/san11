@@ -27,6 +27,8 @@ const INFANTRY_TERRAIN_COST: Record<TerrainType, number> = {
   hill: 6,
   mountain: Number.POSITIVE_INFINITY,
   water: 6,
+  shore: 4,
+  ferry: 4,
 };
 
 const CAVALRY_TERRAIN_COST: Record<TerrainType, number> = {
@@ -63,6 +65,8 @@ export const TERRAIN_DEFENSE: Record<TerrainType, number> = {
   hill: 0.8,
   mountain: 1,
   water: 0.95,
+  shore: 1,
+  ferry: 1,
 };
 
 export interface UnitTactic {

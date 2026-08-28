@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "map:china": "tsx scripts/generate-china-map.ts"
   },
   "keywords": [],
   "author": "",

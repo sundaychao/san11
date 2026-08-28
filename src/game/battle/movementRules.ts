@@ -85,7 +85,7 @@ function distance(a: GridCoord, b: GridCoord) {
   return Math.abs(a.q - b.q) + Math.abs(a.r - b.r);
 }
 
-export function spawnCellFor(state: GameState, city: City, target: City, profile: MovementProfile = 'sword') {
+export function spawnCellFor(state: GameState, city: City, target: City, profile: MovementProfile = 'sword', vehicle?: 'boat' | 'ship') {
   const cityKeys = new Set(sevenCellCityFootprint(cityCenter(city)).map(gridKey));
   const candidates = new Map<string, GridCoord>();
   for (const coord of sevenCellCityFootprint(cityCenter(city))) {
@@ -94,8 +94,9 @@ export function spawnCellFor(state: GameState, city: City, target: City, profile
       if (!cityKeys.has(key)) candidates.set(key, neighbor);
     }
   }
+  const reachable = new Set(deploymentCells(state, city.id, movementAllowanceForProfile(profile), profile, vehicle).map(gridKey));
   return [...candidates.values()]
-    .filter((coord) => isLegalUnitCell(state, coord, undefined, profile))
+    .filter((coord) => isLegalUnitCell(state, coord, undefined, profile) && reachable.has(gridKey(coord)))
     .sort((a, b) => distance(a, cityCenter(target)) - distance(b, cityCenter(target)) || a.q - b.q || a.r - b.r)[0];
 }
 
@@ -107,7 +108,9 @@ function reachableCostsFrom(
   options: { ignoredUnitId?: string; allowedCityTransitKeys?: Set<string>; movingForceId?: ForceId; ignoreEnemyZoc?: 'land' | 'water' | null; vehicle?: 'boat' | 'ship' } = {},
 ) {
   const startKey = gridKey(start);
+  const startOnWater = cellAt(state, start)?.terrain === 'water';
   const costs = new Map<string, number>([[startKey, 0]]);
+  const ferryChain = new Set<string>();
   const frontier: GridCoord[] = [{ q: start.q, r: start.r }];
   const cityKeys = allCityKeys(state);
   const unitKeys = occupiedUnitKeys(state, options.ignoredUnitId);
@@ -139,6 +142,13 @@ function reachableCostsFrom(
       if (nextCost > movementBudget) continue;
       if (costs.has(key) && costs.get(key)! <= nextCost) continue;
       costs.set(key, nextCost);
+      const neighborTerrain = cellAt(state, neighbor)?.terrain;
+      if (neighborTerrain === 'water' && !startOnWater) {
+        const transitWater = currentTerrain === 'ferry' || ferryChain.has(currentKey);
+        if (!transitWater) continue;
+        ferryChain.add(key);
+      }
+      if (neighborTerrain === 'shore') continue;
       frontier.push(neighbor);
     }
   }

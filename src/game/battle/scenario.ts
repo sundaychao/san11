@@ -1,4 +1,5 @@
 import type { CityId, GridCell, TerrainType } from '../types';
+import { neighborsOf } from './grid';
 
 export const GRID_WIDTH = 70;
 export const GRID_HEIGHT = 40;
@@ -31,6 +32,12 @@ export function createBattleGrid(): GridCell[] {
     for (let q = 0; q < GRID_WIDTH; q += 1) {
       cells.push({ q, r, terrain: terrainAt(q, r) });
     }
+  }
+  const waterKeys = new Set(cells.filter((cell) => cell.terrain === 'water').map((cell) => `${cell.q},${cell.r}`));
+  for (const cell of cells) {
+    if (cell.terrain === 'water' || cell.terrain === 'mountain') continue;
+    const touchesWater = neighborsOf(cell.q, cell.r).some((coord) => waterKeys.has(`${coord.q},${coord.r}`));
+    if (touchesWater) cell.terrain = 'shore';
   }
   return cells;
 }

@@ -171,7 +171,7 @@ export interface GameState {
 
 export type TenDay = 1 | 2 | 3;
 
-export type TerrainType = 'road' | 'plain' | 'forest' | 'hill' | 'mountain' | 'water';
+export type TerrainType = 'road' | 'plain' | 'forest' | 'hill' | 'mountain' | 'water' | 'shore' | 'ferry';
 export type TroopType = 'sword' | 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'siege';
 export type VehicleType = 'boat' | 'ship';
 export type ArmamentType = 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'ram' | 'tower' | 'ship';
@@ -192,6 +192,7 @@ export interface ArmyUnit {
   homeCityId: CityId;
   troopType?: TroopType;
   vehicle?: VehicleType;
+  siegeWeapon?: 'ram' | 'tower';
   gold?: number;
   q: number;
   r: number;

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { initialArmaments } from '../armaments';
 import { runAiTurn } from '../ai';
 import { nextRandom } from '../random';
 import { createGame } from '../scenario/jingxiang208';
@@ -1054,7 +1055,9 @@ describe('battle deployment and movement actions', () => {
   });
 
   it('keeps cavalry movement high on plain but penalizes forest and shallow water', () => {
-    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+    const game = createGame('liu', 1);
+    game.cities['jiangling'].armaments = { ...initialArmaments(), cavalry: 5000 };
+    const deployed = deployUnit(game, 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
       troopType: 'cavalry',
@@ -1087,6 +1090,7 @@ describe('battle deployment and movement actions', () => {
   it('makes siege units clearly slower on complex terrain and uses troop type for deployment range', () => {
     const state = createGame('liu', 1);
     setUniformTerrain(state, 'hill');
+    state.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5 };
 
     const infantryDeployTargets = deploymentCells(state, 'jiangling', undefined, 'sword');
     const siegeDeployTargets = deploymentCells(state, 'jiangling', undefined, 'siege');
@@ -1097,6 +1101,7 @@ describe('battle deployment and movement actions', () => {
       cityId: 'jiangling',
       officerId: 'guan-yu',
       troopType: 'siege',
+      siegeWeapon: 'ram',
       troops: 4000,
       food: 6000,
     });
@@ -1118,12 +1123,12 @@ describe('battle deployment and movement actions', () => {
       food: 6000,
     });
     const unit = Object.values(deployed.units)[0];
-    deployed.units[unit.id].q = 27;
-    deployed.units[unit.id].r = 10;
+    deployed.units[unit.id].q = 97;
+    deployed.units[unit.id].r = 132;
     deployed.units[unit.id].moved = false;
     deployed.units[unit.id].movementRemaining = 20;
 
-    const water = deployed.grid.find((cell) => cell.q === 28 && cell.r === 10);
+    const water = deployed.grid.find((cell) => cell.q === 97 && cell.r === 133);
 
     expect(water?.terrain).toBe('water');
     expect(moveUnit(deployed, 'liu', unit.id, water!).units[unit.id]).toMatchObject({ q: water!.q, r: water!.r });
@@ -2560,11 +2565,14 @@ describe('battle deployment and movement actions', () => {
   });
 
   it('lists enemy cities in attack range and lets siege attack from two cells away', () => {
-    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+    const game = createGame('liu', 1);
+    game.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5 };
+    const deployed = deployUnit(game, 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
       targetCityId: 'xiangyang',
       troopType: 'siege',
+      siegeWeapon: 'ram',
       troops: 6000,
       food: 6000,
     });

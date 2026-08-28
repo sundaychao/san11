@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createBattleGrid, GRID_HEIGHT, GRID_WIDTH } from '../battle/scenario';
+import type { GridCell } from '../types';
 import {
   clearEditor,
   createEditorState,
@@ -83,6 +84,43 @@ describe('map editor core', () => {
     const source = createEditorState(createBattleGrid());
     const payload = JSON.parse(exportEditorJson(source));
     payload.grid[0].terrain = 'lava';
+
+    expect(() => importEditorJson(source, JSON.stringify(payload))).toThrow('地图 JSON 无效');
+  });
+
+  it('imports and re-exports custom size maps with their dimensions', () => {
+    const width = 12;
+    const height = 9;
+    const grid: GridCell[] = [];
+    for (let q = 0; q < width; q += 1) {
+      for (let r = 0; r < height; r += 1) grid.push({ q, r, terrain: 'plain' });
+    }
+    const source = createEditorState(grid, [{ id: 'luoyang', label: '洛阳', q: 6, r: 4 }], width, height);
+
+    const payload = JSON.parse(exportEditorJson(source));
+    expect(payload.width).toBe(width);
+    expect(payload.height).toBe(height);
+    payload.grid = payload.grid.map((cell: { q: number; r: number; terrain: string }) => (
+      cell.q === 5 && cell.r === 5 ? { ...cell, terrain: 'water' } : cell
+    ));
+
+    const imported = importEditorJson(source, JSON.stringify(payload));
+
+    expect(imported.width).toBe(width);
+    expect(imported.height).toBe(height);
+    expect(imported.grid.find((cell) => cell.q === 5 && cell.r === 5)?.terrain).toBe('water');
+  });
+
+  it('rejects custom size maps whose markers fall outside the declared bounds', () => {
+    const width = 12;
+    const height = 9;
+    const grid: GridCell[] = [];
+    for (let q = 0; q < width; q += 1) {
+      for (let r = 0; r < height; r += 1) grid.push({ q, r, terrain: 'plain' });
+    }
+    const source = createEditorState(grid, [], width, height);
+    const payload = JSON.parse(exportEditorJson(source));
+    payload.cities = [{ id: 'bad', label: '越界', q: 50, r: 50 }];
 
     expect(() => importEditorJson(source, JSON.stringify(payload))).toThrow('地图 JSON 无效');
   });

@@ -1,6 +1,8 @@
 import { CITY_IDS, FORCE_IDS, OFFICER_IDS } from './scenario/jingxiang208';
+import { createMobileDuelGrid } from './scenario/mobileDuel';
 import { ARMAMENT_TYPES } from './armaments';
 import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Stats, StrategyResultReport } from './types';
+import china42Data from './scenario/china42.json';
 
 export const AUTO_SAVE_KEY = 'jingxiang-208-autosave-v1';
 export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
@@ -131,7 +133,7 @@ function validGridCell(value: unknown): value is GridCell {
   const cell = value as Partial<GridCell>;
   return Number.isInteger(cell.q) && cell.q! >= 0 &&
     Number.isInteger(cell.r) && cell.r! >= 0 &&
-    ['road', 'plain', 'forest', 'hill', 'mountain', 'water'].includes(cell.terrain!);
+    ['road', 'plain', 'forest', 'hill', 'mountain', 'water', 'shore', 'ferry'].includes(cell.terrain!);
 }
 
 function validUnit(value: unknown): value is ArmyUnit {
@@ -145,6 +147,7 @@ function validUnit(value: unknown): value is ArmyUnit {
     CITY_IDS.includes(unit.homeCityId!) &&
     (unit.troopType === undefined || TROOP_TYPES.includes(unit.troopType)) &&
     (unit.vehicle === undefined || unit.vehicle === 'boat' || unit.vehicle === 'ship') &&
+    (unit.siegeWeapon === undefined || unit.siegeWeapon === 'ram' || unit.siegeWeapon === 'tower') &&
     (unit.gold === undefined || validResource(unit.gold)) &&
     Number.isInteger(unit.q) &&
     Number.isInteger(unit.r) &&
@@ -349,10 +352,22 @@ export function loadSave(storage: SaveAdapter, slot: SaveSlot): LoadResult {
     const parsed = JSON.parse(raw) as { schemaVersion?: unknown };
     if (parsed?.schemaVersion !== 2) return { ok: false, reason: '存档版本不兼容' };
     if (!isGameState(parsed)) return { ok: false, reason: '存档无法读取' };
-    return { ok: true, state: parsed };
+    return { ok: true, state: migrateTerrainGrid(parsed) };
   } catch {
     return { ok: false, reason: '存档无法读取' };
   }
+}
+
+function migrateTerrainGrid(state: GameState): GameState {
+  const hasShoreOrFerry = state.grid.some((cell) => cell.terrain === 'shore' || cell.terrain === 'ferry');
+  if (hasShoreOrFerry) return state;
+  const fallbackGrid: GridCell[] = (china42Data.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map(
+    (cell) => ({ q: cell.q, r: cell.r, terrain: cell.terrain }),
+  );
+  return {
+    ...state,
+    grid: state.scenarioId === 'mobile-duel' ? createMobileDuelGrid() : fallbackGrid,
+  };
 }
 
 export function clearSaves(storage: SaveAdapter) {

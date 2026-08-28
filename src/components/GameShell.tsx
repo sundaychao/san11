@@ -56,6 +56,8 @@ const TERRAIN_LABELS: Record<TerrainType, string> = {
   hill: '丘陵',
   mountain: '高山',
   water: '水域',
+  shore: '岸边',
+  ferry: '渡口',
 };
 
 function downloadTextFile(filename: string, content: string) {
@@ -176,6 +178,8 @@ export function GameShell() {
     setEditorState(createEditorState(
       state.grid,
       Object.values(state.cities).map((city) => ({ id: city.id, label: city.name, q: city.gridQ, r: city.gridR })),
+      state.gridWidth,
+      state.gridHeight,
     ));
     setEditorCalibrationMode(false);
     setEditorExport('');
@@ -230,7 +234,7 @@ export function GameShell() {
       const json = await file.text();
       const imported = importEditorJson(editorState, json);
       setEditorState(imported);
-      applyMapEditorMap({ grid: imported.grid, cities: imported.cities });
+      applyMapEditorMap({ grid: imported.grid, cities: imported.cities, width: imported.width, height: imported.height });
       setEditorCalibrationMode(Boolean(imported.backgroundImage));
       setEditorExport('已导入最终游戏地图 JSON，并应用到当前游戏地图。');
     } catch (error) {

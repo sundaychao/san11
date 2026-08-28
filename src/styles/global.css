@@ -141,11 +141,11 @@ button { color: inherit; }
 .icon-button svg, .next-month svg { width: 18px; }
 .map-region { position: relative; min-width: 0; min-height: 0; overflow: hidden; touch-action: none; cursor: default; background: #5f6d5f; }
 .map-region:active { cursor: default; }
-.map-content { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: center; will-change: transform; }
-.map-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; user-select: none; opacity: 0.92; }
+.map-content { position: absolute; inset: 0; }
+.map-image { position: absolute; object-fit: fill; pointer-events: none; user-select: none; opacity: 0.92; }
 .map-region.is-editing .map-image { opacity: 0.62; filter: saturate(0.9) contrast(0.92) brightness(0.92); }
-.battle-grid-overlay { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; pointer-events: auto; }
-.battle-unit-layer { position: absolute; z-index: 4; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.battle-grid-overlay { position: absolute; z-index: 1; pointer-events: auto; }
+.battle-unit-layer { position: absolute; z-index: 4; pointer-events: none; }
 .battle-facility-hit { pointer-events: auto; cursor: help; fill: transparent; }
 .battle-facility-hit.is-force-colored { fill: var(--force-color); fill-opacity: 0.72; stroke: rgba(255, 244, 205, 0.62); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
 .battle-facility-marker { pointer-events: auto; cursor: help; fill: #f6e7a6; font-size: 15px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 3px; vector-effect: non-scaling-stroke; }
@@ -178,6 +178,8 @@ button { color: inherit; }
 .terrain-mountain { fill: rgba(50, 54, 55, 0.48); stroke: rgba(205, 210, 202, 0.48); }
 .terrain-shallowWater, .terrain-deepWater { fill: rgba(38, 125, 168, 0.45); stroke: rgba(126, 213, 238, 0.52); }
 .terrain-water { fill: rgba(38, 125, 168, 0.48); stroke: rgba(126, 213, 238, 0.55); }
+.terrain-shore { fill: rgba(126, 190, 214, 0.38); stroke: rgba(186, 230, 244, 0.6); }
+.terrain-ferry { fill: rgba(160, 116, 64, 0.55); stroke: rgba(214, 178, 122, 0.85); stroke-width: 1.4; }
 .battle-cell.is-facility-occupied { fill: rgba(18, 24, 23, 0.58); stroke: rgba(255, 237, 154, 0.56); stroke-width: 0.9; }
 .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 42%, transparent); stroke: rgba(255, 244, 205, 0.58); stroke-width: 1.3; vector-effect: non-scaling-stroke; pointer-events: auto; cursor: pointer; }
 .battle-grid-overlay.is-editing .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 78%, rgba(255, 231, 145, 0.62)); stroke: rgba(255, 250, 188, 1); stroke-width: 2.3; pointer-events: none; cursor: crosshair; }
@@ -198,7 +200,7 @@ button { color: inherit; }
 .strategy-result-label { pointer-events: none; fill: #e1e4e1; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 13px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(25, 31, 29, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .facility-repair-number { pointer-events: none; fill: #8ff0ae; font-family: Consolas, "Courier New", monospace; font-size: 14px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(8, 45, 24, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .facility-repair-number.is-build { fill: #ffe37a; }
-.city-effect-number { position: absolute; left: 50%; bottom: calc(50% + 58px); z-index: 2; min-width: max-content; transform: translateX(-50%); pointer-events: none; color: #f7ef83; font-family: Consolas, "Microsoft YaHei", sans-serif; font-size: 18px; font-weight: 900; line-height: 1; text-shadow: 0 2px 0 rgba(17, 24, 21, 0.98), 2px 0 0 rgba(17, 24, 21, 0.98), -2px 0 0 rgba(17, 24, 21, 0.98), 0 -2px 0 rgba(17, 24, 21, 0.98), 0 0 7px rgba(0, 0, 0, 0.9); white-space: nowrap; }
+.city-effect-number { position: absolute; left: 50%; bottom: calc(50% + 58px * var(--map-scale, 1)); z-index: 2; min-width: max-content; transform: translateX(-50%); pointer-events: none; color: #f7ef83; font-family: Consolas, "Microsoft YaHei", sans-serif; font-size: calc(18px * var(--map-scale, 1)); font-weight: 900; line-height: 1; text-shadow: 0 2px 0 rgba(17, 24, 21, 0.98), 2px 0 0 rgba(17, 24, 21, 0.98), -2px 0 0 rgba(17, 24, 21, 0.98), 0 -2px 0 rgba(17, 24, 21, 0.98), 0 0 7px rgba(0, 0, 0, 0.9); white-space: nowrap; }
 .city-effect-number.is-armament { color: #9de7ff; }
 .troop-sword { --troop-tone: #cfc6a5; }
 .troop-spear { --troop-tone: #7fab72; }
@@ -210,14 +212,14 @@ button { color: inherit; }
 .vehicle-ship { --troop-tone: #5d8aa8; }
 .battle-unit-troops { fill: #fff6d6; font-size: 8px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 2px; }
 .battle-unit-leader-name { fill: #fff6d6; font-size: 11px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 3px; vector-effect: non-scaling-stroke; }
-.city-marker-layer { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
+.city-marker-layer { position: absolute; z-index: 3; pointer-events: none; }
 .city-marker-layer.is-editing { pointer-events: none; opacity: 0.8; }
 .city-marker {
   position: absolute;
   pointer-events: none;
   z-index: 1;
-  width: 43px;
-  height: 43px;
+  width: calc(43px * var(--map-scale, 1));
+  height: calc(43px * var(--map-scale, 1));
   padding: 0;
   border: 0;
   background: transparent;
@@ -229,12 +231,12 @@ button { color: inherit; }
 .city-marker:hover, .city-marker:focus-visible, .city-marker.is-selected { outline: none; }
 .city-marker:hover .city-marker-copy, .city-marker:focus-visible .city-marker-copy, .city-marker.is-selected .city-marker-copy { border-color: #f2d778; outline: 2px solid rgba(242, 215, 120, 0.58); outline-offset: 1px; }
 .city-marker.is-attack-target .city-marker-copy { border-color: #ffd842; outline: 2px solid rgba(255, 216, 66, 0.62); outline-offset: 1px; }
-.city-attack-target-arrow { position: absolute; left: 50%; top: -11px; transform: translateX(-50%); color: #ffd842; font-size: 18px; font-weight: 900; line-height: 1; pointer-events: none; text-shadow: 0 1px 2px rgba(16, 19, 15, 0.96), 0 0 5px rgba(255, 216, 66, 0.6); }
-.city-marker-copy { position: absolute; left: 50%; bottom: calc(50% + 21px); min-width: 96px; display: grid; grid-template-columns: auto minmax(52px, 1fr); align-items: start; gap: 3px 7px; padding: 4px 6px; border: 1px solid rgba(218, 203, 158, 0.72); border-radius: 2px; background: rgba(24, 37, 33, 0.88); box-shadow: 0 3px 8px rgba(10, 14, 12, 0.45); transform: translateX(-50%); line-height: 1.1; white-space: nowrap; pointer-events: none; }
-.city-marker-copy strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 15px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
+.city-attack-target-arrow { position: absolute; left: 50%; top: calc(-11px * var(--map-scale, 1)); transform: translateX(-50%); color: #ffd842; font-size: calc(18px * var(--map-scale, 1)); font-weight: 900; line-height: 1; pointer-events: none; text-shadow: 0 1px 2px rgba(16, 19, 15, 0.96), 0 0 5px rgba(255, 216, 66, 0.6); }
+.city-marker-copy { position: absolute; left: 50%; bottom: calc(50% + 21px * var(--map-scale, 1)); min-width: calc(96px * var(--map-scale, 1)); display: grid; grid-template-columns: auto minmax(calc(52px * var(--map-scale, 1)), 1fr); align-items: start; gap: calc(3px * var(--map-scale, 1)) calc(7px * var(--map-scale, 1)); padding: calc(4px * var(--map-scale, 1)) calc(6px * var(--map-scale, 1)); border: 1px solid rgba(218, 203, 158, 0.72); border-radius: 2px; background: rgba(24, 37, 33, 0.88); box-shadow: 0 3px 8px rgba(10, 14, 12, 0.45); transform: translateX(-50%); line-height: 1.1; white-space: nowrap; pointer-events: none; }
+.city-marker-copy strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: calc(15px * var(--map-scale, 1)); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
 .city-marker-stats { display: grid; gap: 1px; }
-.city-marker-stat { display: block; color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 11px; font-weight: 800; text-align: right; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
-.city-marker-stat-divider { display: block; height: 1px; background: rgba(255, 244, 205, 0.76); box-shadow: 0 0 4px color-mix(in srgb, var(--force-color) 55%, transparent); }
+.city-marker-stat { display: block; color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: calc(11px * var(--map-scale, 1)); font-weight: 800; text-align: right; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
+.city-marker-stat-divider { display: block; height: calc(1px * var(--map-scale, 1)); background: rgba(255, 244, 205, 0.76); box-shadow: 0 0 4px color-mix(in srgb, var(--force-color) 55%, transparent); }
 .map-tools { position: absolute; z-index: 6; top: 14px; left: 14px; display: flex; gap: 5px; padding: 5px; }
 .map-tools .icon-button { background: rgba(24, 37, 33, 0.9); }
 .hover-coordinate { position: fixed; z-index: 16; left: 50%; bottom: 16px; min-width: 118px; padding: 7px 14px; transform: translateX(-50%); color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 13px; font-weight: 700; text-align: center; pointer-events: none; }
@@ -598,6 +600,8 @@ button { color: inherit; }
 .range-field { display: grid; grid-template-columns: 42px minmax(0, 1fr) 106px; align-items: center; gap: 10px; }
 .range-field > span { color: var(--muted); font-size: 12px; }
 .range-field input[type="range"] { width: 100%; accent-color: var(--gold); cursor: pointer; }
+.range-field input[type="range"]:disabled { accent-color: #6b6658; opacity: 0.45; cursor: not-allowed; }
+.range-field output.is-disabled { border-color: var(--line); color: var(--muted); }
 .range-field output { min-height: 32px; display: grid; place-items: center; padding: 0 8px; border: 1px solid var(--line); background: rgba(244, 237, 217, 0.06); color: #fff6d6; font: 12px Consolas, "Courier New", monospace; text-align: right; }
 .command-note { margin-top: 10px; padding: 8px 10px; border: 1px solid rgba(146, 136, 115, 0.45); background: rgba(15, 30, 29, 0.72); color: var(--muted); font-size: 12px; }
 .transfer-officers > div { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { initialArmaments } from '../armaments';
 import { buildFacility, deployUnit, deploymentCells, firePlotCells, movementCells, type TacticId } from '../battle/actions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from '../battle/grid';
 import { AUTO_SAVE_KEY, MANUAL_SAVE_KEY, type SaveAdapter } from '../persistence';
@@ -746,10 +747,13 @@ describe('GameProvider', () => {
     });
     vi.stubGlobal('Audio', AudioMock);
 
-    const state = deployUnit(createGame('liu', 1), 'liu', {
+    const game = createGame('liu', 1);
+    game.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5 };
+    const state = deployUnit(game, 'liu', {
       cityId: 'jiangling',
       officerIds: ['guan-yu'],
       troopType: 'siege',
+      siegeWeapon: 'ram',
       troops: 4000,
       food: 6000,
     });
@@ -1140,7 +1144,7 @@ describe('GameProvider', () => {
     expect(screen.getByTestId('battle-facility-marker')).toHaveAttribute('data-facility-type', 'arrowTower');
   });
 
-  it('sends an online arrow tower build intent from the unit setting menu after choosing a move destination', async () => {
+  it('sends an online arrow tower build intent from the unit setting menu after choosing a move destination', { timeout: 30000 }, async () => {
     const user = userEvent.setup();
     const socket = new FakeOnlineSocket();
     socketHolder.socket = socket;

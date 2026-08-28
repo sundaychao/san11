@@ -1,4 +1,4 @@
-import { armamentsOf, TROOP_ARMAMENT, TROOP_LABELS } from '../armaments';
+import { ARMAMENT_LABELS, armamentsOf, TROOP_ARMAMENT, TROOP_LABELS } from '../armaments';
 import { formationMovementAllowanceBonus } from '../skills/rules/movement';
 import type { ForceId, GameState } from '../types';
 import {
@@ -48,9 +48,11 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   if (city.troops - input.troops < 500) throw new Error('城市至少保留 500 兵力');
   if (armamentType && cityArmaments[armamentType] < input.troops) throw new Error(`${TROOP_LABELS[troopType]}兵装不足`);
   if (vehicle === 'ship' && cityArmaments.ship < 1) throw new Error('楼船兵装不足');
+  if (troopType === 'siege' && !input.siegeWeapon) throw new Error('需要选择冲车或井阑');
+  if (troopType === 'siege' && cityArmaments[input.siegeWeapon!] < 1) throw new Error(`${ARMAMENT_LABELS[input.siegeWeapon!]}不足`);
 
   const spawn = input.destination ?? (target
-    ? spawnCellFor(state, city, target, troopType)
+    ? spawnCellFor(state, city, target, troopType, vehicle)
     : preferredSpawnCell(state, input.cityId, movementAllowance, troopType, vehicle));
   if (!spawn) throw new Error('没有合法出生格');
   if (!deploymentCells(state, input.cityId, movementAllowance, troopType, vehicle).some((coord) => coord.q === spawn.q && coord.r === spawn.r)) {
@@ -58,6 +60,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   }
 
   const next = structuredClone(state);
+  next.cityEffectReports = [];
   const unitId = `unit-${next.month}-${next.tenDay}-${leaderId}-${Object.keys(next.units).length + 1}`;
   next.cities[input.cityId].troops -= input.troops;
   next.cities[input.cityId].gold -= gold;
@@ -68,6 +71,12 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   if (vehicle === 'ship') {
     next.cities[input.cityId].armaments = { ...cityArmaments, ship: cityArmaments.ship - 1 };
   }
+  if (troopType === 'siege' && input.siegeWeapon) {
+    next.cities[input.cityId].armaments = {
+      ...cityArmaments,
+      [input.siegeWeapon]: cityArmaments[input.siegeWeapon] - 1,
+    };
+  }
   next.actionPoints[forceId] -= DEPLOY_AP_COST;
   for (const officerId of officerIds) {
     next.officers[officerId].acted = true;
@@ -75,7 +84,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   }
   next.units[unitId] = {
     id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.cityId,
-    troopType, vehicle, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: 100,
+    troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: 100,
     movementRemaining: movementAllowance, moved: true, acted: false,
   };
   next.logs.push({ id: `deploy-${unitId}`, month: next.month, forceId, message: `${officer.name}率军从${city.name}出征` });
@@ -104,7 +113,7 @@ export function deployUnitPreviewWithId(state: GameState, forceId: ForceId, inpu
   const unitId = `preview-deploy-${leaderId}`;
   next.units[unitId] = {
     id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.cityId,
-    troopType, vehicle, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: 100,
+    troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: 100,
     movementRemaining: movementAllowance, moved: true, acted: false,
   };
   return { state: next, unitId };
@@ -132,6 +141,7 @@ export function deployTransportUnit(state: GameState, forceId: ForceId, input: T
   }
 
   const next = structuredClone(state);
+  next.cityEffectReports = [];
   const unitId = `transport-${next.month}-${next.tenDay}-${input.officerId}-${Object.keys(next.units).length + 1}`;
   next.cities[input.cityId].troops -= input.troops;
   next.cities[input.cityId].gold -= input.gold;

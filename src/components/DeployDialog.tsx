@@ -12,6 +12,7 @@ export interface DeployConfirmInput {
   officerIds: string[];
   troopType: TroopType;
   vehicle: 'boat' | 'ship';
+  siegeWeapon?: 'ram' | 'tower';
   troops: number;
   gold: number;
   food: number;
@@ -23,13 +24,24 @@ interface DeployDialogProps {
   onClose(): void;
 }
 
-const TROOP_TYPES: Array<{ id: TroopType; label: string; attack: number; defense: number; movement: number }> = [
-  { id: 'sword', label: '剑兵', attack: 33, defense: 33, movement: 22 },
-  { id: 'spear', label: '枪兵', attack: 38, defense: 31, movement: 22 },
-  { id: 'halberd', label: '戟兵', attack: 31, defense: 39, movement: 20 },
-  { id: 'crossbow', label: '弩兵', attack: 36, defense: 28, movement: 19 },
-  { id: 'cavalry', label: '骑兵', attack: 42, defense: 27, movement: 30 },
-  { id: 'siege', label: '兵器', attack: 28, defense: 24, movement: 16 },
+interface DeployTroopOption {
+  id: string;
+  label: string;
+  troopType: TroopType;
+  siegeWeapon?: 'ram' | 'tower';
+  attack: number;
+  defense: number;
+  movement: number;
+}
+
+const TROOP_TYPES: DeployTroopOption[] = [
+  { id: 'sword', troopType: 'sword', label: '剑兵', attack: 33, defense: 33, movement: 22 },
+  { id: 'spear', troopType: 'spear', label: '枪兵', attack: 38, defense: 31, movement: 22 },
+  { id: 'halberd', troopType: 'halberd', label: '戟兵', attack: 31, defense: 39, movement: 20 },
+  { id: 'crossbow', troopType: 'crossbow', label: '弩兵', attack: 36, defense: 28, movement: 19 },
+  { id: 'cavalry', troopType: 'cavalry', label: '骑兵', attack: 42, defense: 27, movement: 30 },
+  { id: 'ram', troopType: 'siege', siegeWeapon: 'ram', label: '冲车', attack: 30, defense: 26, movement: 16 },
+  { id: 'tower', troopType: 'siege', siegeWeapon: 'tower', label: '井阑', attack: 26, defense: 22, movement: 16 },
 ];
 const VEHICLE_TYPES: Array<{ id: 'boat' | 'ship'; label: string }> = [
   { id: 'boat', label: '小舟' },
@@ -62,7 +74,7 @@ function toAmount(value: string) {
 }
 
 function officerAbility(officer: Officer | undefined, troopType: TroopType) {
-  const troop = TROOP_TYPES.find((item) => item.id === troopType) ?? TROOP_TYPES[0];
+  const troop = TROOP_TYPES.find((item) => item.troopType === troopType) ?? TROOP_TYPES[0];
   if (!officer) return { attack: troop.attack, defense: troop.defense, intelligence: 0, construction: 0, movement: TROOP_MOVEMENT[troopType] };
   return {
     attack: officer.stats.leadership,
@@ -288,6 +300,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const [officerIds, setOfficerIds] = useState<string[]>([]);
   const [troopType, setTroopType] = useState<TroopType>('sword');
   const [vehicle, setVehicle] = useState<'boat' | 'ship'>('boat');
+  const [siegeWeapon, setSiegeWeapon] = useState<'ram' | 'tower'>('ram');
   const [troops, setTroops] = useState('');
   const [gold, setGold] = useState('');
   const [food, setFood] = useState('');
@@ -317,7 +330,12 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
     Math.max(0, city.troops - 500),
     armamentStock ?? Number.POSITIVE_INFINITY,
   );
-  const activeTroops = String(Math.min(troopMax, Math.max(0, toAmount(troops || String(Math.min(4000, troopMax))))));
+  const troopMin = 1000;
+  const troopRangeDisabled = troopMax < troopMin;
+  const troopRangeMax = Math.max(troopMin, troopMax);
+  const activeTroops = String(troopRangeDisabled
+    ? troopMin
+    : Math.min(troopMax, Math.max(troopMin, toAmount(troops || String(Math.min(4000, troopMax))))));
   const goldMax = Math.max(0, city.gold);
   const activeGold = String(Math.min(goldMax, Math.max(0, toAmount(gold || String(Math.min(1000, goldMax))))));
   const foodMax = Math.max(0, city.food);
@@ -335,6 +353,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
     !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > city.food ? '兵粮不足' : '',
     armamentType && armamentStock !== null && armamentStock < troopAmount ? `${TROOP_LABELS[troopType]}兵装不足` : '',
     vehicle === 'ship' && shipStock < 1 ? '楼船兵装不足' : '',
+    troopType === 'siege' && cityArmaments[siegeWeapon] < 1 ? `${TROOP_TYPES.find((item) => item.siegeWeapon === siegeWeapon)?.label}不足` : '',
   ].filter(Boolean);
 
   const submit = (event: FormEvent) => {
@@ -346,6 +365,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
         officerIds: activeOfficerIds,
         troopType,
         vehicle,
+        ...(troopType === 'siege' ? { siegeWeapon } : {}),
         troops: troopAmount,
         gold: goldAmount,
         food: foodAmount,
@@ -390,30 +410,24 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
             </button>
           </label>
 
-          <label className="field-row">
-            <span>兵种</span>
-            <select aria-label="兵种" value={troopType} onChange={(event) => {
-              const nextTroopType = event.target.value as TroopType;
-              setTroopType(nextTroopType);
-              setOfficerIds(recommendedOfficerIdsForTroop(availableOfficers, nextTroopType));
-              setSubmitError(null);
-            }}>
-              {TROOP_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}
-            </select>
-          </label>
-
           <div className="deploy-troop-grid" aria-label="兵装选择">
-            {TROOP_TYPES.map((type) => (
-              <button key={type.id} type="button" aria-label={type.label} className={troopType === type.id ? 'is-active' : ''} onClick={() => {
-                setTroopType(type.id);
-                setOfficerIds(recommendedOfficerIdsForTroop(availableOfficers, type.id));
-                setSubmitError(null);
-              }}>
-                <Swords aria-hidden="true" />
-                <span>{type.label}</span>
-                <small>{TROOP_ARMAMENT[type.id] ? `${cityArmaments[TROOP_ARMAMENT[type.id]!]}` : '不限'}</small>
-              </button>
-            ))}
+            {TROOP_TYPES.map((type) => {
+              const disabled = type.siegeWeapon ? cityArmaments[type.siegeWeapon] < 1 : false;
+              const active = troopType === type.troopType && (!type.siegeWeapon || siegeWeapon === type.siegeWeapon);
+              return (
+                <button key={type.id} type="button" aria-label={type.label} disabled={disabled} className={`${active ? 'is-active' : ''}${disabled ? 'is-disabled' : ''}`} onClick={() => {
+                  if (disabled) return;
+                  setTroopType(type.troopType);
+                  if (type.siegeWeapon) setSiegeWeapon(type.siegeWeapon);
+                  setOfficerIds(recommendedOfficerIdsForTroop(availableOfficers, type.troopType));
+                  setSubmitError(null);
+                }}>
+                  <Swords aria-hidden="true" />
+                  <span>{type.label}</span>
+                  <small>{type.siegeWeapon ? `${cityArmaments[type.siegeWeapon]}` : TROOP_ARMAMENT[type.troopType] ? `${cityArmaments[TROOP_ARMAMENT[type.troopType]!]}` : '不限'}</small>
+                </button>
+              );
+            })}
           </div>
 
           <span className="deploy-section-label">交通工具</span>
@@ -437,8 +451,8 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
           <div className="amount-grid deploy-ranges">
             <label className="range-field">
               <span>士兵</span>
-              <input id="deploy-troops" aria-label="出征士兵" type="range" min="0" max={troopMax} step="100" value={activeTroops} onChange={(event) => setTroops(event.target.value)} />
-              <output htmlFor="deploy-troops" data-testid="deploy-troop-value">{Number(activeTroops).toLocaleString('en-US')} / {troopMax.toLocaleString('en-US')}</output>
+              <input id="deploy-troops" aria-label="出征士兵" type="range" min={troopMin} max={troopRangeMax} step="100" value={activeTroops} disabled={troopRangeDisabled} onChange={(event) => setTroops(event.target.value)} />
+              <output htmlFor="deploy-troops" data-testid="deploy-troop-value" className={troopRangeDisabled ? 'is-disabled' : undefined}>{Number(activeTroops).toLocaleString('en-US')} / {troopRangeMax.toLocaleString('en-US')}</output>
             </label>
             <label className="range-field">
               <span>兵粮</span>

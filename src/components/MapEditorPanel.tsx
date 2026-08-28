@@ -32,6 +32,8 @@ const TERRAIN_TOOLS: Array<{ tool: TerrainType; label: string; icon: typeof Brus
   { tool: 'hill', label: '丘陵', icon: Mountain },
   { tool: 'mountain', label: '高山', icon: Mountain },
   { tool: 'water', label: '水域', icon: Waves },
+  { tool: 'shore', label: '岸边', icon: Waves },
+  { tool: 'ferry', label: '渡口', icon: Waves },
 ];
 
 export function MapEditorPanel({

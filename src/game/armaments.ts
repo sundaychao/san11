@@ -30,6 +30,7 @@ export const TROOP_ARMAMENT: Partial<Record<TroopType, ArmamentType>> = {
   spear: 'spear',
   halberd: 'halberd',
   crossbow: 'crossbow',
+  cavalry: 'cavalry',
 };
 
 export const TROOP_LABELS: Record<TroopType, string> = {

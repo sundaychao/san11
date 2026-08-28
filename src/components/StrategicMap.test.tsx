@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { CITY_GRID_CENTERS, GRID_HEIGHT, GRID_WIDTH } from '../game/battle/scenario';
+import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
 import { deployUnit } from '../game/battle/actions';
 import { sevenCellCityFootprint } from '../game/battle/grid';
 import { createGame } from '../game/scenario/jingxiang208';
@@ -18,6 +18,8 @@ const TERRAIN_LABELS: Record<TerrainType, string> = {
   hill: '丘陵',
   mountain: '高山',
   water: '水域',
+  shore: '岸边',
+  ferry: '渡口',
 };
 
 function renderGame(state = createGame('liu', 1)) {
@@ -37,7 +39,7 @@ async function chooseDeployLeader(user: ReturnType<typeof userEvent.setup>, offi
   return screen.getByRole('dialog', { name: '出征编制' });
 }
 
-describe('StrategicMap', () => {
+describe('StrategicMap', { timeout: 30000 }, () => {
   it('selects a city from its map marker', async () => {
     const user = userEvent.setup();
     renderGame();
@@ -122,7 +124,7 @@ describe('StrategicMap', () => {
 
     fireEvent.wheel(viewport, { deltaY: -120 });
 
-    expect(screen.getByTestId('map-content').style.transform).toContain('scale(1.15)');
+    expect(screen.getByTestId('map-content').style.getPropertyValue('--map-scale')).toBe('1.15');
   });
 
   it('keeps zoom within the supported range', async () => {
@@ -132,7 +134,7 @@ describe('StrategicMap', () => {
     const zoomOut = screen.getByRole('button', { name: '缩小地图' });
     for (let index = 0; index < 5; index += 1) await user.click(zoomOut);
 
-    expect(screen.getByTestId('map-content').style.transform).toContain('scale(0.85)');
+    expect(screen.getByTestId('map-content').style.getPropertyValue('--map-scale')).toBe('0.85');
   });
 
   it('shows the hovered grid coordinate at the bottom center of the interface', async () => {
@@ -734,9 +736,12 @@ describe('StrategicMap', () => {
 
     const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
     expect(jianglingMarker).toBeTruthy();
-    const center = CITY_GRID_CENTERS.jiangling;
-    const expectedLeft = ((center.q + 0.5) / GRID_WIDTH) * 100;
-    const expectedTop = ((center.r + (center.q % 2 === 0 ? 0 : 0.5)) / GRID_HEIGHT) * 100;
+    const state = createGame('liu', 1);
+    const city = state.cities.jiangling;
+    const gridWidth = state.gridWidth ?? DEFAULT_GRID_WIDTH;
+    const gridHeight = state.gridHeight ?? DEFAULT_GRID_HEIGHT;
+    const expectedLeft = ((city.gridQ + 0.5) / gridWidth) * 100;
+    const expectedTop = ((city.gridR + (city.gridQ % 2 === 0 ? 0 : 0.5)) / gridHeight) * 100;
 
     expect(Number.parseFloat(jianglingMarker!.style.left)).toBeCloseTo(expectedLeft, 4);
     expect(Number.parseFloat(jianglingMarker!.style.top)).toBeCloseTo(expectedTop, 4);

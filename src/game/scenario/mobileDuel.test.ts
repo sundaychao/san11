@@ -30,16 +30,19 @@ describe('mobile duel scenario', () => {
     }
   });
 
-  it('spans a seven-row middle river and starts both sides with ship armaments', () => {
+  it('spans a seven-row middle river with shores and facing ferries', () => {
     const game = createMobileDuelGame('liu', 'cao', 7);
 
     for (let r = 13; r <= 19; r += 1) {
       expect(game.grid.find((cell) => cell.q === 0 && cell.r === r)?.terrain).toBe('water');
-      expect(game.grid.find((cell) => cell.q === 8 && cell.r === r)?.terrain).toBe('water');
     }
-    expect(game.grid.find((cell) => cell.q === 0 && cell.r === 12)?.terrain).toBe('plain');
-    expect(game.grid.find((cell) => cell.q === 0 && cell.r === 20)?.terrain).toBe('plain');
-    expect(game.cities.xiangyang.armaments?.ship).toBe(2000);
-    expect(game.cities.jiangling.armaments?.ship).toBe(2000);
+    expect(game.grid.find((cell) => cell.q === 7 && cell.r === 12)?.terrain).toBe('shore');
+    expect(game.grid.find((cell) => cell.q === 7 && cell.r === 20)?.terrain).toBe('shore');
+    expect(game.grid.find((cell) => cell.q === 8 && cell.r === 12)?.terrain).toBe('ferry');
+    expect(game.grid.find((cell) => cell.q === 8 && cell.r === 20)?.terrain).toBe('ferry');
+    expect(game.grid.find((cell) => cell.q === 0 && cell.r === 12)?.terrain).toBe('shore');
+    expect(game.grid.find((cell) => cell.q === 0 && cell.r === 20)?.terrain).toBe('shore');
+    expect(game.cities.xiangyang.armaments).toMatchObject({ ram: 1, tower: 1, ship: 1 });
+    expect(game.cities.jiangling.armaments).toMatchObject({ ram: 1, tower: 1, ship: 1 });
   });
 });

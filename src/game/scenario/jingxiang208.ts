@@ -1,6 +1,6 @@
-import { CITY_GRID_CENTERS, createBattleGrid } from '../battle/scenario';
 import { initialArmaments } from '../armaments';
-import type { City, CityId, Force, ForceId, GameState, Officer, OfficerAptitudes, Stats } from '../types';
+import type { City, CityId, Force, ForceId, GameState, GridCell, Officer, OfficerAptitudes, Stats } from '../types';
+import china42Data from './china42.json';
 
 type CitySeed = Omit<City, 'durability' | 'gridQ' | 'gridR' | 'id' | 'maxDurability'> & { id: CityId };
 type OfficerSeed = Omit<Officer, 'acted' | 'location'>;
@@ -159,9 +159,33 @@ function toRecord<T extends { id: string }>(items: T[]): Record<string, T> {
 
 export const FORCE_IDS: ForceId[] = ['cao', 'liu', 'sun', 'biao'];
 
+const CHINA42_CITY_MAP: Record<CityId, string> = {
+  wan: '宛',
+  xiangyang: '襄阳',
+  jiangling: '江陵',
+  wuling: '武陵',
+  jiangxia: '江夏',
+  changsha: '长沙',
+  lingling: '零陵',
+  guiyang: '桂阳',
+};
+
+function getChina42Grid(): GridCell[] {
+  return (china42Data.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map(
+    (cell) => ({ q: cell.q, r: cell.r, terrain: cell.terrain }),
+  );
+}
+
+function getChina42CityCenter(cityId: CityId): { q: number; r: number } {
+  const label = CHINA42_CITY_MAP[cityId];
+  const city = (china42Data.cities as { label: string; q: number; r: number }[]).find((c) => c.label === label);
+  if (!city) throw new Error(`华夏42城中找不到城市: ${cityId} (${label})`);
+  return { q: city.q, r: city.r };
+}
+
 export function createGame(playerForceId: ForceId, seed = Date.now()): GameState {
   const cities = toRecord(citySeeds.map((city) => {
-    const center = CITY_GRID_CENTERS[city.id];
+    const center = getChina42CityCenter(city.id);
     return {
       ...city,
       gridQ: center.q,
@@ -197,7 +221,9 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
     forces: structuredClone(forces),
     cities,
     officers,
-    grid: createBattleGrid(),
+    grid: getChina42Grid(),
+    gridWidth: china42Data.width,
+    gridHeight: china42Data.height,
     units: {},
     battleDamageReports: [],
     cityEffectReports: [],

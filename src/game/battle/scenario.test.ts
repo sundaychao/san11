@@ -7,13 +7,11 @@ describe('battle scenario state', () => {
   it('creates a schema v2 game with ten-day battle fields', () => {
     const game = createGame('liu', 20804);
 
-    expect(GRID_WIDTH).toBe(70);
-    expect(GRID_HEIGHT).toBe(40);
     expect(game.schemaVersion).toBe(2);
     expect(game.tenDay).toBe(1);
     expect(game.turnForceId).toBe('liu');
     expect(game.units).toEqual({});
-    expect(game.grid).toHaveLength(GRID_WIDTH * GRID_HEIGHT);
+    expect(game.grid).toHaveLength(200 * 200);
   });
 
   it('assigns every city a seven-cell center footprint and durability', () => {
@@ -43,5 +41,6 @@ describe('battle scenario state', () => {
     expect(grid.find((cell) => cell.terrain === 'hill')).toBeTruthy();
     expect(grid.find((cell) => cell.terrain === 'mountain')).toBeTruthy();
     expect(grid.find((cell) => cell.terrain === 'water')).toBeTruthy();
+    expect(grid.find((cell) => cell.terrain === 'shore')).toBeTruthy();
   });
 });

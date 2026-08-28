@@ -13,12 +13,16 @@ interface EditorSnapshot {
   backgroundImage: string;
   grid: GridCell[];
   cities: EditableCityMarker[];
+  width: number;
+  height: number;
 }
 
 export interface MapEditorState {
   backgroundImage: string;
   grid: GridCell[];
   cities: EditableCityMarker[];
+  width: number;
+  height: number;
   history: EditorSnapshot[];
   future: EditorSnapshot[];
 }
@@ -41,6 +45,8 @@ interface EditorJsonPayload {
   cities: EditableCityMarker[];
 }
 
+export const MAX_EDITOR_GRID_SIZE = 512;
+
 const TERRAIN_COLORS: Record<TerrainType, string> = {
   plain: '#69775f',
   road: '#a58d57',
@@ -48,6 +54,8 @@ const TERRAIN_COLORS: Record<TerrainType, string> = {
   hill: '#696851',
   mountain: '#303837',
   water: '#1e4c60',
+  shore: '#5f9db4',
+  ferry: '#a07440',
 };
 
 const TERRAIN_CONTROL_COLORS: Record<TerrainType, string> = {
@@ -57,6 +65,8 @@ const TERRAIN_CONTROL_COLORS: Record<TerrainType, string> = {
   hill: '#7b744f',
   mountain: '#2d3332',
   water: '#1f546e',
+  shore: '#5da3bd',
+  ferry: '#b0874c',
 };
 
 const CELL_SIZE = 24;
@@ -77,11 +87,13 @@ function cloneCities(cities: EditableCityMarker[]) {
   return cities.map((city) => ({ ...city }));
 }
 
-function snapshot(state: Pick<MapEditorState, 'backgroundImage' | 'grid' | 'cities'>): EditorSnapshot {
+function snapshot(state: Pick<MapEditorState, 'backgroundImage' | 'grid' | 'cities' | 'width' | 'height'>): EditorSnapshot {
   return {
     backgroundImage: state.backgroundImage,
     grid: cloneGrid(state.grid),
     cities: cloneCities(state.cities),
+    width: state.width,
+    height: state.height,
   };
 }
 
@@ -101,22 +113,22 @@ function cellPosition(q: number, r: number) {
 }
 
 function isTerrain(value: unknown): value is TerrainType {
-  return value === 'road' || value === 'plain' || value === 'forest' || value === 'hill' || value === 'mountain' || value === 'water';
+  return value === 'road' || value === 'plain' || value === 'forest' || value === 'hill' || value === 'mountain' || value === 'water' || value === 'shore' || value === 'ferry';
 }
 
-function isGridCell(value: unknown): value is GridCell {
+function isGridCell(value: unknown, width: number, height: number): value is GridCell {
   if (!value || typeof value !== 'object') return false;
   const cell = value as Partial<GridCell>;
   return Number.isInteger(cell.q) &&
-    Number.isInteger(cell.r) &&
     cell.q! >= 0 &&
-    cell.q! < GRID_WIDTH &&
+    cell.q! < width &&
+    Number.isInteger(cell.r) &&
     cell.r! >= 0 &&
-    cell.r! < GRID_HEIGHT &&
+    cell.r! < height &&
     isTerrain(cell.terrain);
 }
 
-function isEditableCityMarker(value: unknown): value is EditableCityMarker {
+function isEditableCityMarker(value: unknown, width: number, height: number): value is EditableCityMarker {
   if (!value || typeof value !== 'object') return false;
   const city = value as Partial<EditableCityMarker>;
   return typeof city.id === 'string' &&
@@ -125,9 +137,9 @@ function isEditableCityMarker(value: unknown): value is EditableCityMarker {
     Number.isInteger(city.q) &&
     Number.isInteger(city.r) &&
     city.q! >= 0 &&
-    city.q! < GRID_WIDTH &&
+    city.q! < width &&
     city.r! >= 0 &&
-    city.r! < GRID_HEIGHT;
+    city.r! < height;
 }
 
 function parseEditorJsonPayload(json: string): EditorJsonPayload {
@@ -140,44 +152,50 @@ function parseEditorJsonPayload(json: string): EditorJsonPayload {
 
   if (!payload || typeof payload !== 'object') throw new Error('地图 JSON 无效');
   const value = payload as Partial<EditorJsonPayload>;
-  const expectedCellCount = GRID_WIDTH * GRID_HEIGHT;
+  if (
+    !Number.isInteger(value.width) || value.width! < 1 || value.width! > MAX_EDITOR_GRID_SIZE ||
+    !Number.isInteger(value.height) || value.height! < 1 || value.height! > MAX_EDITOR_GRID_SIZE
+  ) throw new Error('地图 JSON 无效');
+  const width: number = value.width!;
+  const height: number = value.height!;
+  const expectedCellCount = width * height;
   const seen = new Set<string>();
   if (
     value.schemaVersion !== 1 ||
-    value.width !== GRID_WIDTH ||
-    value.height !== GRID_HEIGHT ||
     typeof value.backgroundImage !== 'string' ||
     !Array.isArray(value.grid) ||
     value.grid.length !== expectedCellCount ||
     !Array.isArray(value.cities) ||
     !value.grid.every((cell) => {
-      if (!isGridCell(cell)) return false;
+      if (!isGridCell(cell, width, height)) return false;
       const key = `${cell.q},${cell.r}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     }) ||
     seen.size !== expectedCellCount ||
-    !value.cities.every(isEditableCityMarker)
+    !value.cities.every((city) => isEditableCityMarker(city, width, height))
   ) {
     throw new Error('地图 JSON 无效');
   }
 
   return {
     schemaVersion: 1,
-    width: GRID_WIDTH,
-    height: GRID_HEIGHT,
+    width,
+    height,
     backgroundImage: value.backgroundImage,
     grid: cloneGrid(value.grid),
     cities: cloneCities(value.cities),
   };
 }
 
-export function createEditorState(grid: GridCell[], cities: EditableCityMarker[] = []): MapEditorState {
+export function createEditorState(grid: GridCell[], cities: EditableCityMarker[] = [], width: number = GRID_WIDTH, height: number = GRID_HEIGHT): MapEditorState {
   return {
     backgroundImage: '',
     grid: cloneGrid(grid),
     cities: cloneCities(cities),
+    width,
+    height,
     history: [],
     future: [],
   };
@@ -189,6 +207,8 @@ export function paintTerrain(state: MapEditorState, coord: { q: number; r: numbe
 
   return withHistory(state, {
     backgroundImage: state.backgroundImage,
+    width: state.width,
+    height: state.height,
     grid: state.grid.map((cell) => (cell.q === coord.q && cell.r === coord.r ? { ...cell, terrain } : { ...cell })),
     cities: cloneCities(state.cities),
   });
@@ -197,6 +217,8 @@ export function paintTerrain(state: MapEditorState, coord: { q: number; r: numbe
 export function placeCity(state: MapEditorState, city: EditableCityMarker): MapEditorState {
   return withHistory(state, {
     backgroundImage: state.backgroundImage,
+    width: state.width,
+    height: state.height,
     grid: cloneGrid(state.grid),
     cities: [...state.cities.filter((candidate) => candidate.id !== city.id).map((candidate) => ({ ...candidate })), { ...city }],
   });
@@ -210,6 +232,8 @@ export function undoEditor(state: MapEditorState): MapEditorState {
     backgroundImage: previous.backgroundImage,
     grid: cloneGrid(previous.grid),
     cities: cloneCities(previous.cities),
+    width: previous.width,
+    height: previous.height,
     history: state.history.slice(0, -1).map(snapshot),
     future: [snapshot(state), ...state.future.map(snapshot)],
   };
@@ -223,6 +247,8 @@ export function redoEditor(state: MapEditorState): MapEditorState {
     backgroundImage: next.backgroundImage,
     grid: cloneGrid(next.grid),
     cities: cloneCities(next.cities),
+    width: next.width,
+    height: next.height,
     history: [...state.history.map(snapshot), snapshot(state)],
     future: state.future.slice(1).map(snapshot),
   };
@@ -231,6 +257,8 @@ export function redoEditor(state: MapEditorState): MapEditorState {
 export function clearEditor(state: MapEditorState, terrain: TerrainType = 'plain'): MapEditorState {
   return withHistory(state, {
     backgroundImage: state.backgroundImage,
+    width: state.width,
+    height: state.height,
     grid: state.grid.map((cell) => ({ ...cell, terrain })),
     cities: [],
   });
@@ -241,6 +269,8 @@ export function setEditorBackgroundImage(state: MapEditorState, backgroundImage:
 
   return withHistory(state, {
     backgroundImage,
+    width: state.width,
+    height: state.height,
     grid: cloneGrid(state.grid),
     cities: cloneCities(state.cities),
   });
@@ -250,8 +280,8 @@ export function exportEditorJson(state: MapEditorState): string {
   return JSON.stringify(
     {
       schemaVersion: 1,
-      width: GRID_WIDTH,
-      height: GRID_HEIGHT,
+      width: state.width,
+      height: state.height,
       backgroundImage: state.backgroundImage,
       grid: state.grid,
       cities: state.cities,
@@ -267,12 +297,14 @@ export function importEditorJson(state: MapEditorState, json: string): MapEditor
     backgroundImage: payload.backgroundImage,
     grid: payload.grid,
     cities: payload.cities,
+    width: payload.width,
+    height: payload.height,
   });
 }
 
 export function exportEditorSvg(state: MapEditorState): string {
-  const width = GRID_WIDTH * CELL_SIZE;
-  const height = GRID_HEIGHT * CELL_SIZE;
+  const width = state.width * CELL_SIZE;
+  const height = state.height * CELL_SIZE;
   const cells = state.grid.map((cell) => {
     const position = cellPosition(cell.q, cell.r);
     return `<rect x="${position.x}" y="${position.y}" width="${CELL_SIZE}" height="${CELL_SIZE}" fill="${TERRAIN_COLORS[cell.terrain]}" stroke="rgba(236,231,211,0.38)" data-q="${cell.q}" data-r="${cell.r}" data-terrain="${cell.terrain}" />`;
@@ -294,8 +326,8 @@ export function exportEditorSvg(state: MapEditorState): string {
 }
 
 export function exportTerrainControlSvg(state: MapEditorState): string {
-  const width = GRID_WIDTH * CELL_SIZE;
-  const height = GRID_HEIGHT * CELL_SIZE;
+  const width = state.width * CELL_SIZE;
+  const height = state.height * CELL_SIZE;
   const cells = state.grid.map((cell) => {
     const position = cellPosition(cell.q, cell.r);
     return `<rect data-q="${cell.q}" data-r="${cell.r}" data-terrain="${cell.terrain}" x="${position.x}" y="${position.y}" width="${CELL_SIZE}" height="${CELL_SIZE}" fill="${TERRAIN_CONTROL_COLORS[cell.terrain]}" stroke="rgba(255,255,255,0.5)" />`;
@@ -310,12 +342,12 @@ export function exportTerrainControlSvg(state: MapEditorState): string {
     ...cities,
   ];
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" data-export="terrain-control" data-grid-width="${GRID_WIDTH}" data-grid-height="${GRID_HEIGHT}" data-cell-size="${CELL_SIZE}" data-cell-shape="staggered-square-even-columns-up-half">${metadata.join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" data-export="terrain-control" data-grid-width="${state.width}" data-grid-height="${state.height}" data-cell-size="${CELL_SIZE}" data-cell-shape="staggered-square-even-columns-up-half">${metadata.join('')}</svg>`;
 }
 
 function exportTerrainMaskSvg(state: MapEditorState, layer: TerrainMaskLayer, terrain?: TerrainType): string {
-  const width = GRID_WIDTH * CELL_SIZE;
-  const height = GRID_HEIGHT * CELL_SIZE;
+  const width = state.width * CELL_SIZE;
+  const height = state.height * CELL_SIZE;
   const cells = terrain
     ? state.grid
       .filter((cell) => cell.terrain === terrain)
@@ -328,7 +360,7 @@ function exportTerrainMaskSvg(state: MapEditorState, layer: TerrainMaskLayer, te
       return `<rect data-control-city="${city.id}:${coord.q},${coord.r}" x="${position.x}" y="${position.y}" width="${CELL_SIZE}" height="${CELL_SIZE}" fill="#fff" />`;
     }));
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" data-export="terrain-mask" data-mask-layer="${layer}" data-grid-width="${GRID_WIDTH}" data-grid-height="${GRID_HEIGHT}" data-cell-size="${CELL_SIZE}" data-cell-shape="staggered-square-even-columns-up-half"><rect x="0" y="0" width="${width}" height="${height}" fill="#000" />${cells.join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" data-export="terrain-mask" data-mask-layer="${layer}" data-grid-width="${state.width}" data-grid-height="${state.height}" data-cell-size="${CELL_SIZE}" data-cell-shape="staggered-square-even-columns-up-half"><rect x="0" y="0" width="${width}" height="${height}" fill="#000" />${cells.join('')}</svg>`;
 }
 
 export function exportTerrainMaskSvgs(state: MapEditorState): Record<TerrainMaskLayer, TerrainMaskExport> {

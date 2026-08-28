@@ -18,6 +18,9 @@ function unitName(unit: ArmyUnit, state: GameState) {
 
 function unitKind(unit: ArmyUnit) {
   if (unit.kind === 'transport') return '输送队';
+  if (unit.troopType === 'siege' && unit.siegeWeapon) {
+    return unit.siegeWeapon === 'ram' ? '冲车' : '井阑';
+  }
   return TROOP_LABELS[unit.troopType ?? 'sword'];
 }
 

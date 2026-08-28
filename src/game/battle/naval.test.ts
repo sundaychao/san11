@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { initialArmaments } from '../armaments';
 import { movementCells } from './movementRules';
-import { attackUnit, attackableUnits, deployUnit, useUnitTactic } from './actions';
+import { attackUnit, attackableUnits, deployUnit, unitCanUseTactic, unitTactics, useUnitTactic } from './actions';
 import { damageRoll } from './legacyCore';
 import { nextRandom } from '../random';
 import { createGame } from '../scenario/jingxiang208';
@@ -155,6 +155,22 @@ describe('vehicle deployment', () => {
     })).toThrow(/楼船兵装不足/);
   });
 
+  it('clears stale city effect reports when deploying', () => {
+    const game = createGame('liu', 1);
+    game.cityEffectReports = [{
+      id: 'effect-1', cityId: 'jiangling', q: 1, r: 1, amount: 2, label: '冲车', kind: 'armament',
+    }];
+
+    const next = deployUnit(game, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 4000,
+      food: 6000,
+    });
+
+    expect(next.cityEffectReports).toEqual([]);
+  });
+
   it('lets ship vehicles fight stronger on water and take less damage', () => {
     const boatAttack = waterTacticState('S', 1);
     const boatHit = damageRoll(boatAttack.state, boatAttack.attacker, 'water', false, boatAttack.target);
@@ -204,6 +220,147 @@ describe('vehicle deployment', () => {
   });
 });
 
+describe('siege weapon deployment', () => {
+  it('rejects siege deployment without weapon stock', () => {
+    const state = createGame('liu', 1);
+
+    expect(() => deployUnit(state, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      troops: 4000,
+      food: 6000,
+    })).toThrow(/冲车不足/);
+    expect(() => deployUnit(state, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'siege',
+      troops: 4000,
+      food: 6000,
+    })).toThrow(/需要选择冲车或井阑/);
+  });
+
+  it('records the chosen siege weapon on the deployed unit', () => {
+    const game = createGame('liu', 1);
+    game.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5, tower: 5 };
+
+    const ramDeployed = deployUnit(game, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      troops: 4000,
+      food: 6000,
+    });
+    expect(Object.values(ramDeployed.units)[0].siegeWeapon).toBe('ram');
+
+    const towerDeployed = deployUnit(ramDeployed, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'chen-dao',
+      troopType: 'siege',
+      siegeWeapon: 'tower',
+      troops: 4000,
+      food: 6000,
+    });
+    const towerUnit = Object.values(towerDeployed.units).find((unit) => unit.leaderId === 'chen-dao');
+    expect(towerUnit?.siegeWeapon).toBe('tower');
+  });
+
+  it('consumes one siege weapon per deployed siege formation', () => {
+    const game = createGame('liu', 1);
+    game.cities['jiangling'].armaments = { ...initialArmaments(), ram: 3 };
+
+    const first = deployUnit(game, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      troops: 4000,
+      food: 6000,
+    });
+    expect(first.cities['jiangling'].armaments?.ram).toBe(2);
+
+    const second = deployUnit(first, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'chen-dao',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      troops: 4000,
+      food: 6000,
+    });
+    expect(second.cities['jiangling'].armaments?.ram).toBe(1);
+  });
+});
+
+describe('shore and ferry movement', () => {
+  function duelUnit(state: GameState, id: string, coord: { q: number; r: number }, movementRemaining = 30) {
+    state.units[id] = {
+      id, kind: 'combat', forceId: 'liu', leaderId: 'zhang-fei', officerIds: ['zhang-fei'],
+      homeCityId: 'jiangling', troopType: 'sword', vehicle: 'boat', q: coord.q, r: coord.r,
+      troops: 2000, food: 2000, energy: 100, movementRemaining, moved: false, acted: false,
+    };
+    state.officers['zhang-fei'].location = { kind: 'unit', unitId: id };
+  }
+
+  it('stops formations on the shore so they cannot cross water in one turn', () => {
+    const state = createMobileDuelGame('liu', 'cao', 7);
+    duelUnit(state, 'land', { q: 3, r: 11 });
+
+    const cells = movementCells(state, 'land');
+
+    expect(cells.some((cell) => cell.q === 3 && cell.r === 12)).toBe(true);
+    expect(cells.some((cell) => cell.q === 3 && cell.r === 13)).toBe(false);
+  });
+
+  it('lets formations enter water directly through a ferry', () => {
+    const state = createMobileDuelGame('liu', 'cao', 7);
+    duelUnit(state, 'land', { q: 8, r: 11 });
+
+    const cells = movementCells(state, 'land');
+
+    expect(cells.some((cell) => cell.q === 8 && cell.r === 12)).toBe(true);
+    expect(cells.some((cell) => cell.q === 8 && cell.r === 13)).toBe(true);
+  });
+
+  it('lets water formations land through a ferry but stop on ordinary shores', () => {
+    const state = createMobileDuelGame('liu', 'cao', 7);
+    duelUnit(state, 'water-ferry', { q: 8, r: 14 });
+
+    const ferryCells = movementCells(state, 'water-ferry');
+    expect(ferryCells.some((cell) => cell.q === 8 && cell.r === 12)).toBe(true);
+    expect(ferryCells.some((cell) => cell.q === 8 && cell.r === 11)).toBe(true);
+
+    duelUnit(state, 'water-shore', { q: 3, r: 14 });
+    const shoreCells = movementCells(state, 'water-shore');
+    expect(shoreCells.some((cell) => cell.q === 3 && cell.r === 12)).toBe(true);
+    expect(shoreCells.some((cell) => cell.q === 3 && cell.r === 11)).toBe(false);
+  });
+
+  it('lets formations entering water via a ferry keep moving across the river', () => {
+    const state = createMobileDuelGame('liu', 'cao', 7);
+    duelUnit(state, 'ferry-entry', { q: 8, r: 11 }, 30);
+
+    const cells = movementCells(state, 'ferry-entry');
+
+    expect(cells.some((cell) => cell.q === 8 && cell.r === 13)).toBe(true);
+    expect(cells.some((cell) => cell.q === 8 && cell.r === 14)).toBe(true);
+    expect(cells.some((cell) => cell.q === 8 && cell.r === 17)).toBe(false);
+  });
+
+  it('ends movement on the first water cell entered away from a ferry', () => {
+    const state = createMobileDuelGame('liu', 'cao', 7);
+    state.grid = state.grid.map((cell) => (cell.q === 3 && cell.r === 12 ? { ...cell, terrain: 'plain' } : cell));
+    duelUnit(state, 'plain-entry', { q: 3, r: 11 }, 30);
+
+    const cells = movementCells(state, 'plain-entry');
+
+    expect(cells.some((cell) => cell.q === 3 && cell.r === 12)).toBe(true);
+    expect(cells.some((cell) => cell.q === 3 && cell.r === 13)).toBe(true);
+    expect(cells.some((cell) => cell.q === 3 && cell.r === 14)).toBe(false);
+  });
+});
+
 describe('water movement', () => {
   it('lets every troop type move across deep water', () => {
     for (const troopType of ['sword', 'spear', 'halberd', 'crossbow', 'cavalry', 'siege'] as const) {
@@ -250,6 +407,18 @@ describe('naval tactics for any formation on water', () => {
 
     expect(() => useUnitTactic(state, 'liu', attacker.id, target.id, 'ship-ram'))
       .toThrow(/不在水域/);
+  });
+
+  it('replaces land troop tactics with naval tactics while on water', () => {
+    const { state, attacker, target } = waterTacticState('S');
+    expect(unitTactics(state, attacker.id).map((tactic) => tactic.name)).toEqual(['冲角', '火箭', '回旋']);
+
+    expect(() => useUnitTactic(state, 'liu', attacker.id, target.id, 'spear-thrust'))
+      .toThrow(/水域中不能使用陆地战法/);
+    expect(unitCanUseTactic(state, attacker.id, 'spear-thrust')).toBe(false);
+
+    setUniformTerrain(state, 'plain');
+    expect(unitTactics(state, attacker.id).map((tactic) => tactic.name)).toEqual(['突刺', '螺旋突刺', '二段突刺']);
   });
 
   it('pushes the target back with 冲角', () => {

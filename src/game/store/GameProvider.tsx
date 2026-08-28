@@ -56,8 +56,8 @@ interface GameContextValue {
   disconnectOnline(): void;
   loadGame(slot: SaveSlot): LoadResult;
   issueCommand(command: GameCommand): void;
-  deployUnit(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; gold?: number; food: number }): void;
-  deployUnitAction(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction): void;
+  deployUnit(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }): void;
+  deployUnitAction(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction): void;
   deployTransportUnit(input: { cityId: CityId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }): void;
   moveUnit(unitId: string, destination: { q: number; r: number }): void;
   attackUnit(attackerId: string, targetId: string, destination?: GridCoord): void;
@@ -70,7 +70,7 @@ interface GameContextValue {
   dismantleFacility(facilityId: string): void;
   attackCity(attackerId: string, cityId: CityId, destination?: GridCoord): void;
   waitUnit(unitId: string): void;
-  applyMapEditorMap(map: { grid: GridCell[]; cities: EditableCityMarker[] }): void;
+  applyMapEditorMap(map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number }): void;
   endMonth(): void;
   endTenDay(): void;
   manualSave(): void;
@@ -107,7 +107,7 @@ function runOpponentTurns(state: GameState) {
   return next;
 }
 
-function applyEditorMapToState(state: GameState, map: { grid: GridCell[]; cities: EditableCityMarker[] }): GameState {
+function applyEditorMapToState(state: GameState, map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number }): GameState {
   const markersById = new Map(map.cities.map((city) => [city.id, city]));
   const cities = Object.fromEntries(Object.entries(state.cities).map(([id, city]) => {
     const marker = markersById.get(id);
@@ -117,6 +117,8 @@ function applyEditorMapToState(state: GameState, map: { grid: GridCell[]; cities
   return {
     ...state,
     cities,
+    gridWidth: map.width ?? state.gridWidth,
+    gridHeight: map.height ?? state.gridHeight,
     grid: map.grid.map((cell) => ({ ...cell })),
   };
 }
@@ -250,7 +252,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     dispatchLocalIntent(intent, afterSuccess);
   }, [dispatchLocalIntent, isOnline, sendOnlineIntent]);
 
-  const deployBattleUnit = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; gold?: number; food: number }) => {
+  const deployBattleUnit = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }) => {
     dispatchIntent({ type: 'deployUnit', input }, () => emitAudioEvent({ type: 'unit-moved' }));
   }, [dispatchIntent, emitAudioEvent]);
 
@@ -262,7 +264,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     if (action.type === 'buildFacility' || action.type === 'repairFacility') emitAudioEvent({ type: 'project-started' });
   }, [emitAudioEvent]);
 
-  const deployBattleUnitAction = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction) => {
+  const deployBattleUnitAction = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction) => {
     const afterSuccess = () => afterDeployActionAudio(action);
     dispatchIntent({ type: 'deployUnitAction', input, action }, afterSuccess);
   }, [afterDeployActionAudio, dispatchIntent]);
@@ -318,7 +320,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     dispatchIntent({ type: 'waitUnit', unitId });
   }, [dispatchIntent]);
 
-  const applyMapEditorMap = useCallback((map: { grid: GridCell[]; cities: EditableCityMarker[] }) => {
+  const applyMapEditorMap = useCallback((map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number }) => {
     if (!state) throw new Error('尚未开始游戏');
     const next = applyEditorMapToState(state, map);
     replaceGameState(next);

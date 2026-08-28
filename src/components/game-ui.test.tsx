@@ -1073,10 +1073,12 @@ describe('game interface shell', () => {
   it('imports final map json and applies it to the playable map', async () => {
     const user = userEvent.setup();
     const base = createGame('liu', 1);
+    const gridWidth = base.gridWidth ?? 70;
+    const gridHeight = base.gridHeight ?? 40;
     const payload = {
       schemaVersion: 1,
-      width: 70,
-      height: 40,
+      width: gridWidth,
+      height: gridHeight,
       backgroundImage: '',
       grid: base.grid.map((cell) => (
         cell.q === 0 && cell.r === 0 ? { ...cell, terrain: 'forest' } : cell

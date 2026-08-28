@@ -57,6 +57,7 @@ export interface DeployInput {
   targetCityId?: CityId;
   troopType?: TroopType;
   vehicle?: 'boat' | 'ship';
+  siegeWeapon?: 'ram' | 'tower';
   destination?: GridCoord;
   troops: number;
   gold?: number;
@@ -352,10 +353,10 @@ function unitIsOnWater(state: GameState, unit: ArmyUnit) {
 export function unitTactics(state: GameState, unitId: string): UnitTactic[] {
   const unit = state.units[unitId];
   if (!unit || unit.kind === 'transport') return [];
-  const troopTactics = (TACTICS_BY_TROOP[unit.troopType ?? 'sword'] ?? []).map((id) => TACTICS[id]);
-  return unitIsOnWater(state, unit)
-    ? [...troopTactics, ...NAVAL_TACTIC_IDS.map((id) => TACTICS[id])]
-    : troopTactics;
+  if (unitIsOnWater(state, unit)) {
+    return NAVAL_TACTIC_IDS.map((id) => TACTICS[id]);
+  }
+  return (TACTICS_BY_TROOP[unit.troopType ?? 'sword'] ?? []).map((id) => TACTICS[id]);
 }
 
 export function tacticTier(tacticId: TacticId): 1 | 2 | 3 {
@@ -379,8 +380,12 @@ export function unitCanUseTactic(state: GameState, unitId: string, tacticId: Tac
   const grade = tactic.troopType === 'naval'
     ? effectiveNavyAptitude(state, unit).grade
     : effectiveUnitAbilities(state, unit).aptitude.grade;
-  if (tactic.troopType === 'naval' && !unitIsOnWater(state, unit)) return false;
-  if (tactic.troopType !== 'naval' && tactic.troopType !== unit.troopType) return false;
+  if (tactic.troopType === 'naval') {
+    if (!unitIsOnWater(state, unit)) return false;
+  } else {
+    if (tactic.troopType !== unit.troopType) return false;
+    if (unitIsOnWater(state, unit)) return false;
+  }
   return maxTacticTier(grade) >= tacticTier(tacticId);
 }
 
@@ -391,8 +396,9 @@ export function tacticTargetUnits(state: GameState, attackerId: string, tacticId
   if (!attacker || attacker.kind === 'transport' || !tactic) return [];
   if (tactic.troopType === 'naval') {
     if (!unitIsOnWater(state, attackerAtOrigin)) return [];
-  } else if (tactic.troopType !== (attacker.troopType ?? 'sword')) {
-    return [];
+  } else {
+    if (tactic.troopType !== (attacker.troopType ?? 'sword')) return [];
+    if (unitIsOnWater(state, attackerAtOrigin)) return [];
   }
   const minRange = tacticId === 'crossbow-fire' || tacticId === 'crossbow-pierce' || tacticId === 'ship-fire' ? 2 : 1;
   return Object.values(state.units)
@@ -413,8 +419,9 @@ export function tacticTargetFacilities(state: GameState, attackerId: string, tac
   if (!attacker || attacker.kind === 'transport' || !tactic) return [];
   if (tactic.troopType === 'naval') {
     if (!unitIsOnWater(state, origin ? { ...attacker, q: origin.q, r: origin.r } : attacker)) return [];
-  } else if (tactic.troopType !== (attacker.troopType ?? 'sword')) {
-    return [];
+  } else {
+    if (tactic.troopType !== (attacker.troopType ?? 'sword')) return [];
+    if (unitIsOnWater(state, origin ? { ...attacker, q: origin.q, r: origin.r } : attacker)) return [];
   }
   if (tacticId !== 'crossbow-fire' && tacticId !== 'ship-fire') return [];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
@@ -689,8 +696,9 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
   if (!tactic) throw new Error('部队不能使用该战法');
   if (tactic.troopType === 'naval') {
     if (!unitIsOnWater(state, attacker)) throw new Error('部队不在水域，无法使用水军战法');
-  } else if (tactic.troopType !== (attacker.troopType ?? 'sword')) {
-    throw new Error('部队不能使用该战法');
+  } else {
+    if (unitIsOnWater(state, attacker)) throw new Error('水域中不能使用陆地战法');
+    if (tactic.troopType !== (attacker.troopType ?? 'sword')) throw new Error('部队不能使用该战法');
   }
   if (!unitCanUseTactic(state, attackerId, tacticId)) {
     const troopLabel = tactic.troopType === 'naval' ? '水军' : TROOP_LABEL[attacker.troopType ?? 'sword'] ?? '部队';

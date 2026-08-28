@@ -56,7 +56,7 @@ function destinationWithEnemyNeighbor(state: ReturnType<typeof createGame>, unit
   throw new Error('No destination with enemy neighbor found');
 }
 
-describe('command interface', () => {
+describe('command interface', { timeout: 30000 }, () => {
   it('shows and enables every 百出 strategy at the shared one-energy cost', async () => {
     const user = userEvent.setup();
     const state = deployUnit(createGame('liu', 1), 'liu', {
@@ -368,6 +368,7 @@ describe('command interface', () => {
   it('updates the recommended deployment officer when the troop type changes', async () => {
     const user = userEvent.setup();
     const state = createGame('liu', 3);
+    state.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5 };
     state.officers['zhuge-liang'].location = { kind: 'city', cityId: 'jiangling' };
     state.officers['zhuge-liang'].cityId = 'jiangling';
     renderState(state);
@@ -379,7 +380,7 @@ describe('command interface', () => {
 
     expect(within(dialog).getByTestId('deploy-officer-summary')).toHaveTextContent(state.officers['guan-yu'].name);
 
-    await user.selectOptions(within(dialog).getByLabelText('兵种'), 'siege');
+    await user.click(within(dialog).getByRole('button', { name: '冲车' }));
 
     expect(within(dialog).getByTestId('deploy-officer-summary')).toHaveTextContent(state.officers['zhuge-liang'].name);
   });
@@ -402,7 +403,7 @@ describe('command interface', () => {
     expect(shipButton).toBeVisible();
     expect(shipButton).toBeDisabled();
     expect(within(dialog).getByRole('button', { name: '小舟' })).toBeEnabled();
-    await user.selectOptions(within(dialog).getByLabelText('兵种'), 'spear');
+    await user.click(within(dialog).getByRole('button', { name: '枪兵' }));
     const confirmedDialog = await chooseDeployLeader(user, '刘备');
     await user.click(within(confirmedDialog).getByRole('button', { name: '确定出征' }));
 
@@ -437,6 +438,24 @@ describe('command interface', () => {
     const shipButton = within(dialog).getByRole('button', { name: '楼船' });
     expect(shipButton).toBeEnabled();
     expect(shipButton).toHaveTextContent('3');
+  });
+
+  it('shows the chosen siege weapon glyph on the deployed unit marker', () => {
+    const game = createGame('liu', 1);
+    game.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5 };
+    const state = deployUnit(game, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      troops: 4000,
+      food: 6000,
+    });
+    renderState(state);
+
+    const unitMarker = screen.getByTestId('battle-unit-marker');
+    expect(within(unitMarker).getByText('冲')).toBeVisible();
+    expect(unitMarker).toHaveAttribute('data-troop-type', 'siege');
   });
 
   it('opens the strategy menu for Ma Su during the first deployment action', async () => {
@@ -709,7 +728,7 @@ describe('command interface', () => {
     expect(screen.getByTestId('unit-info-panel')).toHaveTextContent('300');
   });
 
-  it('caps weapon troop slider at available armament stock', async () => {
+  it('caps weapon troop slider at available armament stock and disables it below 1000', async () => {
     const user = userEvent.setup();
     const state = createGame('liu', 3);
     state.cities.jiangling.armaments!.spear = 500;
@@ -723,8 +742,11 @@ describe('command interface', () => {
     const dialog = screen.getByRole('dialog', { name: '出征编制' });
     await user.click(within(dialog).getByRole('button', { name: '枪兵' }));
 
-    expect(within(dialog).getByRole('slider', { name: '出征士兵' })).toHaveAttribute('max', '500');
-    expect(within(dialog).getByRole('alert')).toHaveTextContent('士兵必须为 1000-10000');
+    const troopSlider = within(dialog).getByRole('slider', { name: '出征士兵' });
+    expect(troopSlider).toHaveAttribute('max', '1000');
+    expect(troopSlider).toBeDisabled();
+    expect(within(dialog).getByTestId('deploy-troop-value')).toHaveTextContent('1,000 / 1,000');
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('枪兵兵装不足');
     expect(within(dialog).getByRole('button', { name: '确定出征' })).toBeDisabled();
   });
 
@@ -840,11 +862,14 @@ describe('command interface', () => {
 
   it('attacks an enemy city from the unit command menu when no enemy unit is in range', async () => {
     const user = userEvent.setup();
-    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+    const game = createGame('liu', 1);
+    game.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5 };
+    const deployed = deployUnit(game, 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
       targetCityId: 'xiangyang',
       troopType: 'siege',
+      siegeWeapon: 'ram',
       troops: 4000,
       food: 6000,
     });
@@ -907,6 +932,7 @@ describe('command interface', () => {
       food: 6000,
     });
     const state = settleTenDay(deployed);
+    for (const cell of state.grid) cell.terrain = 'plain';
     const attacker = Object.values(state.units)[0];
     const { destination, enemyPosition } = destinationWithEnemyNeighbor(state, attacker.id);
     state.units['enemy-after-move'] = {

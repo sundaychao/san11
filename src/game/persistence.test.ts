@@ -32,6 +32,35 @@ describe('persistence', () => {
     expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
   });
 
+  it('migrates a legacy terrain grid without shores and ferries on load', () => {
+    const legacy = createGame('liu', 9);
+    legacy.grid = legacy.grid.map((cell) => (
+      cell.terrain === 'shore' || cell.terrain === 'ferry' ? { ...cell, terrain: 'plain' } : cell
+    ));
+    writeSave(storage, 'auto', legacy);
+
+    const loaded = loadSave(storage, 'auto');
+
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) {
+      expect(loaded.state.grid.some((cell) => cell.terrain === 'shore')).toBe(true);
+      expect(loaded.state.grid).toHaveLength(legacy.grid.length);
+      expect(Object.values(loaded.state.cities).every((city, index) => (
+        city.gridQ === Object.values(legacy.cities)[index].gridQ &&
+        city.gridR === Object.values(legacy.cities)[index].gridR
+      ))).toBe(true);
+    }
+  });
+
+  it('keeps a current terrain grid unchanged on load', () => {
+    const state = createGame('liu', 9);
+    writeSave(storage, 'auto', state);
+
+    const loaded = loadSave(storage, 'auto');
+
+    expect(loaded).toEqual({ ok: true, state });
+  });
+
   it('round-trips every first-stage and unknown custom skill without persisting derived rules', () => {
     const state = createGame('liu', 9);
     const skillNames = [

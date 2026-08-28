@@ -1,5 +1,5 @@
 import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
-import { useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import { unitIsIncapacitated } from '../game/battle/actions';
 import { coordsWithinRange, gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
@@ -27,6 +27,11 @@ const TROOP_TEXTURES: Record<TroopType, { glyph: string; label: string }> = {
 const VEHICLE_TEXTURES: Record<'boat' | 'ship', { glyph: string; label: string }> = {
   boat: { glyph: '舟', label: '小舟' },
   ship: { glyph: '船', label: '楼船' },
+};
+
+const SIEGE_TEXTURES: Record<'ram' | 'tower', { glyph: string; label: string }> = {
+  ram: { glyph: '冲', label: '冲车' },
+  tower: { glyph: '井', label: '井阑' },
 };
 
 const FACILITY_GLYPHS: Partial<Record<FacilityType, string>> = {
@@ -140,7 +145,21 @@ export function StrategicMap({
   const { state, selectedCityId, selectCity } = useGame();
   const [view, setView] = useState<MapView>(INITIAL_VIEW);
   const [hoveredFacilityId, setHoveredFacilityId] = useState<string | null>(null);
+  const [viewport, setViewport] = useState<{ width: number; height: number } | null>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const regionRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const region = regionRef.current;
+    if (!region || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setViewport({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    observer.observe(region);
+    return () => observer.disconnect();
+  }, []);
 
   if (!state) return null;
 
@@ -148,6 +167,14 @@ export function StrategicMap({
   const gridHeight = state.gridHeight ?? DEFAULT_GRID_HEIGHT;
   const worldWidth = gridWidth * CELL_SIZE;
   const worldHeight = gridHeight * CELL_SIZE;
+  const zoomStyle = (): CSSProperties => {
+    const scale = view.scale;
+    const width = viewport ? Math.max(1, Math.round(viewport.width * scale)) : '100%';
+    const height = viewport ? Math.max(1, Math.round(viewport.height * scale)) : '100%';
+    const left = viewport ? Math.round((viewport.width - (width as number)) / 2 + view.x) : 0;
+    const top = viewport ? Math.round((viewport.height - (height as number)) / 2 + view.y) : 0;
+    return { left, top, width, height };
+  };
   const localCity = Object.values(state.cities).find((city) => city.ownerId === state.playerForceId);
   const opponentCity = Object.values(state.cities).find((city) => city.ownerId !== state.playerForceId);
   const perspectiveRotated = state.scenarioId === 'mobile-duel' && Boolean(
@@ -211,6 +238,21 @@ export function StrategicMap({
       r: city.gridR,
       forceColor: state.forces[city.ownerId].color,
     }));
+
+  const BUFFER = 3;
+  let visibleCells = displayGrid;
+  const effectiveViewport = viewport ?? { width: 1280, height: 720 };
+  if (displayGrid.length > 10000) {
+    const cssWidth = effectiveViewport.width * view.scale;
+    const cssHeight = effectiveViewport.height * view.scale;
+    const left = effectiveViewport.width * (1 - view.scale) / 2 + view.x;
+    const top = effectiveViewport.height * (1 - view.scale) / 2 + view.y;
+    const qMin = Math.floor(-left * gridWidth / cssWidth) - BUFFER;
+    const qMax = Math.ceil((effectiveViewport.width - left) * gridWidth / cssWidth) + BUFFER;
+    const rMin = Math.floor(-top * gridHeight / cssHeight) - BUFFER;
+    const rMax = Math.ceil((effectiveViewport.height - top) * gridHeight / cssHeight) + BUFFER;
+    visibleCells = displayGrid.filter((cell) => cell.q >= qMin && cell.q <= qMax && cell.r >= rMin && cell.r <= rMax);
+  }
   const deployTargetKeys = new Set(deployTargets.map((coord) => `${coord.q},${coord.r}`));
   const deployMode = deployTargetKeys.size > 0;
   const moveTargetKeys = new Set(moveTargets.map((coord) => `${coord.q},${coord.r}`));
@@ -264,7 +306,9 @@ export function StrategicMap({
       ? { glyph: '输', label: '输送队' }
       : onWater && vehicle
         ? VEHICLE_TEXTURES[vehicle]
-        : TROOP_TEXTURES[troopType];
+        : troopType === 'siege' && unit.siegeWeapon
+          ? SIEGE_TEXTURES[unit.siegeWeapon]
+          : TROOP_TEXTURES[troopType];
     const centerX = position.x + CELL_SIZE / 2;
     const centerY = position.y + CELL_SIZE / 2;
     const canActThisTurn = unit.forceId === state.turnForceId && !unit.moved && !unit.acted && !unitIsIncapacitated(unit) && unit.movementRemaining > 0;
@@ -452,6 +496,7 @@ export function StrategicMap({
       className={`map-region${editorMode ? ' is-editing' : ''}`}
       aria-label="战略地图区域"
       data-testid="map-viewport"
+      ref={regionRef}
       onWheel={handleWheel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -463,7 +508,7 @@ export function StrategicMap({
       <div
         className="map-content"
         data-testid="map-content"
-        style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+        style={{ '--map-scale': String(view.scale) } as CSSProperties}
       >
         {backgroundImage && (
           <img
@@ -472,10 +517,11 @@ export function StrategicMap({
             className="map-image"
             data-testid="map-image"
             draggable={false}
+            style={zoomStyle()}
           />
         )}
-        <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}${moveMode ? ' is-moving' : ''}${firePlotMode ? ' is-strategy-targeting' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${worldWidth} ${worldHeight}`} aria-hidden="true">
-          {displayGrid.map((cell) => {
+        <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}${moveMode ? ' is-moving' : ''}${firePlotMode ? ' is-strategy-targeting' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${worldWidth} ${worldHeight}`} aria-hidden="true" style={zoomStyle()}>
+          {visibleCells.map((cell) => {
             const position = displayCellPosition(cell.q, cell.r);
             const cellKey = `${cell.q},${cell.r}`;
             const isDeployTarget = deployTargetKeys.has(cellKey);
@@ -676,7 +722,7 @@ export function StrategicMap({
           })}
           {facilityRepairReports.map(renderFacilityRepairNumber)}
         </svg>
-        <div className={`city-marker-layer${editorMode || deployMode || moveMode ? ' is-editing' : ''}`} aria-label="荆襄城市">
+        <div className={`city-marker-layer${editorMode || deployMode || moveMode ? ' is-editing' : ''}`} aria-label="荆襄城市" style={zoomStyle()}>
           {Object.values(state.cities).map((city) => {
             const force = state.forces[city.ownerId];
             const selected = selectedCityId === city.id;
@@ -727,7 +773,7 @@ export function StrategicMap({
             );
           })}
         </div>
-        <svg className="battle-unit-layer" data-testid="battle-unit-layer" viewBox={`0 0 ${worldWidth} ${worldHeight}`} aria-label="战场部队">
+        <svg className="battle-unit-layer" data-testid="battle-unit-layer" viewBox={`0 0 ${worldWidth} ${worldHeight}`} aria-label="战场部队" style={zoomStyle()}>
           {Object.values(state.units).map(renderUnitMarker)}
           {firePlots.map(renderFireMarker)}
           {damageReports.map(renderDamageNumber)}
