@@ -3,7 +3,7 @@ import { useGame } from '../game/store/GameProvider';
 export function EventLog() {
   const { state } = useGame();
   if (!state) return null;
-  const logs = state.logs.slice(-6).reverse();
+  const logs = state.logs.slice(-100).reverse();
 
   return (
     <section className="event-log tool-panel" aria-label="军情与政务">

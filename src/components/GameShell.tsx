@@ -25,6 +25,7 @@ import { territoryForceAt } from '../game/territory';
 import type { BattleDamageReport, CityEffectReport, FacilityRepairReport, FacilityType, GameCommand, GameState, GridCell, StrategyResultReport, TerrainType } from '../game/types';
 import { BattlePanel } from './BattlePanel';
 import { CityInfoPanel } from './CityInfoPanel';
+import { CityInfoDialog } from './CityInfoDialog';
 import { CityCommandMenu } from './CityCommandMenu';
 import { CityPanel } from './CityPanel';
 import { CommandDialog } from './CommandDialog';
@@ -114,6 +115,8 @@ export function GameShell() {
   const [hoveredCity, setHoveredCity] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
   const [hoveredFacility, setHoveredFacility] = useState<{ facilityId: string; position: { x: number; y: number } } | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
+  const [cityInfoMenu, setCityInfoMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
+  const [cityInfoDialogId, setCityInfoDialogId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [facilityContextMenu, setFacilityContextMenu] = useState<{ facilityId: string; position: { x: number; y: number } } | null>(null);
   const [mapContextMenu, setMapContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showGlobalIntel, setShowGlobalIntel] = useState(false);
@@ -125,6 +128,7 @@ export function GameShell() {
   const [editorTool, setEditorTool] = useState<MapEditorTool>('plain');
   const [editorExport, setEditorExport] = useState('');
   const mapContextMenuRef = useRef<HTMLElement>(null);
+  const cityInfoMenuRef = useRef<HTMLElement>(null);
   const unitCommandMenuRef = useRef<HTMLElement>(null);
   const unitTacticMenuRef = useRef<HTMLElement>(null);
   const unitStrategyMenuRef = useRef<HTMLElement>(null);
@@ -1099,6 +1103,21 @@ export function GameShell() {
     setFacilityContextMenu(null);
   }, [emitAudioEvent]);
 
+  const openCityInfoMenu = useCallback((cityId: NonNullable<typeof selectedCityId>, position: { x: number; y: number }) => {
+    emitAudioEvent({ type: 'menu-click-on' });
+    setMapContextMenu(null);
+    setShowMapIntelOptions(false);
+    setCityMenu(null);
+    setCityInfoMenu({ cityId, position });
+  }, [emitAudioEvent]);
+
+  const closeCityInfoFromRightClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    emitAudioEvent({ type: 'menu-right-click' });
+    setCityInfoMenu(null);
+  }, [emitAudioEvent]);
+
   const closeUnitCommandMenuFromRightClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -1134,6 +1153,18 @@ export function GameShell() {
     document.addEventListener('mousedown', closeOnLeftClickOutside);
     return () => document.removeEventListener('mousedown', closeOnLeftClickOutside);
   }, [mapContextMenu]);
+
+  useEffect(() => {
+    if (!cityInfoMenu) return undefined;
+    const closeOnLeftClickOutside = (event: globalThis.MouseEvent) => {
+      if (event.button !== 0) return;
+      if (cityInfoMenuRef.current?.contains(event.target as Node)) return;
+      setCityInfoMenu(null);
+    };
+
+    document.addEventListener('mousedown', closeOnLeftClickOutside);
+    return () => document.removeEventListener('mousedown', closeOnLeftClickOutside);
+  }, [cityInfoMenu]);
 
   useEffect(() => {
     if (!facilityContextMenu) return undefined;
@@ -1278,6 +1309,9 @@ export function GameShell() {
           setMapContextMenu(null);
           setCityMenu({ cityId, position });
         }}
+        onCityInfoMenu={(cityId, position) => {
+          openCityInfoMenu(cityId, position);
+        }}
         backgroundImage={editorCalibrationMode ? editorState?.backgroundImage : undefined}
         editorGrid={editorState?.grid}
         editorCities={editorState?.cities}
@@ -1407,6 +1441,47 @@ export function GameShell() {
               <button type="button" data-testid="map-context-global-intel-button" onClick={openGlobalIntelFromMap}>全局情报</button>
             </div>
           )}
+        </nav>
+      )}
+      {cityInfoMenu && (
+        <nav
+          ref={cityInfoMenuRef}
+          className="city-info-menu tool-panel"
+          data-testid="city-info-menu"
+          style={{ left: cityInfoMenu.position.x, top: cityInfoMenu.position.y }}
+          aria-label="城池信息菜单"
+          onContextMenu={closeCityInfoFromRightClick}
+        >
+          <button
+            type="button"
+            data-testid="city-info-detail-button"
+            onClick={() => {
+              setCityInfoMenu(null);
+              setCityInfoDialogId(cityInfoMenu.cityId);
+            }}
+          >
+            城池详细信息
+          </button>
+          <button
+            type="button"
+            data-testid="city-info-officers-button"
+            onClick={() => {
+              setCityInfoMenu(null);
+              setCityInfoDialogId(cityInfoMenu.cityId);
+            }}
+          >
+            所属武将
+          </button>
+          <button
+            type="button"
+            data-testid="city-info-force-officers-button"
+            onClick={() => {
+              setCityInfoMenu(null);
+              setMapOfficerListScope('player');
+            }}
+          >
+            势力武将
+          </button>
         </nav>
       )}
       {facilityContextMenu && (
@@ -1580,6 +1655,9 @@ export function GameShell() {
       )}
       {showGlobalIntel && state && <GlobalIntelDialog state={state} onClose={() => setShowGlobalIntel(false)} />}
       {mapOfficerListScope && <OfficerListDialog scope={mapOfficerListScope} onClose={() => setMapOfficerListScope(null)} />}
+      {cityInfoDialogId && state?.cities[cityInfoDialogId] && (
+        <CityInfoDialog cityId={cityInfoDialogId} onClose={() => setCityInfoDialogId(null)} />
+      )}
       {unitDetailId && state?.units[unitDetailId] && (
         <UnitDetailDialog unit={state.units[unitDetailId]} state={state} onClose={() => setUnitDetailId(null)} />
       )}

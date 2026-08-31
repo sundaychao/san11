@@ -102,6 +102,11 @@ export function createMobileDuelGame(bottomForceId: ForceId, topForceId: ForceId
     officers,
     grid: createMobileDuelGrid(),
     units: {},
+    // 双人地图仅两城：宝物交替散落两城
+    treasures: Object.fromEntries(Object.values(base.treasures ?? {}).map((treasure, index) => [
+      treasure.id,
+      { ...treasure, cityId: index % 2 === 0 ? BOTTOM_CITY_ID : TOP_CITY_ID, holderId: null },
+    ])),
     battleDamageReports: [],
     cityEffectReports: [],
     logs: [{

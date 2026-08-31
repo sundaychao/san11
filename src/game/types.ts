@@ -43,7 +43,17 @@ export interface Officer {
   /** 通过能力研究「特技」培育额外习得的特技名列表（与主特技 skill 并存） */
   learnedSkills?: string[];
   aptitudes?: OfficerAptitudes;
+  /** 装备的宝物 id（宝物归属势力，装备后获得其能力与特技加成） */
+  treasureId?: string;
   acted: boolean;
+}
+
+/** 宝物实例状态：归属势力、散落/所在城市、装备武将 */
+export interface TreasureState {
+  id: string;
+  ownerId: ForceId | null;
+  cityId: CityId | null;
+  holderId: string | null;
 }
 
 export type OfficerLocation =
@@ -191,6 +201,8 @@ export interface GameState {
   strategyResultReports?: StrategyResultReport[];
   firePlots?: FirePlot[];
   facilities?: Record<string, Facility>;
+  /** 宝物实例状态（未出土时散落在城市，出土后归势力所有） */
+  treasures?: Record<string, TreasureState>;
   logs: GameLog[];
 }
 
@@ -239,6 +251,8 @@ export type GameCommand =
   | { type: 'train'; cityId: CityId; officerId: string }
   | { type: 'patrol'; cityId: CityId; officerId: string }
   | { type: 'talent'; cityId: CityId; officerId: string }
+  | { type: 'explore'; cityId: CityId; officerIds: string[] }
+  | { type: 'grantTreasure'; cityId: CityId; treasureId: string; officerId: string | null }
   | { type: 'research'; cityId: CityId; officerId: string; branch: TechBranchId }
   | { type: 'abilityResearch'; cityId: CityId; nodeId: string }
   | { type: 'cultivate'; cityId: CityId; officerId: string; nodeId: string }

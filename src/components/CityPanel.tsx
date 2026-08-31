@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Coins, FlaskConical, GraduationCap, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
+import { ChevronDown, ChevronUp, Coins, FlaskConical, Gem, GraduationCap, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
 import { useState } from 'react';
 import { COMMAND_AP } from '../game/commands';
 import { useGame } from '../game/store/GameProvider';
@@ -29,7 +29,8 @@ const COMMANDS: Array<{ type: CommandType; label: string; Icon: typeof Landmark 
   { type: 'train', label: '训练', Icon: Swords },
   { type: 'patrol', label: '巡察', Icon: ShieldCheck },
   { type: 'trade', label: '商人', Icon: Coins },
-  { type: 'talent', label: '人才', Icon: UserSearch },
+  { type: 'explore', label: '探索', Icon: UserSearch },
+  { type: 'grantTreasure', label: '收授宝物', Icon: Gem },
   { type: 'research', label: '科技研究', Icon: FlaskConical },
   { type: 'abilityResearch', label: '能力研究', Icon: GraduationCap },
   { type: 'transfer', label: '调动', Icon: Route },
@@ -117,6 +118,9 @@ export function CityPanel({ onCommand, onOpenCultivatePicker }: CityPanelProps) 
                   disabled = true;
                   title = '商人本旬未到访';
                 }
+              } else if (type === 'grantTreasure' && !Object.values(state.treasures ?? {}).some((treasure) => treasure.ownerId === state.playerForceId)) {
+                disabled = true;
+                title = '尚无已出土的宝物';
               } else if (type === 'research' && techResearching(state)) {
                 disabled = true;
                 title = '科技研究中';

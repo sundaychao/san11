@@ -385,8 +385,9 @@ button { color: inherit; }
   box-shadow: var(--panel-shadow);
 }
 .city-command-secondary button { grid-template-columns: 1fr; min-width: 108px; }
-.map-context-menu, .unit-command-menu, .unit-intel-context-menu, .unit-tactic-menu, .unit-strategy-menu, .facility-context-menu { position: fixed; z-index: 35; display: grid; min-width: 104px; padding: 4px; }
+.map-context-menu, .unit-command-menu, .unit-intel-context-menu, .unit-tactic-menu, .unit-strategy-menu, .facility-context-menu, .city-info-menu { position: fixed; z-index: 35; display: grid; min-width: 104px; padding: 4px; }
 .unit-command-menu { grid-template-columns: 1fr; }
+.city-info-menu { grid-template-columns: 1fr; min-width: 118px; }
 .map-context-submenu {
   position: absolute;
   left: calc(100% + 6px);
@@ -395,7 +396,7 @@ button { color: inherit; }
   min-width: 118px;
   padding: 4px;
 }
-.map-context-menu button, .unit-command-menu button, .unit-intel-context-menu button, .unit-tactic-menu button, .unit-strategy-menu button, .facility-context-menu button {
+.map-context-menu button, .unit-command-menu button, .unit-intel-context-menu button, .unit-tactic-menu button, .unit-strategy-menu button, .facility-context-menu button, .city-info-menu button {
   min-height: 38px;
   padding: 0 14px;
   border: 0;
@@ -409,7 +410,8 @@ button { color: inherit; }
 .unit-intel-context-menu button:hover, .unit-intel-context-menu button:focus-visible,
 .unit-tactic-menu button:hover, .unit-tactic-menu button:focus-visible,
 .unit-strategy-menu button:hover, .unit-strategy-menu button:focus-visible,
-.facility-context-menu button:hover, .facility-context-menu button:focus-visible {
+.facility-context-menu button:hover, .facility-context-menu button:focus-visible,
+.city-info-menu button:hover, .city-info-menu button:focus-visible {
   background: rgba(197, 173, 111, 0.18);
   outline: none;
 }
@@ -425,6 +427,27 @@ button { color: inherit; }
   background: transparent;
 }
 .intel-panel { position: fixed; z-index: 34; top: 82px; left: 18px; width: min(520px, calc(100vw - 360px)); max-height: calc(100dvh - 118px); display: grid; gap: 14px; padding: 16px; overflow: auto; }
+.city-info-dialog { width: min(440px, calc(100vw - 360px)); display: grid; gap: 0; padding: 0; overflow: hidden; }
+.city-info-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
+.city-info-dialog > header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
+.city-info-dialog > header h2 { margin: 0; }
+.city-info-dialog-body { display: grid; gap: 16px; padding: 14px 16px 16px; max-height: min(480px, 64dvh); overflow: auto; }
+.city-info-dialog-body section { margin: 0; }
+.city-info-dialog-body h3 { margin: 0 0 8px; color: var(--gold); font-size: 13px; }
+.city-info-dialog-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 18px; margin: 0; }
+.city-info-dialog-grid div { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 6px; border-bottom: 1px solid rgba(146, 136, 115, 0.22); }
+.city-info-dialog-grid dt { color: var(--paper-dim); }
+.city-info-dialog-grid dd { margin: 0; font-variant-numeric: tabular-nums; }
+.city-info-officer-list h3 { display: flex; align-items: center; gap: 6px; }
+.city-info-officer-list h3 svg { width: 14px; height: 14px; }
+.city-info-officer-list h3 span { color: var(--paper-dim); }
+.city-info-officer-list ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; max-height: min(220px, 30dvh); overflow: auto; }
+.city-info-officer-list li { display: grid; grid-template-columns: 8px minmax(58px, auto) 1fr; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid rgba(146, 136, 115, 0.22); }
+.city-info-officer-list li:last-child { border-bottom: 0; }
+.city-info-officer-list li .force-dot { width: 8px; height: 8px; border-radius: 9999px; }
+.city-info-officer-list li strong { font-size: 13px; }
+.city-info-officer-list li small { color: var(--muted); font-size: 11px; text-align: right; white-space: nowrap; }
+.city-info-empty { color: var(--paper-dim); margin: 0; }
 .intel-panel-centered {
   position: static;
   z-index: auto;
@@ -535,9 +558,9 @@ button { color: inherit; }
 .cultivate-picker-dialog button svg { width: 16px; height: 16px; color: var(--gold); }
 .cultivate-picker-dialog button span { font-size: 13px; white-space: nowrap; }
 .readonly-note { margin: 14px 0 0; padding: 9px; border: 1px solid var(--line); color: var(--muted); font-size: 11px; text-align: center; }
-.event-log { position: fixed; z-index: 12; left: 16px; bottom: 16px; width: min(430px, calc(100vw - 368px)); padding: 13px 15px; }
+.event-log { position: fixed; z-index: 12; left: 16px; bottom: 16px; width: min(430px, calc(100vw - 368px)); max-height: min(460px, 52dvh); display: flex; flex-direction: column; padding: 13px 15px; }
 .event-log h2 { font-size: 17px; }
-.event-log ol { margin: 9px 0 0; padding: 0; list-style: none; }
+.event-log ol { margin: 9px 0 0; flex: 1 1 auto; min-height: 0; padding: 0 6px 2px 0; list-style: none; overflow-y: auto; }
 .event-log li { display: grid; grid-template-columns: 7px 1fr; gap: 8px; align-items: start; margin: 6px 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .event-log li i { width: 7px; height: 7px; margin-top: 5px; }
 .modal-backdrop, .result-backdrop { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(10, 15, 13, 0.72); }
@@ -706,6 +729,14 @@ button { color: inherit; }
 .transfer-officers > div { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
 .transfer-officers label { display: flex; align-items: center; gap: 7px; padding: 7px; border: 1px solid rgba(146, 136, 115, 0.65); font-size: 12px; cursor: pointer; }
 .transfer-officers input { accent-color: var(--gold); }
+.explore-officers > div { max-height: min(260px, 38dvh); overflow: auto; }
+.explore-officers > .explore-list { grid-template-columns: 1fr; gap: 2px; }
+.explore-actions { display: flex; gap: 8px; margin-top: 10px; }
+.explore-actions .explore-select-all { margin-top: 0; }
+.explore-officers > .explore-select-all { margin-top: 10px; padding: 6px 12px; border: 1px solid rgba(210, 170, 90, 0.65); background: rgba(210, 170, 90, 0.12); color: var(--gold); font-size: 12px; cursor: pointer; }
+.explore-officers > .explore-select-all:hover, .explore-actions .explore-select-all:hover { background: rgba(210, 170, 90, 0.24); }
+.explore-officers label.is-over-limit { opacity: 0.45; cursor: not-allowed; }
+.grant-treasure-panel { display: grid; gap: 12px; margin-top: 15px; }
 .command-cost { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin-top: 15px; padding: 10px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 11px; }
 .command-cost span { color: var(--muted); }
 .command-cost strong { text-align: right; }

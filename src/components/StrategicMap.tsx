@@ -71,6 +71,7 @@ const MAX_TERRAIN_CELLS = 8000;
 
 interface StrategicMapProps {
   onCityMenu?(cityId: CityId, position: { x: number; y: number }): void;
+  onCityInfoMenu?(cityId: CityId, position: { x: number; y: number }): void;
   backgroundImage?: string;
   editorGrid?: GridCell[];
   editorCities?: EditableCityMarker[];
@@ -126,6 +127,7 @@ export function StrategicMap({
   cityEffectReports = [],
   facilityRepairReports = [],
   onCityMenu,
+  onCityInfoMenu,
   onCellHover,
   onDeployTargetSelect,
   onEditorCellPaint,
@@ -660,10 +662,9 @@ export function StrategicMap({
                   }}
                   onContextMenu={(event) => {
                     if (!gameCity) return;
-                    dismissCityHover();
                     event.preventDefault();
                     event.stopPropagation();
-                    onMapContextClose?.();
+                    onCityInfoMenu?.(gameCity.id, { x: event.clientX + 12, y: event.clientY });
                   }}
                   onPointerEnter={(event) => {
                     if (!gameCity) return;
@@ -795,7 +796,7 @@ export function StrategicMap({
                   dismissCityHover();
                   event.preventDefault();
                   event.stopPropagation();
-                  onMapContextClose?.();
+                  onCityInfoMenu?.(city.id, { x: event.clientX + 12, y: event.clientY });
                 }}
                 onClick={(event) => {
                   selectCityFromMap(city.id, { x: event.clientX + 12, y: event.clientY });

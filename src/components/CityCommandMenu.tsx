@@ -62,7 +62,8 @@ const SUB_COMMANDS: Record<MenuSection, SubItem[]> = {
     { label: '输送', action: 'transport' },
   ],
   talent: [
-    { label: '探索人才', command: 'talent' },
+    { label: '探索', command: 'explore' },
+    { label: '收授宝物', command: 'grantTreasure' },
     { label: '培育武将', opens: 'cultivate' },
     { label: '科技研究', command: 'research' },
     { label: '能力研究', command: 'abilityResearch' },

@@ -1,14 +1,23 @@
 import { skillDefinition } from './registry';
 import type { ActiveSkill } from './types';
+import { treasureDefinition } from '../treasures';
 import type { ArmyUnit, CityId, GameCommand, GameState, Officer } from '../types';
 
-/** 武将拥有的全部特技名（主特技 + 能力研究习得特技，去重且忽略占位符） */
+/** 武将装备宝物所附带的特技名（无装备或宝物无特技时为空） */
+export function officerTreasureSkillName(officer: Officer): string | null {
+  if (!officer.treasureId) return null;
+  return treasureDefinition(officer.treasureId)?.skill ?? null;
+}
+
+/** 武将拥有的全部特技名（主特技 + 能力研究习得特技 + 宝物特技，去重且忽略占位符） */
 export function officerSkillNames(officer: Officer): string[] {
   const names: string[] = [];
   if (officer.skill && officer.skill !== '无') names.push(officer.skill);
   for (const name of officer.learnedSkills ?? []) {
     if (!names.includes(name)) names.push(name);
   }
+  const treasureSkill = officerTreasureSkillName(officer);
+  if (treasureSkill && !names.includes(treasureSkill)) names.push(treasureSkill);
   return names;
 }
 
@@ -24,10 +33,8 @@ export function resolveOfficerSkills(state: GameState, officerIds: string[]): Ac
   for (const officerId of new Set(officerIds)) {
     const officer = state.officers[officerId];
     if (!officer) continue;
-    // 主特技 + 能力研究习得的附加特技（去重）
-    const skillNames = new Set<string>();
-    if (officer.skill && officer.skill !== '无') skillNames.add(officer.skill);
-    for (const name of officer.learnedSkills ?? []) skillNames.add(name);
+    // 主特技 + 能力研究习得特技 + 宝物特技（去重）
+    const skillNames = new Set<string>(officerSkillNames(officer));
 
     for (const name of skillNames) {
       const definition = skillDefinition(name);
@@ -64,7 +71,7 @@ export function resolveCitySkills(state: GameState, cityId: CityId): ActiveSkill
 }
 
 export function resolveCommandSkills(state: GameState, command: GameCommand): ActiveSkill[] {
-  return command.type === 'transfer' || command.type === 'abilityResearch'
-    ? []
-    : resolveOfficerSkills(state, [command.officerId]);
+  if (command.type === 'transfer' || command.type === 'abilityResearch' || command.type === 'grantTreasure') return [];
+  if (command.type === 'explore') return resolveOfficerSkills(state, command.officerIds);
+  return resolveOfficerSkills(state, [command.officerId]);
 }

@@ -2,6 +2,7 @@ import { executeCommand, validateCommand } from './commands';
 import { dispatchTerritoryDefenseForForce } from './battle/actions';
 import { TECH_BRANCHES, TECH_COSTS, MAX_TECH_LEVEL, techLevelOf } from './techs';
 import { ABILITY_NODES, ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
+import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition } from './treasures';
 import { nextRandom } from './random';
 import type { City, ForceId, GameCommand, GameState, Officer } from './types';
 
@@ -120,6 +121,48 @@ function chooseAiAbilityCommand(state: GameState, forceId: ForceId): GameCommand
   return null;
 }
 
+// AI探索：城中有未出土宝物或行动力富余时，派智力最高的武将去探索
+function chooseAiExploreCommand(state: GameState, forceId: ForceId): GameCommand | null {
+  const cities = Object.values(state.cities).filter((city) => city.ownerId === forceId);
+  for (const city of cities) {
+    const buried = Object.values(state.treasures ?? {}).filter((item) => item.ownerId === null && item.cityId === city.id);
+    const hasTalent = Object.values(state.officers).some((officer) =>
+      officer.forceId === null && officer.location.kind === 'unaffiliated' && officer.location.cityId === city.id,
+    );
+    if (buried.length === 0 && !hasTalent) continue;
+    if (city.gold < EXPLORE_GOLD_PER_OFFICER + 500) continue;
+    const officer = bestOfficer(availableOfficers(state, forceId, city), 'intelligence');
+    if (!officer) continue;
+    if (state.actionPoints[forceId] < EXPLORE_AP_PER_OFFICER + 10) continue;
+    const command: GameCommand = { type: 'explore', cityId: city.id, officerIds: [officer.id] };
+    if (validateCommand(state, forceId, command).length === 0) return command;
+  }
+  return null;
+}
+
+// AI宝物授予：把己方未装备的宝物授予属性最匹配的武将
+function chooseAiGrantTreasureCommand(state: GameState, forceId: ForceId): GameCommand | null {
+  const treasures = Object.values(state.treasures ?? {}).filter((item) => item.ownerId === forceId && !item.holderId);
+  if (treasures.length === 0) return null;
+  const officers = Object.values(state.officers).filter((officer) => officer.forceId === forceId);
+  for (const treasure of treasures) {
+    const definition = treasureDefinition(treasure.id);
+    if (!definition) continue;
+    const statKey = (Object.entries(definition.stats) as Array<[keyof Officer['stats'], number]>)
+      .filter(([, value]) => value > 0)
+      .sort((a, b) => b[1] - a[1])[0]?.[0];
+    const candidates = officers
+      .filter((officer) => !officer.treasureId)
+      .sort((left, right) =>
+        statKey ? right.stats[statKey] - left.stats[statKey] : (right.stats.leadership + right.stats.war) - (left.stats.leadership + left.stats.war));
+    const officer = candidates[0];
+    if (!officer) continue;
+    const command: GameCommand = { type: 'grantTreasure', cityId: officer.location.kind === 'city' ? officer.location.cityId : Object.keys(state.cities)[0] as City['id'], treasureId: treasure.id, officerId: officer.id };
+    if (validateCommand(state, forceId, command).length === 0) return command;
+  }
+  return null;
+}
+
 function chooseAiDecision(state: GameState, forceId: ForceId): AiDecision {
   const cities = Object.values(state.cities).filter((city) => city.ownerId === forceId);
   const selected = (command: GameCommand): AiDecision => ({ command, cursor: state.rngCursor });
@@ -172,6 +215,16 @@ function chooseAiDecision(state: GameState, forceId: ForceId): AiDecision {
   {
     const abilityCommand = chooseAiAbilityCommand(state, forceId);
     if (abilityCommand) return selected(abilityCommand);
+  }
+  // 宝物授予：把未装备的宝物授予属性最匹配的武将
+  {
+    const grantCommand = chooseAiGrantTreasureCommand(state, forceId);
+    if (grantCommand) return selected(grantCommand);
+  }
+  // 探索：城中有未出土宝物或在野武将时，派智力最高的武将探索
+  {
+    const exploreCommand = chooseAiExploreCommand(state, forceId);
+    if (exploreCommand) return selected(exploreCommand);
   }
 
   const candidates: Array<{ command: GameCommand; weight: number }> = [];

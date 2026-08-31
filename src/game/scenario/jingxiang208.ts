@@ -1,5 +1,6 @@
 import { initialArmaments } from '../armaments';
-import type { City, CityId, Force, ForceId, GameState, GridCell, Officer, OfficerAptitudes, Stats } from '../types';
+import { TREASURES } from '../treasures';
+import type { City, CityId, Force, ForceId, GameState, GridCell, Officer, OfficerAptitudes, Stats, TreasureState } from '../types';
 import china42Data from './china42.json';
 
 type CitySeed = Omit<City, 'durability' | 'gridQ' | 'gridR' | 'id' | 'maxDurability'> & { id: CityId };
@@ -238,6 +239,13 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
     gridWidth: china42Data.width,
     gridHeight: china42Data.height,
     units: {},
+    // 宝物开局散落于各城，尚未出土
+    treasures: toRecord(TREASURES.map((treasure): TreasureState => ({
+      id: treasure.id,
+      ownerId: null,
+      cityId: treasure.initialCityId,
+      holderId: null,
+    }))),
     battleDamageReports: [],
     cityEffectReports: [],
     logs: [

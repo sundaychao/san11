@@ -225,7 +225,8 @@ describe('game interface shell', () => {
     expect(within(menu).getByRole('button', { name: '出征' })).toBeVisible();
 
     await user.click(within(menu).getByRole('button', { name: '人才' }));
-    expect(within(menu).getByRole('button', { name: '探索人才' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '探索' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '收授宝物' })).toBeVisible();
     expect(within(menu).getByRole('button', { name: '调动' })).toBeVisible();
   });
 

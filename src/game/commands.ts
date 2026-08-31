@@ -2,7 +2,9 @@ import { nextRandom } from './random';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, isDelayedArmament, produceArmamentYield, DELAYED_ARMAMENT_TEN_DAYS } from './armaments';
 import { ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, CULTIVATE_TEN_DAYS, abilityCultivateRemaining, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
 import { commandYieldMultiplier } from './skills/rules/city';
+import { officerSkillNames } from './skills';
 import { MAX_TECH_LEVEL, RESEARCH_AP_COST, TECH_BRANCHES, TECH_COSTS, TECHP_PER_CIVIL_ACTION, TECHP_PER_TRADE, developMultiplier, recruitMultiplier, researchTenDays, techLevelOf } from './techs';
+import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_CHANCE, EXPLORE_GOLD_MAX, EXPLORE_GOLD_MIN, EXPLORE_GOLD_PER_OFFICER, EXPLORE_TREASURE_BASE_CHANCE, EXPLORE_TREASURE_INT_BONUS_MAX, treasureDefinition } from './treasures';
 import type { City, ForceId, GameCommand, GameState, Officer, TechBranchId } from './types';
 
 export const COMMAND_AP = {
@@ -12,6 +14,8 @@ export const COMMAND_AP = {
   train: 15,
   patrol: 15,
   talent: 20,
+  explore: EXPLORE_AP_PER_OFFICER,
+  grantTreasure: 10,
   research: RESEARCH_AP_COST,
   abilityResearch: 20,
   cultivate: 20,
@@ -26,6 +30,8 @@ export const COMMAND_LABELS: Record<GameCommand['type'], string> = {
   train: '训练',
   patrol: '巡察',
   talent: '人才',
+  explore: '探索',
+  grantTreasure: '收授宝物',
   research: '科技研究',
   abilityResearch: '能力研究',
   cultivate: '培育武将',
@@ -149,7 +155,7 @@ function validateTransfer(state: GameState, forceId: ForceId, command: Extract<G
   return errors;
 }
 
-function localOfficer(state: GameState, forceId: ForceId, command: Exclude<GameCommand, { type: 'transfer' } | { type: 'abilityResearch' }>) {
+function localOfficer(state: GameState, forceId: ForceId, command: Exclude<GameCommand, { type: 'transfer' } | { type: 'abilityResearch' } | { type: 'explore' } | { type: 'grantTreasure' }>) {
   const officer = state.officers[command.officerId];
   return officer?.forceId === forceId && officer.location.kind === 'city' && officer.location.cityId === command.cityId
     ? officer
@@ -162,12 +168,44 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
   if (state.phase !== 'playing') errors.push('本局已经结束');
   if (!city || city.ownerId !== forceId) errors.push('只能管理己方城市');
 
-  if (command.type !== 'transfer' && command.type !== 'abilityResearch') {
+  if (command.type !== 'transfer' && command.type !== 'abilityResearch' && command.type !== 'explore' && command.type !== 'grantTreasure') {
     const officer = localOfficer(state, forceId, command);
     if (!officer) {
       errors.push('武将不在目标城市');
     } else if (officer.acted) {
       errors.push(`${officer.name}本月已行动`);
+    }
+  }
+
+  if (command.type === 'explore') {
+    const count = command.officerIds.length;
+    if (count === 0) {
+      errors.push('至少指派一名武将探索');
+    } else {
+      for (const officerId of command.officerIds) {
+        const officer = state.officers[officerId];
+        if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== command.cityId) {
+          errors.push('只能指派本城待命的己方武将');
+          break;
+        }
+        if (officer.acted) {
+          errors.push(`${officer.name}本月已行动`);
+          break;
+        }
+      }
+      const apCost = EXPLORE_AP_PER_OFFICER * count;
+      if (state.actionPoints[forceId] < apCost) errors.push(`行动力不足 ${apCost}`);
+      if (city.gold < EXPLORE_GOLD_PER_OFFICER * count) errors.push(`资金不足 ${EXPLORE_GOLD_PER_OFFICER * count}`);
+    }
+  }
+
+  if (command.type === 'grantTreasure') {
+    const treasure = state.treasures?.[command.treasureId];
+    if (!treasure || treasure.ownerId !== forceId) {
+      errors.push('只能授予本势力已出土的宝物');
+    } else if (command.officerId) {
+      const officer = state.officers[command.officerId];
+      if (!officer || officer.forceId !== forceId) errors.push('只能授予己方武将');
     }
   }
 
@@ -276,6 +314,61 @@ function resolveTalentSearch(state: GameState, forceId: ForceId, city: City, off
   return talent
     ? `${officer.name}尝试登用${talent.name}，但未能登用`
     : `${officer.name}在${city.name}搜索人才，但一无所获`;
+}
+
+/** 探索结算：人才 → 宝物 → 小份金钱，逐人独立掷点 */
+function resolveExplore(state: GameState, forceId: ForceId, city: City, officer: Officer) {
+  const parts: string[] = [];
+
+  const talent = findLocalTalent(state, city);
+  const talentRoll = nextRandom(state.seed, state.rngCursor);
+  state.rngCursor = talentRoll.cursor;
+  const talentChance = Math.min(85, 35 + Math.floor(officer.stats.intelligence / 2)) / 100;
+  if (talent && talentRoll.value < talentChance) {
+    talent.forceId = forceId;
+    talent.location = { kind: 'city', cityId: city.id };
+    talent.cityId = city.id;
+    addTechP(state, forceId, 150);
+    parts.push(`登用了${talent.name}`);
+  } else if (talent) {
+    parts.push(`尝试登用${talent.name}，但未能登用`);
+  }
+
+  const buried = Object.values(state.treasures ?? {}).filter((item) => item.ownerId === null && item.cityId === city.id);
+  if (buried.length > 0) {
+    const treasureRoll = nextRandom(state.seed, state.rngCursor);
+    state.rngCursor = treasureRoll.cursor;
+    const treasureChance = EXPLORE_TREASURE_BASE_CHANCE + (officer.stats.intelligence / 100) * EXPLORE_TREASURE_INT_BONUS_MAX;
+    if (treasureRoll.value < treasureChance) {
+      const found = buried[Math.min(buried.length - 1, Math.floor(treasureRoll.value * buried.length * 10) % buried.length)];
+      found.ownerId = forceId;
+      found.cityId = null;
+      found.holderId = null;
+      parts.push(`发现了宝物「${treasureDefinition(found.id)?.name ?? found.id}」，已归主公所有`);
+    }
+  }
+
+  const goldRoll = nextRandom(state.seed, state.rngCursor);
+  state.rngCursor = goldRoll.cursor;
+  if (goldRoll.value < EXPLORE_GOLD_CHANCE) {
+    const amountRoll = nextRandom(state.seed, state.rngCursor);
+    state.rngCursor = amountRoll.cursor;
+    const gold = EXPLORE_GOLD_MIN + Math.floor(amountRoll.value * (EXPLORE_GOLD_MAX - EXPLORE_GOLD_MIN + 1));
+    city.gold += gold;
+    parts.push(`拾得金钱${gold}`);
+  }
+
+  if (parts.length === 0) return `${officer.name}在${city.name}探索，一无所获`;
+  return `${officer.name}在${city.name}探索，${parts.join('，')}`;
+}
+
+/** 装备/卸下宝物时同步增减武将五维（卸下精确还原） */
+function applyTreasureStatDelta(officer: Officer, treasureId: string, sign: 1 | -1) {
+  const definition = treasureDefinition(treasureId);
+  if (!definition) return;
+  for (const [key, bonus] of Object.entries(definition.stats)) {
+    officer.stats[key as keyof Officer['stats']] += sign * (bonus ?? 0);
+  }
 }
 
 function applyTransfer(state: GameState, command: Extract<GameCommand, { type: 'transfer' }>) {
@@ -405,6 +498,44 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       officer.acted = true;
       break;
     }
+    case 'explore': {
+      const reports = command.officerIds.map((officerId) => {
+        const officer = next.officers[officerId];
+        city.gold -= EXPLORE_GOLD_PER_OFFICER;
+        officer.acted = true;
+        return resolveExplore(next, forceId, city, officer);
+      });
+      message = reports.join('；');
+      break;
+    }
+    case 'grantTreasure': {
+      const treasure = next.treasures?.[command.treasureId];
+      if (treasure) {
+        const treasureName = treasureDefinition(treasure.id)?.name ?? treasure.id;
+        const previousHolder = treasure.holderId ? next.officers[treasure.holderId] : undefined;
+        if (previousHolder) {
+          applyTreasureStatDelta(previousHolder, treasure.id, -1);
+          previousHolder.treasureId = undefined;
+        }
+        const target = command.officerId ? next.officers[command.officerId] : undefined;
+        if (target) {
+          // 目标已装备其它宝物时先卸下
+          if (target.treasureId && target.treasureId !== treasure.id) {
+            const oldTreasure = next.treasures?.[target.treasureId];
+            applyTreasureStatDelta(target, target.treasureId, -1);
+            if (oldTreasure) oldTreasure.holderId = null;
+          }
+          applyTreasureStatDelta(target, treasure.id, 1);
+          target.treasureId = treasure.id;
+          treasure.holderId = target.id;
+          message = `将宝物「${treasureName}」授予${target.name}`;
+        } else {
+          treasure.holderId = null;
+          message = previousHolder ? `收回${previousHolder.name}装备的宝物「${treasureName}」` : `收回宝物「${treasureName}」`;
+        }
+      }
+      break;
+    }
     case 'research': {
       const officer = next.officers[command.officerId];
       const branchDef = TECH_BRANCHES.find((candidate) => candidate.id === command.branch)!;
@@ -473,7 +604,11 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       break;
   }
 
-  next.actionPoints[forceId] -= COMMAND_AP[command.type];
+  // 探索按人数结算行动力（每人20）
+  const apCost = command.type === 'explore'
+    ? EXPLORE_AP_PER_OFFICER * command.officerIds.length
+    : COMMAND_AP[command.type];
+  next.actionPoints[forceId] -= apCost;
   next.logs.push({
     id: `command-${next.month}-${next.logs.length}`,
     month: next.month,

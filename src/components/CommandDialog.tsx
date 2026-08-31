@@ -4,6 +4,7 @@ import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
 import { COMMAND_AP, COMMAND_LABELS, TRADE_MAX_GRAIN, grainPriceOf, quoteTrade, tradeEffectMultiplier, tradeEffectPercent, transferDuration, validateCommand } from '../game/commands';
 import { MAX_TECH_LEVEL, TECH_BRANCHES, TECH_COSTS, researchTenDays, techLevelOf } from '../game/techs';
+import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition, treasureEffectText } from '../game/treasures';
 import { ABILITY_CENTER, ABILITY_NODE_MAP, ABILITY_NODES, ABILITY_RESEARCH_GOLD, ABILITY_TREE_COLS, ABILITY_TREE_ROWS, abilityCultivateRemaining, abilityEffectText, abilityKindLabel, abilityNodeStatus, canCultivateOfficer } from '../game/abilityResearch';
 import { useGame } from '../game/store/GameProvider';
 import type { ArmamentType, CityId, GameCommand, TechBranchId } from '../game/types';
@@ -30,6 +31,11 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
   // 能力研究：选中的节点 + 培育武将
   const [abilityNodeId, setAbilityNodeId] = useState<string>('warLow');
   const [cultivateOfficerId, setCultivateOfficerId] = useState('');
+  // 探索：勾选的武将列表（每人20行动力）
+  const [exploreOfficerIds, setExploreOfficerIds] = useState<string[]>([]);
+  // 收授宝物：选中的宝物 + 授予目标（null=收回归主公）
+  const [treasureId, setTreasureId] = useState('');
+  const [grantOfficerId, setGrantOfficerId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLFormElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
@@ -50,6 +56,25 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
   );
   const availableOfficers = officers.filter((officer) => !officer.acted);
   const tradeOfficers = [...availableOfficers].sort((a, b) => b.stats.politics - a.stats.politics);
+  // 探索：按智力降序排列，勾选数量受行动力限制（每人20）
+  const exploreOfficers = [...availableOfficers].sort((a, b) => b.stats.intelligence - a.stats.intelligence);
+  const exploreMaxCount = Math.floor(state.actionPoints[state.playerForceId] / EXPLORE_AP_PER_OFFICER);
+  const exploreSelected = exploreOfficerIds.filter((id) => availableOfficers.some((officer) => officer.id === id));
+  // 一并：按默认顺序（智力降序）勾选，直至填满当前可用行动力所能支持的武将数
+  const exploreSelectAll = () => {
+    const selected = new Set(exploreOfficerIds);
+    for (const officer of exploreOfficers) {
+      if (selected.size >= exploreMaxCount) break;
+      selected.add(officer.id);
+    }
+    setExploreOfficerIds([...selected]);
+  };
+  // 收授宝物：本势力已出土宝物
+  const ownedTreasures = Object.values(state.treasures ?? {}).filter((treasure) => treasure.ownerId === state.playerForceId);
+  const activeTreasureId = treasureId || ownedTreasures[0]?.id || '';
+  const activeTreasure = activeTreasureId ? state.treasures?.[activeTreasureId] : undefined;
+  const activeTreasureDef = activeTreasureId ? treasureDefinition(activeTreasureId) : undefined;
+  const forceOfficers = Object.values(state.officers).filter((officer) => officer.forceId === state.playerForceId);
   // 技巧研究：按所选方向的研究属性排序武将
   const researchBranchDef = TECH_BRANCHES.find((branch) => branch.id === researchBranch)!;
   const researchStatKey = researchBranchDef.researchStat;
@@ -105,13 +130,19 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
       }
       return { type: 'abilityResearch', cityId, nodeId: abilityNodeId };
     }
+    if (type === 'explore') {
+      return { type, cityId, officerIds: exploreOfficerIds };
+    }
+    if (type === 'grantTreasure') {
+      return { type, cityId, treasureId: activeTreasureId, officerId: grantOfficerId };
+    }
     const base = { cityId, officerId: activeOfficerId };
     if (type === 'develop') return { ...base, type, focus };
     if (type === 'produceArmament') return { ...base, type, armamentType };
     if (type === 'research') return { ...base, type, branch: researchBranch };
     if (type === 'trade') return { ...base, type, mode: tradeValue >= 0 ? 'buy' : 'sell', amount: Math.min(Math.abs(tradeValue), TRADE_MAX_GRAIN) };
     return { ...base, type } as GameCommand;
-  }, [abilityNode, abilityNodeId, activeOfficerId, activeTargetId, armamentType, cityId, cultivateMode, cultivateOfficerChosen, focus, officerIds, researchBranch, tradeValue, type]);
+  }, [abilityNode, abilityNodeId, activeOfficerId, activeTargetId, activeTreasureId, armamentType, cityId, cultivateMode, cultivateOfficerChosen, exploreOfficerIds, focus, grantOfficerId, officerIds, researchBranch, tradeValue, type]);
 
   const errors = validateCommand(state, state.playerForceId, command);
   const label = COMMAND_LABELS[type];
@@ -155,7 +186,11 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
     }
   };
 
-  const estimatedCost = type === 'develop' || type === 'talent'
+  const estimatedCost = type === 'explore'
+    ? `行动力 ${EXPLORE_AP_PER_OFFICER * exploreOfficerIds.length} · 资金 ${EXPLORE_GOLD_PER_OFFICER * exploreOfficerIds.length}`
+    : type === 'grantTreasure'
+      ? '宝物授予/收回'
+      : type === 'develop' || type === 'talent'
     ? '资金 500'
     : type === 'recruit'
       ? '资金 800 · 兵粮 500'
@@ -187,11 +222,11 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
       <form ref={dialogRef} className="command-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="command-title" onSubmit={submit} onKeyDown={handleDialogKeyDown}>
         <header>
-          <div><p>{city.name}政务 · 行动力 {COMMAND_AP[type]}</p><h2 id="command-title">{label}</h2></div>
+          <div><p>{city.name}政务 · 行动力 {type === 'explore' ? `${EXPLORE_AP_PER_OFFICER}/人` : COMMAND_AP[type]}</p><h2 id="command-title">{label}</h2></div>
           <button type="button" className="icon-button" aria-label="关闭指令" title="关闭" onClick={onClose}><X /></button>
         </header>
 
-        {type !== 'transfer' && type !== 'abilityResearch' && (
+        {type !== 'transfer' && type !== 'abilityResearch' && type !== 'explore' && type !== 'grantTreasure' && (
           <label className="field-row">
             <span>执行武将</span>
             <select aria-label="执行武将" value={activeOfficerId} onChange={(event) => setOfficerId(event.target.value)}>
@@ -202,6 +237,71 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
               ))}
             </select>
           </label>
+        )}
+
+        {type === 'explore' && (
+          <fieldset className="transfer-officers explore-officers" aria-label="探索武将">
+            <legend>探索武将（每人行动力{EXPLORE_AP_PER_OFFICER} · 资金{EXPLORE_GOLD_PER_OFFICER}，最多{exploreMaxCount}人）</legend>
+            <div className="explore-list">
+              {exploreOfficers.map((officer) => {
+                const checked = exploreOfficerIds.includes(officer.id);
+                const overLimit = !checked && exploreOfficerIds.length >= exploreMaxCount;
+                return (
+                  <label key={officer.id} className={overLimit ? 'is-over-limit' : undefined}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={overLimit}
+                      onChange={() => setExploreOfficerIds((current) => current.includes(officer.id) ? current.filter((item) => item !== officer.id) : [...current, officer.id])}
+                    />
+                    <span>{officer.name} · 智{officer.stats.intelligence} 政{officer.stats.politics}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="explore-actions">
+              <button type="button" className="explore-select-all" onClick={exploreSelectAll}>一并</button>
+              <button type="button" className="explore-select-all" onClick={() => setExploreOfficerIds([])}>一并解除</button>
+            </div>
+          </fieldset>
+        )}
+
+        {type === 'grantTreasure' && (
+          <section className="grant-treasure-panel" aria-label="收授宝物">
+            {ownedTreasures.length === 0 ? (
+              <div className="command-note">本势力尚无已出土的宝物，可先派武将探索获取。</div>
+            ) : (
+              <>
+                <label className="field-row">
+                  <span>宝物</span>
+                  <select aria-label="宝物" value={activeTreasureId} onChange={(event) => setTreasureId(event.target.value)}>
+                    {ownedTreasures.map((treasure) => (
+                      <option key={treasure.id} value={treasure.id}>
+                        {treasureDefinition(treasure.id)?.name ?? treasure.id}{treasure.holderId ? `（${state.officers[treasure.holderId]?.name ?? ''}装备中）` : '（未装备）'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {activeTreasureDef && (
+                  <dl className="produce-stock">
+                    <div><dt>效果</dt><dd>{treasureEffectText(activeTreasureDef)}</dd></div>
+                    <div><dt>说明</dt><dd>{activeTreasureDef.description}</dd></div>
+                  </dl>
+                )}
+                <label className="field-row">
+                  <span>授予武将</span>
+                  <select aria-label="授予武将" value={grantOfficerId ?? ''} onChange={(event) => setGrantOfficerId(event.target.value || null)}>
+                    <option value="">收回·归主公所有</option>
+                    {forceOfficers.map((officer) => (
+                      <option key={officer.id} value={officer.id}>
+                        {officer.name} · 统{officer.stats.leadership} 武{officer.stats.war} 智{officer.stats.intelligence}{officer.treasureId ? `（已装备${treasureDefinition(officer.treasureId)?.name ?? ''}）` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
+          </section>
         )}
 
         {type === 'develop' && (
@@ -481,7 +581,7 @@ export function CommandDialog({ type, cityId, onClose }: CommandDialogProps) {
           </div>
         )}
 
-        {type !== 'research' && type !== 'abilityResearch' && (
+        {type !== 'explore' && type !== 'research' && type !== 'abilityResearch' && (
           <div className="command-cost">
             <span>行动力</span><strong>-{COMMAND_AP[type]}</strong>
             <span>预计消耗</span><strong>{estimatedCost}</strong>
