@@ -108,7 +108,6 @@ function reachableCostsFrom(
   options: { ignoredUnitId?: string; allowedCityTransitKeys?: Set<string>; movingForceId?: ForceId; ignoreEnemyZoc?: 'land' | 'water' | null; vehicle?: 'boat' | 'ship' } = {},
 ) {
   const startKey = gridKey(start);
-  const startOnWater = cellAt(state, start)?.terrain === 'water';
   const costs = new Map<string, number>([[startKey, 0]]);
   const ferryChain = new Set<string>();
   const frontier: GridCoord[] = [{ q: start.q, r: start.r }];
@@ -138,18 +137,38 @@ function reachableCostsFrom(
       if (!canTransitCity && cityKeys.has(key)) continue;
       if (unitKeys.has(key)) continue;
       if (facilityKeys.has(key)) continue;
-      const nextCost = currentCost + terrainCost;
+      const neighborTerrain = cellAt(state, neighbor)?.terrain;
+
+      // 横跨水域边界：陆地<->水域。
+      const currentIsWater = currentTerrain === 'water';
+      const neighborIsWater = neighborTerrain === 'water';
+      const crossesWaterBoundary = currentIsWater !== neighborIsWater;
+      // 经渡口横跨允许继续（渡口桥接），不受"需停留边界"限制
+      const viaFerry = crossesWaterBoundary && (currentTerrain === 'ferry' || neighborTerrain === 'ferry' || ferryChain.has(currentKey));
+      if (viaFerry) {
+        ferryChain.add(currentKey);
+        ferryChain.add(key);
+      }
+
+      let nextCost: number;
+      let isTerminal = false;
+      if (viaFerry) {
+        nextCost = currentCost + terrainCost;
+      } else if (crossesWaterBoundary) {
+        // 非渡口跨界：只有当部队本回合从该边界格出发时才能跨一步入水/登岸
+        // （即前一回合必须已停留在边界格）。否则本回合最多到达边界、不能越界；
+        // 跨界格消耗全部行动力并作为终点、不再扩展。
+        if (currentKey !== startKey) continue;
+        nextCost = movementBudget;
+        isTerminal = true;
+      } else {
+        nextCost = currentCost + terrainCost;
+      }
+
       if (nextCost > movementBudget) continue;
       if (costs.has(key) && costs.get(key)! <= nextCost) continue;
       costs.set(key, nextCost);
-      const neighborTerrain = cellAt(state, neighbor)?.terrain;
-      if (neighborTerrain === 'water' && !startOnWater) {
-        const transitWater = currentTerrain === 'ferry' || ferryChain.has(currentKey);
-        if (!transitWater) continue;
-        ferryChain.add(key);
-      }
-      if (neighborTerrain === 'shore') continue;
-      frontier.push(neighbor);
+      if (!isTerminal) frontier.push(neighbor);
     }
   }
 

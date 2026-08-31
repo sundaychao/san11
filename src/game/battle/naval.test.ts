@@ -293,7 +293,7 @@ describe('siege weapon deployment', () => {
   });
 });
 
-describe('shore and ferry movement', () => {
+describe('water and ferry movement', () => {
   function duelUnit(state: GameState, id: string, coord: { q: number; r: number }, movementRemaining = 30) {
     state.units[id] = {
       id, kind: 'combat', forceId: 'liu', leaderId: 'zhang-fei', officerIds: ['zhang-fei'],
@@ -303,7 +303,7 @@ describe('shore and ferry movement', () => {
     state.officers['zhang-fei'].location = { kind: 'unit', unitId: id };
   }
 
-  it('stops formations on the shore so they cannot cross water in one turn', () => {
+  it('stops formations so they cannot cross water in one turn from land', () => {
     const state = createMobileDuelGame('liu', 'cao', 7);
     duelUnit(state, 'land', { q: 3, r: 11 });
 
@@ -323,7 +323,7 @@ describe('shore and ferry movement', () => {
     expect(cells.some((cell) => cell.q === 8 && cell.r === 13)).toBe(true);
   });
 
-  it('lets water formations land through a ferry but stop on ordinary shores', () => {
+  it('lets water formations land through a ferry but stop on the water-adjacent land', () => {
     const state = createMobileDuelGame('liu', 'cao', 7);
     duelUnit(state, 'water-ferry', { q: 8, r: 14 });
 
@@ -331,10 +331,12 @@ describe('shore and ferry movement', () => {
     expect(ferryCells.some((cell) => cell.q === 8 && cell.r === 12)).toBe(true);
     expect(ferryCells.some((cell) => cell.q === 8 && cell.r === 11)).toBe(true);
 
-    duelUnit(state, 'water-shore', { q: 3, r: 14 });
-    const shoreCells = movementCells(state, 'water-shore');
-    expect(shoreCells.some((cell) => cell.q === 3 && cell.r === 12)).toBe(true);
-    expect(shoreCells.some((cell) => cell.q === 3 && cell.r === 11)).toBe(false);
+    duelUnit(state, 'water-plain', { q: 3, r: 14 });
+    const plainCells = movementCells(state, 'water-plain');
+    expect(plainCells.some((cell) => cell.q === 3 && cell.r === 12)).toBe(true);
+    // 出水需先停留在水中相接的边界格(r12)，本回合不能登岸，下一回合才能出水
+    expect(plainCells.some((cell) => cell.q === 3 && cell.r === 11)).toBe(false);
+    expect(plainCells.some((cell) => cell.q === 3 && cell.r === 10)).toBe(false);
   });
 
   it('lets formations entering water via a ferry keep moving across the river', () => {
@@ -348,16 +350,29 @@ describe('shore and ferry movement', () => {
     expect(cells.some((cell) => cell.q === 8 && cell.r === 17)).toBe(false);
   });
 
-  it('ends movement on the first water cell entered away from a ferry', () => {
+  it('ends movement on the first water cell entered away from a ferry, requiring the unit to start on the boundary', () => {
     const state = createMobileDuelGame('liu', 'cao', 7);
     state.grid = state.grid.map((cell) => (cell.q === 3 && cell.r === 12 ? { ...cell, terrain: 'plain' } : cell));
-    duelUnit(state, 'plain-entry', { q: 3, r: 11 }, 30);
+    // 部队已在陆地边界格 r12 停留一回合，本回合从这里出发才能跨越一步入水
+    duelUnit(state, 'plain-entry', { q: 3, r: 12 }, 30);
 
     const cells = movementCells(state, 'plain-entry');
 
-    expect(cells.some((cell) => cell.q === 3 && cell.r === 12)).toBe(true);
+    // 从边界格出发可以把入水格 r13 作为终点（消耗全部行动力），但不能越过 r13 继续深入
     expect(cells.some((cell) => cell.q === 3 && cell.r === 13)).toBe(true);
     expect(cells.some((cell) => cell.q === 3 && cell.r === 14)).toBe(false);
+  });
+
+  it('does not cross into water mid-turn; the unit must first stop on the land boundary cell', () => {
+    const state = createMobileDuelGame('liu', 'cao', 7);
+    state.grid = state.grid.map((cell) => (cell.q === 3 && cell.r === 12 ? { ...cell, terrain: 'plain' } : cell));
+    duelUnit(state, 'plain-approach', { q: 3, r: 10 }, 30);
+
+    const cells = movementCells(state, 'plain-approach');
+
+    // 本回合最多到达陆地边界格 r12，不能同回合越界入水 r13
+    expect(cells.some((cell) => cell.q === 3 && cell.r === 12)).toBe(true);
+    expect(cells.some((cell) => cell.q === 3 && cell.r === 13)).toBe(false);
   });
 });
 

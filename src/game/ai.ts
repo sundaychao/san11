@@ -1,5 +1,7 @@
 import { executeCommand, validateCommand } from './commands';
 import { dispatchTerritoryDefenseForForce } from './battle/actions';
+import { TECH_BRANCHES, TECH_COSTS, MAX_TECH_LEVEL, techLevelOf } from './techs';
+import { ABILITY_NODES, ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
 import { nextRandom } from './random';
 import type { City, ForceId, GameCommand, GameState, Officer } from './types';
 
@@ -35,9 +37,87 @@ function developmentCommand(state: GameState, forceId: ForceId, city: City, focu
     : null;
 }
 
+// AI科技研究：有富余金钱与技巧P时，把已开工的方向优先补满
+function chooseAiResearchCommand(state: GameState, forceId: ForceId): GameCommand | null {
+  const force = state.forces[forceId];
+  if (!force) return null;
+  const techP = force.techP ?? 0;
+  const cities = Object.values(state.cities).filter((city) => city.ownerId === forceId);
+  if (cities.length === 0) return null;
+
+  // 方向优先级：已研究过的方向优先升级，其次按剧本预研方向
+  const startedBranches = TECH_BRANCHES
+    .filter((branch) => techLevelOf(state, forceId, branch.id) > 0)
+    .sort((left, right) => techLevelOf(state, forceId, right.id) - techLevelOf(state, forceId, left.id));
+  const freshBranches = TECH_BRANCHES.filter((branch) => techLevelOf(state, forceId, branch.id) === 0);
+  const orderedBranches = [...startedBranches, ...freshBranches];
+
+  for (const branch of orderedBranches) {
+    const level = techLevelOf(state, forceId, branch.id);
+    if (level >= MAX_TECH_LEVEL) continue;
+    const cost = TECH_COSTS[level];
+    if (techP < cost.techP) continue;
+    // 找一座金钱充足的城市，用对应属性最优的武将研究
+    const sortedCities = [...cities].sort((a, b) => b.gold - a.gold);
+    for (const city of sortedCities) {
+      if (city.gold < cost.gold + 2000) continue;
+      const officers = availableOfficers(state, forceId, city);
+      const officer = bestOfficer(officers, branch.researchStat);
+      if (!officer) continue;
+      const command: GameCommand = { type: 'research', cityId: city.id, officerId: officer.id, branch: branch.id };
+      if (validateCommand(state, forceId, command).length === 0) return command;
+    }
+  }
+  return null;
+}
+
 interface AiDecision {
   command: GameCommand | null;
   cursor: number;
+}
+
+// AI能力研究：优先培育已研究完成的能力，其次启动新的能力研究
+function chooseAiAbilityCommand(state: GameState, forceId: ForceId): GameCommand | null {
+  const force = state.forces[forceId];
+  if (!force) return null;
+  const cities = Object.values(state.cities).filter((city) => city.ownerId === forceId);
+  if (cities.length === 0) return null;
+  const research = force.abilityResearch;
+
+  // 1. 培育：已研究且仍有培育次数的节点，挑一名最适合的在城武将
+  if (research) {
+    for (const nodeId of research.researched) {
+      const node = ABILITY_NODE_MAP[nodeId];
+      if (!node || (research.remaining[nodeId] ?? 0) <= 0) continue;
+      for (const city of cities) {
+        const candidates = availableOfficers(state, forceId, city)
+          .filter((officer) => canCultivateOfficer(officer, node))
+          .sort((left, right) =>
+            node.kind === 'stat' && node.stat
+              ? right.stats[node.stat] - left.stats[node.stat]
+              : (right.stats.leadership + right.stats.war) - (left.stats.leadership + left.stats.war));
+        const officer = candidates[0];
+        if (!officer) continue;
+        const command: GameCommand = { type: 'cultivate', cityId: city.id, officerId: officer.id, nodeId: node.id };
+        if (validateCommand(state, forceId, command).length === 0) return command;
+      }
+    }
+  }
+
+  // 2. 启动新研究：无在研项目、城市资金充足；优先耗时短的低级节点
+  if (!research?.active) {
+    const available = ABILITY_NODES
+      .filter((node) => abilityNodeStatus(state, forceId, node) === 'available')
+      .sort((left, right) => left.months - right.months);
+    for (const node of available) {
+      for (const city of [...cities].sort((a, b) => b.gold - a.gold)) {
+        if (city.gold < ABILITY_RESEARCH_GOLD + 1000) continue;
+        const command: GameCommand = { type: 'abilityResearch', cityId: city.id, nodeId: node.id };
+        if (validateCommand(state, forceId, command).length === 0) return command;
+      }
+    }
+  }
+  return null;
 }
 
 function chooseAiDecision(state: GameState, forceId: ForceId): AiDecision {
@@ -82,6 +162,16 @@ function chooseAiDecision(state: GameState, forceId: ForceId): AiDecision {
       const command = cityCommand(state, forceId, city, 'talent', 'intelligence');
       if (command) return selected(command);
     }
+  }
+  // 科技研究：金钱与技巧P富余时，优先把已开工的方向补到高级
+  {
+    const researchCommand = chooseAiResearchCommand(state, forceId);
+    if (researchCommand) return selected(researchCommand);
+  }
+  // 能力研究：先培育已完成的能力，再启动新研究
+  {
+    const abilityCommand = chooseAiAbilityCommand(state, forceId);
+    if (abilityCommand) return selected(abilityCommand);
   }
 
   const candidates: Array<{ command: GameCommand; weight: number }> = [];

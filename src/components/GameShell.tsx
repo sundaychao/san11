@@ -28,6 +28,8 @@ import { CityInfoPanel } from './CityInfoPanel';
 import { CityCommandMenu } from './CityCommandMenu';
 import { CityPanel } from './CityPanel';
 import { CommandDialog } from './CommandDialog';
+import { CultivateDialog, type CultivateCategory } from './CultivateDialog';
+import { CultivatePickerDialog } from './CultivatePickerDialog';
 import { DeployDialog, type DeployConfirmInput } from './DeployDialog';
 import { EventLog } from './EventLog';
 import { FacilityInfoPanel } from './FacilityInfoPanel';
@@ -56,7 +58,6 @@ const TERRAIN_LABELS: Record<TerrainType, string> = {
   hill: '丘陵',
   mountain: '高山',
   water: '水域',
-  shore: '岸边',
   ferry: '渡口',
 };
 
@@ -73,9 +74,11 @@ function downloadTextFile(filename: string, content: string) {
 }
 
 export function GameShell() {
-  const { applyMapEditorMap, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, dismantleFacility, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, moveUnit, repairFacility, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
+  const { applyMapEditorMap, attackCity, attackFacility, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, dismantleFacility, endTenDay, hasAutosave, hasManualSave, loadGame, manualSave, moveUnit, repairFacility, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
   const { emit: emitAudioEvent } = useAudioEventAdapter();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
+  const [activeCultivate, setActiveCultivate] = useState<CultivateCategory | null>(null);
+  const [cultivatePickerOpen, setCultivatePickerOpen] = useState(false);
   const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [transportCityId, setTransportCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [pendingDeploy, setPendingDeploy] = useState<DeployConfirmInput | null>(null);
@@ -96,7 +99,7 @@ export function GameShell() {
   const [unitIntelMenu, setUnitIntelMenu] = useState<{ unitId: string; position: { x: number; y: number } } | null>(null);
   const [unitDetailId, setUnitDetailId] = useState<string | null>(null);
   const [unitOfficerListId, setUnitOfficerListId] = useState<string | null>(null);
-  const [targetingAttack, setTargetingAttack] = useState<{ unitId: string; origin?: GridCoord } | null>(null);
+  const [targetingAttack, setTargetingAttack] = useState<{ unitId: string; origin?: GridCoord; joint?: boolean } | null>(null);
   const [targetingTactic, setTargetingTactic] = useState<{ unitId: string; tacticId: TacticId; origin?: GridCoord } | null>(null);
   const [targetingFirePlot, setTargetingFirePlot] = useState<{ unitId: string; strategyId: StrategyId; origin?: GridCoord } | null>(null);
   const [targetingUnitStrategy, setTargetingUnitStrategy] = useState<{ unitId: string; strategyId: StrategyId; origin?: GridCoord } | null>(null);
@@ -132,6 +135,53 @@ export function GameShell() {
   const unitHoverCloseTimerRef = useRef<number | null>(null);
   const canOperateCurrentTurn = !state || state.turnForceId === state.playerForceId;
   const closeCommand = useCallback(() => setActiveCommand(null), []);
+  const closeCultivate = useCallback(() => setActiveCultivate(null), []);
+  const closeCultivatePicker = useCallback(() => setCultivatePickerOpen(false), []);
+  const openCultivatePicker = useCallback(() => {
+    setCultivatePickerOpen(true);
+    setActiveCommand(null);
+    setCityMenu(null);
+    setMapContextMenu(null);
+    setShowMapIntelOptions(false);
+    setUnitCommandMenu(null);
+    setUnitTacticMenu(null);
+    setUnitStrategyMenu(null);
+    setPendingDeployCommand(null);
+    setPendingDeployAction(null);
+    setTargetingAttack(null);
+    setTargetingTactic(null);
+    setTargetingFirePlot(null);
+    setTargetingUnitStrategy(null);
+    setTargetingFacility(null);
+    setTargetingRepair(null);
+    setShowGlobalIntel(false);
+    setMapOfficerListScope(null);
+    setSelectedUnitId(null);
+    setFacilityContextMenu(null);
+  }, []);
+  const launchCultivate = useCallback((category: CultivateCategory) => {
+    setCultivatePickerOpen(false);
+    setActiveCultivate(category);
+    setActiveCommand(null);
+    setCityMenu(null);
+    setMapContextMenu(null);
+    setShowMapIntelOptions(false);
+    setUnitCommandMenu(null);
+    setUnitTacticMenu(null);
+    setUnitStrategyMenu(null);
+    setPendingDeployCommand(null);
+    setPendingDeployAction(null);
+    setTargetingAttack(null);
+    setTargetingTactic(null);
+    setTargetingFirePlot(null);
+    setTargetingUnitStrategy(null);
+    setTargetingFacility(null);
+    setTargetingRepair(null);
+    setShowGlobalIntel(false);
+    setMapOfficerListScope(null);
+    setSelectedUnitId(null);
+    setFacilityContextMenu(null);
+  }, []);
   const cancelUnitHoverClose = useCallback(() => {
     if (unitHoverCloseTimerRef.current === null) return;
     window.clearTimeout(unitHoverCloseTimerRef.current);
@@ -357,6 +407,7 @@ export function GameShell() {
   const attackTargetUnitIds = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
     if (!targetState) return [];
+    if (targetingAttack?.joint) return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).jointAttackUnits.map((unit) => unit.id);
     if (targetingAttack) return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackUnits.map((unit) => unit.id);
     if (targetingTactic) return getTacticUnitTargets(targetState, targetingTactic.unitId, targetingTactic.tacticId, targetingTactic.origin).map((unit) => unit.id);
     if (targetingUnitStrategy) return getStrategyUnitTargets(targetState, targetingUnitStrategy.unitId, targetingUnitStrategy.strategyId, targetingUnitStrategy.origin).map((unit) => unit.id);
@@ -381,13 +432,13 @@ export function GameShell() {
   }, [attackTargetUnitIds, hoveredUnit, pendingDeployActionPreview, state, targetingUnitStrategy]);
   const attackTargetCityIds = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
-    if (!targetState || !targetingAttack) return [];
+    if (!targetState || !targetingAttack || targetingAttack.joint) return [];
     return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackCities.map((city) => city.id);
   }, [pendingDeployActionPreview, state, targetingAttack]);
   const targetFacilityIds = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
     if (!targetState) return [];
-    if (targetingAttack) return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackFacilities.map((facility) => facility.id);
+    if (targetingAttack && !targetingAttack.joint) return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackFacilities.map((facility) => facility.id);
     if (targetingTactic) return getTacticFacilityTargets(targetState, targetingTactic.unitId, targetingTactic.tacticId, targetingTactic.origin).map((facility) => facility.id);
     if (targetingRepair) return getRepairTargets(targetState, targetingRepair.unitId, targetingRepair.origin).map((facility) => facility.id);
     return [];
@@ -557,6 +608,28 @@ export function GameShell() {
     const commandUnitId = deployAction?.unitId ?? unitMenuUnitId;
     setSelectedUnitId(commandUnitId);
     setTargetingAttack({ unitId: commandUnitId, origin: deployAction ? undefined : unitMenuDestination });
+    setTargetingTactic(null);
+    setTargetingFirePlot(null);
+    setTargetingUnitStrategy(null);
+    setTargetingFacility(null);
+    setTargetingRepair(null);
+    setUnitTacticMenu(null);
+    setUnitStrategyMenu(null);
+    setUnitCommandMenu(null);
+  }, [beginPendingDeployAction, canOperateCurrentTurn, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuState, unitMenuUnitId]);
+
+  const executeUnitJointAttackCommand = useCallback(() => {
+    if (
+      !canOperateCurrentTurn ||
+      !unitCommandMenu ||
+      !unitMenuState ||
+      !unitMenuUnitId ||
+      !unitMenuQuery?.commandAvailability.jointAttack
+    ) return;
+    const deployAction = isPendingDeployCommandMenu ? beginPendingDeployAction() : null;
+    const commandUnitId = deployAction?.unitId ?? unitMenuUnitId;
+    setSelectedUnitId(commandUnitId);
+    setTargetingAttack({ unitId: commandUnitId, origin: deployAction ? undefined : unitMenuDestination, joint: true });
     setTargetingTactic(null);
     setTargetingFirePlot(null);
     setTargetingUnitStrategy(null);
@@ -745,6 +818,12 @@ export function GameShell() {
       if (!handled) {
         useUnitStrategy(targetingUnitStrategy.unitId, targetingUnitStrategy.strategyId, { targetUnitId: targetId }, targetingUnitStrategy.origin);
       }
+    } else if (targetingAttack?.joint) {
+      const handled = pendingDeployAction?.unitId === targetingAttack.unitId &&
+        finishPendingDeployAction({ type: 'jointAttackUnit', targetId });
+      if (!handled) {
+        jointAttackUnit(targetingAttack.unitId, targetId, targetingAttack.origin);
+      }
     } else if (targetingAttack) {
       const handled = pendingDeployAction?.unitId === targetingAttack.unitId &&
         finishPendingDeployAction({ type: 'attackUnit', targetId });
@@ -764,7 +843,7 @@ export function GameShell() {
     setUnitCommandMenu(null);
     setUnitTacticMenu(null);
     setUnitStrategyMenu(null);
-  }, [attackTargetUnitIds, attackUnit, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, targetingAttack, targetingTactic, targetingUnitStrategy, useUnitStrategy, useUnitTactic]);
+  }, [attackTargetUnitIds, attackUnit, jointAttackUnit, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, targetingAttack, targetingTactic, targetingUnitStrategy, useUnitStrategy, useUnitTactic]);
 
   const selectFacilityTarget = useCallback((facilityId: string) => {
     if (!canOperateCurrentTurn) return;
@@ -1261,7 +1340,7 @@ export function GameShell() {
         <FacilityInfoPanel facility={state.facilities[hoveredFacility.facilityId]} state={state} position={hoveredFacility.position} />
       )}
       <ForceOverviewPanel />
-      <CityPanel onCommand={launchCommand} />
+      <CityPanel onCommand={launchCommand} onOpenCultivatePicker={openCultivatePicker} />
       <BattlePanel />
       <EventLog />
       {editorState && (
@@ -1290,8 +1369,11 @@ export function GameShell() {
         <CityCommandMenu
           cityId={cityMenu.cityId}
           actionPoints={state ? state.actionPoints[state.playerForceId] : 0}
+          merchantAvailable={Boolean(state && state.cities[cityMenu.cityId].merchantPresent && !state.cities[cityMenu.cityId].merchantTradedThisTenDay)}
           position={cityMenu.position}
           onCommand={launchCommand}
+          onCultivate={launchCultivate}
+          onOpenCultivatePicker={openCultivatePicker}
           onDeploy={openDeployDialog}
           onTransport={openTransportDialog}
           onClose={() => setCityMenu(null)}
@@ -1374,6 +1456,7 @@ export function GameShell() {
             const onClick =
               command === '待命' ? executeUnitWaitCommand :
               commandIndex === 1 ? executeUnitAttackCommand :
+              command === '齐攻' ? executeUnitJointAttackCommand :
               command === '战法' ? executeUnitTacticCommand :
               command === '计略' ? executeUnitStrategyCommand :
               commandIndex === 7 ? executeUnitRepairCommand :
@@ -1507,6 +1590,12 @@ export function GameShell() {
         />
       )}
       {activeCommand && selectedCityId && <CommandDialog type={activeCommand} cityId={selectedCityId} onClose={closeCommand} />}
+      {activeCultivate && selectedCityId && (
+        <CultivateDialog cityId={selectedCityId} category={activeCultivate} onClose={closeCultivate} />
+      )}
+      {cultivatePickerOpen && selectedCityId && (
+        <CultivatePickerDialog onSelect={launchCultivate} onClose={closeCultivatePicker} />
+      )}
       {deployCityId && (
         <DeployDialog
           cityId={deployCityId}

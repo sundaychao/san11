@@ -599,7 +599,7 @@ describe('game interface shell', () => {
 
     const dialog = screen.getByRole('dialog', { name: '征兵' });
     expect(within(dialog).getByLabelText('执行武将')).toBeVisible();
-    expect(within(dialog).getByRole('button', { name: '执行征兵' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: '决定·征兵' })).toBeEnabled();
   });
 
   it('shows temporary city gain numbers after recruit and armament production', () => {
@@ -616,7 +616,7 @@ describe('game interface shell', () => {
       fireEvent.click(jianglingMarker!);
       fireEvent.click(within(screen.getByTestId('city-command-menu')).getByRole('button', { name: '都市' }));
       fireEvent.click(within(screen.getByTestId('city-command-menu')).getByRole('button', { name: '征兵' }));
-      fireEvent.click(within(screen.getByRole('dialog', { name: '征兵' })).getByRole('button', { name: '执行征兵' }));
+      fireEvent.click(within(screen.getByRole('dialog', { name: '征兵' })).getByRole('button', { name: '决定·征兵' }));
 
       const recruitEffect = screen.getByTestId('city-effect-number');
       expect(recruitEffect).toHaveTextContent('士兵 +1,290');
@@ -632,7 +632,7 @@ describe('game interface shell', () => {
       const dialog = screen.getByRole('dialog', { name: '生产兵装' });
       expect(within(dialog).getByLabelText('执行武将')).toBeVisible();
       fireEvent.click(within(dialog).getByRole('button', { name: '弩' }));
-      fireEvent.click(within(dialog).getByRole('button', { name: '执行生产兵装' }));
+      fireEvent.click(within(dialog).getByRole('button', { name: '决定·生产兵装' }));
 
       expect(screen.queryByRole('dialog', { name: '生产兵装' })).not.toBeInTheDocument();
       expect(screen.getByText(/生产江陵弩/)).toBeVisible();

@@ -82,11 +82,18 @@ function validOfficerLocation(location: unknown) {
   const value = location as Record<string, unknown>;
   if (value.kind === 'unit') return typeof value.unitId === 'string';
   if (value.kind === 'city' || value.kind === 'unaffiliated') return CITY_IDS.includes(value.cityId as City['id']);
-  if (value.kind === 'task') return CITY_IDS.includes(value.cityId as City['id']) &&
-    ARMAMENT_TYPES.includes(value.armamentType as ArmamentType) &&
-    value.task === 'armament' &&
-    Number.isInteger(value.amount) && Number(value.amount) >= 0 &&
-    Number.isInteger(value.remainingTenDays) && Number(value.remainingTenDays) > 0;
+  if (value.kind === 'task') {
+    const validCity = CITY_IDS.includes(value.cityId as City['id']) &&
+      Number.isInteger(value.remainingTenDays) && Number(value.remainingTenDays) > 0;
+    if (!validCity) return false;
+    if (value.task === 'armament') {
+      return ARMAMENT_TYPES.includes(value.armamentType as ArmamentType) &&
+        Number.isInteger(value.amount) && Number(value.amount) >= 0;
+    }
+    if (value.task === 'research') return typeof value.branch === 'string';
+    if (value.task === 'cultivate') return typeof value.nodeId === 'string';
+    return false;
+  }
   return value.kind === 'transfer' &&
     CITY_IDS.includes(value.fromCityId as City['id']) &&
     CITY_IDS.includes(value.targetCityId as City['id']) &&
@@ -113,6 +120,8 @@ function validOfficer(value: unknown): value is Officer {
     validOfficerLocation(officer.location) &&
     typeof officer.acted === 'boolean' &&
     (officer.skill === undefined || typeof officer.skill === 'string') &&
+    (officer.learnedSkills === undefined ||
+      (Array.isArray(officer.learnedSkills) && officer.learnedSkills.every((skill) => typeof skill === 'string'))) &&
     (officer.aptitudes === undefined || validOfficerAptitudes(officer.aptitudes)) &&
     Boolean(stats) &&
     exactKeys(stats!, ['leadership', 'war', 'intelligence', 'politics', 'charisma'] satisfies Array<keyof Stats>) &&
@@ -133,7 +142,7 @@ function validGridCell(value: unknown): value is GridCell {
   const cell = value as Partial<GridCell>;
   return Number.isInteger(cell.q) && cell.q! >= 0 &&
     Number.isInteger(cell.r) && cell.r! >= 0 &&
-    ['road', 'plain', 'forest', 'hill', 'mountain', 'water', 'shore', 'ferry'].includes(cell.terrain!);
+    ['road', 'plain', 'forest', 'hill', 'mountain', 'water', 'ferry'].includes(cell.terrain!);
 }
 
 function validUnit(value: unknown): value is ArmyUnit {
@@ -173,7 +182,7 @@ function validBattleDamageReport(value: unknown): value is BattleDamageReport {
     typeof report.amount === 'number' &&
     Number.isInteger(report.amount) &&
     report.amount >= 0 &&
-    (report.kind === 'attack' || report.kind === 'counter') &&
+    (report.kind === 'attack' || report.kind === 'counter' || report.kind === 'jointAttack') &&
     (report.critical === undefined || typeof report.critical === 'boolean') &&
     (report.label === undefined || typeof report.label === 'string');
 }
@@ -359,8 +368,18 @@ export function loadSave(storage: SaveAdapter, slot: SaveSlot): LoadResult {
 }
 
 function migrateTerrainGrid(state: GameState): GameState {
-  const hasShoreOrFerry = state.grid.some((cell) => cell.terrain === 'shore' || cell.terrain === 'ferry');
-  if (hasShoreOrFerry) return state;
+  // 旧存档中可能仍含 shore 地形，统一转换为 water
+  let changed = false;
+  const normalized = state.grid.map((cell) => {
+    if ((cell.terrain as string) === 'shore') {
+      changed = true;
+      return { ...cell, terrain: 'water' as const };
+    }
+    return cell;
+  });
+  if (changed) return { ...state, grid: normalized };
+  const hasFerry = state.grid.some((cell) => cell.terrain === 'ferry');
+  if (hasFerry) return state;
   const fallbackGrid: GridCell[] = (china42Data.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map(
     (cell) => ({ q: cell.q, r: cell.r, terrain: cell.terrain }),
   );

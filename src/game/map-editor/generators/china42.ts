@@ -321,7 +321,7 @@ export function generateChina42Map(): GeneratedMap {
       for (const neighbor of [coord, ...neighborsOf(coord.q, coord.r)]) {
         if (!inBounds(neighbor.q, neighbor.r)) continue;
         const current = get(neighbor.q, neighbor.r);
-        if (current === 'mountain' || current === 'shore' || current === 'ferry') {
+        if (current === 'mountain' || current === 'ferry') {
           set(neighbor.q, neighbor.r, 'plain');
         }
       }
@@ -336,8 +336,6 @@ export function generateChina42Map(): GeneratedMap {
         return 1;
       case 'ferry':
         return 2;
-      case 'shore':
-        return 3;
       case 'hill':
         return 5;
       case 'forest':
@@ -402,22 +400,12 @@ export function generateChina42Map(): GeneratedMap {
     if (!path) throw new Error(`无法修建道路: ${from.label}-${to.label}`);
     for (const [q, r] of path) {
       const current = get(q, r);
-      if (current === 'water' || current === 'shore') set(q, r, 'ferry');
+      if (current === 'water') set(q, r, 'ferry');
       else set(q, r, 'road');
     }
   }
 
-  // 岸边：临水的非道路陆地格（保留道路通行，渡口已定）
-  const updatedKeys: Array<[number, number]> = [];
-  for (let q = 0; q < WIDTH; q += 1) {
-    for (let r = 0; r < HEIGHT; r += 1) {
-      const current = get(q, r);
-      if (current === 'water' || current === 'mountain' || current === 'ferry' || current === 'road') continue;
-      const touchesWater = neighborsOf(q, r).some((coord) => inBounds(coord.q, coord.r) && get(coord.q, coord.r) === 'water');
-      if (touchesWater) updatedKeys.push([q, r]);
-    }
-  }
-  for (const [q, r] of updatedKeys) set(q, r, 'shore');
+  // 岸边已并入水域：临水陆地直接作为可航行水域的一部分，不再单独生成 shore
 
   // 历史名渡口：官渡、白马、孟津、蒲坂、夏口、荆州、京口、柴桑、淮上、湘江、辽西
   const FERRY_CROSSINGS: Point[] = [

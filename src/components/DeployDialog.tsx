@@ -4,6 +4,7 @@ import { useAudioEventAdapter, type AudioEventAdapter } from '../audio/reactAudi
 import { armamentsOf, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT } from '../game/armaments';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { useGame } from '../game/store/GameProvider';
+import { officerSkillsText } from '../game/skills';
 import type { CityId, Officer, OfficerAptitudes, Stats, TroopType } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -134,7 +135,7 @@ function columnsForOfficerPicker(activeView: OfficerPickerView): OfficerPickerCo
 
 function officerPickerSortValue(officer: Officer, sortKey: OfficerPickerSortKey) {
   if (sortKey === 'name') return officer.name;
-  if (sortKey === 'skill') return officer.skill ?? '无';
+  if (sortKey === 'skill') return officerSkillsText(officer);
   if (sortKey in fallbackAptitudes) {
     const aptitudes = officer.aptitudes ?? fallbackAptitudes;
     return aptitudeRank[aptitudes[sortKey as keyof OfficerAptitudes]];
@@ -210,7 +211,7 @@ function OfficerPicker({
       );
     }
     if (activeView === 'skill') {
-      return <span>{officer.skill ?? '无'}</span>;
+      return <span>{officerSkillsText(officer)}</span>;
     }
     const aptitudes = officer.aptitudes ?? fallbackAptitudes;
     return (

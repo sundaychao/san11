@@ -7,7 +7,7 @@ import { territoryCityAt, territoryForceAt } from '../territory';
 import { settleTenDay } from '../turn';
 import type { TroopType } from '../types';
 import * as skillHandlers from '../skills/handlers';
-import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
+import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
 import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 import { damageRoll } from './shared';
@@ -1288,8 +1288,10 @@ describe('battle deployment and movement actions', () => {
     const next = useUnitTactic(state, 'liu', attacker.id, 'whirlwind-a', 'halberd-whirlwind');
 
     expect(next.rngCursor).toBe(state.rngCursor + 3);
-    expect(next.battleDamageReports).toHaveLength(2);
-    expect(next.battleDamageReports?.every((report) => report.critical && report.label === '暴击')).toBe(true);
+    const damageReports = next.battleDamageReports!.filter((report) => report.kind !== 'counter');
+    expect(damageReports).toHaveLength(2);
+    expect(damageReports.every((report) => report.critical && report.label === '暴击')).toBe(true);
+    expect(next.battleDamageReports?.some((report) => report.kind === 'counter' && report.unitId === attacker.id)).toBe(true);
   });
 
   it('uses 飞将 tactic criticals without consuming the ordinary critical roll', () => {
@@ -1334,8 +1336,10 @@ describe('battle deployment and movement actions', () => {
     const next = useUnitTactic(state, 'liu', attacker.id, target.id, 'halberd-whirlwind');
 
     expect(next.rngCursor).toBe(state.rngCursor + 2);
-    expect(next.battleDamageReports?.map((report) => report.unitId)).toEqual([target.id, 'area-stronger']);
-    expect(next.battleDamageReports?.every((report) => report.critical && report.label === '暴击')).toBe(true);
+    const damageReports = next.battleDamageReports!.filter((report) => report.kind !== 'counter');
+    expect(damageReports.map((report) => report.unitId)).toEqual([target.id, 'area-stronger']);
+    expect(damageReports.every((report) => report.critical && report.label === '暴击')).toBe(true);
+    expect(next.battleDamageReports?.some((report) => report.kind === 'counter' && report.unitId === attacker.id)).toBe(true);
   });
 
   it('rolls area tactic damage and 不屈 once per target in deterministic order', () => {
@@ -1391,7 +1395,9 @@ describe('battle deployment and movement actions', () => {
     expect(nextRandom(state.seed, 3).value).toBeGreaterThanOrEqual(0.5);
     expect(secondExpected.defenseRoll).toBeGreaterThanOrEqual(0.5);
     expect(next.rngCursor).toBe(expectedState.rngCursor);
-    expect(next.battleDamageReports).toEqual([firstExpected.report, secondExpected.report]);
+    const damageReports = next.battleDamageReports!.filter((report) => report.kind !== 'counter');
+    expect(damageReports).toEqual([firstExpected.report, secondExpected.report]);
+    expect(next.battleDamageReports?.some((report) => report.kind === 'counter' && report.unitId === attacker.id)).toBe(true);
   });
 
   it('uses spear tactics to push or confuse a target and spend energy', () => {
@@ -1562,7 +1568,7 @@ describe('battle deployment and movement actions', () => {
     const whirlwind = useUnitTactic(state, 'liu', attacker.id, 'enemy-front', 'halberd-whirlwind');
 
     expect(whirlwind.units[attacker.id].energy).toBe(70);
-    expect(whirlwind.battleDamageReports?.map((report) => report.unitId).sort()).toEqual(['enemy-front', 'enemy-side']);
+    expect(whirlwind.battleDamageReports?.filter((report) => report.kind !== 'counter').map((report) => report.unitId).sort()).toEqual(['enemy-front', 'enemy-side']);
 
     const crossbowState = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -1622,7 +1628,7 @@ describe('battle deployment and movement actions', () => {
     const swept = useUnitTactic(state, 'liu', attacker.id, 'sweep-target', 'halberd-sweep');
 
     expect(swept.units[attacker.id].energy).toBe(80);
-    expect(swept.battleDamageReports?.map((report) => report.unitId).sort()).toEqual([
+    expect(swept.battleDamageReports?.filter((report) => report.kind !== 'counter').map((report) => report.unitId).sort()).toEqual([
       'sweep-linked-a',
       'sweep-linked-b',
       'sweep-target',
@@ -2201,8 +2207,8 @@ describe('battle deployment and movement actions', () => {
     });
   });
 
-  it('resolves 连战 through two normal hits but spends energy and counters once', () => {
-    const { state, attacker, target } = combatSkillState('连战', '无', 10_000);
+  it('resolves 连击 through two normal hits but spends energy and counters once', () => {
+    const { state, attacker, target } = combatSkillState('连击', '无', 10_000);
     const expectedState = structuredClone(state);
     const expectedFirst = damageRoll(expectedState, expectedState.units[attacker.id], 'plain', false, expectedState.units[target.id]);
     expectedState.rngCursor = nextRandom(expectedState.seed, expectedState.rngCursor).cursor;
@@ -2217,8 +2223,8 @@ describe('battle deployment and movement actions', () => {
     expect(next.units[attacker.id]).toMatchObject({ energy: 90, acted: true });
   });
 
-  it('does not roll 连战 after the first normal hit defeats the target', () => {
-    const { state, attacker, target } = combatSkillState('连战', '无', 1);
+  it('does not roll 连击 after the first normal hit defeats the target', () => {
+    const { state, attacker, target } = combatSkillState('连击', '无', 1);
 
     const next = attackUnit(state, 'liu', attacker.id, target.id);
 
@@ -2534,6 +2540,105 @@ describe('battle deployment and movement actions', () => {
 
     second.units[ally.id].acted = true;
     expect(jointAttackableUnits(second, attacker.id).map((unit) => unit.id)).toEqual([]);
+  });
+
+  it('performs a joint attack that merges ally damage into one report and acts every participant', () => {
+    const first = deployUnit(createGame('liu', 2), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 4000,
+      food: 6000,
+    });
+    const second = deployUnit(first, 'liu', {
+      cityId: 'wuling',
+      officerId: 'zhang-fei',
+      troops: 4000,
+      food: 6000,
+    });
+    const [attacker, ally] = Object.values(second.units);
+    const enemyPosition = neighborsOf(attacker.q, attacker.r)[0];
+    const allyPosition = neighborsOf(enemyPosition.q, enemyPosition.r)
+      .find((coord) => (
+        (coord.q !== attacker.q || coord.r !== attacker.r) &&
+        !Object.values(second.units).some((unit) => unit.q === coord.q && unit.r === coord.r)
+      ))!;
+    second.units[ally.id].q = allyPosition.q;
+    second.units[ally.id].r = allyPosition.r;
+    readyUnitAt(second, attacker.id, attacker, attacker.troopType ?? 'sword');
+    readyUnitAt(second, ally.id, allyPosition, ally.troopType ?? 'sword');
+    second.units['joint-target'] = {
+      id: 'joint-target',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      q: enemyPosition.q,
+      r: enemyPosition.r,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+
+    const next = jointAttackUnit(second, 'liu', attacker.id, 'joint-target');
+
+    // 总伤害合并为单个齐攻报告，且报告的伤害等于目标实际受到的损失
+    const jointReport = next.battleDamageReports!.find((report) => report.kind === 'jointAttack');
+    expect(jointReport).toBeDefined();
+    expect(jointReport!.amount).toBe(3000 - next.units['joint-target'].troops);
+    expect(next.units['joint-target'].troops).toBeLessThan(3000);
+    // 主攻者与友军都本旬行动、各消耗 10 气力
+    expect(next.units[attacker.id].acted).toBe(true);
+    expect(next.units[ally.id].acted).toBe(true);
+    expect(next.units[attacker.id].energy).toBe(90);
+    expect(next.units[ally.id].energy).toBe(90);
+  });
+
+  it('rejects a joint attack when no actionable ally is adjacent to the target', () => {
+    const first = deployUnit(createGame('liu', 2), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 4000,
+      food: 6000,
+    });
+    const second = deployUnit(first, 'liu', {
+      cityId: 'wuling',
+      officerId: 'zhang-fei',
+      troops: 4000,
+      food: 6000,
+    });
+    const [attacker, ally] = Object.values(second.units);
+    const enemyPosition = neighborsOf(attacker.q, attacker.r)[0];
+    const allyPosition = neighborsOf(enemyPosition.q, enemyPosition.r)
+      .find((coord) => (
+        (coord.q !== attacker.q || coord.r !== attacker.r) &&
+        !Object.values(second.units).some((unit) => unit.q === coord.q && unit.r === coord.r)
+      ))!;
+    second.units[ally.id].q = allyPosition.q;
+    second.units[ally.id].r = allyPosition.r;
+    readyUnitAt(second, attacker.id, attacker, attacker.troopType ?? 'sword');
+    readyUnitAt(second, ally.id, allyPosition, ally.troopType ?? 'sword');
+    second.units.ally = second.units[ally.id];
+    second.units['joint-target'] = {
+      id: 'joint-target',
+      forceId: 'cao',
+      leaderId: 'cao-ren',
+      homeCityId: 'xiangyang',
+      q: enemyPosition.q,
+      r: enemyPosition.r,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+
+    // 让友军本旬已行动，齐攻不再可用
+    second.units[ally.id].acted = true;
+    expect(jointAttackableUnits(second, attacker.id)).toHaveLength(0);
+    expect(() => jointAttackUnit(second, 'liu', attacker.id, 'joint-target')).toThrow(/齐攻范围/);
   });
 
   it('captures a city when siege damage drops garrison or durability to zero', () => {

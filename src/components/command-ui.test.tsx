@@ -20,6 +20,17 @@ function renderState(state = createGame('liu', 3)) {
   );
 }
 
+// 默认最高角度视野约 30 格且中心在地图中心 (100,100)；测试视口 fallback 1280×720。
+// 地图层等比（方格不变形）渲染：横向 1 格约 42.7px，纵向每格与横向相同。
+function panMapTo(q: number, r: number) {
+  const cellPxX = (1280 * 6.67) / 200;
+  const cellPxY = cellPxX; // 等比后纵向每格像素 = 横向每格像素
+  const viewport = screen.getByTestId('map-viewport');
+  fireEvent.pointerDown(viewport, { pointerId: 1, button: 0, buttons: 1, clientX: 640, clientY: 360 });
+  fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 640 + (100 - q) * cellPxX, clientY: 360 + (100 - r) * cellPxY });
+  fireEvent.pointerUp(viewport, { pointerId: 1 });
+}
+
 function officerNamesIn(dialog: HTMLElement) {
   return within(dialog).getAllByRole('rowheader').map((header) => header.textContent ?? '');
 }
@@ -73,6 +84,7 @@ describe('command interface', { timeout: 30000 }, () => {
       energy: 100, movementRemaining: 20, moved: false, acted: false,
     };
     renderState(state);
+    panMapTo(10, 10);
 
     const marker = screen.getAllByTestId('battle-unit-marker')
       .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
@@ -163,7 +175,7 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(officerRow('刘备')).toHaveTextContent('仁德');
     expect(officerRow('刘备')).toHaveTextContent('项目自定义特技，效果将在单独规则设计中启用');
     const noSkillCells = within(officerRow('糜芳')).getAllByRole('cell');
-    expect(noSkillCells[0].textContent).toBe('');
+    expect(noSkillCells[0].textContent).toBe('—');
     expect(noSkillCells[1].textContent).toBe('');
 
     await user.click(within(dialog).getByRole('button', { name: '适性' }));
@@ -286,11 +298,52 @@ describe('command interface', { timeout: 30000 }, () => {
     await user.click(screen.getByRole('button', { name: '巡察' }));
     const dialog = screen.getByRole('dialog', { name: '巡察' });
     await user.selectOptions(within(dialog).getByLabelText('执行武将'), 'liu-bei');
-    await user.click(within(dialog).getByRole('button', { name: '执行巡察' }));
+    await user.click(within(dialog).getByRole('button', { name: '决定·巡察' }));
 
     expect(screen.queryByRole('dialog', { name: '巡察' })).not.toBeInTheDocument();
     expect(screen.getByText(/刘备巡察江陵/)).toBeVisible();
     expect(screen.getByText('已行动')).toBeVisible();
+  });
+
+  it('buys grain by dragging the merchant slider right and sells by dragging it left', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    state.cities.jiangling.merchantPresent = true;
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: '商人' }));
+    const dialog = screen.getByRole('dialog', { name: '商人' });
+    expect(within(dialog).getByText(/粮价 1金=5粮/)).toBeVisible();
+    const slider = within(dialog).getByLabelText('交易数量') as HTMLInputElement;
+    // 滑块居中（0）时不交易，执行按钮禁用
+    expect(slider).toHaveValue('0');
+    expect(within(dialog).getByRole('button', { name: '决定·商人' })).toBeDisabled();
+
+    // 向右拖动 = 买入兵粮：兵粮预览增加
+    fireEvent.change(slider, { target: { value: '5000' } });
+    expect(within(dialog).getByText(/38,000 → 43,000/)).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: '决定·商人' }));
+    expect(screen.queryByRole('dialog', { name: '商人' })).not.toBeInTheDocument();
+    expect(screen.getByText(/以1金5粮的价格购入5,000兵粮/)).toBeVisible();
+  });
+
+  it('sells grain by dragging the merchant slider to the left', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    state.cities.jiangling.merchantPresent = true;
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: '商人' }));
+    const dialog = screen.getByRole('dialog', { name: '商人' });
+    const slider = within(dialog).getByLabelText('交易数量') as HTMLInputElement;
+
+    // 向左拖动 = 卖出兵粮：兵粮预览减少
+    fireEvent.change(slider, { target: { value: '-3000' } });
+    expect(within(dialog).getByText(/38,000 → 35,000/)).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: '决定·商人' }));
+
+    expect(screen.queryByRole('dialog', { name: '商人' })).not.toBeInTheDocument();
+    expect(screen.getByText(/以1金5粮的价格卖出3,000兵粮/)).toBeVisible();
   });
 
   it('moves focus into the command dialog, closes on Escape, and restores focus', async () => {
@@ -331,7 +384,7 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(within(dialog).queryByText('调动兵力')).not.toBeInTheDocument();
 
     await user.click(within(dialog).getByLabelText(/关羽/));
-    await user.click(within(dialog).getByRole('button', { name: '执行调动' }));
+    await user.click(within(dialog).getByRole('button', { name: '决定·调动' }));
 
     expect(screen.queryByRole('dialog', { name: '调动' })).not.toBeInTheDocument();
     expect(screen.getByText(/调动关羽/)).toBeVisible();
@@ -409,6 +462,7 @@ describe('command interface', { timeout: 30000 }, () => {
 
     expect(screen.queryByRole('dialog', { name: '出征编制' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('battle-unit-marker')).not.toBeInTheDocument();
+    panMapTo(92, 120); // 等比后江陵(120)在初始视野外，平移让部署格渲染
     const deploymentCell = screen.getAllByTestId(/deploy-target-/)[0];
     fireEvent.pointerDown(deploymentCell, { button: 0, buttons: 1 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
@@ -461,6 +515,7 @@ describe('command interface', { timeout: 30000 }, () => {
   it('opens the strategy menu for Ma Su during the first deployment action', async () => {
     const user = userEvent.setup();
     renderState();
+    panMapTo(86, 136);
 
     await user.click(screen.getByRole('button', { name: /^武陵 刘备/ }));
     const menu = screen.getByTestId('city-command-menu');
@@ -479,6 +534,7 @@ describe('command interface', { timeout: 30000 }, () => {
   it('completes Ma Su deployment after selecting 火计 and a target cell', async () => {
     const user = userEvent.setup();
     renderState();
+    panMapTo(86, 136);
 
     await user.click(screen.getByRole('button', { name: /^武陵 刘备/ }));
     const menu = screen.getByTestId('city-command-menu');
@@ -508,6 +564,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const destination = enhanced.find((coord) => !base.some((cell) => cell.q === coord.q && cell.r === coord.r));
     expect(destination).toBeDefined();
     renderState(state);
+    panMapTo(destination!.q, destination!.r); // 等比后部署目标格在初始视野外，平移到目标让部署格渲染
 
     await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
     const menu = screen.getByTestId('city-command-menu');
@@ -687,6 +744,7 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(within(dialog).getByTestId('deploy-gold-value')).toHaveTextContent('900');
 
     await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
+    panMapTo(92, 120); // 等比后江陵(120)在初始视野外，平移让部署格渲染
     fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
@@ -707,6 +765,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const dialog = screen.getByRole('dialog', { name: '出征编制' });
     fireEvent.change(within(dialog).getByRole('slider', { name: '出征资金' }), { target: { value: '900' } });
     await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
+    panMapTo(92, 120); // 等比后江陵(120)在初始视野外，平移让部署格渲染
 
     fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1, clientX: 320, clientY: 220 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
@@ -786,6 +845,7 @@ describe('command interface', { timeout: 30000 }, () => {
     await user.click(within(dialog).getByRole('button', { name: '确定输送' }));
 
     expect(screen.queryByRole('dialog', { name: '输送编制' })).not.toBeInTheDocument();
+    panMapTo(92, 120); // 等比后江陵(120)在初始视野外，平移让输送部署格渲染
     const transportCell = screen.getAllByTestId(/deploy-target-/)[0];
     fireEvent.pointerDown(transportCell, { button: 0, buttons: 1 });
 
@@ -810,6 +870,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const dialog = screen.getByRole('dialog', { name: '出征编制' });
     const confirmedDialog = await chooseDeployLeader(user, '刘备');
     await user.click(within(confirmedDialog).getByRole('button', { name: '确定出征' }));
+    panMapTo(92, 120); // 等比后江陵(120)在初始视野外，平移让部署/移动格渲染
     fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
@@ -950,6 +1011,8 @@ describe('command interface', { timeout: 30000 }, () => {
       acted: false,
     };
     renderState(state);
+    // 等比后攻击/齐攻的目标格(江陵附近)在初始视野外，平移到目的地格让 move-target 渲染
+    panMapTo(destination.q, destination.r);
 
     const playerUnit = screen.getAllByTestId('battle-unit-marker')
       .find((marker) => marker.getAttribute('data-grid-position') === `${attacker.q},${attacker.r}`)!;
@@ -998,6 +1061,8 @@ describe('command interface', { timeout: 30000 }, () => {
       acted: false,
     };
     renderState(state);
+    // 等比后(10,10)部队区域在初始视野外，平移到该区域让目标/部队格渲染
+    panMapTo(10, 10);
 
     const playerUnit = screen.getAllByTestId('battle-unit-marker')
       .find((marker) => marker.getAttribute('data-grid-position') === '10,10')!;
@@ -1243,6 +1308,7 @@ describe('command interface', { timeout: 30000 }, () => {
       ball: { id: 'ball', type: 'fireBall', forceId: 'liu', q: 11, r: 10, durability: 200, completed: true },
     };
     renderState(state);
+    panMapTo(10, 10);
 
     const marker = screen.getAllByTestId('battle-unit-marker')
       .find((candidate) => candidate.getAttribute('data-grid-position') === '10,10')!;
@@ -1333,6 +1399,8 @@ describe('command interface', { timeout: 30000 }, () => {
       acted: false,
     };
     renderState(state);
+    // 等比后攻击/齐攻的目标格(江陵附近)在初始视野外，平移到目的地格让 move-target 渲染
+    panMapTo(destination.q, destination.r);
 
     const playerUnit = screen.getAllByTestId('battle-unit-marker')
       .find((marker) => marker.getAttribute('data-grid-position') === `${attacker.q},${attacker.r}`)!;
@@ -1340,6 +1408,17 @@ describe('command interface', { timeout: 30000 }, () => {
     fireEvent.pointerDown(screen.getByTestId(`move-target-${destination.q}-${destination.r}`), { button: 0, buttons: 1, clientX: 320, clientY: 220 });
 
     expect(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '齐攻' })).toBeEnabled();
+
+    fireEvent.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '齐攻' }));
+    const enemy = screen.getAllByTestId('battle-unit-marker')
+      .find((marker) => marker.getAttribute('data-grid-position') === `${enemyPosition.q},${enemyPosition.r}`)!;
+    fireEvent.pointerDown(enemy, { button: 0, buttons: 1, clientX: 360, clientY: 260 });
+
+    const jointDamage = screen.getAllByTestId('battle-damage-number')
+      .find((node) => node.getAttribute('class')?.includes('is-jointAttack'));
+    expect(jointDamage).toBeTruthy();
+    expect(jointDamage!.textContent).toMatch(/^-/);
+    expect(Number(jointDamage!.textContent!.replace(/[^0-9]/g, ''))).toBeGreaterThan(0);
   });
 
   it('shows yellow arrows above enemy units that can be attacked', async () => {
@@ -1368,6 +1447,8 @@ describe('command interface', { timeout: 30000 }, () => {
       acted: false,
     };
     renderState(state);
+    // 等比后攻击目标(江陵附近)在初始视野外，平移到单位处让目标格/敌人显示
+    panMapTo(attacker.q, attacker.r);
 
     const playerUnit = screen.getAllByTestId('battle-unit-marker')
       .find((marker) => marker.getAttribute('data-grid-position') === `${attacker.q},${attacker.r}`)!;

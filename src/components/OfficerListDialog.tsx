@@ -3,7 +3,8 @@ import { useMemo, useState } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { useGame } from '../game/store/GameProvider';
 import { ARMAMENT_LABELS } from '../game/armaments';
-import { skillDefinition } from '../game/skills';
+import { TECH_BRANCH_LABELS } from '../game/techs';
+import { skillDefinition, officerSkillNames, officerSkillsText } from '../game/skills';
 import type { GameState, Officer, OfficerAptitudes, Stats } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -79,9 +80,14 @@ function taskInfo(officer: Officer, state: GameState) {
     };
   }
   if (officer.location.kind === 'task') {
+    const taskLabel = officer.location.task === 'research'
+      ? `研究${TECH_BRANCH_LABELS[officer.location.branch]}系科技`
+      : officer.location.task === 'cultivate'
+        ? `培育能力`
+        : `生产${ARMAMENT_LABELS[officer.location.armamentType]}`;
     return {
       status: '执行中',
-      task: `生产${ARMAMENT_LABELS[officer.location.armamentType]}`,
+      task: taskLabel,
       time: `${officer.location.remainingTenDays}旬`,
     };
   }
@@ -124,10 +130,6 @@ function columnsForTab(activeTab: OfficerListTab): OfficerColumn[] {
   ];
 }
 
-function displaySkill(skill?: string) {
-  return skill && skill !== '无' ? skill : '';
-}
-
 function renderOfficerCells(officer: Officer, state: GameState, activeTab: OfficerListTab) {
   if (activeTab === '所属') {
     return (
@@ -149,11 +151,12 @@ function renderOfficerCells(officer: Officer, state: GameState, activeTab: Offic
     );
   }
   if (activeTab === '特技') {
-    const skill = displaySkill(officer.skill);
+    const skillNames = officerSkillNames(officer);
+    const primary = skillNames[0];
     return (
       <>
-        <td>{skill}</td>
-        <td className="officer-skill-description">{skill ? skillDefinition(skill)?.description ?? '暂无说明' : ''}</td>
+        <td>{officerSkillsText(officer)}</td>
+        <td className="officer-skill-description">{primary ? skillDefinition(primary)?.description ?? '暂无说明' : ''}</td>
       </>
     );
   }
@@ -192,10 +195,10 @@ function sortValue(officer: Officer, state: GameState, sortKey: SortKey) {
   if (sortKey === 'name') return officer.name;
   if (sortKey === 'owner') return ownershipText(officer, state);
   if (sortKey === 'location') return locationText(officer, state);
-  if (sortKey === 'skill') return displaySkill(officer.skill);
+  if (sortKey === 'skill') return officerSkillsText(officer);
   if (sortKey === 'skillDescription') {
-    const skill = displaySkill(officer.skill);
-    return skill ? skillDefinition(skill)?.description ?? '暂无说明' : '';
+    const primary = officerSkillNames(officer)[0];
+    return primary ? skillDefinition(primary)?.description ?? '暂无说明' : '';
   }
   if (sortKey === 'status' || sortKey === 'task' || sortKey === 'time') return taskInfo(officer, state)[sortKey];
   if (sortKey in fallbackAptitudes) {

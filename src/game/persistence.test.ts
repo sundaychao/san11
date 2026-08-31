@@ -32,10 +32,10 @@ describe('persistence', () => {
     expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
   });
 
-  it('migrates a legacy terrain grid without shores and ferries on load', () => {
+  it('migrates legacy shore terrain to water and restores missing ferries on load', () => {
     const legacy = createGame('liu', 9);
     legacy.grid = legacy.grid.map((cell) => (
-      cell.terrain === 'shore' || cell.terrain === 'ferry' ? { ...cell, terrain: 'plain' } : cell
+      cell.terrain === 'ferry' ? { ...cell, terrain: 'plain' } : cell
     ));
     writeSave(storage, 'auto', legacy);
 
@@ -43,7 +43,7 @@ describe('persistence', () => {
 
     expect(loaded.ok).toBe(true);
     if (loaded.ok) {
-      expect(loaded.state.grid.some((cell) => cell.terrain === 'shore')).toBe(true);
+      expect(loaded.state.grid.some((cell) => (cell.terrain as string) === 'shore')).toBe(false);
       expect(loaded.state.grid).toHaveLength(legacy.grid.length);
       expect(Object.values(loaded.state.cities).every((city, index) => (
         city.gridQ === Object.values(legacy.cities)[index].gridQ &&
@@ -64,7 +64,7 @@ describe('persistence', () => {
   it('round-trips every first-stage and unknown custom skill without persisting derived rules', () => {
     const state = createGame('liu', 9);
     const skillNames = [
-      '强行', '飞将', '神将', '连战', '不屈', '百出', '火神', '洞察', '连环', '筑城', '乐奏', '富豪', '米道', '名声', '能吏', '自定义未登记',
+      '强行', '飞将', '神将', '连击', '不屈', '百出', '火神', '洞察', '连环', '筑城', '乐奏', '富豪', '米道', '名声', '能吏', '自定义未登记',
     ] as const;
     const assignedOfficerIds = Object.values(state.officers)
       .slice(0, skillNames.length)

@@ -7,6 +7,7 @@ import {
   deployUnit,
   deployUnitWithId,
   dismantleFacility,
+  jointAttackUnit,
   moveUnit,
   repairFacility,
   useFirePlot,
@@ -51,6 +52,8 @@ export function reduceGameIntent(
           return deployed.state;
         case 'attackUnit':
           return attackUnit(deployed.state, forceId, deployed.unitId, intent.action.targetId);
+        case 'jointAttackUnit':
+          return jointAttackUnit(deployed.state, forceId, deployed.unitId, intent.action.targetId);
         case 'attackFacility':
           return attackFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityId);
         case 'attackCity':
@@ -76,6 +79,10 @@ export function reduceGameIntent(
     case 'attackUnit': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
       return attackUnit(moved, forceId, intent.attackerId, intent.targetId);
+    }
+    case 'jointAttackUnit': {
+      const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
+      return jointAttackUnit(moved, forceId, intent.attackerId, intent.targetId);
     }
     case 'attackFacility': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);

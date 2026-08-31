@@ -106,16 +106,16 @@ describe('monthly settlement', () => {
 
     const next = settleMonth(state);
 
-    expect(next.rngCursor).toBe(9);
+    expect(next.rngCursor).toBe(17);
     expect(next.logs.slice(-2)).toEqual([
-      { id: 'event-1-lingling-8', month: 1, forceId: 'biao', message: '零陵发生丰收' },
+      { id: 'event-1-wuling-13', month: 1, forceId: 'liu', message: '武陵发生商旅' },
       { id: 'month-2', month: 2, forceId: null, message: '进入建安十三年后的第2个月。' },
     ]);
     expect(next.cities.changsha).toMatchObject({
       gold: 9280, food: 36000, population: 98401, order: 82, troops: 13200,
     });
     expect(next.cities.lingling).toMatchObject({
-      gold: 10280, food: 38000, population: 82369, order: 90, troops: 11000,
+      gold: 10280, food: 35000, population: 82369, order: 90, troops: 11000,
     });
   });
 
@@ -538,5 +538,126 @@ describe('ten-day settlement', () => {
     expect(afterThree.officers['guan-yu'].location).toEqual({ kind: 'city', cityId: 'wuling' });
     expect(afterThree.officers['guan-yu'].cityId).toBe('wuling');
     expect(afterThree.logs.some((log) => log.message.includes('关羽抵达武陵'))).toBe(true);
+  });
+
+  it('completes tech research and raises the force branch level', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.techs = { spear: 1 };
+    state.officers['liu-bei'].location = {
+      kind: 'task', cityId: 'jiangling', task: 'research', branch: 'spear', remainingTenDays: 1,
+    };
+
+    const next = settleTenDay(state);
+
+    expect(next.forces.liu.techs?.spear).toBe(2);
+    expect(next.officers['liu-bei'].location).toEqual({ kind: 'city', cityId: 'jiangling' });
+    expect(next.officers['liu-bei'].acted).toBe(false);
+    expect(next.logs.some((log) => log.message.includes('「兵粮袭击」研究'))).toBe(true);
+  });
+
+  it('keeps a mid-progress research task running across ten-days', () => {
+    const state = createGame('liu', 1);
+    state.officers['liu-bei'].location = {
+      kind: 'task', cityId: 'jiangling', task: 'research', branch: 'civil', remainingTenDays: 3,
+    };
+
+    const next = settleTenDay(state);
+
+    expect(next.officers['liu-bei'].location).toMatchObject({ kind: 'task', remainingTenDays: 2 });
+    expect(next.forces.liu.techs?.civil).toBeUndefined();
+  });
+
+  it('accumulates techP from city population each ten-day', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.techP = 0;
+    // 刘备两城：江陵95000人口=23点，武陵85000=21点
+    const expected = Math.floor(95000 / 4000) + Math.floor(85000 / 4000);
+
+    const next = settleTenDay(state);
+
+    expect(next.forces.liu.techP).toBe(state.forces.liu.techP + expected);
+  });
+
+  it('regenerates unit energy faster and beyond 100 with military techs', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.techs = { military: 4 };
+    state.units['energy-tech-unit'] = {
+      id: 'energy-tech-unit',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      homeCityId: 'jiangling',
+      troopType: 'sword',
+      q: 12,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 105,
+      movementRemaining: 5,
+      moved: false,
+      acted: false,
+    };
+
+    const next = settleTenDay(state);
+
+    // 军制4级：每旬恢复10（105-400食物消耗后+10 → 但食物3000够耗，恢复10）
+    expect(next.units['energy-tech-unit'].energy).toBe(115);
+  });
+
+  it('raises city order each ten-day with the benevolent-rule civil tech', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.techs = { civil: 4 };
+    const startOrder = state.cities.jiangling.order;
+
+    const next = settleTenDay(state);
+
+    expect(next.cities.jiangling.order).toBe(startOrder + 2);
+  });
+
+  it('completes ability research after its months and lets cultivation raise an officer', () => {
+    let next = executeCommand(createGame('liu', 1), 'liu', {
+      type: 'abilityResearch', cityId: 'jiangling', nodeId: 'warLow',
+    });
+
+    // warLow 耗时1个月：月结后研究完成并解锁5次培育
+    next = settleMonth(next);
+    expect(next.forces.liu.abilityResearch?.researched).toContain('warLow');
+    expect(next.forces.liu.abilityResearch?.remaining.warLow).toBe(5);
+    expect(next.forces.liu.abilityResearch?.active).toBeUndefined();
+
+    // 培育简雍（武力24），耗时3旬（30日）
+    const warBefore = next.officers['jian-yong'].stats.war;
+    next = executeCommand(next, 'liu', {
+      type: 'cultivate', cityId: 'jiangling', officerId: 'jian-yong', nodeId: 'warLow',
+    });
+    expect(next.officers['jian-yong'].location).toMatchObject({
+      kind: 'task', task: 'cultivate', nodeId: 'warLow', remainingTenDays: 3,
+    });
+
+    next = settleTenDay(next);
+    next = settleTenDay(next);
+    next = settleTenDay(next);
+    expect(next.officers['jian-yong'].stats.war).toBe(warBefore + 5);
+    expect(next.forces.liu.abilityResearch?.remaining.warLow).toBe(4);
+    expect(next.officers['jian-yong'].location.kind).toBe('city');
+  });
+
+  it('grants a learned skill to an officer after cultivating a researched skill node', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.abilityResearch = { researched: ['sk-lianji'], remaining: { 'sk-lianji': 3 } };
+
+    let next = executeCommand(state, 'liu', {
+      type: 'cultivate', cityId: 'jiangling', officerId: 'jian-yong', nodeId: 'sk-lianji',
+    });
+    expect(next.officers['jian-yong'].skill).not.toBe('连击');
+
+    next = settleTenDay(next);
+    next = settleTenDay(next);
+    next = settleTenDay(next);
+
+    expect(next.officers['jian-yong'].learnedSkills).toContain('连击');
+    expect(next.officers['jian-yong'].skill).toBe('论客');
+    expect(next.forces.liu.abilityResearch?.remaining['sk-lianji']).toBe(2);
+    expect(next.officers['jian-yong'].location.kind).toBe('city');
   });
 });

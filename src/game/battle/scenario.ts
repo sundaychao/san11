@@ -37,7 +37,7 @@ export function createBattleGrid(): GridCell[] {
   for (const cell of cells) {
     if (cell.terrain === 'water' || cell.terrain === 'mountain') continue;
     const touchesWater = neighborsOf(cell.q, cell.r).some((coord) => waterKeys.has(`${coord.q},${coord.r}`));
-    if (touchesWater) cell.terrain = 'shore';
+    if (touchesWater) cell.terrain = 'water';
   }
   return cells;
 }

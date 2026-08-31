@@ -41,6 +41,5 @@ describe('battle scenario state', () => {
     expect(grid.find((cell) => cell.terrain === 'hill')).toBeTruthy();
     expect(grid.find((cell) => cell.terrain === 'mountain')).toBeTruthy();
     expect(grid.find((cell) => cell.terrain === 'water')).toBeTruthy();
-    expect(grid.find((cell) => cell.terrain === 'shore')).toBeTruthy();
   });
 });

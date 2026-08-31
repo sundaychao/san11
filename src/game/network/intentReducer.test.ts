@@ -117,7 +117,7 @@ describe('reduceGameIntent', () => {
     if (!reduceGameIntent) return;
 
     const state = createGame('liu', 3214);
-    state.officers['guan-yu'].skill = '连战';
+    state.officers['guan-yu'].skill = '连击';
     state.officers['guan-yu'].stats.war = 97;
     state.officers['guan-yu'].location = { kind: 'unit', unitId: 'parity-attacker' };
     state.officers['liu-bei'].skill = '神将';
@@ -156,8 +156,8 @@ describe('reduceGameIntent', () => {
       expectedCursor: 2,
     },
     {
-      name: '连战普通攻击',
-      attackerSkill: '连战',
+      name: '连击普通攻击',
+      attackerSkill: '连击',
       defenderSkill: '无',
       seed: 1,
       intent: { type: 'attackUnit', attackerId: 'host-unit', targetId: 'guest-unit' },
@@ -224,7 +224,7 @@ describe('reduceGameIntent', () => {
 
     if (name === '神将普通攻击') {
       expect(onlineState.battleDamageReports?.[0]).toMatchObject({ unitId: 'guest-unit', critical: true, label: '暴击' });
-    } else if (name === '连战普通攻击') {
+    } else if (name === '连击普通攻击') {
       expect(onlineState.battleDamageReports?.filter((report) => report.unitId === 'guest-unit')).toHaveLength(2);
     } else if (name === '百出扰乱') {
       expect(onlineState.units['host-unit']).toMatchObject({ energy: 99, acted: true });

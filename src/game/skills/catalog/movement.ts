@@ -32,6 +32,6 @@ export const MOVEMENT_SKILLS: SkillDefinition[] = [
     { kind: 'movementAllowance', add: 6, waterOnly: true },
   ]),
   movementSkill('踏破', '降低栈道、落石等地形伤害'),
-  movementSkill('运搬', '运输部队移动力增加'),
+  movementSkill('搬运', '运输部队移动力增加'),
   movementSkill('解毒', '免受毒泉伤害'),
 ];

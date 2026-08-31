@@ -6,9 +6,13 @@ export {
   jointAttackableUnits,
 } from './legacyCore';
 
-import type { CityId, ForceId, GameState } from '../types';
+import type { ArmyUnit, CityId, ForceId, GameState } from '../types';
+import { nextRandom } from '../random';
+import { addTechP } from '../commands';
+import { TECHP_PER_CITY_CAPTURE, techLevelOf, troopDamageMultiplier } from '../techs';
+import { resolveUnitSkills } from '../skills';
 import { normalAttackIsCritical, reduceIncomingDamageBySkills, rollNoCounterAttack, rollRepeatNormalAttack } from '../skills/rules/combat';
-import { attackableFacilities, attackableUnits } from './targetRules';
+import { attackableFacilities, attackableUnits, jointAttackableUnits } from './targetRules';
 import {
   areAdjacent,
   assertUnitTurn,
@@ -18,8 +22,27 @@ import {
   removeUnit,
   unitTerrain,
 } from './shared';
+import { unitIsIncapacitated } from './movementRules';
 
 const NORMAL_ATTACK_CRITICAL_MULTIPLIER = 1.35;
+
+function computeNormalAttackDamage(
+  next: GameState,
+  attacker: ArmyUnit,
+  target: ArmyUnit,
+  critical: boolean,
+) {
+  // 科技：兵科训练/精锐普攻伤害加成
+  const techMultiplier = attacker.forceId && attacker.troopType && attacker.troopType !== 'sword' && attacker.troopType !== 'siege'
+    ? troopDamageMultiplier(next, attacker.forceId, attacker.troopType)
+    : 1;
+  const rolledDamage = damageRoll(next, attacker, unitTerrain(next, target), false, target);
+  const criticalDamage = critical
+    ? Math.round(rolledDamage * NORMAL_ATTACK_CRITICAL_MULTIPLIER * techMultiplier)
+    : Math.round(rolledDamage * techMultiplier);
+  const fortifiedDamage = reduceUnitDamageByFortress(next, target, criticalDamage);
+  return reduceIncomingDamageBySkills(next, target, fortifiedDamage, 'normalAttack');
+}
 
 function applyNormalAttackHit(
   next: GameState,
@@ -31,12 +54,7 @@ function applyNormalAttackHit(
   const target = next.units[targetId];
   if (!attacker || !target) return false;
 
-  const rolledDamage = damageRoll(next, attacker, unitTerrain(next, target), false, target);
-  const criticalDamage = critical
-    ? Math.round(rolledDamage * NORMAL_ATTACK_CRITICAL_MULTIPLIER)
-    : rolledDamage;
-  const fortifiedDamage = reduceUnitDamageByFortress(next, target, criticalDamage);
-  const damage = reduceIncomingDamageBySkills(next, target, fortifiedDamage, 'normalAttack');
+  const damage = computeNormalAttackDamage(next, attacker, target, critical);
   target.troops -= damage;
   next.battleDamageReports ??= [];
   next.battleDamageReports.push({
@@ -77,10 +95,98 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
     if (!applyNormalAttackHit(next, attackerId, targetId, critical)) return next;
   }
   const attackerTerrain = unitTerrain(next, nextAttacker);
-  if (areAdjacent(nextTarget, nextAttacker) && !rollNoCounterAttack(next, nextAttacker, attackerTerrain)) {
+  // 科技：弩兵2级还射——受弩兵远程攻击时（即使不相邻）也能反击
+  const returnFire = nextTarget.troopType === 'crossbow' && nextTarget.forceId
+    && nextAttacker.troopType === 'crossbow'
+    && techLevelOf(next, nextTarget.forceId, 'crossbow') >= 2;
+  if ((returnFire || areAdjacent(nextTarget, nextAttacker)) && !rollNoCounterAttack(next, nextAttacker, attackerTerrain)) {
     const rolledCounterDamage = damageRoll(next, nextTarget, unitTerrain(next, nextAttacker), true, nextAttacker);
     const fortifiedCounterDamage = reduceUnitDamageByFortress(next, nextAttacker, rolledCounterDamage);
     const counterDamage = reduceIncomingDamageBySkills(next, nextAttacker, fortifiedCounterDamage, 'counter');
+    next.battleDamageReports.push({
+      id: `damage-${next.month}-${next.tenDay}-${next.rngCursor}-${attackerId}`,
+      unitId: attackerId, q: nextAttacker.q, r: nextAttacker.r, amount: counterDamage, kind: 'counter',
+    });
+    nextAttacker.troops -= counterDamage;
+    if (nextAttacker.troops <= 0) removeUnit(next, nextAttacker, nextTarget);
+  }
+  return next;
+}
+
+export function jointAttackUnit(state: GameState, forceId: ForceId, attackerId: string, targetId: string): GameState {
+  const attacker = assertUnitTurn(state, forceId, attackerId);
+  const target = state.units[targetId];
+  if (!target) throw new Error('目标部队不存在');
+  if (target.forceId === forceId) throw new Error('不能攻击己方部队');
+  if (attacker.energy < 10) throw new Error('气力不足');
+  if (!jointAttackableUnits(state, attackerId).some((unit) => unit.id === targetId)) throw new Error('目标不在齐攻范围');
+
+  const next = structuredClone(state);
+  const nextTarget = next.units[targetId];
+  const nextAttacker = next.units[attackerId];
+  next.battleDamageReports = [];
+  next.facilityRepairReports = [];
+  next.strategyResultReports = [];
+
+  // 参与齐攻的部队 = 主攻者自身 + 与目标相邻且本旬仍可行动的友军战斗部队
+  const participants = Object.values(next.units).filter((unit) => {
+    if (unit.forceId !== forceId || unit.kind === 'transport') return false;
+    if (!areAdjacent({ q: unit.q, r: unit.r }, { q: nextTarget.q, r: nextTarget.r })) return false;
+    if (unit.id === attackerId) return true;
+    return !unit.acted && !unit.moved && !unitIsIncapacitated(unit);
+  });
+
+  // 铁壁：目标拥有铁壁时，齐攻只按一次普通攻击处理（仅主攻者造成一次伤害）
+  const targetHasIronWall = resolveUnitSkills(next, nextTarget).some((skill) => skill.definition.name === '铁壁');
+  const hittingUnits = targetHasIronWall ? participants.filter((unit) => unit.id === attackerId) : participants;
+
+  let totalDamage = 0;
+  let anyCritical = false;
+  for (const participant of hittingUnits) {
+    const critical = normalAttackIsCritical(next, participant, nextTarget);
+    const damage = computeNormalAttackDamage(next, participant, nextTarget, critical);
+    totalDamage += damage;
+    anyCritical = anyCritical || critical;
+    participant.energy = Math.max(0, participant.energy - 10);
+    participant.acted = true;
+  }
+
+  nextTarget.troops = Math.max(0, nextTarget.troops - totalDamage);
+  if (totalDamage > 0) {
+    next.battleDamageReports.push({
+      id: `damage-${next.month}-${next.tenDay}-${next.rngCursor}-${targetId}`,
+      unitId: targetId,
+      q: nextTarget.q,
+      r: nextTarget.r,
+      amount: totalDamage,
+      kind: 'jointAttack',
+      ...(anyCritical ? { critical: true, label: '齐攻' } : {}),
+    });
+  }
+
+  // 掎角：任一参战者拥有掎角且目标存活时，有概率使目标混乱
+  const hasJiaojiao = hittingUnits.some((unit) => resolveUnitSkills(next, unit).some((skill) => skill.definition.name === '掎角'));
+  if (hasJiaojiao && nextTarget.troops > 0) {
+    const roll = nextRandom(next.seed, next.rngCursor);
+    next.rngCursor = roll.cursor;
+    if (roll.value < 0.5) nextTarget.confusedTenDays = 1;
+  }
+
+  if (nextTarget.troops <= 0) {
+    removeUnit(next, nextTarget, nextAttacker);
+    return next;
+  }
+
+  // 反击：参与齐攻的部队越多，目标反击损伤越低（原版一斉攻击的反击通常远小于逐一普攻）
+  // 仅主攻者（紧贴目标者）吃到一次反击，按参战部队数衰减
+  const attackerTerrain = unitTerrain(next, nextAttacker);
+  if (areAdjacent(nextTarget, nextAttacker) && !rollNoCounterAttack(next, nextAttacker, attackerTerrain)) {
+    const rolledCounterDamage = damageRoll(next, nextTarget, unitTerrain(next, nextAttacker), true, nextAttacker);
+    const fortifiedCounterDamage = reduceUnitDamageByFortress(next, nextAttacker, rolledCounterDamage);
+    const counterDamage = Math.round(
+      reduceIncomingDamageBySkills(next, nextAttacker, fortifiedCounterDamage, 'counter') *
+      (2 / Math.max(2, participants.length)),
+    );
     next.battleDamageReports.push({
       id: `damage-${next.month}-${next.tenDay}-${next.rngCursor}-${attackerId}`,
       unitId: attackerId, q: nextAttacker.q, r: nextAttacker.r, amount: counterDamage, kind: 'counter',
@@ -133,6 +239,8 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   if (nextCity.troops === 0 || nextCity.durability === 0) {
     const oldOwner = nextCity.ownerId;
     nextCity.ownerId = forceId;
+    // 占领城市获得技巧P
+    addTechP(next, forceId, TECHP_PER_CITY_CAPTURE);
     nextCity.order = Math.max(0, nextCity.order - 20);
     nextCity.gold = Math.floor(nextCity.gold / 2);
     nextCity.food = Math.floor(nextCity.food / 2);

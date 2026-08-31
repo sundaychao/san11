@@ -1,7 +1,9 @@
 import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, StrategyResultReport, TerrainType, TroopType } from '../types';
 import { nextRandom } from '../random';
+import { addTechP } from '../commands';
+import { TECHP_PER_BREAK_UNIT, techLevelOf, troopDamageMultiplier } from '../techs';
 import { complexHandlerById } from '../skills/handlers';
-import { reduceIncomingDamageBySkills, tacticCriticalMode } from '../skills/rules/combat';
+import { reduceIncomingDamageBySkills, rollNoCounterAttack, tacticCriticalMode } from '../skills/rules/combat';
 import { facilityBuildPowerMultiplier } from '../skills/rules/facility';
 import { resolveStrategySkillRules } from '../skills/rules/strategy';
 import { territoryCityAt } from '../territory';
@@ -14,6 +16,7 @@ import {
   DEFENSE_MAX_TROOPS,
   DEFENSE_MIN_TROOPS,
   DRUM_DAMAGE_MULTIPLIER,
+  movementAllowanceForUnit,
   FACILITIES,
   FACILITY_BUILD_COSTS,
   FACILITY_BUILD_DURABILITY_PER_TEN_THOUSAND,
@@ -334,6 +337,8 @@ export function removeUnit(next: GameState, unit: ArmyUnit, looter?: ArmyUnit) {
       nextLooter.gold = (nextLooter.gold ?? 0) + Math.floor((unit.gold ?? 0) / 2);
       nextLooter.food += Math.floor(unit.food / 2);
     }
+    // 击破敌军部队获得技巧P
+    if (looter.forceId) addTechP(next, looter.forceId, TECHP_PER_BREAK_UNIT);
   }
   delete next.units[unit.id];
   const retreatCity = Object.values(next.cities).find((city) => city.ownerId === unit.forceId);
@@ -620,6 +625,20 @@ function tacticAffectedUnits(next: GameState, attacker: ArmyUnit, target: ArmyUn
   return [target];
 }
 
+// 科技：战法兵科伤害加成（枪/戟/弩/骑的训练与精锐）+ 骑兵2级马镫（按本旬已移动格数每格+4%）
+function troopDamageMultiplierOfTactic(state: GameState, attacker: ArmyUnit, tactic: UnitTactic): number {
+  if (!attacker.forceId) return 1;
+  const troop = tactic.troopType;
+  if (troop !== 'spear' && troop !== 'halberd' && troop !== 'crossbow' && troop !== 'cavalry') return 1;
+  let multiplier = troopDamageMultiplier(state, attacker.forceId, troop);
+  if (troop === 'cavalry' && techLevelOf(state, attacker.forceId, 'cavalry') >= 2) {
+    const allowance = movementAllowanceForUnit(attacker);
+    const movedCells = Math.max(0, allowance - (attacker.movementRemaining ?? 0));
+    multiplier *= 1 + movedCells * 0.04;
+  }
+  return multiplier;
+}
+
 function applyTacticDamage(
   next: GameState,
   attacker: ArmyUnit,
@@ -631,10 +650,13 @@ function applyTacticDamage(
   const nextAttacker = next.units[attacker.id];
   const nextTarget = next.units[target.id];
   if (!nextAttacker || !nextTarget) return;
+  // 科技：兵科训练/精锐伤害加成（枪/戟/弩/骑）
+  const techMultiplier = troopDamageMultiplierOfTactic(next, nextAttacker, tactic);
   const modifiedDamage = Math.round(
     damageRoll(next, nextAttacker, unitTerrain(next, nextTarget), false, nextTarget) *
     tactic.power *
     TACTIC_APTITUDE_DAMAGE[aptitude] *
+    techMultiplier *
     (critical ? 1.35 : 1),
   );
   const fortifiedDamage = reduceUnitDamageByFortress(next, nextTarget, modifiedDamage);
@@ -741,11 +763,49 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
   }
   if (fireArrowCells.length > 0) igniteGroundFire(next, fireArrowCells, nextAttacker);
   if (next.units[targetId]) applyTacticPositionEffect(next, attackerId, targetId, tactic);
+  if (next.units[targetId]) applyTacticCounterDamage(next, attackerId, targetId);
   if (next.units[attackerId]) {
+    // 科技：枪兵2级兵粮袭击——战法击中敌军时夺取其兵粮
+    if (tactic.troopType === 'spear' && techLevelOf(next, forceId, 'spear') >= 2) {
+      const lootTarget = next.units[targetId];
+      if (lootTarget) {
+        const loot = Math.min(lootTarget.food, Math.floor(lootTarget.food * 0.15) + 200);
+        lootTarget.food -= loot;
+        next.units[attackerId].food += loot;
+      }
+    }
     next.units[attackerId].energy -= tactic.cost;
-    next.units[attackerId].acted = true;
+    // 科技：骑兵3级游击——攻击后可再次行动（二动）
+    if (!(tactic.troopType === 'cavalry' && techLevelOf(next, forceId, 'cavalry') >= 3)) {
+      next.units[attackerId].acted = true;
+    }
   }
   return next;
+}
+
+// 战法反伤比例：低于普攻但不为零，战法受击方可以反击，只是伤害更小
+// 用固定中值掷点(rollValue=0.5)计算，不消耗RNG，便于战法结算保持确定性回放
+const TACTIC_COUNTER_RATIO = 0.5;
+
+function applyTacticCounterDamage(next: GameState, attackerId: string, targetId: string): void {
+  const attacker = next.units[attackerId];
+  const target = next.units[targetId];
+  if (!attacker || !target) return;
+  const attackerTerrain = unitTerrain(next, attacker);
+  if (!areAdjacent(target, attacker) || rollNoCounterAttack(next, attacker, attackerTerrain)) return;
+  const rolledCounterDamage = damageForRoll(next, target, unitTerrain(next, attacker), 0.5, true, attacker);
+  const fortifiedCounterDamage = reduceUnitDamageByFortress(next, attacker, rolledCounterDamage);
+  const counterDamage = Math.round(
+    reduceIncomingDamageBySkills(next, attacker, fortifiedCounterDamage, 'counter') * TACTIC_COUNTER_RATIO,
+  );
+  if (counterDamage <= 0) return;
+  next.battleDamageReports ??= [];
+  next.battleDamageReports.push({
+    id: `damage-${next.month}-${next.tenDay}-${next.rngCursor}-${attackerId}-tacticCounter`,
+    unitId: attackerId, q: attacker.q, r: attacker.r, amount: counterDamage, kind: 'counter',
+  });
+  attacker.troops -= counterDamage;
+  if (attacker.troops <= 0) removeUnit(next, attacker, target);
 }
 
 function useFireArrowFacilityTactic(state: GameState, attacker: ArmyUnit, facilityId: string, tactic: UnitTactic): GameState {

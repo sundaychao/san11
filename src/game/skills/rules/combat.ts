@@ -1,6 +1,7 @@
 import { nextRandom } from '../../random';
 import { NAVAL_TACTIC_IDS } from '../../battle/catalog';
 import type { TacticId } from '../../battle/tactics';
+import { techLevelOf } from '../../techs';
 import type { ArmyUnit, GameState, TerrainType } from '../../types';
 import { skillConditionMatches } from '../conditions';
 import { resolveUnitSkills } from '../sources';
@@ -48,11 +49,19 @@ export function reduceIncomingDamageBySkills(
       effect.sources.includes(source) && skillConditionMatches(state, effect.condition, target)
     ))
     .reduce((highest, { effect }) => Math.max(highest, effect.chance), 0);
-  if (chance === 0) return damage;
+  // 科技：戟兵2级矢盾（受远程攻击30%免伤）、3级大盾（受普通攻击30%免伤）
+  let techShieldChance = 0;
+  if (target.forceId && target.troopType === 'halberd') {
+    const halberdLevel = techLevelOf(state, target.forceId, 'halberd');
+    if (halberdLevel >= 2 && (source === 'normalAttack' || source === 'tactic')) techShieldChance = 0.3;
+    if (halberdLevel >= 3 && source === 'normalAttack') techShieldChance = 0.3;
+  }
+  const totalChance = Math.max(chance, techShieldChance);
+  if (totalChance === 0) return damage;
 
   const roll = nextRandom(state.seed, state.rngCursor);
   state.rngCursor = roll.cursor;
-  return roll.value < chance ? 0 : damage;
+  return roll.value < totalChance ? 0 : damage;
 }
 
 function isWaterTerrain(terrain: TerrainType | undefined) {
@@ -60,6 +69,11 @@ function isWaterTerrain(terrain: TerrainType | undefined) {
 }
 
 export function rollNoCounterAttack(state: GameState, attacker: ArmyUnit, terrain: TerrainType) {
+  // 科技：枪兵3级奇袭——在森林地形攻击不受反击
+  if (attacker.forceId && attacker.troopType === 'spear' && terrain === 'forest'
+    && techLevelOf(state, attacker.forceId, 'spear') >= 3) {
+    return true;
+  }
   const chance = effectsOfKind(resolveUnitSkills(state, attacker), 'noCounterAttack')
     .filter(({ effect }) => effect.terrain === 'land'
       ? !isWaterTerrain(terrain)

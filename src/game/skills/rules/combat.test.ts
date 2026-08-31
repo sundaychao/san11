@@ -70,7 +70,7 @@ function requireRule<K extends keyof CombatRules>(name: K): NonNullable<CombatRu
 describe('combat skill rules', () => {
   it('activates only the Task 4 catalog entries', () => {
     expect(skillDefinition('神将')?.implementationStatus).toBe('active');
-    expect(skillDefinition('连战')?.implementationStatus).toBe('active');
+    expect(skillDefinition('连击')?.implementationStatus).toBe('active');
     expect(skillDefinition('不屈')?.implementationStatus).toBe('active');
     expect(skillDefinition('飞将')?.implementationStatus).toBe('active');
     expect(skillDefinition('驱逐')?.implementationStatus).toBe('planned');
@@ -101,10 +101,10 @@ describe('combat skill rules', () => {
     expect(tacticCriticalMode(fixture.state, fixture.attacker, fixture.weaker, 'spear-thrust')).toBe('normal');
   });
 
-  it('deduplicates 连战 and consumes exactly one repeat roll at the highest applicable chance', () => {
+  it('deduplicates 连击 and consumes exactly one repeat roll at the highest applicable chance', () => {
     const rollRepeatNormalAttack = requireRule('rollRepeatNormalAttack');
-    const { state, attacker } = combatFixture('连战');
-    state.officers['liu-bei'].skill = '连战';
+    const { state, attacker } = combatFixture('连击');
+    state.officers['liu-bei'].skill = '连击';
     attacker.officerIds = ['guan-yu', 'liu-bei'];
     const expected = nextRandom(state.seed, state.rngCursor);
 

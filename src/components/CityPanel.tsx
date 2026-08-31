@@ -1,13 +1,25 @@
-import { ChevronDown, ChevronUp, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
+import { ChevronDown, ChevronUp, Coins, FlaskConical, GraduationCap, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
 import { useState } from 'react';
 import { COMMAND_AP } from '../game/commands';
 import { useGame } from '../game/store/GameProvider';
-import type { GameCommand } from '../game/types';
+import type { GameCommand, GameState } from '../game/types';
 
 type CommandType = GameCommand['type'];
 
+/** 是否有科技正在研究中（城间任意己方武将执行 research 任务） */
+function techResearching(state: GameState): boolean {
+  return Object.values(state.officers).some((officer) =>
+    officer.forceId === state.playerForceId && officer.location.kind === 'task' && officer.location.task === 'research');
+}
+
+/** 是否有能力正在研究中 */
+function abilityResearching(state: GameState): boolean {
+  return Boolean(state.forces[state.playerForceId]?.abilityResearch?.active);
+}
+
 interface CityPanelProps {
   onCommand?(type: CommandType): void;
+  onOpenCultivatePicker?(): void;
 }
 
 const COMMANDS: Array<{ type: CommandType; label: string; Icon: typeof Landmark }> = [
@@ -16,13 +28,16 @@ const COMMANDS: Array<{ type: CommandType; label: string; Icon: typeof Landmark 
   { type: 'produceArmament', label: '生产兵装', Icon: Hammer },
   { type: 'train', label: '训练', Icon: Swords },
   { type: 'patrol', label: '巡察', Icon: ShieldCheck },
+  { type: 'trade', label: '商人', Icon: Coins },
   { type: 'talent', label: '人才', Icon: UserSearch },
+  { type: 'research', label: '科技研究', Icon: FlaskConical },
+  { type: 'abilityResearch', label: '能力研究', Icon: GraduationCap },
   { type: 'transfer', label: '调动', Icon: Route },
 ];
 
 const formatNumber = (value: number) => value.toLocaleString('en-US');
 
-export function CityPanel({ onCommand }: CityPanelProps) {
+export function CityPanel({ onCommand, onOpenCultivatePicker }: CityPanelProps) {
   const { state, selectedCityId } = useGame();
   const [collapsed, setCollapsed] = useState(false);
   if (!state || !selectedCityId) return null;
@@ -88,16 +103,54 @@ export function CityPanel({ onCommand }: CityPanelProps) {
       </section>
 
       {owned && state.phase === 'playing' ? (
-        <section className="command-grid" aria-label="城市指令">
-          {COMMANDS.map(({ type, label, Icon }) => {
-            const disabled = state.actionPoints[state.playerForceId] < COMMAND_AP[type];
-            return (
-              <button key={type} type="button" data-testid={`command-${type}-button`} disabled={disabled} onClick={() => onCommand?.(type)}>
-                <Icon aria-hidden="true" /><span>{label}</span>
-              </button>
-            );
-          })}
-        </section>
+        <>
+          <section className="command-grid" aria-label="城市指令">
+            {COMMANDS.map(({ type, label, Icon }) => {
+              let disabled = state.actionPoints[state.playerForceId] < COMMAND_AP[type];
+              let title: string | undefined;
+              let displayLabel = label;
+              if (type === 'trade') {
+                if (city.merchantTradedThisTenDay) {
+                  disabled = true;
+                  title = '本旬已完成一次粮食交易';
+                } else if (!city.merchantPresent) {
+                  disabled = true;
+                  title = '商人本旬未到访';
+                }
+              } else if (type === 'research' && techResearching(state)) {
+                disabled = true;
+                title = '科技研究中';
+                displayLabel = '科技研究中';
+              } else if (type === 'abilityResearch' && abilityResearching(state)) {
+                disabled = true;
+                title = '能力研究中';
+                displayLabel = '能力研究中';
+              }
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  data-testid={`command-${type}-button`}
+                  disabled={disabled}
+                  title={title}
+                  onClick={() => onCommand?.(type)}
+                >
+                  <Icon aria-hidden="true" /><span>{displayLabel}</span>
+                </button>
+              );
+            })}
+          </section>
+          <section className="cultivate-submenu" aria-label="培育武将">
+            <button
+              type="button"
+              data-testid="cultivate-toggle-button"
+              onClick={() => onOpenCultivatePicker?.()}
+            >
+              <ChevronUp aria-hidden="true" />
+              <span>培育武将</span>
+            </button>
+          </section>
+        </>
       ) : (
         <p className="readonly-note">{state.phase === 'finished' ? '经营期已经结束' : '仅可查看他势力城市情报'}</p>
       )}

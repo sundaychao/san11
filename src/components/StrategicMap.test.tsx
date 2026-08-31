@@ -18,7 +18,6 @@ const TERRAIN_LABELS: Record<TerrainType, string> = {
   hill: '丘陵',
   mountain: '高山',
   water: '水域',
-  shore: '岸边',
   ferry: '渡口',
 };
 
@@ -31,12 +30,16 @@ function renderGame(state = createGame('liu', 1)) {
 }
 
 function zoomToTerrain() {
-  // china42 大地图（200×200）默认全图视图下地形格子过小、数量过多，不渲染；
-  // 放大到 scale=4 后可见格子数低于阈值，地形与交互格子开始渲染。
+  // 默认视角（最高角度，约 30 格视野）下可见格子数已低于渲染阈值，
+  // 地形与交互格子无需额外放大即渲染；保留函数以维持既有调用点语义。
+}
+
+function panViewport(dx: number, dy: number) {
+  // 拖拽平移视野：默认 fallback 视口 1280×720，视野中心从地图中心移动 (dx, dy) 像素
   const viewport = screen.getByTestId('map-viewport');
-  for (let i = 0; i < 20; i += 1) {
-    fireEvent.wheel(viewport, { deltaY: -120 });
-  }
+  fireEvent.pointerDown(viewport, { pointerId: 1, button: 0, buttons: 1, clientX: 640, clientY: 360 });
+  fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 640 + dx, clientY: 360 + dy });
+  fireEvent.pointerUp(viewport, { pointerId: 1 });
 }
 
 async function chooseDeployLeader(user: ReturnType<typeof userEvent.setup>, officerName = '刘备') {
@@ -75,6 +78,8 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     const state = createGame('liu', 1);
     renderGame(state);
     zoomToTerrain();
+    // 江陵 (q92,r120) 在地图中心下方，向上拖动视野约 20 格（每格约 42.7px）使其进入可见范围
+    panViewport(0, -880);
 
     const city = state.cities.jiangling;
     const footprintMapCell = screen.getAllByTestId(/^map-cell-/).find((node) => {
@@ -138,9 +143,10 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     renderGame();
     const viewport = screen.getByTestId('map-viewport');
 
+    // 默认最高角度 scale≈6.67（30 格视野），放大一次 ×1.2 后约 8
     fireEvent.wheel(viewport, { deltaY: -120 });
 
-    expect(screen.getByTestId('map-content').style.getPropertyValue('--map-scale')).toBe('1.15');
+    expect(screen.getByTestId('map-content').style.getPropertyValue('--map-scale')).toBe('8');
   });
 
   it('keeps zoom within the supported range', async () => {
@@ -150,13 +156,16 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     const zoomOut = screen.getByRole('button', { name: '缩小地图' });
     for (let index = 0; index < 5; index += 1) await user.click(zoomOut);
 
-    expect(screen.getByTestId('map-content').style.getPropertyValue('--map-scale')).toBe('0.85');
+    // 连续缩小不会低于最高角度（30 格视野，scale≈6.67）
+    expect(screen.getByTestId('map-content').style.getPropertyValue('--map-scale')).toBe('6.67');
   });
 
   it('shows the hovered grid coordinate at the bottom center of the interface', async () => {
     const user = userEvent.setup();
     renderGame();
     zoomToTerrain();
+    // 等比（方格不变形）后，初始垂直窗覆盖地图中部，江陵（r=120）在地图下方，需先下移视野使其部署格渲染
+    panViewport(0, -1100);
 
     const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
     expect(jianglingMarker).toBeTruthy();
@@ -458,6 +467,8 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     });
     renderGame(settleTenDay(deployed));
     zoomToTerrain();
+    // 等比后江陵（r=120）位于初始垂直窗下方，向下移动视野让部队/移动目标格渲染
+    panViewport(0, -1100);
 
     expect(screen.getByTestId('battle-unit-ready-badge')).toBeInTheDocument();
 

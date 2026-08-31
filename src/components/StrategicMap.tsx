@@ -13,8 +13,14 @@ interface MapView {
   scale: number;
 }
 
-const INITIAL_VIEW: MapView = { x: 0, y: 0, scale: 1 };
+// 缩放范围按横向可见格数定义：最高角度视野约 30 格，最低角度约 11 格
+const FARTHEST_VISIBLE_CELLS = 30;
+const NEAREST_VISIBLE_CELLS = 11;
+// 每次缩放的倍率（视野格数按此比例增减）
+const ZOOM_FACTOR = 1.2;
 const CELL_SIZE = 43;
+// 垂直（行）方向裁剪保留的行缓冲：水平方向按用户诉求精确到 30 格，纵向仅保留少量余量，防止边缘取整缺格
+const ROW_CULL_BUFFER = 3;
 const TROOP_TEXTURES: Record<TroopType, { glyph: string; label: string }> = {
   sword: { glyph: '剑', label: '剑兵' },
   spear: { glyph: '枪', label: '枪兵' },
@@ -59,9 +65,9 @@ function cellPosition(q: number, r: number) {
   };
 }
 
-const MIN_SCALE = 0.85;
 const VIEWPORT_CULL_THRESHOLD = 1500;
-const MAX_TERRAIN_CELLS = 4000;
+// 最低角度（11 格视野）下可见格子约 11×11，阈值余量充足；culling 之后才做判定
+const MAX_TERRAIN_CELLS = 8000;
 
 interface StrategicMapProps {
   onCityMenu?(cityId: CityId, position: { x: number; y: number }): void;
@@ -143,7 +149,11 @@ export function StrategicMap({
   selectedUnitId,
 }: StrategicMapProps) {
   const { state, selectedCityId, selectCity } = useGame();
-  const [view, setView] = useState<MapView>(INITIAL_VIEW);
+  const [view, setView] = useState<MapView>(() => ({
+    x: 0,
+    y: 0,
+    scale: Math.round(((state?.gridWidth ?? DEFAULT_GRID_WIDTH) / FARTHEST_VISIBLE_CELLS) * 100) / 100,
+  }));
   const [hoveredFacilityId, setHoveredFacilityId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<{ width: number; height: number } | null>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
@@ -167,12 +177,22 @@ export function StrategicMap({
   const gridHeight = state.gridHeight ?? DEFAULT_GRID_HEIGHT;
   const worldWidth = gridWidth * CELL_SIZE;
   const worldHeight = gridHeight * CELL_SIZE;
-  const maxScale = Math.max(2.4, Math.ceil(Math.max(gridWidth, gridHeight) / 20));
-  const clampScale = (value: number) => Math.min(maxScale, Math.max(MIN_SCALE, Math.round(value * 100) / 100));
+  // 视野格数 = gridWidth / scale：最高角度约 30 格（scale 小），最低角度约 11 格（scale 大）
+  const minScale = gridWidth / FARTHEST_VISIBLE_CELLS;
+  const maxScale = gridWidth / NEAREST_VISIBLE_CELLS;
+  const clampScale = (value: number) => {
+    const clamped = Math.min(maxScale, Math.max(minScale, value));
+    return Math.round(clamped * 100) / 100;
+  };
+  const resetView = (): MapView => ({ x: 0, y: 0, scale: clampScale(minScale) });
   const zoomStyle = (): CSSProperties => {
     const scale = view.scale;
     const width = viewport ? Math.max(1, Math.round(viewport.width * scale)) : '100%';
-    const height = viewport ? Math.max(1, Math.round(viewport.height * scale)) : '100%';
+    // 容器高度与宽度保持世界坐标宽高比，避免正方形网格被非正方形视口纵向压缩扭曲，
+    // 同时让 HTML 标牌与 SVG 网格/单位层落在同一等比基准上（相互对齐）。
+    const height = viewport
+      ? Math.max(1, Math.round((width as number) * (worldHeight / worldWidth)))
+      : '100%';
     const left = viewport ? Math.round((viewport.width - (width as number)) / 2 + view.x) : 0;
     const top = viewport ? Math.round((viewport.height - (height as number)) / 2 + view.y) : 0;
     return { left, top, width, height };
@@ -196,13 +216,15 @@ export function StrategicMap({
     };
   };
 
-  const zoom = (amount: number) => {
-    setView((current) => ({ ...current, scale: clampScale(current.scale + amount) }));
+  const zoom = (direction: number) => {
+    setView((current) => (
+      { ...current, scale: clampScale(current.scale * (direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR)) }
+    ));
   };
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
-    zoom(event.deltaY < 0 ? 0.15 : -0.15);
+    zoom(event.deltaY < 0 ? 1 : -1);
   };
 
   const handleContextMenu = (event: MouseEvent<HTMLDivElement>) => {
@@ -241,18 +263,23 @@ export function StrategicMap({
       forceColor: state.forces[city.ownerId].color,
     }));
 
-  const BUFFER = 3;
   let visibleCells = displayGrid;
   const effectiveViewport = viewport ?? { width: 1280, height: 720 };
+  // 屏幕上单个格子的像素尺寸，用于让城池标牌等 HTML 覆盖层与格子保持固定比例
+  const cellPx = (effectiveViewport.width * view.scale) / gridWidth;
   if (displayGrid.length > VIEWPORT_CULL_THRESHOLD) {
     const cssWidth = effectiveViewport.width * view.scale;
-    const cssHeight = effectiveViewport.height * view.scale;
-    const left = effectiveViewport.width * (1 - view.scale) / 2 + view.x;
-    const top = effectiveViewport.height * (1 - view.scale) / 2 + view.y;
-    const qMin = Math.floor(-left * gridWidth / cssWidth) - BUFFER;
-    const qMax = Math.ceil((effectiveViewport.width - left) * gridWidth / cssWidth) + BUFFER;
-    const rMin = Math.floor(-top * gridHeight / cssHeight) - BUFFER;
-    const rMax = Math.ceil((effectiveViewport.height - top) * gridHeight / cssHeight) + BUFFER;
+    // 与 zoomStyle 保持一致：容器高度按世界坐标宽高比等比计算，否则裁剪范围与实际渲染错位
+    const cssHeight = cssWidth * (gridHeight / gridWidth);
+    const left = (effectiveViewport.width - cssWidth) / 2 + view.x;
+    const top = (effectiveViewport.height - cssHeight) / 2 + view.y;
+    // 仅裁剪视口实际覆盖的列（水平方向）：floor/ceil 取整本身包含边缘容差，无需额外 buffer，
+    // 避免最高角度（左右 30 格视野）下多渲染出 37 格。行（垂直方向）保留少量缓冲，
+    // 防止顶部/底部边缘格子因取整在极窄视野下缺失。
+    const qMin = Math.floor(-left * gridWidth / cssWidth);
+    const qMax = Math.ceil((effectiveViewport.width - left) * gridWidth / cssWidth);
+    const rMin = Math.floor(-top * gridHeight / cssHeight) - ROW_CULL_BUFFER;
+    const rMax = Math.ceil((effectiveViewport.height - top) * gridHeight / cssHeight) + ROW_CULL_BUFFER;
     visibleCells = displayGrid.filter((cell) => cell.q >= qMin && cell.q <= qMax && cell.r >= rMin && cell.r <= rMax);
   }
   const renderTerrainByScale = visibleCells.length <= MAX_TERRAIN_CELLS;
@@ -377,7 +404,7 @@ export function StrategicMap({
           dismissUnitHover();
           onUnitContextMenu?.(unit.id, { x: event.clientX + 10, y: event.clientY + 4 });
         }}
-        onPointerEnter={(event) => onUnitHover?.(unit.id, { x: event.clientX + 14, y: event.clientY + 4 })}
+        onPointerEnter={(event) => onUnitHover?.(unit.id, { x: event.clientX + 57, y: event.clientY + 47 })}
         onPointerLeave={() => onUnitLeave?.()}
       >
         <text
@@ -531,7 +558,7 @@ export function StrategicMap({
       <div
         className="map-content"
         data-testid="map-content"
-        style={{ '--map-scale': String(view.scale) } as CSSProperties}
+        style={{ '--map-scale': String(view.scale), '--cell-px': `${cellPx.toFixed(2)}px` } as CSSProperties}
       >
         {backgroundImage && (
           <img
@@ -543,7 +570,7 @@ export function StrategicMap({
             style={zoomStyle()}
           />
         )}
-        <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}${moveMode ? ' is-moving' : ''}${firePlotMode ? ' is-strategy-targeting' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${worldWidth} ${worldHeight}`} aria-hidden="true" style={zoomStyle()}>
+        <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}${moveMode ? ' is-moving' : ''}${firePlotMode ? ' is-strategy-targeting' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${worldWidth} ${worldHeight}`} preserveAspectRatio="none" aria-hidden="true" style={zoomStyle()}>
           {cellsToRender.map((cell) => {
             const position = displayCellPosition(cell.q, cell.r);
             const cellKey = `${cell.q},${cell.r}`;
@@ -598,7 +625,7 @@ export function StrategicMap({
                 onPointerEnter={(event) => {
                   onCellHover?.(cell);
                   if (cityIdAtCell) {
-                    onCityHover?.(cityIdAtCell, { x: event.clientX + 14, y: event.clientY + 4 });
+                    onCityHover?.(cityIdAtCell, { x: event.clientX + 57, y: event.clientY + 47 });
                   }
                   if (!editorMode || event.buttons !== 1) return;
                   event.stopPropagation();
@@ -640,7 +667,7 @@ export function StrategicMap({
                   }}
                   onPointerEnter={(event) => {
                     if (!gameCity) return;
-                    onCityHover?.(gameCity.id, { x: event.clientX + 14, y: event.clientY + 4 });
+                    onCityHover?.(gameCity.id, { x: event.clientX + 57, y: event.clientY + 47 });
                   }}
                   onPointerLeave={() => {
                     if (!gameCity) return;
@@ -698,7 +725,7 @@ export function StrategicMap({
                 }}
                 onPointerEnter={(event) => {
                   setHoveredFacilityId(facility.id);
-                  onFacilityHover?.(facility.id, { x: event.clientX + 14, y: event.clientY + 4 });
+                  onFacilityHover?.(facility.id, { x: event.clientX + 57, y: event.clientY + 47 });
                 }}
                 onPointerLeave={() => {
                   setHoveredFacilityId((current) => current === facility.id ? null : current);
@@ -773,9 +800,9 @@ export function StrategicMap({
                 onClick={(event) => {
                   selectCityFromMap(city.id, { x: event.clientX + 12, y: event.clientY });
                 }}
-                onPointerEnter={(event) => onCityHover?.(city.id, { x: event.clientX + 14, y: event.clientY + 4 })}
+                onPointerEnter={(event) => onCityHover?.(city.id, { x: event.clientX + 57, y: event.clientY + 47 })}
                 onPointerLeave={() => onCityLeave?.()}
-                onMouseEnter={(event) => onCityHover?.(city.id, { x: event.clientX + 14, y: event.clientY + 4 })}
+                onMouseEnter={(event) => onCityHover?.(city.id, { x: event.clientX + 57, y: event.clientY + 47 })}
                 onMouseLeave={() => onCityLeave?.()}
               >
                 {cityEffect && (
@@ -783,8 +810,8 @@ export function StrategicMap({
                     {cityEffect.label} +{cityEffect.amount.toLocaleString('en-US')}
                   </span>
                 )}
-                {isAttackTarget && <span className="city-attack-target-arrow" data-testid="attack-city-target-arrow">▼</span>}
                 <span className="city-marker-copy">
+                  {isAttackTarget && <span className="city-attack-target-arrow" data-testid="attack-city-target-arrow">▼</span>}
                   <strong>{city.name}</strong>
                   <span className="city-marker-stats" aria-hidden="true">
                     <span className="city-marker-stat" data-testid="city-marker-troops">{city.troops}</span>
@@ -796,7 +823,7 @@ export function StrategicMap({
             );
           })}
         </div>
-        <svg className="battle-unit-layer" data-testid="battle-unit-layer" viewBox={`0 0 ${worldWidth} ${worldHeight}`} aria-label="战场部队" style={zoomStyle()}>
+        <svg className="battle-unit-layer" data-testid="battle-unit-layer" viewBox={`0 0 ${worldWidth} ${worldHeight}`} preserveAspectRatio="none" aria-label="战场部队" style={zoomStyle()}>
           {Object.values(state.units).map(renderUnitMarker)}
           {firePlots.map(renderFireMarker)}
           {damageReports.map(renderDamageNumber)}
@@ -805,9 +832,9 @@ export function StrategicMap({
       </div>
 
       <div className="map-tools tool-panel" aria-label="地图工具">
-        <button type="button" className="icon-button" aria-label="放大地图" title="放大地图" onClick={() => zoom(0.15)}><ZoomIn /></button>
-        <button type="button" className="icon-button" aria-label="缩小地图" title="缩小地图" onClick={() => zoom(-0.15)}><ZoomOut /></button>
-        <button type="button" className="icon-button" aria-label="复位地图" title="复位地图" onClick={() => setView(INITIAL_VIEW)}><Maximize2 /></button>
+        <button type="button" className="icon-button" aria-label="放大地图" title="放大地图" onClick={() => zoom(1)}><ZoomIn /></button>
+        <button type="button" className="icon-button" aria-label="缩小地图" title="缩小地图" onClick={() => zoom(-1)}><ZoomOut /></button>
+        <button type="button" className="icon-button" aria-label="复位地图" title="复位地图" onClick={() => setView(resetView())}><Maximize2 /></button>
       </div>
 
       <div className="mini-map tool-panel" aria-label="荆襄小地图">

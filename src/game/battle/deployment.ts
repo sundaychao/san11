@@ -1,4 +1,5 @@
 import { ARMAMENT_LABELS, armamentsOf, TROOP_ARMAMENT, TROOP_LABELS } from '../armaments';
+import { deployTroopCapOf, energyCapOf, techLevelOf } from '../techs';
 import { formationMovementAllowanceBonus } from '../skills/rules/movement';
 import type { ForceId, GameState } from '../types';
 import {
@@ -42,7 +43,9 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   }
   if (officers.some((candidate) => candidate.acted)) throw new Error('选择的武将已经行动');
   if (state.actionPoints[forceId] < DEPLOY_AP_COST) throw new Error('行动力不足 20');
-  if (!Number.isInteger(input.troops) || input.troops < 1000 || input.troops > 10000) throw new Error('出征兵力必须为 1000-10000');
+  if (!Number.isInteger(input.troops) || input.troops < 1000 || input.troops > deployTroopCapOf(state, forceId)) {
+    throw new Error(`出征兵力必须为 1000-${deployTroopCapOf(state, forceId)}`);
+  }
   if (!Number.isInteger(gold) || gold < 0 || gold > city.gold) throw new Error('资金不足');
   if (!Number.isInteger(input.food) || input.food < 0 || input.food > city.food) throw new Error('粮草不足');
   if (city.troops - input.troops < 500) throw new Error('城市至少保留 500 兵力');
@@ -82,9 +85,15 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
     next.officers[officerId].acted = true;
     next.officers[officerId].location = { kind: 'unit', unitId };
   }
+  // 科技：军制1级熟练兵气力上限+20；2级随军参谋初始气力+政治×20%
+  const energyCap = energyCapOf(state, forceId);
+  const staffOfficerBonus = techLevelOf(state, forceId, 'military') >= 2
+    ? Math.floor((officer?.stats.politics ?? 0) * 0.2)
+    : 0;
+  const initialEnergy = Math.min(energyCap, 100 + staffOfficerBonus);
   next.units[unitId] = {
     id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.cityId,
-    troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: 100,
+    troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: initialEnergy,
     movementRemaining: movementAllowance, moved: true, acted: false,
   };
   next.logs.push({ id: `deploy-${unitId}`, month: next.month, forceId, message: `${officer.name}率军从${city.name}出征` });

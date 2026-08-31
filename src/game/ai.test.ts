@@ -30,13 +30,15 @@ describe('AI turn', () => {
     expect(state.actionPoints.liu).toBe(80);
   });
 
-  it('returns null when no officer can act', () => {
+  it('returns only force-level ability research when no officer can act', () => {
     const state = createGame('liu', 1);
     for (const officer of Object.values(state.officers)) {
       if (officer.forceId === 'liu') officer.acted = true;
     }
 
-    expect(chooseAiCommand(state, 'liu')).toBeNull();
+    // 所有武将已行动时，只有无需武将的势力级「能力研究」可能发起
+    const command = chooseAiCommand(state, 'liu');
+    expect(command === null || command.type === 'abilityResearch').toBe(true);
   });
 
   it('advances the persisted random cursor for weighted fallback development', () => {

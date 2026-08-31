@@ -12,6 +12,9 @@ const forces: Record<ForceId, Force> = {
     leaderId: 'cao-cao',
     color: '#2088ff',
     description: '据守北境重镇，政务与统率均衡。',
+    // 开局技巧P 10000，便于直接测试/验证科技研究效果
+    techP: 10000,
+    techs: { spear: 1 },
   },
   liu: {
     id: 'liu',
@@ -19,6 +22,8 @@ const forces: Record<ForceId, Force> = {
     leaderId: 'liu-bei',
     color: '#f2c230',
     description: '人才出众，以民心和武将能力见长。',
+    techP: 10000,
+    techs: { cavalry: 1 },
   },
   sun: {
     id: 'sun',
@@ -26,6 +31,8 @@ const forces: Record<ForceId, Force> = {
     leaderId: 'sun-quan',
     color: '#e23d34',
     description: '立足江东水网，城市资源较为充裕。',
+    techP: 10000,
+    techs: { crossbow: 1 },
   },
   biao: {
     id: 'biao',
@@ -33,6 +40,8 @@ const forces: Record<ForceId, Force> = {
     leaderId: 'liu-biao',
     color: '#30b45a',
     description: '深耕荆南，治安稳定且人才待发掘。',
+    techP: 10000,
+    techs: { civil: 1 },
   },
 };
 
@@ -184,7 +193,7 @@ function getChina42CityCenter(cityId: CityId): { q: number; r: number } {
 }
 
 export function createGame(playerForceId: ForceId, seed = Date.now()): GameState {
-  const cities = toRecord(citySeeds.map((city) => {
+  const cities = toRecord(citySeeds.map((city, index) => {
     const center = getChina42CityCenter(city.id);
     return {
       ...city,
@@ -193,6 +202,10 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
       maxDurability: 3000,
       durability: 3000,
       armaments: initialArmaments(),
+      // 开局各城粮价在 3~7 之间错落分布
+      grainPrice: 3 + (index % 5),
+      // 开局商人按 1/4 错落分布（江陵、零陵开局有商人）
+      merchantPresent: index % 4 === 2,
     };
   })) as Record<CityId, City>;
   const officers = toRecord(officerSeeds.map((officer) => {

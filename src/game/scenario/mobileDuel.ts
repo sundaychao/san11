@@ -26,7 +26,7 @@ export function createMobileDuelGrid(): GridCell[] {
       } else if (onShore && q === TOP_CITY_CENTER.q) {
         terrain = 'ferry';
       } else if (onShore) {
-        terrain = 'shore';
+        terrain = 'water';
       } else {
         terrain = 'plain';
       }

@@ -1,5 +1,7 @@
-import { clamp } from './commands';
+import { clamp, rollGrainPrices, rollMerchants, addTechP } from './commands';
+import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
+import { MAX_TECH_LEVEL, TECH_BRANCHES, TECHP_POP_DIVISOR, techLevelOf } from './techs';
 import { movementAllowanceForUnit, unitSupplyMultiplier } from './battle/actions';
 import { applyGroundFireDamageToFacilities, applyGroundFireDamageToUnits } from './battle/fire';
 import { cellAt } from './battle/movementRules';
@@ -58,6 +60,8 @@ function applyPossibleEvent(state: GameState, city: City) {
 export function settleMonth(state: GameState): GameState {
   const next = structuredClone(state);
   clearTransientBattleReports(next);
+  // 每月初各城粮价独立波动（1金=3~7粮）
+  rollGrainPrices(next);
   const enteringMonth = next.month === 24 ? next.month : next.month + 1;
   const shouldSettleQuarterFood = isQuarterStartMonth(enteringMonth);
 
@@ -73,6 +77,7 @@ export function settleMonth(state: GameState): GameState {
   }
   for (const forceId of FORCE_IDS) next.actionPoints[forceId] = BASE_TEN_DAY_ACTION_POINTS;
   for (const officer of Object.values(next.officers)) officer.acted = false;
+  settleAbilityResearch(next);
 
   if (next.month === 24) {
     next.phase = 'finished';
@@ -103,11 +108,6 @@ function removeUnit(next: GameState, unit: ArmyUnit) {
   }
 }
 
-function settleCitySupply(city: City) {
-  const foodCost = Math.max(0, Math.ceil((city.troops * CITY_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
-  city.food = Math.max(0, city.food - foodCost);
-}
-
 function settleUnitBurning(next: GameState, unit: ArmyUnit) {
   if (!unit.burningTenDays) return;
   const burnDamage = Math.max(200, Math.ceil(unit.troops * 0.05));
@@ -125,12 +125,25 @@ function settleUnitBurning(next: GameState, unit: ArmyUnit) {
   if (unit.troops <= 0) removeUnit(next, unit);
 }
 
+function settleCitySupply(next: GameState, city: City) {
+  const foodCost = Math.max(0, Math.ceil((city.troops * CITY_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
+  city.food = Math.max(0, city.food - foodCost);
+  // 内政4级仁政：治安自然回升翻倍
+  if (city.ownerId && techLevelOf(next, city.ownerId, 'civil') >= 4) {
+    city.order = clamp(city.order + 2, 0, 100);
+  }
+  // 技巧P：每旬每城按人口产出
+  if (city.ownerId) addTechP(next, city.ownerId, Math.floor(city.population / TECHP_POP_DIVISOR));
+}
+
 function settleUnitSupply(next: GameState, unit: ArmyUnit) {
+  const energyCap = unit.forceId ? (100 + (techLevelOf(next, unit.forceId, 'military') >= 1 ? 20 : 0)) : 100;
+  const energyRegen = unit.forceId && techLevelOf(next, unit.forceId, 'military') >= 4 ? 10 : 5;
   const baseFoodCost = Math.max(0, Math.ceil((unit.troops * UNIT_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
   const foodCost = Math.ceil(baseFoodCost * unitSupplyMultiplier(next, unit));
   if (unit.food >= foodCost) {
     unit.food -= foodCost;
-    unit.energy = Math.min(100, unit.energy + 5);
+    unit.energy = Math.min(energyCap, unit.energy + energyRegen);
   } else {
     unit.food = 0;
     unit.energy = Math.max(0, unit.energy - 20);
@@ -187,6 +200,28 @@ function settleOfficerTransfers(next: GameState) {
   }
 }
 
+function settleAbilityResearch(next: GameState) {
+  for (const force of Object.values(next.forces)) {
+    const research = force.abilityResearch;
+    if (!research?.active) continue;
+    research.active.remainingMonths -= 1;
+    if (research.active.remainingMonths > 0) continue;
+
+    const node = ABILITY_NODE_MAP[research.active.nodeId];
+    if (node && !research.researched.includes(node.id)) {
+      research.researched = [...research.researched, node.id];
+      research.remaining = { ...research.remaining, [node.id]: node.learnCount };
+      next.logs.push({
+        id: `ability-research-${next.month}-${force.id}-${next.logs.length}`,
+        month: next.month,
+        forceId: force.id,
+        message: `${force.name}完成能力「${node.label}」研究，可培育${node.learnCount}名武将`,
+      });
+    }
+    research.active = undefined;
+  }
+}
+
 function settleOfficerTasks(next: GameState) {
   for (const officer of Object.values(next.officers)) {
     if (officer.location.kind !== 'task') continue;
@@ -195,6 +230,46 @@ function settleOfficerTasks(next: GameState) {
 
     const task = officer.location;
     const city = next.cities[task.cityId];
+    if (task.task === 'research') {
+      // 研究完成：势力科技等级+1
+      const force = officer.forceId ? next.forces[officer.forceId] : undefined;
+      const branchDef = TECH_BRANCHES.find((candidate) => candidate.id === task.branch);
+      if (force && branchDef) {
+        const currentLevel = force.techs?.[task.branch] ?? 0;
+        force.techs = { ...force.techs, [task.branch]: Math.min(MAX_TECH_LEVEL, currentLevel + 1) };
+        next.logs.push({
+          id: `research-complete-${next.month}-${officer.id}-${next.logs.length}`,
+          month: next.month,
+          forceId: officer.forceId,
+          message: `${officer.name}完成「${branchDef.levels[currentLevel].name}」研究，${force.name}科技提升`,
+        });
+      }
+      officer.location = { kind: 'city', cityId: city.id };
+      officer.cityId = city.id;
+      officer.acted = false;
+      continue;
+    }
+    if (task.task === 'cultivate') {
+      // 培育完成：提升武将能力/适性，扣减该节点剩余培育次数
+      const node = ABILITY_NODE_MAP[task.nodeId];
+      const force = officer.forceId ? next.forces[officer.forceId] : undefined;
+      if (node && force) {
+        applyCultivation(officer, node);
+        const research = force.abilityResearch ?? { researched: [], remaining: {} };
+        research.remaining = { ...research.remaining, [node.id]: Math.max(0, (research.remaining[node.id] ?? 0) - 1) };
+        force.abilityResearch = research;
+        next.logs.push({
+          id: `cultivate-complete-${next.month}-${officer.id}-${next.logs.length}`,
+          month: next.month,
+          forceId: officer.forceId,
+          message: `${officer.name}完成「${node.label}」培育`,
+        });
+      }
+      officer.location = { kind: 'city', cityId: city.id };
+      officer.cityId = city.id;
+      officer.acted = false;
+      continue;
+    }
     const current = armamentsOf(city.armaments);
     city.armaments = {
       ...current,
@@ -224,7 +299,9 @@ function settleOfficerTasks(next: GameState) {
 export function settleTenDay(state: GameState): GameState {
   let next = structuredClone(state);
   clearTransientBattleReports(next);
-  for (const city of Object.values(next.cities)) settleCitySupply(city);
+  // 每旬各城商人独立掷点到访（1/4），并重置交易次数
+  rollMerchants(next);
+  for (const city of Object.values(next.cities)) settleCitySupply(next, city);
   for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
   applyGroundFireDamageToUnits(next, 'ten-day-fire');
   applyGroundFireDamageToFacilities(next);

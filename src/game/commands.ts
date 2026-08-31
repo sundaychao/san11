@@ -1,7 +1,9 @@
 import { nextRandom } from './random';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, isDelayedArmament, produceArmamentYield, DELAYED_ARMAMENT_TEN_DAYS } from './armaments';
+import { ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, CULTIVATE_TEN_DAYS, abilityCultivateRemaining, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
 import { commandYieldMultiplier } from './skills/rules/city';
-import type { City, ForceId, GameCommand, GameState, Officer } from './types';
+import { MAX_TECH_LEVEL, RESEARCH_AP_COST, TECH_BRANCHES, TECH_COSTS, TECHP_PER_CIVIL_ACTION, TECHP_PER_TRADE, developMultiplier, recruitMultiplier, researchTenDays, techLevelOf } from './techs';
+import type { City, ForceId, GameCommand, GameState, Officer, TechBranchId } from './types';
 
 export const COMMAND_AP = {
   develop: 20,
@@ -10,7 +12,11 @@ export const COMMAND_AP = {
   train: 15,
   patrol: 15,
   talent: 20,
+  research: RESEARCH_AP_COST,
+  abilityResearch: 20,
+  cultivate: 20,
   transfer: 10,
+  trade: 20,
 } as const;
 
 export const COMMAND_LABELS: Record<GameCommand['type'], string> = {
@@ -20,8 +26,72 @@ export const COMMAND_LABELS: Record<GameCommand['type'], string> = {
   train: '训练',
   patrol: '巡察',
   talent: '人才',
+  research: '科技研究',
+  abilityResearch: '能力研究',
+  cultivate: '培育武将',
   transfer: '调动',
+  trade: '商人',
 };
+
+// 商人粮价：1金可兑换的兵粮数，每月每城在 3~7 之间独立波动（标准价5）
+export const GRAIN_PRICE_MIN = 3;
+export const GRAIN_PRICE_MAX = 7;
+export const DEFAULT_GRAIN_PRICE = 5;
+// 卖出兵粮需扣除两成手续费
+const SELL_FEE_RATIO = 0.8;
+// 单次交易上限（兵粮）
+export const TRADE_MAX_GRAIN = 30000;
+// 每旬各城商人到访概率
+export const MERCHANT_ARRIVAL_CHANCE = 1 / 4;
+
+export function grainPriceOf(city: City): number {
+  const price = city.grainPrice;
+  return typeof price === 'number' && price >= GRAIN_PRICE_MIN && price <= GRAIN_PRICE_MAX
+    ? price
+    : DEFAULT_GRAIN_PRICE;
+}
+
+export function rollGrainPrices(state: GameState): void {
+  for (const city of Object.values(state.cities)) {
+    const roll = nextRandom(state.seed, state.rngCursor);
+    state.rngCursor = roll.cursor;
+    city.grainPrice = GRAIN_PRICE_MIN + Math.floor(roll.value * (GRAIN_PRICE_MAX - GRAIN_PRICE_MIN + 1));
+  }
+}
+
+// 每旬各城独立掷点决定商人是否到访（1/4），并重置本旬交易次数
+export function rollMerchants(state: GameState): void {
+  for (const city of Object.values(state.cities)) {
+    const roll = nextRandom(state.seed, state.rngCursor);
+    state.rngCursor = roll.cursor;
+    city.merchantPresent = roll.value < MERCHANT_ARRIVAL_CHANCE;
+    city.merchantTradedThisTenDay = false;
+  }
+}
+
+// 交易效果：政治50为100%，每点政治约增减 1/350（政治81≈108%，政治100≈114%）
+export function tradeEffectMultiplier(politics: number): number {
+  return 1 + (politics - 50) / 350;
+}
+
+export function tradeEffectPercent(politics: number): number {
+  return Math.floor(tradeEffectMultiplier(politics) * 100);
+}
+
+export interface TradeQuote {
+  goldDelta: number;
+  foodDelta: number;
+}
+
+// amount 统一为兵粮数量：买入时为拟购入的兵粮数（所需资金向上取整），卖出时为拟售出的兵粮数
+export function quoteTrade(city: City, politics: number, mode: 'buy' | 'sell', amount: number): TradeQuote {
+  const price = grainPriceOf(city);
+  const effect = tradeEffectMultiplier(politics);
+  if (mode === 'buy') {
+    return { goldDelta: -Math.ceil(amount / (price * effect)), foodDelta: amount };
+  }
+  return { goldDelta: Math.floor((amount / price) * SELL_FEE_RATIO * effect), foodDelta: -amount };
+}
 
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, Math.round(value)));
@@ -42,8 +112,19 @@ function commandGoldCost(command: GameCommand) {
     case 'produceArmament': return ARMAMENT_GOLD_COST;
     case 'patrol': return 300;
     case 'talent': return 500;
+    case 'abilityResearch': return ABILITY_RESEARCH_GOLD;
     default: return 0;
   }
+}
+
+/** 研究下一级科技的金钱消耗 */
+export function researchGoldCost(state: GameState, forceId: ForceId, branch: TechBranchId): number {
+  return TECH_COSTS[techLevelOf(state, forceId, branch)]?.gold ?? 0;
+}
+
+/** 研究下一级科技的技巧P消耗 */
+export function researchTechPCost(state: GameState, forceId: ForceId, branch: TechBranchId): number {
+  return TECH_COSTS[techLevelOf(state, forceId, branch)]?.techP ?? 0;
 }
 
 function validateTransfer(state: GameState, forceId: ForceId, command: Extract<GameCommand, { type: 'transfer' }>) {
@@ -68,7 +149,7 @@ function validateTransfer(state: GameState, forceId: ForceId, command: Extract<G
   return errors;
 }
 
-function localOfficer(state: GameState, forceId: ForceId, command: Exclude<GameCommand, { type: 'transfer' }>) {
+function localOfficer(state: GameState, forceId: ForceId, command: Exclude<GameCommand, { type: 'transfer' } | { type: 'abilityResearch' }>) {
   const officer = state.officers[command.officerId];
   return officer?.forceId === forceId && officer.location.kind === 'city' && officer.location.cityId === command.cityId
     ? officer
@@ -81,7 +162,7 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
   if (state.phase !== 'playing') errors.push('本局已经结束');
   if (!city || city.ownerId !== forceId) errors.push('只能管理己方城市');
 
-  if (command.type !== 'transfer') {
+  if (command.type !== 'transfer' && command.type !== 'abilityResearch') {
     const officer = localOfficer(state, forceId, command);
     if (!officer) {
       errors.push('武将不在目标城市');
@@ -105,8 +186,73 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
   if (command.type === 'produceArmament' && !ARMAMENT_TYPES.includes(command.armamentType)) {
     errors.push('兵装类型无效');
   }
+  if (command.type === 'trade') {
+    if (!city.merchantPresent) {
+      errors.push('商人本旬未到访');
+    } else if (city.merchantTradedThisTenDay) {
+      errors.push('本旬已完成一次粮食交易');
+    } else if (!Number.isInteger(command.amount) || command.amount <= 0) {
+      errors.push('交易数量必须为正整数');
+    } else if (command.amount > TRADE_MAX_GRAIN) {
+      errors.push(`单次交易最多${TRADE_MAX_GRAIN.toLocaleString('en-US')}兵粮`);
+    } else if (command.mode === 'sell' && command.amount > city.food) {
+      errors.push('兵粮不足');
+    } else if (command.mode === 'buy') {
+      const officer = localOfficer(state, forceId, command);
+      const goldCost = Math.ceil(command.amount / (grainPriceOf(city) * tradeEffectMultiplier(officer?.stats.politics ?? 50)));
+      if (goldCost > city.gold) errors.push('资金不足');
+    }
+  }
+  if (command.type === 'research') {
+    const branch = TECH_BRANCHES.find((candidate) => candidate.id === command.branch);
+    if (!branch) errors.push('科技方向无效');
+    else {
+      const level = techLevelOf(state, forceId, command.branch);
+      if (level >= MAX_TECH_LEVEL) errors.push('该方向科技已研究完毕');
+      else {
+        const cost = TECH_COSTS[level];
+        if (city.gold < cost.gold) errors.push(`资金不足 ${cost.gold}`);
+        if ((state.forces[forceId]?.techP ?? 0) < cost.techP) errors.push(`技巧P不足 ${cost.techP}`);
+        // 每旬每势力同时只能研究一项（含城间）
+        const busy = Object.values(state.officers).some((officer) =>
+          officer.forceId === forceId && officer.location.kind === 'task' && officer.location.task === 'research');
+        if (busy) errors.push('已有科技正在研究中');
+      }
+    }
+  }
+  if (command.type === 'abilityResearch') {
+    const node = ABILITY_NODE_MAP[command.nodeId];
+    const activeNode = state.forces[forceId]?.abilityResearch?.active;
+    if (activeNode) errors.push('已有能力正在研究中');
+    else if (!node) errors.push('能力节点无效');
+    else {
+      const status = abilityNodeStatus(state, forceId, node);
+      if (status === 'done') errors.push('该能力已研究完成');
+      else if (status === 'locked') errors.push('前置能力尚未研究');
+    }
+  }
+  if (command.type === 'cultivate') {
+    const node = ABILITY_NODE_MAP[command.nodeId];
+    const officer = localOfficer(state, forceId, command);
+    if (!node) {
+      errors.push('能力节点无效');
+    } else if (abilityNodeStatus(state, forceId, node) !== 'done') {
+      errors.push('该能力尚未研究完成');
+    } else if (abilityCultivateRemaining(state, forceId, node.id) <= 0) {
+      errors.push('该能力培育次数已用完');
+    } else if (officer && !canCultivateOfficer(officer, node)) {
+      errors.push(node.kind === 'aptitude' ? '该武将适性不符合培育条件' : '该武将能力已达上限');
+    }
+  }
   if (command.type === 'transfer') errors.push(...validateTransfer(state, forceId, command));
   return [...new Set(errors)];
+}
+
+/** 技巧P入账（击破/占领/登庸/交易/内政等） */
+export function addTechP(state: GameState, forceId: ForceId, amount: number): void {
+  const force = state.forces[forceId];
+  if (!force || amount <= 0) return;
+  force.techP = (force.techP ?? 0) + amount;
 }
 
 function findLocalTalent(state: GameState, city: City) {
@@ -124,6 +270,7 @@ function resolveTalentSearch(state: GameState, forceId: ForceId, city: City, off
     talent.forceId = forceId;
     talent.location = { kind: 'city', cityId: city.id };
     talent.cityId = city.id;
+    addTechP(state, forceId, 150);
     return `${officer.name}在${city.name}登用了${talent.name}`;
   }
   return talent
@@ -166,9 +313,11 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'develop': {
       const officer = next.officers[command.officerId];
       city.gold -= 500;
-      const gain = 4 + Math.floor(officer.stats.politics / 20);
+      const baseGain = 4 + Math.floor(officer.stats.politics / 20);
+      const gain = Math.max(1, Math.round(baseGain * developMultiplier(next, forceId, command.focus)));
       city[command.focus] = clamp(city[command.focus] + gain, 0, 100);
       const focusName = command.focus === 'commerce' ? '商业' : '农业';
+      addTechP(next, forceId, TECHP_PER_CIVIL_ACTION);
       message = `${officer.name}开发${city.name}${focusName}，提升了${gain}点`;
       officer.acted = true;
       break;
@@ -176,12 +325,13 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'recruit': {
       const officer = next.officers[command.officerId];
       const baseGain = 300 + officer.stats.charisma * 10;
-      const gain = Math.round(baseGain * commandYieldMultiplier(next, command));
+      const gain = Math.round(baseGain * commandYieldMultiplier(next, command) * recruitMultiplier(next, forceId));
       city.gold -= 800;
       city.food -= 500;
       city.population -= 500;
       city.troops += gain;
       city.order = clamp(city.order - 2, 0, 100);
+      addTechP(next, forceId, TECHP_PER_CIVIL_ACTION);
       message = `${officer.name}在${city.name}征募士兵`;
       next.cityEffectReports = [{
         id: `city-effect-${next.month}-${next.logs.length}`,
@@ -252,6 +402,69 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       const officer = next.officers[command.officerId];
       city.gold -= 500;
       message = resolveTalentSearch(next, forceId, city, officer);
+      officer.acted = true;
+      break;
+    }
+    case 'research': {
+      const officer = next.officers[command.officerId];
+      const branchDef = TECH_BRANCHES.find((candidate) => candidate.id === command.branch)!;
+      const level = techLevelOf(next, forceId, command.branch);
+      const cost = TECH_COSTS[level];
+      city.gold -= cost.gold;
+      const force = next.forces[forceId];
+      force.techP = (force.techP ?? 0) - cost.techP;
+      const statValue = branchDef.researchStat === 'leadership'
+        ? officer.stats.leadership
+        : officer.stats.politics;
+      const tenDays = researchTenDays(cost.baseTenDays, statValue);
+      officer.location = {
+        kind: 'task',
+        cityId: city.id,
+        task: 'research',
+        branch: command.branch,
+        remainingTenDays: tenDays,
+      };
+      officer.acted = true;
+      message = `${officer.name}在${city.name}开始研究${branchDef.name}系「${branchDef.levels[level].name}」，预计${tenDays}旬完成`;
+      break;
+    }
+    case 'abilityResearch': {
+      const node = ABILITY_NODE_MAP[command.nodeId];
+      city.gold -= ABILITY_RESEARCH_GOLD;
+      const force = next.forces[forceId];
+      const current = force.abilityResearch ?? { researched: [], remaining: {} };
+      force.abilityResearch = {
+        ...current,
+        active: { nodeId: node.id, remainingMonths: node.months },
+      };
+      message = `${force.name}开始研究能力「${node.label}」，预计${node.months}个月完成，耗金${ABILITY_RESEARCH_GOLD}`;
+      break;
+    }
+    case 'cultivate': {
+      const officer = next.officers[command.officerId];
+      const node = ABILITY_NODE_MAP[command.nodeId];
+      officer.location = {
+        kind: 'task',
+        cityId: city.id,
+        task: 'cultivate',
+        nodeId: node.id,
+        remainingTenDays: CULTIVATE_TEN_DAYS,
+      };
+      officer.acted = true;
+      message = `${officer.name}开始培育「${node.label}」，预计${CULTIVATE_TEN_DAYS}旬完成`;
+      break;
+    }
+    case 'trade': {
+      const officer = next.officers[command.officerId];
+      const quote = quoteTrade(city, officer.stats.politics, command.mode, command.amount);
+      city.gold += quote.goldDelta;
+      city.food += quote.foodDelta;
+      city.merchantTradedThisTenDay = true;
+      addTechP(next, forceId, TECHP_PER_TRADE);
+      const price = grainPriceOf(city);
+      message = command.mode === 'buy'
+        ? `${officer.name}在${city.name}以1金${price}粮的价格购入${quote.foodDelta.toLocaleString('en-US')}兵粮，耗金${(-quote.goldDelta).toLocaleString('en-US')}`
+        : `${officer.name}在${city.name}以1金${price}粮的价格卖出${command.amount.toLocaleString('en-US')}兵粮，得金${quote.goldDelta.toLocaleString('en-US')}`;
       officer.acted = true;
       break;
     }

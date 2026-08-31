@@ -20,6 +20,7 @@ function newlyCreatedUnitId(before: GameState, after: GameState) {
 function actionEvents(unitId: string, action: Extract<ActionGameIntent, { type: 'deployUnitAction' }>['action']): GameEvent[] {
   switch (action.type) {
     case 'attackUnit': return [{ type: 'unit-attacked', attackerId: unitId, targetId: action.targetId, targetType: 'unit' }];
+    case 'jointAttackUnit': return [{ type: 'unit-attacked', attackerId: unitId, targetId: action.targetId, targetType: 'unit' }];
     case 'attackFacility': return [{ type: 'unit-attacked', attackerId: unitId, targetId: action.facilityId, targetType: 'facility' }];
     case 'attackCity': return [{ type: 'unit-attacked', attackerId: unitId, targetId: action.cityId, targetType: 'city' }];
     case 'useUnitTactic': return [{ type: 'tactic-used', unitId, tacticId: action.tacticId }];
@@ -52,6 +53,7 @@ export function eventsForIntent(before: GameState, after: GameState, intent: Act
         : [];
     }
     case 'attackUnit': return [{ type: 'unit-attacked', attackerId: intent.attackerId, targetId: intent.targetId, targetType: 'unit' }];
+    case 'jointAttackUnit': return [{ type: 'unit-attacked', attackerId: intent.attackerId, targetId: intent.targetId, targetType: 'unit' }];
     case 'attackFacility': return [{ type: 'unit-attacked', attackerId: intent.attackerId, targetId: intent.facilityId, targetType: 'facility' }];
     case 'attackCity': return [{ type: 'unit-attacked', attackerId: intent.attackerId, targetId: intent.cityId, targetType: 'city' }];
     case 'useUnitTactic': return [{ type: 'tactic-used', unitId: intent.attackerId, tacticId: intent.tacticId }];

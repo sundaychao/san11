@@ -61,6 +61,7 @@ interface GameContextValue {
   deployTransportUnit(input: { cityId: CityId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }): void;
   moveUnit(unitId: string, destination: { q: number; r: number }): void;
   attackUnit(attackerId: string, targetId: string, destination?: GridCoord): void;
+  jointAttackUnit(attackerId: string, targetId: string, destination?: GridCoord): void;
   attackFacility(attackerId: string, facilityId: string, destination?: GridCoord): void;
   useUnitTactic(attackerId: string, targetId: string, tacticId: TacticId, destination?: GridCoord): void;
   useUnitStrategy(unitId: string, strategyId: StrategyId, selection: StrategySelection, destination?: GridCoord): void;
@@ -281,6 +282,10 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     dispatchIntent({ type: 'attackUnit', attackerId, targetId, destination }, () => emitAudioEvent({ type: 'unit-attacked' }));
   }, [dispatchIntent, emitAudioEvent]);
 
+  const jointAttackBattleUnit = useCallback((attackerId: string, targetId: string, destination?: GridCoord) => {
+    dispatchIntent({ type: 'jointAttackUnit', attackerId, targetId, destination }, () => emitAudioEvent({ type: 'unit-attacked' }));
+  }, [dispatchIntent, emitAudioEvent]);
+
   const attackBattleFacility = useCallback((attackerId: string, facilityId: string, destination?: GridCoord) => {
     dispatchIntent({ type: 'attackFacility', attackerId, facilityId, destination }, () => emitAudioEvent({ type: 'unit-attacked' }));
   }, [dispatchIntent, emitAudioEvent]);
@@ -417,6 +422,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     deployTransportUnit: deployTransport,
     moveUnit: moveBattleUnit,
     attackUnit: attackBattleUnit,
+    jointAttackUnit: jointAttackBattleUnit,
     attackFacility: attackBattleFacility,
     useUnitTactic: useBattleTactic,
     useUnitStrategy: useBattleStrategy,
@@ -434,7 +440,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     clearSave: clearSaveSlot,
     selectCity: setSelectedCityId,
     clearError: () => setError(null),
-  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattleUnit, auth, availability, buildBattleFacility, clearSaveSlot, createOnlineRoom, deployBattleUnit, deployBattleUnitAction, deployTransport, disconnectOnline, dismantleBattleFacility, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, selectedCityId, selectOnlineForce, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
+  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattleUnit, jointAttackBattleUnit, auth, availability, buildBattleFacility, clearSaveSlot, createOnlineRoom, deployBattleUnit, deployBattleUnitAction, deployTransport, disconnectOnline, dismantleBattleFacility, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, selectedCityId, selectOnlineForce, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 }

@@ -178,7 +178,6 @@ button { color: inherit; }
 .terrain-mountain { fill: rgba(50, 54, 55, 0.48); stroke: rgba(205, 210, 202, 0.48); }
 .terrain-shallowWater, .terrain-deepWater { fill: rgba(38, 125, 168, 0.45); stroke: rgba(126, 213, 238, 0.52); }
 .terrain-water { fill: rgba(38, 125, 168, 0.48); stroke: rgba(126, 213, 238, 0.55); }
-.terrain-shore { fill: rgba(126, 190, 214, 0.38); stroke: rgba(186, 230, 244, 0.6); }
 .terrain-ferry { fill: rgba(160, 116, 64, 0.55); stroke: rgba(214, 178, 122, 0.85); stroke-width: 1.4; }
 .battle-cell.is-facility-occupied { fill: rgba(18, 24, 23, 0.58); stroke: rgba(255, 237, 154, 0.56); stroke-width: 0.9; }
 .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 42%, transparent); stroke: rgba(255, 244, 205, 0.58); stroke-width: 1.3; vector-effect: non-scaling-stroke; pointer-events: auto; cursor: pointer; }
@@ -196,11 +195,12 @@ button { color: inherit; }
 .fire-cell-marker { pointer-events: none; fill: #ffcf42; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 24px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(102, 13, 5, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 5px rgba(255, 86, 36, 0.85)); }
 .battle-damage-number { pointer-events: none; fill: #ffdf54; font-family: Consolas, "Courier New", monospace; font-size: 14px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(88, 8, 6, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .battle-damage-number.is-counter { fill: #ff8f6f; }
+.battle-damage-number.is-jointAttack { font-size: 22px; fill: #ffd34d; letter-spacing: 1px; stroke-width: 5px; }
 .battle-critical-label { pointer-events: none; fill: #ffe56b; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 14px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(138, 23, 16, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .strategy-result-label { pointer-events: none; fill: #e1e4e1; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 13px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(25, 31, 29, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .facility-repair-number { pointer-events: none; fill: #8ff0ae; font-family: Consolas, "Courier New", monospace; font-size: 14px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(8, 45, 24, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .facility-repair-number.is-build { fill: #ffe37a; }
-.city-effect-number { position: absolute; left: 50%; bottom: calc(50% + 58px * var(--map-scale, 1)); z-index: 2; min-width: max-content; transform: translateX(-50%); pointer-events: none; color: #f7ef83; font-family: Consolas, "Microsoft YaHei", sans-serif; font-size: calc(18px * var(--map-scale, 1)); font-weight: 900; line-height: 1; text-shadow: 0 2px 0 rgba(17, 24, 21, 0.98), 2px 0 0 rgba(17, 24, 21, 0.98), -2px 0 0 rgba(17, 24, 21, 0.98), 0 -2px 0 rgba(17, 24, 21, 0.98), 0 0 7px rgba(0, 0, 0, 0.9); white-space: nowrap; }
+.city-effect-number { position: absolute; left: 50%; bottom: calc(50% + 64px); z-index: 2; min-width: max-content; transform: translateX(-50%); pointer-events: none; color: #f7ef83; font-family: Consolas, "Microsoft YaHei", sans-serif; font-size: max(13px, calc(16px * var(--map-scale, 1))); font-weight: 900; line-height: 1; text-shadow: 0 2px 0 rgba(17, 24, 21, 0.98), 2px 0 0 rgba(17, 24, 21, 0.98), -2px 0 0 rgba(17, 24, 21, 0.98), 0 -2px 0 rgba(17, 24, 21, 0.98), 0 0 7px rgba(0, 0, 0, 0.9); white-space: nowrap; }
 .city-effect-number.is-armament { color: #9de7ff; }
 .troop-sword { --troop-tone: #cfc6a5; }
 .troop-spear { --troop-tone: #7fab72; }
@@ -218,8 +218,8 @@ button { color: inherit; }
   position: absolute;
   pointer-events: none;
   z-index: 1;
-  width: calc(43px * var(--map-scale, 1));
-  height: calc(43px * var(--map-scale, 1));
+  width: max(calc(var(--cell-px, 5.6px) * 1.2), 28px);
+  height: max(calc(var(--cell-px, 5.6px) * 1.2), 28px);
   padding: 0;
   border: 0;
   background: transparent;
@@ -231,12 +231,12 @@ button { color: inherit; }
 .city-marker:hover, .city-marker:focus-visible, .city-marker.is-selected { outline: none; }
 .city-marker:hover .city-marker-copy, .city-marker:focus-visible .city-marker-copy, .city-marker.is-selected .city-marker-copy { border-color: #f2d778; outline: 2px solid rgba(242, 215, 120, 0.58); outline-offset: 1px; }
 .city-marker.is-attack-target .city-marker-copy { border-color: #ffd842; outline: 2px solid rgba(255, 216, 66, 0.62); outline-offset: 1px; }
-.city-attack-target-arrow { position: absolute; left: 50%; top: calc(-11px * var(--map-scale, 1)); transform: translateX(-50%); color: #ffd842; font-size: calc(18px * var(--map-scale, 1)); font-weight: 900; line-height: 1; pointer-events: none; text-shadow: 0 1px 2px rgba(16, 19, 15, 0.96), 0 0 5px rgba(255, 216, 66, 0.6); }
-.city-marker-copy { position: absolute; left: 50%; bottom: calc(50% + 21px * var(--map-scale, 1)); min-width: calc(96px * var(--map-scale, 1)); display: grid; grid-template-columns: auto minmax(calc(52px * var(--map-scale, 1)), 1fr); align-items: start; gap: calc(3px * var(--map-scale, 1)) calc(7px * var(--map-scale, 1)); padding: calc(4px * var(--map-scale, 1)) calc(6px * var(--map-scale, 1)); border: 1px solid rgba(218, 203, 158, 0.72); border-radius: 2px; background: rgba(24, 37, 33, 0.88); box-shadow: 0 3px 8px rgba(10, 14, 12, 0.45); transform: translateX(-50%); line-height: 1.1; white-space: nowrap; pointer-events: none; }
-.city-marker-copy strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: calc(15px * var(--map-scale, 1)); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
+.city-attack-target-arrow { position: absolute; left: 50%; top: calc(-1.25em); transform: translateX(-50%); color: #ffd842; font-size: 15px; font-weight: 900; line-height: 1; pointer-events: none; text-shadow: 0 1px 2px rgba(16, 19, 15, 0.96), 0 0 5px rgba(255, 216, 66, 0.6); }
+.city-marker-copy { position: absolute; left: 50%; bottom: calc(100% + 3px); min-width: max(calc(var(--cell-px, 5.6px) * 2), 40px); display: grid; grid-template-columns: min-content; justify-items: center; gap: 1px; padding: 2px 4px; border: 1px solid rgba(218, 203, 158, 0.72); border-radius: 2px; background: rgba(24, 37, 33, 0.88); box-shadow: 0 3px 8px rgba(10, 14, 12, 0.45); transform: translateX(-50%); line-height: 1.1; white-space: nowrap; pointer-events: none; }
+.city-marker-copy strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: max(10px, calc(var(--cell-px, 5.6px) * 0.6)); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
 .city-marker-stats { display: grid; gap: 1px; }
-.city-marker-stat { display: block; color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: calc(11px * var(--map-scale, 1)); font-weight: 800; text-align: right; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
-.city-marker-stat-divider { display: block; height: calc(1px * var(--map-scale, 1)); background: rgba(255, 244, 205, 0.76); box-shadow: 0 0 4px color-mix(in srgb, var(--force-color) 55%, transparent); }
+.city-marker-stat { display: block; color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: max(8px, calc(var(--cell-px, 5.6px) * 0.3)); font-weight: 800; text-align: right; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
+.city-marker-stat-divider { display: block; height: 1px; background: rgba(255, 244, 205, 0.76); box-shadow: 0 0 4px color-mix(in srgb, var(--force-color) 55%, transparent); }
 .map-tools { position: absolute; z-index: 6; top: 14px; left: 14px; display: flex; gap: 5px; padding: 5px; }
 .map-tools .icon-button { background: rgba(24, 37, 33, 0.9); }
 .hover-coordinate { position: fixed; z-index: 16; left: 50%; bottom: 16px; min-width: 118px; padding: 7px 14px; transform: translateX(-50%); color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 13px; font-weight: 700; text-align: center; pointer-events: none; }
@@ -370,6 +370,12 @@ button { color: inherit; }
 .city-command-secondary button:disabled:hover, .city-command-secondary button.is-disabled:hover {
   background: transparent;
 }
+.city-command-secondary button.is-back {
+  color: var(--gold);
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+.city-command-secondary button.is-back:hover { background: rgba(197, 173, 111, 0.18); }
 .city-command-primary svg { width: 16px; height: 16px; color: var(--gold); }
 .city-command-primary svg:last-child { color: var(--muted); }
 .city-command-secondary {
@@ -499,7 +505,35 @@ button { color: inherit; }
 .command-grid button:disabled { opacity: 0.42; cursor: not-allowed; }
 .command-grid button:disabled:hover { border-color: var(--line); background: rgba(244, 237, 217, 0.07); }
 .command-grid svg { width: 18px; height: 18px; color: var(--gold); }
-.command-grid span { font-size: 12px; }
+.command-grid span { font-size: 12px; white-space: nowrap; }
+.cultivate-submenu { padding-top: 10px; }
+.cultivate-submenu > button { width: 100%; min-height: 30px; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.05); cursor: pointer; color: var(--gold); }
+.cultivate-submenu > button:hover, .cultivate-submenu > button:focus-visible { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.16); outline: none; }
+.cultivate-submenu > button svg { width: 14px; height: 14px; }
+.cultivate-submenu > button span { font-size: 12px; white-space: nowrap; }
+
+/* —— 培育武将选择（3 个条目，与城市命令菜单前两级同款样式） —— */
+.cultivate-picker-dialog { display: grid; min-width: 148px; padding: 4px; background: rgba(24, 37, 33, 0.96); box-shadow: var(--panel-shadow); }
+.cultivate-picker-dialog button {
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 0;
+  border-bottom: 1px solid rgba(146, 136, 115, 0.52);
+  background: transparent;
+  color: var(--paper);
+  text-align: left;
+  cursor: pointer;
+}
+.cultivate-picker-dialog button:last-child { border-bottom: 0; }
+.cultivate-picker-dialog button:hover, .cultivate-picker-dialog button:focus-visible { background: rgba(197, 173, 111, 0.18); outline: none; }
+.cultivate-picker-dialog button:disabled { color: rgba(244, 237, 217, 0.35); cursor: not-allowed; }
+.cultivate-picker-dialog button:disabled:hover { background: transparent; }
+.cultivate-picker-dialog button svg { width: 16px; height: 16px; color: var(--gold); }
+.cultivate-picker-dialog button span { font-size: 13px; white-space: nowrap; }
 .readonly-note { margin: 14px 0 0; padding: 9px; border: 1px solid var(--line); color: var(--muted); font-size: 11px; text-align: center; }
 .event-log { position: fixed; z-index: 12; left: 16px; bottom: 16px; width: min(430px, calc(100vw - 368px)); padding: 13px 15px; }
 .event-log h2 { font-size: 17px; }
@@ -591,10 +625,75 @@ button { color: inherit; }
 .produce-armament-grid button:hover, .produce-armament-grid button:focus-visible, .produce-armament-grid button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.22); outline: none; }
 .produce-armament-grid strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 18px; }
 .produce-armament-grid span { color: var(--muted); font-family: Consolas, "Courier New", monospace; font-size: 11px; text-align: center; }
-.produce-stock { display: grid; gap: 6px; margin: 0; }
-.produce-stock > div { display: grid; grid-template-columns: 54px 1fr; align-items: center; min-height: 32px; padding: 0 8px; border: 1px solid rgba(146, 136, 115, 0.55); }
-.produce-stock dt { color: var(--muted); font-size: 12px; }
-.produce-stock dd { margin: 0; color: #fff6d6; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+.produce-stock, .trade-quote { display: grid; gap: 6px; margin: 0; }
+.produce-stock > div, .trade-quote > div { display: grid; grid-template-columns: 54px 1fr; align-items: center; min-height: 32px; padding: 0 8px; border: 1px solid rgba(146, 136, 115, 0.55); }
+.produce-stock dt, .trade-quote dt { color: var(--muted); font-size: 12px; }
+.produce-stock dd, .trade-quote dd { margin: 0; color: #fff6d6; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+.trade-panel { display: grid; gap: 12px; margin-top: 15px; }
+.research-panel { display: grid; gap: 10px; margin-top: 15px; }
+.research-techp { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(197, 173, 111, 0.12); }
+.research-techp span { color: var(--muted); font-size: 12px; }
+.research-techp strong { color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 16px; font-variant-numeric: tabular-nums; }
+.research-branch { border: 1px solid var(--line); background: rgba(244, 237, 217, 0.04); }
+.research-branch.is-selected { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.12); }
+.research-branch-head { width: 100%; display: flex; justify-content: space-between; align-items: center; min-height: 40px; padding: 0 12px; border: 0; background: transparent; color: var(--paper); cursor: pointer; }
+.research-branch-head:hover { background: rgba(244, 237, 217, 0.08); }
+.research-branch-head strong { font-family: STKaiti, KaiTi, serif; font-size: 15px; }
+.research-branch-head span { color: var(--muted); font: 12px Consolas, "Courier New", monospace; font-variant-numeric: tabular-nums; }
+.research-levels { display: grid; gap: 5px; margin: 0; padding: 0 10px 10px; list-style: none; counter-reset: tech-level; }
+.research-levels li { display: grid; grid-template-columns: 86px 1fr; gap: 4px 10px; padding: 7px 9px; border: 1px solid rgba(146, 136, 115, 0.45); font-size: 11px; }
+.research-levels li strong { grid-row: span 2; align-self: center; color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 13px; }
+.research-levels li span { color: var(--paper); }
+.research-levels li em { color: var(--muted); font-style: normal; font-size: 10px; font-variant-numeric: tabular-nums; }
+.research-levels li.is-done { border-color: rgba(127, 184, 122, 0.6); background: rgba(127, 184, 122, 0.12); }
+.research-levels li.is-next { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.16); }
+.research-levels li.is-locked { opacity: 0.55; }
+/* —— 技巧研究表格（参照原版研究技巧界面） —— */
+.tech-research-panel { margin-top: 15px; }
+.tech-table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1px solid rgba(146, 136, 115, 0.6); background: rgba(15, 30, 29, 0.72); }
+.tech-table th, .tech-table td { border: 1px solid rgba(146, 136, 115, 0.45); text-align: center; vertical-align: middle; padding: 0; }
+.tech-table thead tr:first-child th { position: relative; height: 38px; color: #e8d9ac; background: rgba(197, 173, 111, 0.14); font-family: STKaiti, KaiTi, serif; font-size: 17px; font-weight: 700; }
+.tech-table thead tr:first-child th + th::before { content: '→'; position: absolute; left: -11px; top: 50%; transform: translateY(-50%); color: var(--gold-line); font-size: 13px; }
+.tech-table .tech-cost-row th { height: 26px; color: var(--muted); font: 400 11px Consolas, "Courier New", monospace; font-variant-numeric: tabular-nums; }
+.tech-table tbody th { width: 64px; height: 42px; color: #e8dfc8; background: rgba(244, 237, 217, 0.07); font-family: STKaiti, KaiTi, serif; font-size: 14px; font-weight: 700; }
+.tech-table td { height: 42px; }
+.tech-table td button { width: 100%; height: 100%; min-height: 42px; border: 1px solid var(--gold-line); border-radius: 2px; background: rgba(197, 173, 111, 0.18); color: #fff2c4; font-family: STKaiti, KaiTi, serif; font-size: 13px; cursor: pointer; }
+.tech-table td button:hover { background: rgba(197, 173, 111, 0.34); }
+.tech-table td button.is-selected { background: var(--gold); border-color: var(--gold); color: var(--ink); font-weight: 700; }
+.tech-table td .is-done { display: grid; place-items: center; min-height: 42px; background: rgba(127, 184, 122, 0.26); color: #dff0d8; font-family: STKaiti, KaiTi, serif; font-size: 13px; }
+.tech-table td .is-locked { display: grid; place-items: center; min-height: 42px; color: rgba(244, 237, 217, 0.32); font-family: STKaiti, KaiTi, serif; font-size: 13px; }
+.tech-info { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 10px 0 0; border: 1px solid rgba(146, 136, 115, 0.55); border-bottom: 0; }
+.tech-info > div { display: flex; align-items: center; gap: 6px; min-height: 34px; padding: 4px 8px; border-bottom: 1px solid rgba(146, 136, 115, 0.45); }
+.tech-info > div:not(:nth-child(3n)) { border-right: 1px solid rgba(146, 136, 115, 0.45); }
+.tech-info dt { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.tech-info dd { margin: 0; color: #fff6d6; font-size: 11px; font-variant-numeric: tabular-nums; overflow-wrap: break-word; white-space: normal; }
+.tech-info .tech-effect { grid-column: span 2; }
+/* —— 能力研究树 —— */
+.ability-panel { margin-top: 15px; }
+.ability-tree { position: relative; display: grid; gap: 5px; padding: 12px; aspect-ratio: 900 / 560; border: 1px solid rgba(146, 136, 115, 0.6); background: rgba(15, 30, 29, 0.72); }
+.ability-arrows { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+.ability-center { z-index: 1; display: grid; place-items: center; align-self: center; justify-self: center; width: 92%; height: 44px; border: 1px dashed var(--gold-line); border-radius: 999px; color: var(--gold); font-family: STKaiti, KaiTi, serif; font-size: 13px; }
+.ability-node { position: relative; z-index: 1; align-self: center; justify-self: center; width: 92%; height: 44px; padding: 2px 4px; border: 1px solid rgba(146, 136, 115, 0.45); border-radius: 999px; background: rgba(244, 237, 217, 0.05); color: rgba(244, 237, 217, 0.38); font-family: STKaiti, KaiTi, serif; font-size: 12px; line-height: 1.2; cursor: pointer; }
+.ability-node.is-selected { box-shadow: 0 0 0 2px var(--gold); z-index: 2; }
+.ability-node em { position: absolute; top: -7px; right: -5px; padding: 0 4px; border-radius: 8px; background: var(--gold); color: var(--ink); font: 700 10px Consolas, "Courier New", monospace; font-style: normal; }
+/* 特技节点：暗橄榄金（可研究，培育后武将习得该特技）；状态色（可用/在研/已研究）在其后覆盖 */
+.ability-node.cat-skill { border-color: rgba(176, 158, 96, 0.55); background: rgba(94, 84, 50, 0.42); color: rgba(216, 203, 160, 0.78); }
+.ability-node.cat-skill:hover { background: rgba(112, 98, 56, 0.6); }
+/* 前置未研究完成的节点：不可选中 */
+.ability-node:disabled { cursor: not-allowed; }
+.ability-node:disabled:hover { filter: none; }
+.ability-node:disabled.is-locked { opacity: 0.72; }
+.ability-node.is-available { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.24); color: #fff2c4; }
+.ability-node.is-active { border-color: #d08a5f; background: rgba(208, 138, 95, 0.28); color: #ffe6d2; }
+/* 已研究完成的节点：统一单一金色填充色（不再按分类分色，特技节点同样适用） */
+.ability-node.is-done { color: #fdf6e3; border-color: rgba(197, 173, 111, 0.95); background: #8a7440; }
+.ability-node.is-done:hover { background: #967e45; }
+.ability-info dd { white-space: normal; }
+.command-dialog:has(.ability-panel) { width: min(720px, 100%); }
+.trade-slider-wrap { padding: 10px 14px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); }
+.trade-slider-wrap input[type="range"] { width: 100%; accent-color: var(--gold); cursor: pointer; }
+.trade-slider-wrap.is-buy input[type="range"] { accent-color: #7fb87a; }
+.trade-slider-wrap.is-sell input[type="range"] { accent-color: #d08a5f; }
 .amount-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 13px; }
 .deploy-ranges { grid-template-columns: 1fr; gap: 10px; }
 .range-field { display: grid; grid-template-columns: 42px minmax(0, 1fr) 106px; align-items: center; gap: 10px; }
@@ -610,6 +709,186 @@ button { color: inherit; }
 .command-cost { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin-top: 15px; padding: 10px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 11px; }
 .command-cost span { color: var(--muted); }
 .command-cost strong { text-align: right; }
+
+/* —— 培育对话框（能力 / 适性 / 特技） —— */
+.cultivate-dialog {
+  --cult-stat-lead: #66c2c4; /* 统率：防御青 */
+  --cult-stat-war: #e07d7d;  /* 武力：攻击红 */
+  --cult-stat-int: #b18be0;  /* 智力：计略紫 */
+  --cult-stat-pol: #e4c67b;  /* 政治：内政黄 */
+  --cult-stat-cha: #85b97d;  /* 魅力：内政绿 */
+  width: min(880px, 96vw);
+  padding: 18px 20px 16px;
+  display: grid;
+  gap: 14px;
+}
+.cultivate-dialog .dialog-header span { font-size: 18px; font-family: STKaiti, KaiTi, serif; letter-spacing: 1px; }
+.cultivate-dialog .dialog-close { color: var(--muted); }
+
+.cultivate-officer-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 6px 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(146, 136, 115, 0.6);
+  background: rgba(15, 30, 29, 0.72);
+}
+.cultivate-officer-card > .field-label {
+  grid-column: 1 / 2;
+  grid-row: 1 / 2;
+  color: var(--muted);
+  font-size: 12px;
+  align-self: center;
+}
+.cultivate-officer-body {
+  grid-column: 2 / 3;
+  grid-row: 1 / 3;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.cultivate-officer-avatar { display: flex; align-items: center; gap: 8px; }
+.officer-avatar-badge {
+  display: grid; place-items: center;
+  width: 54px; height: 68px;
+  background: linear-gradient(180deg, rgba(255,220,150,0.18), rgba(150,100,50,0.4));
+  border: 1px solid rgba(200, 170, 120, 0.75);
+  border-radius: 3px;
+  font-family: STKaiti, KaiTi, serif;
+  color: #ffeab0;
+  font-size: 30px;
+  letter-spacing: 1px;
+}
+.cultivate-officer-name {
+  color: #fff6d6;
+  font-family: STKaiti, KaiTi, serif;
+  font-size: 18px;
+}
+.cultivate-officer-select { min-width: 160px; }
+
+.cultivate-stats-grid { display: flex; flex-direction: column; gap: 3px; border: 1px solid rgba(146, 136, 115, 0.45); padding: 6px 10px; min-width: 230px; }
+.cultivate-stat-item { display: grid; grid-template-columns: 40px 1fr; align-items: center; }
+.cultivate-stat-label { font-family: STKaiti, KaiTi, serif; font-size: 16px; font-weight: 600; }
+.cultivate-stat-value { color: #fff6d6; font-variant-numeric: tabular-nums; text-align: right; }
+
+.cultivate-aptitude-grid {
+  display: grid; grid-template-columns: repeat(3, auto); gap: 4px 14px;
+  border: 1px solid rgba(146, 136, 115, 0.45); padding: 6px 10px;
+}
+.cultivate-apt-item { display: grid; grid-template-columns: 46px auto; align-items: center; }
+.cultivate-apt-name { color: var(--muted); font-size: 11px; }
+.cultivate-apt-grade { font-variant-numeric: tabular-nums; color: #fff6d6; }
+
+.cultivate-skill-row { display: grid; grid-template-columns: auto 1fr; gap: 10px; border: 1px solid rgba(146, 136, 115, 0.45); padding: 6px 10px; min-width: 260px; }
+.cultivate-skill-label { color: var(--muted); font-size: 12px; }
+.cultivate-skill-value { color: #fff6d6; }
+
+.cultivate-grid-panel {
+  border: 1px solid rgba(146, 136, 115, 0.6);
+  background: rgba(15, 30, 29, 0.72);
+  padding: 14px 16px;
+}
+.cultivate-grid { display: grid; gap: 12px; }
+.cultivate-grid-stat { grid-template-columns: 1fr; }
+.cultivate-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 4px 0; border-left: 3px solid; border-right: 3px solid transparent; padding-left: 8px; }
+
+.cultivate-grid-apt { grid-template-columns: repeat(6, 1fr); gap: 14px; }
+.cultivate-apt-col { display: grid; grid-template-rows: 1fr 1fr; gap: 12px; }
+
+.cultivate-grid-skill { grid-template-columns: 1fr; }
+.cultivate-skill-row-grid { display: grid; gap: 10px; }
+
+.cultivate-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 8px 8px;
+  border-radius: 999px; /* 胶囊椭圆 */
+  min-height: 54px;
+  border: 1.5px solid rgba(146, 136, 115, 0.7);
+  background: rgba(30, 38, 40, 0.85);
+  color: rgba(244, 237, 217, 0.38);
+  cursor: default;
+  user-select: none;
+}
+.cultivate-node:not(:disabled) { cursor: pointer; }
+.cultivate-node.is-locked { opacity: 0.85; }
+/* 已研究完成的节点（含培育次数用尽）统一使用分类纯色填充；可培育再叠加金色描边 */
+.cultivate-node.is-done { color: #fff6d6; }
+.cultivate-node.is-eligible { color: #fff6d6; border-color: rgba(220, 180, 90, 0.9); }
+.cultivate-node.is-selected { background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 700; }
+
+/* 节点分类底色：已研究 = 单色实心填充（非锁定、非选中时生效） */
+.cultivate-node.is-stat.cat-stat-leadership:not(.is-locked):not(.is-selected)  { background: #3f6a72; }
+.cultivate-node.is-stat.cat-stat-war:not(.is-locked):not(.is-selected)          { background: #8a4343; }
+.cultivate-node.is-stat.cat-stat-intelligence:not(.is-locked):not(.is-selected) { background: #6a4f8a; }
+.cultivate-node.is-stat.cat-stat-politics:not(.is-locked):not(.is-selected)     { background: #8a7038; }
+.cultivate-node.is-stat.cat-stat-charisma:not(.is-locked):not(.is-selected)     { background: #4a7a44; }
+.cultivate-node.is-apt:not(.is-locked):not(.is-selected)  { background: #7a5630; color: #ffe2a8; border-color: rgba(200, 160, 90, 0.7); }
+.cultivate-node.is-skill:not(.is-locked):not(.is-selected){ background: #6a6640; color: #f3e7a6; border-color: rgba(190, 170, 90, 0.7); }
+
+/* 可培育的已研究节点：叠加金色描边提示（覆盖分类填充的边框） */
+.cultivate-node.is-eligible.is-stat,
+.cultivate-node.is-eligible.is-apt,
+.cultivate-node.is-eligible.is-skill { border-color: rgba(240, 200, 110, 0.95); box-shadow: inset 0 0 0 1px rgba(240, 200, 110, 0.5); }
+
+.cultivate-node.is-selected.is-stat,
+.cultivate-node.is-selected.is-apt,
+.cultivate-node.is-selected.is-skill { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+
+.cultivate-node-label { font-family: STKaiti, KaiTi, serif; font-size: 15px; text-align: center; }
+.cultivate-node-box {
+  display: block;
+  text-align: center;
+  margin: 0 auto;
+  font-size: 11px;
+  color: var(--muted);
+  width: 60%;
+  padding: 1px 4px;
+  border: 1px solid rgba(146, 136, 115, 0.55);
+  background: rgba(0,0,0,0.25);
+  min-height: 18px;
+}
+.cultivate-node-box.has-count { color: #f4d470; border-color: rgba(220, 180, 90, 0.8); }
+.cultivate-node.is-selected .cultivate-node-box.has-count { color: var(--ink); border-color: rgba(0,0,0,0.35); background: rgba(255,255,255,0.2); }
+
+.cultivate-info {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 6px 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(146, 136, 115, 0.55);
+  background: rgba(15, 30, 29, 0.72);
+  font-size: 12px;
+}
+.cultivate-info > div { display: contents; }
+.cultivate-info span { color: var(--muted); align-self: center; }
+.cultivate-info strong { color: #fff6d6; text-align: left; align-self: center; font-weight: 500; }
+
+.cultivate-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+.cultivate-ap {
+  display: inline-flex;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px solid rgba(146, 136, 115, 0.45);
+  font-size: 12px;
+}
+.cultivate-ap span { color: var(--muted); }
+.cultivate-ap strong { color: #fff6d6; }
+.cultivate-actions { display: inline-flex; gap: 8px; }
+.cultivate-actions .primary-button.danger:not(:disabled) { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+.cultivate-actions .primary-button.danger:disabled { opacity: 0.5; cursor: not-allowed; }
 .validation-errors { display: flex; align-items: flex-start; gap: 7px; margin-top: 11px; padding: 9px; border: 1px solid #a95b51; color: #edaaa2; font-size: 11px; line-height: 1.4; }
 .validation-errors svg { flex: 0 0 16px; width: 16px; }
 .command-dialog footer, .result-overlay footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
@@ -678,8 +957,6 @@ button { color: inherit; }
   .mini-map { display: none; }
   .map-tools { top: 8px; left: 8px; }
   .map-tools .icon-button { width: 36px; min-height: 36px; }
-  .city-marker { width: 43px; height: 43px; padding: 0; }
-  .city-marker-copy strong { font-size: 14px; }
   .event-log { display: none; }
   .modal-backdrop, .result-backdrop { align-items: end; padding: 0; }
   .unit-detail-dialog { width: 100%; max-height: min(90dvh, calc(100dvh - 16px)); padding: 15px; border-width: 1px 0 0; }

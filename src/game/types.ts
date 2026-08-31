@@ -1,5 +1,8 @@
 export type ForceId = 'cao' | 'liu' | 'sun' | 'biao';
 
+/** 科技方向：枪兵/戟兵/弩兵/骑兵/军制/内政 */
+export type TechBranchId = 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'military' | 'civil';
+
 export type CityId =
   | 'wan'
   | 'xiangyang'
@@ -37,6 +40,8 @@ export interface Officer {
   location: OfficerLocation;
   stats: Stats;
   skill?: string;
+  /** 通过能力研究「特技」培育额外习得的特技名列表（与主特技 skill 并存） */
+  learnedSkills?: string[];
   aptitudes?: OfficerAptitudes;
   acted: boolean;
 }
@@ -46,7 +51,9 @@ export type OfficerLocation =
   | { kind: 'unit'; unitId: string }
   | { kind: 'unaffiliated'; cityId: CityId }
   | { kind: 'transfer'; fromCityId: CityId; targetCityId: CityId; remainingTenDays: number }
-  | { kind: 'task'; cityId: CityId; task: 'armament'; armamentType: ArmamentType; amount: number; remainingTenDays: number };
+  | { kind: 'task'; cityId: CityId; task: 'armament'; armamentType: ArmamentType; amount: number; remainingTenDays: number }
+  | { kind: 'task'; cityId: CityId; task: 'research'; branch: TechBranchId; remainingTenDays: number }
+  | { kind: 'task'; cityId: CityId; task: 'cultivate'; nodeId: string; remainingTenDays: number };
 
 export interface City {
   id: CityId;
@@ -68,6 +75,11 @@ export interface City {
   durability: number;
   maxDurability: number;
   armaments?: CityArmaments;
+  grainPrice?: number;
+  /** 商人本旬是否到访（每旬独立 1/4 概率） */
+  merchantPresent?: boolean;
+  /** 本旬是否已与商人完成一次粮食交易 */
+  merchantTradedThisTenDay?: boolean;
 }
 
 export interface Force {
@@ -76,6 +88,19 @@ export interface Force {
   leaderId: string;
   color: string;
   description: string;
+  /** 技巧P（研究科技用） */
+  techP?: number;
+  /** 各科技方向已研究等级 0-4 */
+  techs?: Partial<Record<TechBranchId, number>>;
+  /** 能力研究（PK版研究能力树）状态 */
+  abilityResearch?: AbilityResearchState;
+}
+
+/** 能力研究状态：已研究完成的节点、各节点剩余培育次数、正在研究的节点 */
+export interface AbilityResearchState {
+  researched: string[];
+  remaining: Record<string, number>;
+  active?: { nodeId: string; remainingMonths: number };
 }
 
 export interface GameLog {
@@ -91,7 +116,7 @@ export interface BattleDamageReport {
   q: number;
   r: number;
   amount: number;
-  kind: 'attack' | 'counter';
+  kind: 'attack' | 'counter' | 'jointAttack';
   critical?: boolean;
   label?: string;
 }
@@ -171,7 +196,7 @@ export interface GameState {
 
 export type TenDay = 1 | 2 | 3;
 
-export type TerrainType = 'road' | 'plain' | 'forest' | 'hill' | 'mountain' | 'water' | 'shore' | 'ferry';
+export type TerrainType = 'road' | 'plain' | 'forest' | 'hill' | 'mountain' | 'water' | 'ferry';
 export type TroopType = 'sword' | 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'siege';
 export type VehicleType = 'boat' | 'ship';
 export type ArmamentType = 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'ram' | 'tower' | 'ship';
@@ -214,12 +239,16 @@ export type GameCommand =
   | { type: 'train'; cityId: CityId; officerId: string }
   | { type: 'patrol'; cityId: CityId; officerId: string }
   | { type: 'talent'; cityId: CityId; officerId: string }
+  | { type: 'research'; cityId: CityId; officerId: string; branch: TechBranchId }
+  | { type: 'abilityResearch'; cityId: CityId; nodeId: string }
+  | { type: 'cultivate'; cityId: CityId; officerId: string; nodeId: string }
   | {
       type: 'transfer';
       cityId: CityId;
       targetCityId: CityId;
       officerIds: string[];
-    };
+    }
+  | { type: 'trade'; cityId: CityId; officerId: string; mode: 'buy' | 'sell'; amount: number };
 
 export interface ForceRanking {
   forceId: ForceId;

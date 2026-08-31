@@ -5,6 +5,7 @@ import type { CityId, FacilityType, GameCommand } from '../types';
 export type DeployFollowupAction =
   | { type: 'wait' }
   | { type: 'attackUnit'; targetId: string }
+  | { type: 'jointAttackUnit'; targetId: string }
   | { type: 'attackFacility'; facilityId: string }
   | { type: 'attackCity'; cityId: CityId }
   | { type: 'useUnitTactic'; targetId: string; tacticId: TacticId }
@@ -20,6 +21,7 @@ export type GameIntent =
   | { type: 'moveUnit'; unitId: string; destination: GridCoord }
   | { type: 'waitUnit'; unitId: string }
   | { type: 'attackUnit'; attackerId: string; targetId: string; destination?: GridCoord }
+  | { type: 'jointAttackUnit'; attackerId: string; targetId: string; destination?: GridCoord }
   | { type: 'attackFacility'; attackerId: string; facilityId: string; destination?: GridCoord }
   | { type: 'useUnitTactic'; attackerId: string; targetId: string; tacticId: TacticId; destination?: GridCoord }
   | { type: 'useUnitStrategy'; unitId: string; strategyId: StrategyId; selection: StrategySelection; destination?: GridCoord }

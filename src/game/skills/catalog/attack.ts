@@ -19,7 +19,7 @@ export const ATTACK_SKILLS: SkillDefinition[] = [
   attackSkill('扫讨', '攻击时降低敌方少量气力'),
   attackSkill('威风', '攻击时降低敌方大量气力'),
   attackSkill('昂扬', '击破敌军后恢复气力'),
-  activeAttackSkill('连战', '普通攻击有50%概率连续攻击两次', [{ kind: 'repeatNormalAttack', chance: 0.5 }]),
+  activeAttackSkill('连击', '普通攻击有50%概率连续攻击两次', [{ kind: 'repeatNormalAttack', chance: 0.5 }]),
   attackSkill('急袭', '陆地普通攻击时有50%概率不受反击伤害'),
   activeAttackSkill('强袭', '水上普通攻击时有50%概率不受反击伤害', [
     { kind: 'noCounterAttack', chance: 0.5, terrain: 'water' },

@@ -1,4 +1,5 @@
 import type { ArmyUnit, City, Facility, GameState } from '../types';
+import { techLevelOf } from '../techs';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { cellAt, cityCenter, unitIsIncapacitated } from './movementRules';
 
@@ -30,7 +31,12 @@ export function gridDistanceWithin(from: GridCoord, to: GridCoord, maxDistance: 
 
 export function unitAttackRange(state: GameState, unit: ArmyUnit) {
   if (cellAt(state, unit)?.terrain === 'water') return 2;
-  return ['crossbow', 'siege'].includes(unit.troopType ?? 'sword') ? 2 : 1;
+  if (['crossbow', 'siege'].includes(unit.troopType ?? 'sword')) {
+    // 科技：弩兵3级劲弩射程+1
+    if (unit.troopType === 'crossbow' && unit.forceId && techLevelOf(state, unit.forceId, 'crossbow') >= 3) return 3;
+    return 2;
+  }
+  return 1;
 }
 
 function isUnitInAttackRange(state: GameState, attacker: ArmyUnit, target: ArmyUnit) {

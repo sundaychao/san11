@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ARMAMENT_GOLD_COST, produceArmamentYield } from './armaments';
-import { COMMAND_AP, executeCommand, transferDuration, validateCommand } from './commands';
+import { COMMAND_AP, TRADE_MAX_GRAIN, executeCommand, grainPriceOf, quoteTrade, rollGrainPrices, rollMerchants, tradeEffectPercent, transferDuration, validateCommand } from './commands';
 import { createGame } from './scenario/jingxiang208';
 
 describe('command engine', () => {
@@ -278,5 +278,294 @@ describe('command engine', () => {
     expect(validateCommand(state, 'liu', {
       type: 'patrol', cityId: 'jiangling', officerId: 'liu-bei',
     })).toContain('刘备本月已行动');
+  });
+
+  it('buys a fixed amount of grain at the city price, charging gold rounded up with the politics effect', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.grainPrice = 5;
+    state.cities.jiangling.merchantPresent = true;
+    const politics = state.officers['liu-bei'].stats.politics;
+    const expected = quoteTrade(state.cities.jiangling, politics, 'buy', 5000);
+
+    const next = executeCommand(state, 'liu', {
+      type: 'trade', cityId: 'jiangling', officerId: 'liu-bei', mode: 'buy', amount: 5000,
+    });
+
+    expect(next.cities.jiangling.food).toBe(state.cities.jiangling.food + 5000);
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold + expected.goldDelta);
+    // 政治80 → 交易效果108%，买5000粮需金 ceil(5000 ÷ (5 × 1.0857)) = 922
+    expect(expected.foodDelta).toBe(5000);
+    expect(expected.goldDelta).toBe(-922);
+    expect(next.actionPoints.liu).toBe(state.actionPoints.liu - COMMAND_AP.trade);
+    expect(next.officers['liu-bei'].acted).toBe(true);
+  });
+
+  it('sells grain for gold with a twenty percent fee and the politics trade effect', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.grainPrice = 5;
+    state.cities.jiangling.merchantPresent = true;
+    const politics = state.officers['liu-bei'].stats.politics;
+    const expected = quoteTrade(state.cities.jiangling, politics, 'sell', 5000);
+
+    const next = executeCommand(state, 'liu', {
+      type: 'trade', cityId: 'jiangling', officerId: 'liu-bei', mode: 'sell', amount: 5000,
+    });
+
+    expect(next.cities.jiangling.food).toBe(state.cities.jiangling.food - 5000);
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold + expected.goldDelta);
+    // 卖粮 = 5000 ÷ 5 × 0.8 × 1.0857 ≈ 868
+    expect(expected.goldDelta).toBe(868);
+  });
+
+  it('rejects trades with non-positive amounts, over-cap amounts, or insufficient resources', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.grainPrice = 5;
+    state.cities.jiangling.merchantPresent = true;
+    state.cities.jiangling.gold = 500;
+    state.cities.jiangling.food = 1000;
+
+    expect(validateCommand(state, 'liu', {
+      type: 'trade', cityId: 'jiangling', officerId: 'liu-bei', mode: 'buy', amount: 0,
+    })).toContain('交易数量必须为正整数');
+    expect(validateCommand(state, 'liu', {
+      type: 'trade', cityId: 'jiangling', officerId: 'liu-bei', mode: 'buy', amount: TRADE_MAX_GRAIN + 1,
+    })).toContain(`单次交易最多${TRADE_MAX_GRAIN.toLocaleString('en-US')}兵粮`);
+    // 买3000粮需金 ceil(3000 ÷ 5.43) ≈ 553 > 500
+    expect(validateCommand(state, 'liu', {
+      type: 'trade', cityId: 'jiangling', officerId: 'liu-bei', mode: 'buy', amount: 3000,
+    })).toContain('资金不足');
+    expect(validateCommand(state, 'liu', {
+      type: 'trade', cityId: 'jiangling', officerId: 'liu-bei', mode: 'sell', amount: 2000,
+    })).toContain('兵粮不足');
+  });
+
+  it('rolls monthly grain prices between three and seven per city', () => {
+    const state = createGame('liu', 1);
+    const cityCount = Object.keys(state.cities).length;
+
+    rollGrainPrices(state);
+
+    const after = Object.values(state.cities).map((city) => city.grainPrice!);
+    expect(after).toHaveLength(cityCount);
+    expect(after.every((price) => Number.isInteger(price) && price >= 3 && price <= 7)).toBe(true);
+    expect(state.rngCursor).toBe(cityCount);
+  });
+
+  it('rolls merchants per city each ten-day and resets the trade flag', () => {
+    const state = createGame('liu', 1);
+    const cityCount = Object.keys(state.cities).length;
+    state.cities.jiangling.merchantTradedThisTenDay = true;
+
+    rollMerchants(state);
+
+    expect(state.rngCursor).toBe(cityCount);
+    for (const city of Object.values(state.cities)) {
+      expect(typeof city.merchantPresent).toBe('boolean');
+      expect(city.merchantTradedThisTenDay).toBe(false);
+    }
+  });
+
+  it('rejects trading when the merchant is absent or already traded this ten-day', () => {
+    const absent = createGame('liu', 1);
+    absent.cities.jiangling.merchantPresent = false;
+    expect(validateCommand(absent, 'liu', {
+      type: 'trade', cityId: 'jiangling', officerId: 'liu-bei', mode: 'buy', amount: 1000,
+    })).toContain('商人本旬未到访');
+
+    const once = createGame('liu', 1);
+    once.cities.jiangling.grainPrice = 5;
+    once.cities.jiangling.merchantPresent = true;
+    const traded = executeCommand(once, 'liu', {
+      type: 'trade', cityId: 'jiangling', officerId: 'liu-bei', mode: 'buy', amount: 1000,
+    });
+    expect(traded.cities.jiangling.merchantTradedThisTenDay).toBe(true);
+    expect(validateCommand(traded, 'liu', {
+      type: 'trade', cityId: 'jiangling', officerId: 'jian-yong', mode: 'sell', amount: 1000,
+    })).toContain('本旬已完成一次粮食交易');
+  });
+
+  it('computes trade effect percent from officer politics', () => {
+    expect(tradeEffectPercent(50)).toBe(100);
+    expect(tradeEffectPercent(80)).toBe(108);
+    expect(tradeEffectPercent(100)).toBe(114);
+  });
+
+  it('starts research with gold, techP, action point, and task costs', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.techP = 3200;
+    state.forces.liu.techs = { cavalry: 1 };
+    const startGold = state.cities.jiangling.gold;
+
+    const next = executeCommand(state, 'liu', {
+      type: 'research', cityId: 'jiangling', officerId: 'liu-bei', branch: 'cavalry',
+    });
+
+    // 刘备统率80，2级基础4旬，80/20=4省4旬 → 1旬完成
+    expect(next.officers['liu-bei'].location).toEqual({
+      kind: 'task', cityId: 'jiangling', task: 'research', branch: 'cavalry', remainingTenDays: 1,
+    });
+    expect(next.cities.jiangling.gold).toBe(startGold - 2000);
+    expect(next.forces.liu.techP).toBe(3200 - 2000);
+    expect(next.actionPoints.liu).toBe(80 - 20);
+    expect(next.officers['liu-bei'].acted).toBe(true);
+  });
+
+  it('rejects research without techP or when another research is running', () => {
+    const poor = createGame('liu', 1);
+    poor.forces.liu.techP = 500;
+    expect(validateCommand(poor, 'liu', {
+      type: 'research', cityId: 'jiangling', officerId: 'liu-bei', branch: 'spear',
+    })).toContain('技巧P不足 1000');
+
+    const busy = createGame('liu', 1);
+    busy.forces.liu.techP = 5000;
+    busy.officers['jian-yong'].location = {
+      kind: 'task', cityId: 'wuling', task: 'research', branch: 'civil', remainingTenDays: 2,
+    };
+    expect(validateCommand(busy, 'liu', {
+      type: 'research', cityId: 'jiangling', officerId: 'liu-bei', branch: 'spear',
+    })).toContain('已有科技正在研究中');
+
+    const finished = createGame('liu', 1);
+    finished.forces.liu.techP = 99999;
+    finished.forces.liu.techs = { spear: 4 };
+    expect(validateCommand(finished, 'liu', {
+      type: 'research', cityId: 'jiangling', officerId: 'liu-bei', branch: 'spear',
+    })).toContain('该方向科技已研究完毕');
+  });
+
+  it('awards techP from civil actions, trade, and recruitment of talent', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.techP = 0;
+    state.forces.liu.techs = { civil: 1 };
+    const startAgriculture = state.cities.jiangling.agriculture;
+
+    // 内政开发 +30
+    const next = executeCommand(state, 'liu', {
+      type: 'develop', cityId: 'jiangling', officerId: 'liu-bei', focus: 'agriculture',
+    });
+    expect(next.forces.liu.techP).toBe(30);
+    // 屯田科技（civil 1级）+25%：刘备政治80基础8 → 10
+    expect(next.cities.jiangling.agriculture).toBe(startAgriculture + 10);
+  });
+
+  it('boosts recruit yield with the corvee civil tech', () => {
+    const state = createGame('liu', 1);
+    const plain = createGame('liu', 1);
+    state.forces.liu.techs = { civil: 3 };
+    plain.forces.liu.techs = {};
+
+    const boosted = executeCommand(state, 'liu', { type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei' });
+    const base = executeCommand(plain, 'liu', { type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei' });
+
+    const boostedGain = boosted.cities.jiangling.troops - state.cities.jiangling.troops;
+    const baseGain = base.cities.jiangling.troops - plain.cities.jiangling.troops;
+    expect(boostedGain).toBe(Math.round(baseGain * 1.3));
+  });
+
+  it('applies troop damage and movement techs to combat math', async () => {
+    const { troopDamageMultiplier, troopMovementBonus, deployTroopCapOf, energyCapOf } = await import('./techs');
+    const state = createGame('liu', 1);
+    state.forces.liu.techs = { spear: 1 };
+    expect(troopDamageMultiplier(state, 'liu', 'spear')).toBeCloseTo(1.1);
+    expect(troopDamageMultiplier(state, 'liu', 'cavalry')).toBe(1);
+    expect(troopMovementBonus(state, 'liu', 'spear')).toBe(0);
+
+    state.forces.liu.techs = { spear: 4, military: 3 };
+    expect(troopDamageMultiplier(state, 'liu', 'spear')).toBeCloseTo(1.2);
+    expect(troopMovementBonus(state, 'liu', 'spear')).toBe(6);
+    expect(deployTroopCapOf(state, 'liu')).toBe(13000);
+    // 军制3级含1级熟练兵：气力上限+20
+    expect(energyCapOf(state, 'liu')).toBe(120);
+  });
+
+  it('starts ability research with gold and action point cost', () => {
+    const state = createGame('liu', 1);
+    const startGold = state.cities.jiangling.gold;
+
+    const next = executeCommand(state, 'liu', {
+      type: 'abilityResearch', cityId: 'jiangling', nodeId: 'warLow',
+    });
+
+    expect(next.cities.jiangling.gold).toBe(startGold - 300);
+    expect(next.actionPoints.liu).toBe(80 - COMMAND_AP.abilityResearch);
+    expect(next.forces.liu.abilityResearch?.active).toEqual({ nodeId: 'warLow', remainingMonths: 1 });
+  });
+
+  it('rejects ability research with missing prerequisites or another active research', () => {
+    const state = createGame('liu', 1);
+    // spearA 需前置 spearB
+    expect(validateCommand(state, 'liu', {
+      type: 'abilityResearch', cityId: 'jiangling', nodeId: 'spearA',
+    })).toContain('前置能力尚未研究');
+
+    const researching = executeCommand(state, 'liu', {
+      type: 'abilityResearch', cityId: 'jiangling', nodeId: 'warLow',
+    });
+    expect(validateCommand(researching, 'liu', {
+      type: 'abilityResearch', cityId: 'jiangling', nodeId: 'leadLow',
+    })).toContain('已有能力正在研究中');
+  });
+
+  it('never allows re-researching a completed ability node', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.abilityResearch = { researched: ['warLow'], remaining: { warLow: 5 } };
+
+    // 校验层：已完成节点直接拒绝
+    expect(validateCommand(state, 'liu', {
+      type: 'abilityResearch', cityId: 'jiangling', nodeId: 'warLow',
+    })).toContain('该能力已研究完成');
+
+    // 执行层：同样抛错，不会产生重复研究
+    expect(() => executeCommand(state, 'liu', {
+      type: 'abilityResearch', cityId: 'jiangling', nodeId: 'warLow',
+    })).toThrow('该能力已研究完成');
+  });
+
+  it('rejects cultivation before research completion or when officer is ineligible', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.abilityResearch = { researched: ['warLow'], remaining: { warLow: 5 } };
+
+    // 武力92的关羽已达低级节点上限70，不可培育
+    expect(validateCommand(state, 'liu', {
+      type: 'cultivate', cityId: 'jiangling', officerId: 'guan-yu', nodeId: 'warLow',
+    })).toContain('该武将能力已达上限');
+
+    // 未研究的节点不可培育
+    expect(validateCommand(state, 'liu', {
+      type: 'cultivate', cityId: 'jiangling', officerId: 'jian-yong', nodeId: 'warHigh',
+    })).toContain('该能力尚未研究完成');
+  });
+
+  it('allows researching a skill node once its prerequisites are done', () => {
+    const state = createGame('liu', 1);
+    // 连击 前置 枪兵A；枪兵A 前置 弩兵A；弩兵A 前置 武+5中……这里直接完成该链最末端的前置即可
+    state.forces.liu.abilityResearch = { researched: ['crossbowA', 'warMid', 'spearA'], remaining: {} };
+
+    expect(validateCommand(state, 'liu', {
+      type: 'abilityResearch', cityId: 'jiangling', nodeId: 'sk-lianji',
+    })).toEqual([]);
+
+    const researched = executeCommand(state, 'liu', {
+      type: 'abilityResearch', cityId: 'jiangling', nodeId: 'sk-lianji',
+    });
+    expect(researched.forces.liu.abilityResearch?.active).toEqual({ nodeId: 'sk-lianji', remainingMonths: 1 });
+  });
+
+  it('grants the learned skill to an officer after cultivating a skill node', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.abilityResearch = { researched: ['sk-lianji'], remaining: { 'sk-lianji': 3 } };
+
+    expect(validateCommand(state, 'liu', {
+      type: 'cultivate', cityId: 'jiangling', officerId: 'jian-yong', nodeId: 'sk-lianji',
+    })).toEqual([]);
+
+    const next = executeCommand(state, 'liu', {
+      type: 'cultivate', cityId: 'jiangling', officerId: 'jian-yong', nodeId: 'sk-lianji',
+    });
+    expect(next.officers['jian-yong'].location).toMatchObject({
+      kind: 'task', task: 'cultivate', nodeId: 'sk-lianji', remainingTenDays: 3,
+    });
+    expect(next.forces.liu.abilityResearch?.remaining).toEqual({ 'sk-lianji': 3 });
   });
 });
