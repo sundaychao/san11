@@ -6,6 +6,7 @@ import {
   DEFEAT_DEATH_CHANCE,
   DUEL_KILL_CHANCE,
   HEALTH_TEN_DAYS,
+  ILLNESS_DEATH_CHANCE,
   applyDefeatInjuries,
   applyIllness,
   applyInjury,
@@ -104,15 +105,39 @@ describe('settleOfficerHealth（旬末恢复）', () => {
   it('未归零时仅递减不痊愈；被俘武将不参与结算', () => {
     const state = createGame('liu', 1);
     const injured = officerOf(state, 'guan-yu');
-    injured.health = { level: 'severe', remainingTenDays: 27 };
+    injured.health = { level: 'light', remainingTenDays: 9 };
     const captive = officerOf(state, 'zhang-fei');
     captive.health = { level: 'light', remainingTenDays: 9 };
     captive.location = { kind: 'captive', cityId: 'xiangyang', captorForceId: 'cao', capturedTenDays: 0 };
 
     settleOfficerHealth(state);
 
-    expect(injured.health).toEqual({ level: 'severe', remainingTenDays: 26 });
+    expect(injured.health).toEqual({ level: 'light', remainingTenDays: 8 });
     expect(captive.health).toEqual({ level: 'light', remainingTenDays: 9 });
+  });
+
+  it('轻伤不判定伤重不治（0% 概率不消耗 RNG）', () => {
+    const state = createGame('liu', 1);
+    const officer = officerOf(state, 'guan-yu');
+    officer.health = { level: 'light', remainingTenDays: 9 };
+    const cursorBefore = state.rngCursor;
+
+    settleOfficerHealth(state);
+
+    expect(state.rngCursor).toBe(cursorBefore);
+    expect(officer.health).toEqual({ level: 'light', remainingTenDays: 8 });
+  });
+
+  it('强运武将带重伤连续结算多旬不会病逝', () => {
+    const state = createGame('liu', 1);
+    const officer = officerOf(state, 'guan-yu');
+    officer.skill = '强运';
+
+    for (let i = 0; i < 12; i += 1) {
+      officer.health = { level: 'severe', remainingTenDays: 27 };
+      settleOfficerHealth(state);
+      expect(officer.deathMonth).toBeUndefined();
+    }
   });
 });
 
@@ -139,8 +164,11 @@ describe('markDeath / rollDeath', () => {
     expect(rollDeath(state, doomed, 1, '于部队覆灭中阵亡')).toBe(true);
     expect(doomed.deathMonth).toBe(state.month);
 
+    const cursorBefore = state.rngCursor;
     expect(rollDeath(state, safe, 0)).toBe(false);
     expect(safe.deathMonth).toBeUndefined();
+    // 概率为 0 时不消耗 RNG
+    expect(state.rngCursor).toBe(cursorBefore);
   });
 
   it('强运武将免于战死；已死亡武将不重复判定', () => {
@@ -159,6 +187,9 @@ describe('markDeath / rollDeath', () => {
   it('战死概率常量与设计一致', () => {
     expect(DEFEAT_DEATH_CHANCE).toBe(0.12);
     expect(DUEL_KILL_CHANCE).toBe(0.25);
+    expect(ILLNESS_DEATH_CHANCE.light).toBe(0);
+    expect(ILLNESS_DEATH_CHANCE.moderate).toBe(0.03);
+    expect(ILLNESS_DEATH_CHANCE.severe).toBe(0.08);
   });
 });
 

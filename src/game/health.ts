@@ -56,10 +56,12 @@ export function applyIllness(state: GameState, officer: Officer): boolean {
   return applyInjury(state, officer, 'moderate');
 }
 
-/** 旬末：伤病按旬恢复；剩余0时痊愈 */
+/** 旬末：伤病按旬恢复；中等/重伤有小概率伤重不治；剩余0时痊愈 */
 export function settleOfficerHealth(state: GameState): void {
   for (const officer of Object.values(state.officers)) {
     if (!officer.health || officer.location.kind === 'captive') continue;
+    // 伤势恶化：中等 3%/旬、重伤 8%/旬 概率病逝（强运免死由 rollDeath 处理；轻伤不掷点）
+    if (rollDeath(state, officer, ILLNESS_DEATH_CHANCE[officer.health.level], '伤重不治')) continue;
     officer.health.remainingTenDays -= 1;
     if (officer.health.remainingTenDays <= 0) {
       state.logs.push({
@@ -112,14 +114,21 @@ export function effectiveStat(officer: Officer, key: keyof Officer['stats']): nu
 export const DEFEAT_DEATH_CHANCE = 0.12;
 /** 单挑中将对方 HP 打到 0 时的讨取概率 */
 export const DUEL_KILL_CHANCE = 0.25;
+/** 旬结算时伤重不治概率：中等 3%/旬，重伤 8%/旬（轻伤不判定） */
+export const ILLNESS_DEATH_CHANCE: Record<NonNullable<OfficerHealth['level']>, number> = {
+  light: 0,
+  moderate: 0.03,
+  severe: 0.08,
+};
 
 /** 武将是否可被战死（强运/护卫等 injuryImmune 效果免死） */
 export function canDieInBattle(state: GameState, officer: Officer): boolean {
   return effectsOfKind(resolveOfficerSkills(state, [officer.id]), 'injuryImmune').length === 0;
 }
 
-/** 战死判定：掷点成功则武将阵亡并写日志；返回是否死亡 */
+/** 战死判定：掷点成功则武将阵亡并写日志；返回是否死亡（chance<=0 时不消耗 RNG） */
 export function rollDeath(state: GameState, officer: Officer, chance: number, cause = '阵亡'): boolean {
+  if (chance <= 0) return false;
   if (officer.deathMonth !== undefined) return false;
   if (!canDieInBattle(state, officer)) return false;
   const roll = nextRandom(state.seed, state.rngCursor);
