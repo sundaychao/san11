@@ -1,10 +1,14 @@
 .superpowers/
 .worktrees/
+.codex/
+.agents/
+.workbuddy/
 node_modules/
 dist/
 playwright-report/
 test-results/
 artifacts/
+test-out.txt
 server/data/*.db
 server/data/*.db-*
 server/data/users.json
