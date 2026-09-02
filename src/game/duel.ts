@@ -176,7 +176,7 @@ export function resolveDuel(state: GameState, participants: DuelParticipants, at
   let attackerDied = false;
   let defenderDied = false;
 
-  // 讨取判定：单挑中被击溃（HP 归零）的败者有概率直接战死（强运免死）
+  // 讨取判定：单挑中被击溃（HP 归零）的败者有概率直接战死（强运免死；死亡善后由 markDeath 内置）
   if (winner === 'attacker' && defenderHp <= 0) {
     defenderDied = rollDeath(state, participants.defender, DUEL_KILL_CHANCE, '于单挑中被讨取');
   }

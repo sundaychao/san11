@@ -78,6 +78,8 @@ export interface Officer {
   gender?: 'male' | 'female';
   /** 武将性格（单挑/舌战愤怒模式）：莽撞/刚胆/冷静/胆小 */
   personality?: 'reckless' | 'bold' | 'calm' | 'timid';
+  /** 出生年（公元纪年；用于老龄病逝判定。史书未载者采用通行推定值） */
+  birthYear?: number;
   /** 死亡月份（处决或战死；在局中保留记录但不参与任何结算） */
   deathMonth?: number;
   acted: boolean;

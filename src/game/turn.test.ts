@@ -103,6 +103,8 @@ describe('monthly settlement', () => {
   it('preserves unskilled settlement values and RNG results for the same seed', () => {
     const state = createGame('liu', 20804);
     for (const officer of Object.values(state.officers)) officer.skill = undefined;
+    // 老龄系统与该基线测试正交：将高龄武将年轻化，避免每月老龄掷点污染 RNG 与日志
+    for (const officer of Object.values(state.officers)) officer.birthYear = Math.max(officer.birthYear ?? 170, 170);
 
     const next = settleMonth(state);
 

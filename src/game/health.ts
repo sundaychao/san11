@@ -75,19 +75,22 @@ export function settleOfficerHealth(state: GameState): void {
   }
 }
 
-/** 战死 / 病逝：武将死亡（局中保留记录） */
+/** 战死 / 病逝：武将死亡（局中保留记录）。
+ *  顺序关键：先记死亡日志、再执行善后（此时 forceId/location 尚未清理，
+ *  主公继位与部队善后才能定位到死者归属），最后清空归属与伤病。 */
 export function markDeath(state: GameState, officer: Officer, cause: string): void {
   if (officer.deathMonth) return;
-  officer.forceId = null;
-  officer.location = { kind: 'unaffiliated', cityId: officer.cityId };
-  officer.health = undefined;
   officer.deathMonth = state.month;
   state.logs.push({
     id: `death-${state.month}-${officer.id}-${state.logs.length}`,
     month: state.month,
-    forceId: null,
+    forceId: officer.forceId,
     message: `${officer.name}${cause}`,
   });
+  applyDeathConsequences(state, officer);
+  officer.forceId = null;
+  officer.location = { kind: 'unaffiliated', cityId: officer.cityId };
+  officer.health = undefined;
 }
 
 /** 战败部队中的武将：按概率负伤（未受俘者，强运豁免） */
@@ -136,4 +139,79 @@ export function rollDeath(state: GameState, officer: Officer, chance: number, ca
   if (roll.value >= chance) return false;
   markDeath(state, officer, cause);
   return true;
+}
+
+/** 剧本起始年份（按剧本 id 映射；两剧本同期开局）。
+ *  注意：不可从 scenario/jingxiang208 导入——skills→captives/duel/turn→health 的
+ *  既有依赖链会在模块初始化时形成循环，导致常量读取到 TDZ undefined。 */
+const SCENARIO_START_YEARS: Record<GameState['scenarioId'], number> = {
+  'jingxiang-208': 208,
+  'mobile-duel': 208,
+};
+
+/** 当前公元年份（局内 month 从 1 起，每 12 个月推进一年） */
+export function scenarioYear(state: GameState): number {
+  return SCENARIO_START_YEARS[state.scenarioId] + Math.floor((state.month - 1) / 12);
+}
+
+/** 老龄病逝：58 岁起每岁 +2%/月，上限 30% */
+export function oldAgeDeathChance(age: number): number {
+  return Math.min(0.3, Math.max(0, (age - 58) * 0.02));
+}
+
+/** 武将死亡善后：主公继位（统率高者继任）、清空太守、部队副将继任或溃散 */
+export function applyDeathConsequences(state: GameState, officer: Officer): void {
+  // 势力主公：由统率最高的在世同势力武将继任
+  if (officer.forceId) {
+    const force = state.forces[officer.forceId];
+    if (force && force.leaderId === officer.id) {
+      const successor = Object.values(state.officers)
+        .filter((candidate) => candidate.forceId === officer.forceId
+          && candidate.id !== officer.id
+          && candidate.deathMonth === undefined)
+        .sort((a, b) => b.stats.leadership - a.stats.leadership)[0];
+      if (successor) {
+        force.leaderId = successor.id;
+        state.logs.push({
+          id: `succession-${state.month}-${state.logs.length}`,
+          month: state.month,
+          forceId: officer.forceId,
+          message: `${successor.name}继任${force.name}之主`,
+        });
+      }
+    }
+  }
+  // 太守：清空即可，后续调城自动补任
+  for (const city of Object.values(state.cities)) {
+    if (city.governorId === officer.id) city.governorId = null;
+  }
+  // 部队主将：副将继任；无副将则部队溃散
+  if (officer.location.kind === 'unit') {
+    const unit = state.units[officer.location.unitId];
+    if (unit && unit.leaderId === officer.id) {
+      const successor = (unit.officerIds ?? [])
+        .map((id) => state.officers[id])
+        .find((candidate) => candidate && candidate.deathMonth === undefined && candidate.id !== officer.id);
+      if (successor) {
+        unit.leaderId = successor.id;
+        unit.officerIds = (unit.officerIds ?? []).filter((id) => id !== officer.id);
+      } else {
+        delete state.units[unit.id];
+      }
+    }
+  }
+}
+
+/**
+ * 每月老龄结算：58 岁以上武将按年龄概率病逝（强运免死；在世者才判定）。
+ * 在 settleMonth 调用；只有高龄武将会消耗 RNG。
+ */
+export function settleAgingDeaths(state: GameState): void {
+  const year = scenarioYear(state);
+  for (const officer of Object.values(state.officers)) {
+    if (officer.deathMonth !== undefined || !officer.birthYear) continue;
+    const age = year - officer.birthYear;
+    // markDeath 内部已含死亡善后（主公继位/太守清位/部队善后）
+    rollDeath(state, officer, oldAgeDeathChance(age), '寿终正寝');
+  }
 }

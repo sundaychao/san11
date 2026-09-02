@@ -10,7 +10,7 @@ import { FORCE_IDS } from './scenario/jingxiang208';
 import { movementAllowanceBonus } from './skills/rules/movement';
 import { settleLoyaltyDrift } from './loyalty';
 import { settleCaptives } from './captives';
-import { applyIllness, settleOfficerHealth } from './health';
+import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
 import { settleLegionAutomation, marketTenDayIncome, farmMonthlyIncome, settlePlotConstruction, settleCityRangedAttack, isCityBlocked } from './innerAffairs';
 import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
 import { addOfficerMerit, MERIT_PER_MONTH, positionDefinition, rankDefinition, rankForCityCount, rankIndex } from './ranks';
@@ -228,6 +228,9 @@ export function settleMonth(state: GameState): GameState {
 
   // 每月：爵位晋升 + 被动功绩 + 官职俸禄
   settleRanksMeritSalaries(next);
+
+  // 每月：老龄武将病逝判定（主公继位/太守清空/部队处理在 health 内善后）
+  settleAgingDeaths(next);
 
   // 每月：俘虏忠诚下降/逃生判定 + 农场设施粮食产出（封锁城池无收入）
   settleCaptives(next);

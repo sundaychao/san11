@@ -7,6 +7,7 @@ import {
   DUEL_KILL_CHANCE,
   HEALTH_TEN_DAYS,
   ILLNESS_DEATH_CHANCE,
+  applyDeathConsequences,
   applyDefeatInjuries,
   applyIllness,
   applyInjury,
@@ -15,7 +16,10 @@ import {
   injuryMultiplier,
   isInjured,
   markDeath,
+  oldAgeDeathChance,
   rollDeath,
+  scenarioYear,
+  settleAgingDeaths,
   settleOfficerHealth,
 } from './health';
 import type { GameState, Officer } from './types';
@@ -251,5 +255,118 @@ describe('伤病衰减接入战斗能力（effectiveUnitAbilities）', () => {
     expect(abilities.leadership.value).toBe(Math.round(state.officers['jian-yong'].stats.leadership * 0.5));
     expect(abilities.war.value).toBe(Math.round(state.officers['guan-yu'].stats.war * 0.75));
     expect(abilities.intelligence.value).toBe(Math.round(state.officers['zhuge-liang'].stats.intelligence * 0.9));
+  });
+});
+
+describe('老龄病逝（寿命系统）', () => {
+  it('scenarioYear：month 1-12 为 208 年，13-24 为 209 年', () => {
+    const state = createGame('liu', 1);
+    expect(scenarioYear(state)).toBe(208);
+    state.month = 13;
+    expect(scenarioYear(state)).toBe(209);
+  });
+
+  it('oldAgeDeathChance：58 岁起每岁 +2%/月，上限 30%', () => {
+    expect(oldAgeDeathChance(58)).toBe(0);
+    expect(oldAgeDeathChance(59)).toBeCloseTo(0.02);
+    expect(oldAgeDeathChance(66)).toBeCloseTo(0.16);
+    expect(oldAgeDeathChance(100)).toBe(0.3);
+    expect(oldAgeDeathChance(30)).toBe(0);
+  });
+
+  it('settleAgingDeaths：年轻武将不判定、不消耗 RNG', () => {
+    const state = createGame('liu', 1);
+    // 诸葛亮 181 年生，208 年时 27 岁
+    const young = state.officers['zhuge-liang'];
+    // 剧本里有高龄武将（刘表 66 岁，16%/月）会掷点，全部年轻化以隔离本用例的 RNG 语义
+    for (const officer of Object.values(state.officers)) officer.birthYear = Math.max(officer.birthYear ?? 170, 170);
+    const cursorBefore = state.rngCursor;
+
+    settleAgingDeaths(state);
+
+    expect(young.deathMonth).toBeUndefined();
+    expect(state.rngCursor).toBe(cursorBefore);
+  });
+
+  it('强运高龄武将连续结算 24 个月不会病逝', () => {
+    const state = createGame('liu', 1);
+    // 刘表 142 年生，208 年时 66 岁（16%/月）
+    const elderly = state.officers['liu-biao'];
+    elderly.skill = '强运';
+
+    for (let month = 1; month <= 24; month += 1) {
+      state.month = month;
+      settleAgingDeaths(state);
+      expect(elderly.deathMonth).toBeUndefined();
+    }
+  });
+
+  it('剧本数据：48 名武将均有出生年', () => {
+    const state = createGame('liu', 1);
+    const officers = Object.values(state.officers);
+    expect(officers.length).toBe(48);
+    expect(officers.every((officer) => typeof officer.birthYear === 'number')).toBe(true);
+  });
+});
+
+describe('死亡善后（applyDeathConsequences）', () => {
+  it('势力主公死亡：统率最高的在世同势力武将继任并写日志', () => {
+    const state = createGame('liu', 1);
+    const liuBei = state.officers['liu-bei'];
+    markDeath(state, liuBei, '寿终正寝');
+
+    applyDeathConsequences(state, liuBei);
+
+    // 关羽统率 95 为刘备势力在世最高
+    expect(state.forces.liu.leaderId).toBe('guan-yu');
+    const log = state.logs.at(-1);
+    expect(log?.message).toContain('关羽');
+    expect(log?.message).toContain('继任');
+  });
+
+  it('主公死亡后太守空缺；无同势力武将时不强行继任', () => {
+    const state = createGame('liu', 1);
+    const liuBei = state.officers['liu-bei'];
+    markDeath(state, liuBei, '寿终正寝');
+
+    applyDeathConsequences(state, liuBei);
+
+    expect(state.cities.jiangling.governorId).toBeNull();
+    expect(state.forces.liu.leaderId).toBe('guan-yu');
+  });
+
+  it('部队主将死亡：副将继任', () => {
+    const state = createGame('liu', 1);
+    state.units['u1'] = {
+      id: 'u1', kind: 'combat', forceId: 'liu', leaderId: 'guan-yu',
+      officerIds: ['guan-yu', 'chen-dao'], homeCityId: 'jiangling',
+      troopType: 'spear', q: 10, r: 10, troops: 4000, food: 5000,
+      energy: 100, movementRemaining: 20, moved: false, acted: false,
+    };
+    const guanYu = state.officers['guan-yu'];
+    guanYu.location = { kind: 'unit', unitId: 'u1' };
+    markDeath(state, guanYu, '阵亡');
+
+    applyDeathConsequences(state, guanYu);
+
+    expect(state.units['u1'].leaderId).toBe('chen-dao');
+    expect(state.units['u1'].officerIds).toEqual(['chen-dao']);
+  });
+
+  it('部队主将死亡且无副将：部队溃散移除', () => {
+    const state = createGame('liu', 1);
+    state.units['u2'] = {
+      id: 'u2', kind: 'combat', forceId: 'liu', leaderId: 'guan-yu',
+      officerIds: ['guan-yu'], homeCityId: 'jiangling',
+      troopType: 'spear', q: 10, r: 10, troops: 4000, food: 5000,
+      energy: 100, movementRemaining: 20, moved: false, acted: false,
+    };
+    const guanYu = state.officers['guan-yu'];
+    guanYu.location = { kind: 'unit', unitId: 'u2' };
+    markDeath(state, guanYu, '阵亡');
+
+    applyDeathConsequences(state, guanYu);
+
+    expect(state.units['u2']).toBeUndefined();
   });
 });

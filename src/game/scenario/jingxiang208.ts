@@ -181,6 +181,35 @@ const officerSeeds: OfficerSeed[] = [
 
 export const OFFICER_IDS = officerSeeds.map((officer) => officer.id);
 
+/** 剧本起始年份（建安十三年，公元 208 年；month 为局内相对月份） */
+export const SCENARIO_START_YEAR = 208;
+
+/**
+ * 武将出生年（公元纪年），用于老龄病逝判定。
+ * 《三国志》未载生年者采用光荣《三国志》系列的通行推定值。
+ */
+const officerBirthYears: Record<string, number> = {
+  // 曹操势力
+  'cao-cao': 155, 'cao-ren': 168, 'xun-yu': 163, 'xu-huang': 165,
+  'xiahou-dun': 157, 'xiahou-yuan': 160, 'zhang-liao': 169, 'yu-jin': 165,
+  'yue-jin': 165, 'guo-jia': 170,
+  // 刘备势力
+  'liu-bei': 161, 'guan-yu': 160, 'zhang-fei': 165, 'zhuge-liang': 181,
+  'jian-yong': 163, 'sun-qian': 165, 'mi-fang': 170, 'chen-dao': 175,
+  'liao-hua': 185, 'ma-su': 190,
+  // 孙权势力
+  'sun-quan': 182, 'zhou-yu': 175, 'lu-su': 172, 'gan-ning': 172,
+  'cheng-pu': 148, 'huang-gai': 150, 'han-dang': 152, 'taishi-ci': 166,
+  'lu-meng': 178, 'ling-tong': 189,
+  // 刘表势力
+  'liu-biao': 142, 'kuai-yue': 155, 'cai-mao': 158, 'wen-pin': 160,
+  'huang-zu': 150, 'zhang-yun': 160, 'liu-qi': 172, 'liu-cong': 182,
+  'han-song': 150, 'deng-xi': 160,
+  // 在野/人才池
+  'zhao-yun': 160, 'pang-tong': 179, 'huang-zhong': 148, 'wei-yan': 172,
+  'ma-liang': 187, 'jiang-wan': 193, 'yi-ji': 165, 'mi-zhu': 165,
+};
+
 function toRecord<T extends { id: string }>(items: T[]): Record<string, T> {
   return Object.fromEntries(items.map((item) => [item.id, item]));
 }
@@ -233,6 +262,7 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
     const force = officer.forceId ? forces[officer.forceId] : undefined;
     return {
       ...officer,
+      birthYear: officerBirthYears[officer.id],
       loyalty: officer.forceId === null ? 0 : force?.leaderId === officer.id ? LEADER_INITIAL_LOYALTY : DEFAULT_OFFICER_LOYALTY,
       ambition: personality?.ambition ?? 50,
       righteousness: personality?.righteousness ?? 55,

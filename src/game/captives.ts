@@ -3,7 +3,7 @@ import { effectsOfKind, resolveOfficerSkills } from './skills';
 import { clampLoyalty, recruitmentInitialLoyalty, setOfficerLoyalty } from './loyalty';
 import { compatDifference } from './diplomacy';
 import { treasureDefinition } from './treasures';
-import { applyDefeatInjuries, DEFEAT_DEATH_CHANCE, rollDeath } from './health';
+import { applyDefeatInjuries, applyDeathConsequences, DEFEAT_DEATH_CHANCE, rollDeath } from './health';
 import type { ArmyUnit, CityId, ForceId, GameState, Officer } from './types';
 
 /**
@@ -92,7 +92,7 @@ export function captureOfficersOnDestroy(state: GameState, unit: ArmyUnit, loote
   for (const officerId of officerIds) {
     const officer = state.officers[officerId];
     if (!officer) continue;
-    // 战死判定：部队覆灭时概率阵亡（强运/护卫免死，rollDeath 内部处理）
+    // 战死判定：部队覆灭时概率阵亡（强运/护卫免死；死亡善后由 markDeath 内置）
     if (rollDeath(state, officer, DEFEAT_DEATH_CHANCE, '于部队覆灭中阵亡')) {
       dead.push(officer.name);
       continue;
@@ -251,6 +251,8 @@ export function executeCaptive(state: GameState, target: Officer): void {
       target.treasureId = undefined;
     }
   }
+  // 死亡善后须在清空归属前执行：主公被处决时按统率继任，太守空缺清位
+  applyDeathConsequences(state, target);
   target.forceId = null;
   target.location = { kind: 'unaffiliated', cityId: target.cityId };
   target.deathMonth = state.month;
