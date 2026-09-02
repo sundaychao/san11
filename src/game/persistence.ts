@@ -92,6 +92,9 @@ function validOfficerLocation(location: unknown) {
     }
     if (value.task === 'research') return typeof value.branch === 'string';
     if (value.task === 'cultivate') return typeof value.nodeId === 'string';
+    if (value.task === 'construction') {
+      return typeof value.facility === 'string' && Number.isInteger(value.plotIndex) && Number(value.plotIndex) >= 0;
+    }
     return false;
   }
   return value.kind === 'transfer' &&
@@ -142,7 +145,7 @@ function validGridCell(value: unknown): value is GridCell {
   const cell = value as Partial<GridCell>;
   return Number.isInteger(cell.q) && cell.q! >= 0 &&
     Number.isInteger(cell.r) && cell.r! >= 0 &&
-    ['road', 'plain', 'forest', 'hill', 'mountain', 'water', 'ferry'].includes(cell.terrain!);
+    ['road', 'plain', 'forest', 'hill', 'mountain', 'water', 'ferry', 'construction'].includes(cell.terrain!);
 }
 
 function validUnit(value: unknown): value is ArmyUnit {

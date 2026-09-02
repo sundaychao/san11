@@ -1,5 +1,6 @@
 import { ARMAMENT_LABELS, armamentsOf, TROOP_ARMAMENT, TROOP_LABELS } from '../armaments';
-import { deployTroopCapOf, energyCapOf, techLevelOf } from '../techs';
+import { energyCapOf, techLevelOf, troopMovementBonusForTroop } from '../techs';
+import { unitTroopCapOf } from '../ranks';
 import { formationMovementAllowanceBonus } from '../skills/rules/movement';
 import type { ForceId, GameState } from '../types';
 import {
@@ -30,7 +31,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   const gold = input.gold ?? 0;
   const armamentType = TROOP_ARMAMENT[troopType];
   const cityArmaments = armamentsOf(city?.armaments);
-  const movementAllowance = movementAllowanceForProfile(troopType) + formationMovementAllowanceBonus(state, officerIds, troopType);
+  const movementAllowance = movementAllowanceForProfile(troopType) + formationMovementAllowanceBonus(state, officerIds, troopType) + troopMovementBonusForTroop(state, forceId, troopType);
   if (state.phase !== 'playing') throw new Error('游戏已经结束');
   if (state.turnForceId !== forceId) throw new Error('不是当前势力旬');
   if (!city || city.ownerId !== forceId) throw new Error('只能从己方城市出征');
@@ -43,8 +44,8 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   }
   if (officers.some((candidate) => candidate.acted)) throw new Error('选择的武将已经行动');
   if (state.actionPoints[forceId] < DEPLOY_AP_COST) throw new Error('行动力不足 20');
-  if (!Number.isInteger(input.troops) || input.troops < 1000 || input.troops > deployTroopCapOf(state, forceId)) {
-    throw new Error(`出征兵力必须为 1000-${deployTroopCapOf(state, forceId)}`);
+  if (!Number.isInteger(input.troops) || input.troops < 1000 || input.troops > unitTroopCapOf(state, forceId, leaderId)) {
+    throw new Error(`出征兵力必须为 1000-${unitTroopCapOf(state, forceId, leaderId)}`);
   }
   if (!Number.isInteger(gold) || gold < 0 || gold > city.gold) throw new Error('资金不足');
   if (!Number.isInteger(input.food) || input.food < 0 || input.food > city.food) throw new Error('粮草不足');
@@ -115,7 +116,7 @@ export function deployUnitPreviewWithId(state: GameState, forceId: ForceId, inpu
   const troopType = input.troopType ?? 'sword';
   const vehicle = input.vehicle ?? 'boat';
   const gold = input.gold ?? 0;
-  const movementAllowance = movementAllowanceForProfile(troopType) + formationMovementAllowanceBonus(state, officerIds, troopType);
+  const movementAllowance = movementAllowanceForProfile(troopType) + formationMovementAllowanceBonus(state, officerIds, troopType) + troopMovementBonusForTroop(state, forceId, troopType);
   const spawn = input.destination ?? preferredSpawnCell(state, input.cityId, movementAllowance, troopType, vehicle);
   if (!city || !leaderId || !spawn) throw new Error('无法创建出征预览');
   const next = structuredClone(state);

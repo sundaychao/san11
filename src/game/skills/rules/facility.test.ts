@@ -4,10 +4,10 @@ import { SUPPORT_SKILLS } from '../catalog/support';
 import { facilityBuildPowerMultiplier } from './facility';
 
 describe('facility officer skill rules', () => {
-  it('activates exactly 乐奏 and 筑城 in the support catalog', () => {
+  it('activates 规律/沉着/明镜/乐奏/筑城 in the support catalog', () => {
     expect(SUPPORT_SKILLS
       .filter((definition) => definition.implementationStatus === 'active')
-      .map((definition) => definition.name)).toEqual(['乐奏', '筑城']);
+      .map((definition) => definition.name)).toEqual(['规律', '沉着', '明镜', '乐奏', '诗想', '筑城']);
   });
 
   it('uses deputy-provided 筑城 without stacking duplicate names', () => {

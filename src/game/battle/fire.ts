@@ -1,5 +1,6 @@
 import type { ArmyUnit, GameState } from '../types';
 import { gridKey } from './grid';
+import { fireDamageMultiplierOf } from '../skills/rules/combat';
 import { reduceUnitDamageByFortress, removeUnit } from './shared';
 
 export const GROUND_FIRE_DAMAGE = 500;
@@ -11,7 +12,8 @@ function isBurningGround(state: GameState, unit: ArmyUnit) {
 }
 
 function applyDamage(next: GameState, unit: ArmyUnit, prefix: string) {
-  const damage = reduceUnitDamageByFortress(next, unit, GROUND_FIRE_DAMAGE);
+  // 藤甲：火焰伤害加倍
+  const damage = reduceUnitDamageByFortress(next, unit, Math.round(GROUND_FIRE_DAMAGE * fireDamageMultiplierOf(next, unit)));
   unit.troops -= damage;
   next.battleDamageReports ??= [];
   next.battleDamageReports.push({

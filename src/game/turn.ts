@@ -1,16 +1,23 @@
-import { clamp, rollGrainPrices, rollMerchants, addTechP } from './commands';
+import { clamp, rollGrainPrices, rollMerchants } from './commands';
 import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
-import { MAX_TECH_LEVEL, TECH_BRANCHES, TECHP_POP_DIVISOR, techLevelOf } from './techs';
+import { MAX_TECH_LEVEL, TECH_BRANCHES, TECHP_POP_DIVISOR, techLevelOf, addTechP } from './techs';
 import { movementAllowanceForUnit, unitSupplyMultiplier } from './battle/actions';
 import { applyGroundFireDamageToFacilities, applyGroundFireDamageToUnits } from './battle/fire';
 import { cellAt } from './battle/movementRules';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
 import { movementAllowanceBonus } from './skills/rules/movement';
+import { settleLoyaltyDrift } from './loyalty';
+import { settleCaptives } from './captives';
+import { applyIllness, settleOfficerHealth } from './health';
+import { settleLegionAutomation, marketTenDayIncome, farmMonthlyIncome, settlePlotConstruction, settleCityRangedAttack, isCityBlocked } from './innerAffairs';
+import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
+import { addOfficerMerit, MERIT_PER_MONTH, positionDefinition, rankDefinition, rankForCityCount, rankIndex } from './ranks';
 import { settleForceTurnStart } from './skills/rules/turn';
 import { cityIncomeMultiplier } from './skills/rules/city';
-import type { ArmyUnit, City, GameState } from './types';
+import { tenDayIndex } from './diplomacy';
+import type { ArmyUnit, City, ForceId, GameState } from './types';
 
 interface CityEvent {
   name: string;
@@ -19,7 +26,9 @@ interface CityEvent {
 
 const EVENTS: CityEvent[] = [
   { name: '丰收', apply: (city) => { city.food += 3000; } },
+  { name: '蝗灾', apply: (city) => { const loss = 3000 + Math.floor(city.food * 0.08); city.food = Math.max(0, city.food - loss); city.order = clamp(city.order - 3, 0, 100); } },
   { name: '旱灾', apply: (city) => { city.food = Math.max(0, city.food - 3000); city.order = clamp(city.order - 2, 0, 100); } },
+  { name: '洪水', apply: (city) => { city.troops = Math.max(0, city.troops - Math.max(300, Math.floor(city.troops * 0.04))); city.order = clamp(city.order - 4, 0, 100); } },
   { name: '商旅', apply: (city) => { city.gold += 1200; } },
   { name: '流民', apply: (city) => { city.population += 2000; city.order = clamp(city.order - 1, 0, 100); } },
   { name: '疫病', apply: (city) => { city.population = Math.max(0, city.population - 1500); city.troops = Math.max(0, city.troops - 500); city.order = clamp(city.order - 3, 0, 100); } },
@@ -45,9 +54,33 @@ function applyPossibleEvent(state: GameState, city: City) {
   state.rngCursor = roll.cursor;
   if (roll.value >= 0.18) return;
 
+  // 「风水」特技：所辖城灾害/丰收类事件发生率减半
+  const hasFengShui = city.ownerId && Object.values(state.officers).some((o) =>
+    o.forceId === city.ownerId && (o.location.kind === 'city' || o.location.kind === 'task')
+      && o.location.cityId === city.id && officerSkillNames(o).includes('风水'));
+  if (hasFengShui && roll.value >= 0.09) return;
+
   const choice = nextRandom(state.seed, state.rngCursor);
   state.rngCursor = choice.cursor;
-  const event = EVENTS[Math.floor(choice.value * EVENTS.length)];
+  let event = EVENTS[Math.floor(choice.value * EVENTS.length)];
+  // 祈祷：所属城市发生非丰收事件时，有 1/3 概率转为丰收
+  const hasPrayer = effectsOfKind(resolveCitySkills(state, city.id), 'harvestBlessed').length > 0;
+  if (hasPrayer && event.name !== '丰收') {
+    const blessingRoll = nextRandom(state.seed, state.rngCursor);
+    state.rngCursor = blessingRoll.cursor;
+    if (blessingRoll.value < 1 / 3) event = EVENTS[0];
+  }
+  // 丰收规模随农业值放大（农业越高收成越好）
+  if (event.name === '丰收') city.food += city.agriculture * 30;
+  // 疫病：城中武将随机染病（30%）
+  if (event.name === '疫病') {
+    for (const officer of Object.values(state.officers)) {
+      if (officer.forceId !== city.ownerId || officer.location.kind !== 'city' || officer.location.cityId !== city.id) continue;
+      const roll2 = nextRandom(state.seed, state.rngCursor);
+      state.rngCursor = roll2.cursor;
+      if (roll2.value < 0.3) applyIllness(state, officer);
+    }
+  }
   event.apply(city);
   state.logs.push({
     id: `event-${state.month}-${city.id}-${state.rngCursor}`,
@@ -55,6 +88,131 @@ function applyPossibleEvent(state: GameState, city: City) {
     forceId: city.ownerId,
     message: `${city.name}发生${event.name}`,
   });
+}
+
+/**
+ * 贼兵/异民族骚扰（简化版）：
+ * 治安低于50的城每月有概率遭贼兵劫掠——损失金钱/粮草、守军折损、治安再降；
+ * 「威压」特技持有者所在城免疫骚扰。
+ */
+function settleBarbarianRaids(next: GameState) {
+  for (const city of Object.values(next.cities)) {
+    if (!city.ownerId || city.order >= 50) continue;
+    const hasRepress = Object.values(next.officers).some((o) =>
+      o.forceId === city.ownerId && (o.location.kind === 'city' || o.location.kind === 'task')
+        && o.location.cityId === city.id && officerSkillNames(o).includes('威压'));
+    if (hasRepress) continue;
+    const roll = nextRandom(next.seed, next.rngCursor);
+    next.rngCursor = roll.cursor;
+    const chance = (50 - city.order) / 120;
+    if (roll.value >= chance) continue;
+    const goldLoss = Math.floor(city.gold * (0.02 + roll.value * 0.06));
+    const foodLoss = Math.floor(city.food * (0.03 + roll.value * 0.07));
+    const troopLoss = Math.min(city.troops, 200 + Math.floor(city.troops * 0.02));
+    city.gold -= goldLoss;
+    city.food -= foodLoss;
+    city.troops -= troopLoss;
+    city.order = clamp(city.order - 4, 0, 100);
+    next.logs.push({
+      id: `raid-${next.month}-${city.id}-${next.rngCursor}`,
+      month: next.month,
+      forceId: city.ownerId,
+      message: `贼兵袭扰${city.name}！损失金钱${goldLoss}、兵粮${foodLoss}、守军${troopLoss}`,
+    });
+  }
+}
+
+/** 每旬递减停战剩余旬数，到期解除 */
+function settleTruces(next: GameState) {
+  for (const force of Object.values(next.forces)) {
+    const truces = force.truces ?? {};
+    let changed = false;
+    for (const [target, remaining] of Object.entries(truces)) {
+      const nextValue = remaining - 1;
+      if (nextValue <= 0) {
+        delete truces[target as ForceId];
+        changed = true;
+        next.logs.push({
+          id: `truce-end-${next.month}-${force.id}-${target}-${next.logs.length}`,
+          month: next.month,
+          forceId: force.id,
+          message: `${force.name}与${next.forces[target as ForceId]?.name ?? '对手'}的停战协定到期`,
+        });
+      } else {
+        truces[target as ForceId] = nextValue;
+        changed = true;
+      }
+    }
+    if (changed) force.truces = truces;
+  }
+}
+
+/** 临时部队到期（援军）自动撤退 */
+function settleExpiringUnits(next: GameState) {
+  const current = tenDayIndex(next.month, next.tenDay ?? 1);
+  for (const unit of Object.values(next.units)) {
+    if (unit.expiresTenDay !== undefined && current >= unit.expiresTenDay) {
+      const officers = unit.officerIds ?? [unit.leaderId];
+      for (const officerId of officers) {
+        const officer = next.officers[officerId];
+        if (!officer) continue;
+        const home = next.cities[unit.homeCityId];
+        officer.location = home ? { kind: 'city', cityId: home.id } : { kind: 'unaffiliated', cityId: unit.homeCityId };
+        officer.cityId = officer.location.cityId;
+        officer.acted = false;
+      }
+      delete next.units[unit.id];
+      next.logs.push({
+        id: `reinforce-return-${next.month}-${unit.id}-${next.logs.length}`,
+        month: next.month,
+        forceId: unit.forceId,
+        message: `援军部队（${unit.leaderId}）任务结束，撤回${next.cities[unit.homeCityId]?.name ?? '驻地'}`,
+      });
+    }
+  }
+}
+
+/**
+ * 每月初结算：
+ * - 爵位：按城市数量自动晋升（达到皇帝时触发汉帝退位剧情）；
+ * - 功绩：所有在职武将每月被动+30；
+ * - 俸禄：有官职的武将每月从所在城资金扣俸禄。
+ */
+function settleRanksMeritSalaries(next: GameState) {
+  const promotions: string[] = [];
+  for (const force of Object.values(next.forces)) {
+    const cityCount = Object.values(next.cities).filter((city) => city.ownerId === force.id).length;
+    const desired = rankForCityCount(cityCount);
+    if (rankIndex(force.rank) < rankIndex(desired.id)) {
+      const previous = rankIndex(force.rank) >= 0 ? rankDefinition(force.rank as NonNullable<typeof force.rank>).name : '无';
+      force.rank = desired.id;
+      promotions.push(
+        desired.id === 'huangdi'
+          ? `${force.name}大业已成，属下劝汉帝退位，拥立其为皇帝！`
+          : `${force.name}势力主晋升为${desired.name}（此前${previous}）`,
+      );
+    } else if (rankIndex(force.rank) === -1) {
+      force.rank = desired.id;
+    }
+  }
+  for (const officer of Object.values(next.officers)) {
+    if (officer.forceId) addOfficerMerit(officer, MERIT_PER_MONTH);
+    if (!officer.forceId || !officer.positionId) continue;
+    const position = positionDefinition(officer.positionId);
+    if (!position) continue;
+    const city = next.cities[officer.cityId];
+    if (city && city.ownerId === officer.forceId) {
+      city.gold = Math.max(0, city.gold - position.salary);
+    }
+  }
+  for (const promotion of promotions) {
+    next.logs.push({
+      id: `rank-${next.month}-${promotion.length}-${next.logs.length}`,
+      month: next.month,
+      forceId: null,
+      message: promotion,
+    });
+  }
 }
 
 export function settleMonth(state: GameState): GameState {
@@ -65,12 +223,29 @@ export function settleMonth(state: GameState): GameState {
   const enteringMonth = next.month === 24 ? next.month : next.month + 1;
   const shouldSettleQuarterFood = isQuarterStartMonth(enteringMonth);
 
+  // 季初（1/4/7/10月）忠诚自然波动
+  if (shouldSettleQuarterFood) settleLoyaltyDrift(next);
+
+  // 每月：爵位晋升 + 被动功绩 + 官职俸禄
+  settleRanksMeritSalaries(next);
+
+  // 每月：俘虏忠诚下降/逃生判定 + 农场设施粮食产出（封锁城池无收入）
+  settleCaptives(next);
   for (const city of Object.values(next.cities)) {
-    const baseGold = city.commerce * 20 + city.population / 100;
-    city.gold += Math.round(baseGold * cityIncomeMultiplier(next, city.id, 'gold'));
-    if (shouldSettleQuarterFood) {
-      const baseFood = city.agriculture * 60 + city.population / 40;
-      city.food += Math.round(baseFood * cityIncomeMultiplier(next, city.id, 'food'));
+    if (city.ownerId && !isCityBlocked(next, city)) {
+      city.food += farmMonthlyIncome(city);
+    }
+  }
+
+  for (const city of Object.values(next.cities)) {
+    const blocked = city.ownerId ? isCityBlocked(next, city) : false;
+    if (!blocked) {
+      const baseGold = city.commerce * 20 + city.population / 100;
+      city.gold += Math.round(baseGold * cityIncomeMultiplier(next, city.id, 'gold'));
+      if (shouldSettleQuarterFood) {
+        const baseFood = city.agriculture * 60 + city.population / 40;
+        city.food += Math.round(baseFood * cityIncomeMultiplier(next, city.id, 'food'));
+      }
     }
     city.population += Math.floor((city.population * 0.005 * city.order) / 100);
     applyPossibleEvent(next, city);
@@ -78,6 +253,7 @@ export function settleMonth(state: GameState): GameState {
   for (const forceId of FORCE_IDS) next.actionPoints[forceId] = BASE_TEN_DAY_ACTION_POINTS;
   for (const officer of Object.values(next.officers)) officer.acted = false;
   settleAbilityResearch(next);
+  settleBarbarianRaids(next);
 
   if (next.month === 24) {
     next.phase = 'finished';
@@ -126,7 +302,10 @@ function settleUnitBurning(next: GameState, unit: ArmyUnit) {
 }
 
 function settleCitySupply(next: GameState, city: City) {
-  const foodCost = Math.max(0, Math.ceil((city.troops * CITY_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
+  // 度支：所属城市士兵消费的兵粮减半
+  const foodMultiplier = effectsOfKind(resolveCitySkills(next, city.id), 'cityFoodConsumptionMultiplier')
+    .reduce((lowest, { effect }) => Math.min(lowest, effect.multiplier), 1);
+  const foodCost = Math.max(0, Math.ceil((city.troops * CITY_FOOD_PER_TEN_THOUSAND_TROOPS * foodMultiplier) / 10000));
   city.food = Math.max(0, city.food - foodCost);
   // 内政4级仁政：治安自然回升翻倍
   if (city.ownerId && techLevelOf(next, city.ownerId, 'civil') >= 4) {
@@ -249,6 +428,13 @@ function settleOfficerTasks(next: GameState) {
       officer.acted = false;
       continue;
     }
+    if (task.task === 'construction') {
+      // 建设任务工期结束：释放武将回城（设施完成由 settlePlotConstruction 结算）
+      officer.location = { kind: 'city', cityId: city.id };
+      officer.cityId = city.id;
+      officer.acted = false;
+      continue;
+    }
     if (task.task === 'cultivate') {
       // 培育完成：提升武将能力/适性，扣减该节点剩余培育次数
       const node = ABILITY_NODE_MAP[task.nodeId];
@@ -301,7 +487,17 @@ export function settleTenDay(state: GameState): GameState {
   clearTransientBattleReports(next);
   // 每旬各城商人独立掷点到访（1/4），并重置交易次数
   rollMerchants(next);
-  for (const city of Object.values(next.cities)) settleCitySupply(next, city);
+  // 城池箭矢射击（敌方部队进入攻击范围时先造成伤害）
+  const cityArrowEvents = settleCityRangedAttack(next);
+  for (const msg of cityArrowEvents) next.logs.push({ id: `city-arrow-${next.month}-${next.tenDay}-${next.logs.length}`, month: next.month, forceId: null, message: msg });
+
+  for (const city of Object.values(next.cities)) {
+    settleCitySupply(next, city);
+    // 市场设施每旬产出金钱（被封锁的城池无收入）
+    if (city.ownerId && !isCityBlocked(next, city)) {
+      city.gold += marketTenDayIncome(city);
+    }
+  }
   for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
   applyGroundFireDamageToUnits(next, 'ten-day-fire');
   applyGroundFireDamageToFacilities(next);
@@ -309,6 +505,13 @@ export function settleTenDay(state: GameState): GameState {
   settleForceTurnStart(next, state.playerForceId);
   settleOfficerTransfers(next);
   settleOfficerTasks(next);
+  // 伤病按旬恢复、停战旬数递减、委任军团自动内政、援军到时撤退
+  settleOfficerHealth(next);
+  settleTruces(next);
+  settleLegionAutomation(next);
+  settleExpiringUnits(next);
+  // 建设用地建设进度推进（完成则立即转为已建成设施）
+  settlePlotConstruction(next);
 
   if (next.tenDay === 3) {
     next = settleMonth(next);

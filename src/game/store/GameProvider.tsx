@@ -70,6 +70,10 @@ interface GameContextValue {
   repairFacility(unitId: string, facilityId: string, destination?: GridCoord): void;
   dismantleFacility(facilityId: string): void;
   attackCity(attackerId: string, cityId: CityId, destination?: GridCoord): void;
+  duelUnit(unitId: string, targetUnitId: string, stance: 'attack' | 'defense' | 'spirit' | 'finisher', destination?: GridCoord): void;
+  debateRound(cardIndex: number): void;
+  debateRethink(): void;
+  dismissDebate(): void;
   waitUnit(unitId: string): void;
   applyMapEditorMap(map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number }): void;
   endMonth(): void;
@@ -321,6 +325,22 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     dispatchIntent({ type: 'attackCity', attackerId, cityId, destination }, () => emitAudioEvent({ type: 'unit-attacked' }));
   }, [dispatchIntent, emitAudioEvent]);
 
+  const duelBattleUnit = useCallback((unitId: string, targetUnitId: string, stance: 'attack' | 'defense' | 'spirit' | 'finisher', destination?: GridCoord) => {
+    dispatchIntent({ type: 'duelUnit', unitId, targetUnitId, stance, destination }, () => emitAudioEvent({ type: 'unit-attacked' }));
+  }, [dispatchIntent, emitAudioEvent]);
+
+  const playDebateRound = useCallback((cardIndex: number) => {
+    dispatchIntent({ type: 'debateRound', cardIndex }, () => emitAudioEvent({ type: 'unit-attacked' }));
+  }, [dispatchIntent, emitAudioEvent]);
+
+  const rethinkDebate = useCallback(() => {
+    dispatchIntent({ type: 'debateRethink' });
+  }, [dispatchIntent]);
+
+  const dismissDebateView = useCallback(() => {
+    dispatchIntent({ type: 'debateDismiss' });
+  }, [dispatchIntent]);
+
   const waitBattleUnit = useCallback((unitId: string) => {
     dispatchIntent({ type: 'waitUnit', unitId });
   }, [dispatchIntent]);
@@ -431,6 +451,10 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     repairFacility: repairBattleFacility,
     dismantleFacility: dismantleBattleFacility,
     attackCity: attackBattleCity,
+    duelUnit: duelBattleUnit,
+    debateRound: playDebateRound,
+    debateRethink: rethinkDebate,
+    dismissDebate: dismissDebateView,
     waitUnit: waitBattleUnit,
     applyMapEditorMap,
     endMonth,
@@ -440,7 +464,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     clearSave: clearSaveSlot,
     selectCity: setSelectedCityId,
     clearError: () => setError(null),
-  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattleUnit, jointAttackBattleUnit, auth, availability, buildBattleFacility, clearSaveSlot, createOnlineRoom, deployBattleUnit, deployBattleUnitAction, deployTransport, disconnectOnline, dismantleBattleFacility, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, selectedCityId, selectOnlineForce, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
+  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattleUnit, jointAttackBattleUnit, auth, availability, buildBattleFacility, clearSaveSlot, createOnlineRoom, deployBattleUnit, deployBattleUnitAction, deployTransport, disconnectOnline, dismantleBattleFacility, dismissDebateView, duelBattleUnit, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, playDebateRound, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, rethinkDebate, selectedCityId, selectOnlineForce, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 }

@@ -108,7 +108,7 @@ describe('monthly settlement', () => {
 
     expect(next.rngCursor).toBe(17);
     expect(next.logs.slice(-2)).toEqual([
-      { id: 'event-1-wuling-13', month: 1, forceId: 'liu', message: '武陵发生商旅' },
+      { id: 'event-1-wuling-13', month: 1, forceId: 'liu', message: '武陵发生洪水' },
       { id: 'month-2', month: 2, forceId: null, message: '进入建安十三年后的第2个月。' },
     ]);
     expect(next.cities.changsha).toMatchObject({
@@ -472,6 +472,11 @@ describe('ten-day settlement', () => {
 
   it('completes special armament production after one month', () => {
     const state = createGame('liu', 1);
+    // 冲车生产需工房
+    state.cities.jiangling.plots = [
+      { ...(state.cities.jiangling.plots?.[0] ?? {}), id: 'test-smithy', type: 'smithy', level: 1, value: 0, constructing: undefined },
+      ...(state.cities.jiangling.plots ?? []).slice(1),
+    ];
     const currentRams = state.cities.jiangling.armaments?.ram ?? 0;
     const producing = executeCommand(state, 'liu', {
       type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'ram',

@@ -1,4 +1,6 @@
 import { initialArmaments } from '../armaments';
+import { initConstructionPlots } from '../innerAffairs';
+import { DEFAULT_OFFICER_LOYALTY, LEADER_INITIAL_LOYALTY } from '../loyalty';
 import { TREASURES } from '../treasures';
 import type { City, CityId, Force, ForceId, GameState, GridCell, Officer, OfficerAptitudes, Stats, TreasureState } from '../types';
 import china42Data from './china42.json';
@@ -110,6 +112,22 @@ const officerProfiles: Partial<Record<string, { skill: string; aptitudes: Office
   'ma-liang': { skill: '能吏', aptitudes: aptitudes('C', 'C', 'B', 'C', 'A', 'C') },
 };
 
+// 武将性格（义理/野望）：影响季初忠诚波动与挖角难度；未列出的武将取默认 义理55/野望50
+const officerPersonalities: Partial<Record<string, { ambition?: number; righteousness?: number }>> = {
+  'xun-yu': { righteousness: 82 },
+  'zhang-liao': { righteousness: 74 },
+  'guo-jia': { ambition: 66 },
+  'guan-yu': { righteousness: 90 },
+  'zhang-fei': { righteousness: 82 },
+  'zhuge-liang': { righteousness: 86, ambition: 44 },
+  'ma-su': { ambition: 68 },
+  'gan-ning': { ambition: 76, righteousness: 52 },
+  'lu-meng': { ambition: 66, righteousness: 70 },
+  'lu-su': { righteousness: 78 },
+  'wei-yan': { ambition: 66, righteousness: 60 },
+  'mi-fang': { ambition: 72, righteousness: 32 },
+};
+
 const officerSeeds: OfficerSeed[] = [
   { id: 'cao-cao', name: '曹操', forceId: 'cao', cityId: 'wan', stats: stats(96, 72, 91, 94, 96) },
   { id: 'cao-ren', name: '曹仁', forceId: 'cao', cityId: 'xiangyang', stats: stats(89, 86, 71, 62, 75) },
@@ -211,8 +229,13 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
   })) as Record<CityId, City>;
   const officers = toRecord(officerSeeds.map((officer) => {
     const profile = officerProfiles[officer.id];
+    const personality = officerPersonalities[officer.id];
+    const force = officer.forceId ? forces[officer.forceId] : undefined;
     return {
       ...officer,
+      loyalty: officer.forceId === null ? 0 : force?.leaderId === officer.id ? LEADER_INITIAL_LOYALTY : DEFAULT_OFFICER_LOYALTY,
+      ambition: personality?.ambition ?? 50,
+      righteousness: personality?.righteousness ?? 55,
       location: { kind: officer.forceId === null ? 'unaffiliated' : 'city', cityId: officer.cityId } as Officer['location'],
       stats: { ...officer.stats },
       skill: profile?.skill ?? '无',
@@ -221,7 +244,7 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
     };
   }));
 
-  return {
+  const state: GameState = {
     schemaVersion: 2,
     scenarioId: 'jingxiang-208',
     seed: seed >>> 0,
@@ -257,4 +280,7 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
       },
     ],
   };
+  // 初始化建设用地地形与每城地格坐标
+  initConstructionPlots(state);
+  return state;
 }

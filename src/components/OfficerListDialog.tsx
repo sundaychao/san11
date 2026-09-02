@@ -3,13 +3,15 @@ import { useMemo, useState } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { useGame } from '../game/store/GameProvider';
 import { ARMAMENT_LABELS } from '../game/armaments';
+import { officerLoyalty } from '../game/loyalty';
+import { PLOT_LABELS } from '../game/innerAffairs';
 import { TECH_BRANCH_LABELS } from '../game/techs';
 import { skillDefinition, officerSkillNames, officerSkillsText } from '../game/skills';
-import type { GameState, Officer, OfficerAptitudes, Stats } from '../game/types';
+import type { ForceId, GameState, Officer, OfficerAptitudes, Stats } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
 interface OfficerListDialogProps {
-  scope?: 'player' | 'all';
+  scope?: 'player' | 'all' | { forceId: ForceId };
   officerIds?: string[];
   onClose(): void;
 }
@@ -19,6 +21,7 @@ type SortDirection = 'desc' | 'asc';
 type SortKey =
   | 'name'
   | 'owner'
+  | 'loyalty'
   | 'location'
   | keyof Stats
   | 'skill'
@@ -84,11 +87,30 @@ function taskInfo(officer: Officer, state: GameState) {
       ? `研究${TECH_BRANCH_LABELS[officer.location.branch]}系科技`
       : officer.location.task === 'cultivate'
         ? `培育能力`
-        : `生产${ARMAMENT_LABELS[officer.location.armamentType]}`;
+        : officer.location.task === 'construction'
+          ? `建设${PLOT_LABELS[officer.location.facility]}`
+          : `生产${ARMAMENT_LABELS[officer.location.armamentType]}`;
     return {
       status: '执行中',
       task: taskLabel,
       time: `${officer.location.remainingTenDays}旬`,
+    };
+  }
+  // 城内武将：正在建设设施 → 执行中；否则按已行动/待命显示
+  if (officer.location.kind === 'city') {
+    const constructingPlot = (state.cities[officer.location.cityId].plots ?? [])
+      .find((plot) => plot?.constructing?.officerId === officer.id);
+    if (constructingPlot?.constructing) {
+      return {
+        status: '执行中',
+        task: `建设${PLOT_LABELS[constructingPlot.constructing.facility]}`,
+        time: `${constructingPlot.constructing.remainingTenDays}旬`,
+      };
+    }
+    return {
+      status: officer.acted ? '已行动' : '待命',
+      task: '',
+      time: '',
     };
   }
   return { status: '', task: '', time: '' };
@@ -98,6 +120,7 @@ function columnsForTab(activeTab: OfficerListTab): OfficerColumn[] {
   if (activeTab === '所属') return [
     { label: '武将', sortKey: 'name' },
     { label: '所属', sortKey: 'owner' },
+    { label: '忠诚', sortKey: 'loyalty' },
     { label: '所在', sortKey: 'location' },
   ];
   if (activeTab === '能力') return [
@@ -135,6 +158,7 @@ function renderOfficerCells(officer: Officer, state: GameState, activeTab: Offic
     return (
       <>
         <td>{ownershipText(officer, state)}</td>
+        <td>{officerLoyalty(officer)}</td>
         <td>{locationText(officer, state)}</td>
       </>
     );
@@ -194,6 +218,7 @@ function defaultOfficerCompare(left: Officer, right: Officer) {
 function sortValue(officer: Officer, state: GameState, sortKey: SortKey) {
   if (sortKey === 'name') return officer.name;
   if (sortKey === 'owner') return ownershipText(officer, state);
+  if (sortKey === 'loyalty') return officerLoyalty(officer);
   if (sortKey === 'location') return locationText(officer, state);
   if (sortKey === 'skill') return officerSkillsText(officer);
   if (sortKey === 'skillDescription') {
@@ -224,7 +249,11 @@ export function OfficerListDialog({ scope = 'player', officerIds, onClose }: Off
     if (!state) return [];
     const base = officerIds?.length
       ? officerIds.map((id) => state.officers[id]).filter((officer): officer is Officer => Boolean(officer))
-      : Object.values(state.officers).filter((officer) => scope === 'all' || officer.forceId === state.playerForceId);
+      : Object.values(state.officers).filter((officer) => {
+        if (scope === 'all') return true;
+        if (typeof scope === 'object' && scope !== null) return officer.forceId === scope.forceId;
+        return officer.forceId === state.playerForceId;
+      });
     if (officerIds?.length && !sort) return base;
     return [...base].sort((left, right) => {
       if (!sort) return defaultOfficerCompare(left, right);
@@ -252,7 +281,7 @@ export function OfficerListDialog({ scope = 'player', officerIds, onClose }: Off
       <section className="officer-list-dialog tool-panel" data-testid={officerIds?.length ? 'unit-officer-list-dialog' : undefined} role="dialog" aria-modal="true" aria-labelledby="officer-list-title">
         <header>
           <div>
-            <p>{officerIds?.length ? '所属部队' : scope === 'all' ? '全势力' : `${state.forces[state.playerForceId].name}军`}</p>
+            <p>{officerIds?.length ? '所属部队' : scope === 'all' ? '全势力' : typeof scope === 'object' && scope !== null ? `${state.forces[scope.forceId]?.name ?? ''}军` : `${state.forces[state.playerForceId].name}军`}</p>
             <h2 id="officer-list-title">武将一览</h2>
           </div>
           <button type="button" className="icon-button" aria-label="关闭武将一览" title="关闭" onClick={onClose}><X /></button>

@@ -112,6 +112,14 @@ export const TECHP_PER_TRADE = 80;
 export const TECHP_PER_CIVIL_ACTION = 30;
 export const TECHP_POP_DIVISOR = 4000;
 
+/** 技巧P入账（击破/占领/登庸/交易/内政等）。
+ * 定义于此叶子模块，避免 commands.ts 与战斗模块形成循环依赖（启动时 TDZ 崩溃）。 */
+export function addTechP(state: GameState, forceId: ForceId, amount: number): void {
+  const force = state.forces[forceId];
+  if (!force || amount <= 0) return;
+  force.techP = (force.techP ?? 0) + amount;
+}
+
 /** 获取势力已研究等级（0-4） */
 export function techLevelOf(state: GameState, forceId: ForceId, branch: TechBranchId): number {
   return state.forces[forceId]?.techs?.[branch] ?? 0;
@@ -126,6 +134,12 @@ export function troopDamageMultiplier(state: GameState, forceId: ForceId, troop:
 /** 精锐兵种移动力加成（4级+6） */
 export function troopMovementBonus(state: GameState, forceId: ForceId, troop: 'spear' | 'halberd' | 'crossbow' | 'cavalry'): number {
   return techLevelOf(state, forceId, troop) >= 4 ? 6 : 0;
+}
+
+/** 精锐兵种移动力加成（宽松入参：非枪/戟/弩/骑兵种固定为0） */
+export function troopMovementBonusForTroop(state: GameState, forceId: ForceId, troop: string | undefined): number {
+  if (troop !== 'spear' && troop !== 'halberd' && troop !== 'crossbow' && troop !== 'cavalry') return 0;
+  return troopMovementBonus(state, forceId, troop);
 }
 
 /** 气力上限（军制1级+20） */

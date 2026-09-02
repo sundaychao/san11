@@ -288,7 +288,7 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(jianYongRow).toHaveTextContent('输送');
     expect(jianYongRow).toHaveTextContent('进行中');
     expect(liuBeiRow).not.toHaveTextContent('执行中');
-    expect(liuBeiRow).not.toHaveTextContent('待命');
+    expect(liuBeiRow).toHaveTextContent('待命');
   });
 
   it('executes a patrol through the command dialog', async () => {
@@ -1607,6 +1607,12 @@ describe('command interface', { timeout: 30000 }, () => {
   it('does not show old damage numbers again after recruiting troops', () => {
     vi.useFakeTimers();
     const state = createGame('liu', 1);
+    // 征兵需先建兵舍：为江陵预置一座兵舍
+    const emptyPlot = (state.cities.jiangling.plots ?? []).find((plot) => plot && plot.type === 'empty' && !plot.constructing);
+    if (emptyPlot) {
+      emptyPlot.type = 'barracks';
+      emptyPlot.level = 1;
+    }
     state.battleDamageReports = [{
       id: 'old-damage',
       unitId: 'old-target',

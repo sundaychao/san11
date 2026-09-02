@@ -1,10 +1,16 @@
-import { executeCommand, validateCommand } from './commands';
+import { executeCommand, researchTechPCost, validateCommand } from './commands';
 import { dispatchTerritoryDefenseForForce } from './battle/actions';
 import { TECH_BRANCHES, TECH_COSTS, MAX_TECH_LEVEL, techLevelOf } from './techs';
 import { ABILITY_NODES, ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition } from './treasures';
+import { POSITIONS, forceRankOf, officerMerit, positionDefinition, rankIndex } from './ranks';
+import { RUMOR_AP_COST, RUMOR_GOLD_COST } from './rumor';
+import { DIPLOMACY_AP_COST, GOODWILL_GOLD_COST, areAllies, areNonAggressed, forceDiplomacy } from './diplomacy';
+import { CAPTIVE_DISPOSE_AP_COST, canBuildPlot, cityPlots, hasPlotFacility, plotCost } from './innerAffairs';
+import { capturableByLoyalty } from './captives';
+import { legionsOf } from './innerAffairs';
 import { nextRandom } from './random';
-import type { City, ForceId, GameCommand, GameState, Officer } from './types';
+import type { City, CityId, ForceId, GameCommand, GameState, Officer } from './types';
 
 function availableOfficers(state: GameState, forceId: ForceId, city: City) {
   return Object.values(state.officers).filter(
@@ -31,14 +37,6 @@ function cityCommand(
   return officer ? commandIfLegal(state, forceId, { type, cityId: city.id, officerId: officer.id }) : null;
 }
 
-function developmentCommand(state: GameState, forceId: ForceId, city: City, focus: 'commerce' | 'agriculture') {
-  const officer = bestOfficer(availableOfficers(state, forceId, city), 'politics');
-  return officer
-    ? commandIfLegal(state, forceId, { type: 'develop', cityId: city.id, officerId: officer.id, focus })
-    : null;
-}
-
-// AI科技研究：有富余金钱与技巧P时，把已开工的方向优先补满
 function chooseAiResearchCommand(state: GameState, forceId: ForceId): GameCommand | null {
   const force = state.forces[forceId];
   if (!force) return null;
@@ -65,6 +63,8 @@ function chooseAiResearchCommand(state: GameState, forceId: ForceId): GameComman
       const officers = availableOfficers(state, forceId, city);
       const officer = bestOfficer(officers, branch.researchStat);
       if (!officer) continue;
+      // 指导：研究技巧P消耗减半后仍不足则跳过
+      if (techP < researchTechPCost(state, forceId, branch.id, officer.id)) continue;
       const command: GameCommand = { type: 'research', cityId: city.id, officerId: officer.id, branch: branch.id };
       if (validateCommand(state, forceId, command).length === 0) return command;
     }
@@ -163,6 +163,176 @@ function chooseAiGrantTreasureCommand(state: GameState, forceId: ForceId): GameC
   return null;
 }
 
+// AI官职任命：为功绩满足、尚无官职或可升职的武将授予最高可用的官职（不消耗行动力）
+function chooseAiAppointPositionCommand(state: GameState, forceId: ForceId): GameCommand | null {
+  const force = state.forces[forceId];
+  if (!force) return null;
+  const rankNow = forceRankOf(state, forceId);
+  const officers = Object.values(state.officers).filter((officer) => officer.forceId === forceId && officer.id !== force.leaderId);
+  for (const officer of officers) {
+    const current = officer.positionId ? positionDefinition(officer.positionId) : null;
+    const best = POSITIONS
+      .filter((position) =>
+        officerMerit(officer) >= position.merit
+        && rankIndex(rankNow) >= rankIndex(position.rankNeeded)
+        && (!current || position.troopCommand > current.troopCommand))
+      .sort((a, b) => b.troopCommand - a.troopCommand || b.merit - a.merit)[0];
+    if (!best) continue;
+    const command: GameCommand = { type: 'appointPosition', cityId: officer.location.kind === 'city' ? officer.location.cityId : Object.keys(state.cities)[0] as City['id'], officerId: officer.id, positionId: best.id };
+    if (validateCommand(state, forceId, command).length === 0) return command;
+  }
+  return null;
+}
+
+// AI军师任命：将己方智力最高且在城、非被俘的武将任命为军师（不消耗行动力）
+function chooseAiStrategistCommand(state: GameState, forceId: ForceId): GameCommand | null {
+  const force = state.forces[forceId];
+  if (!force) return null;
+  if (force.strategistId) return null;
+  const officers = Object.values(state.officers).filter(
+    (officer) => officer.forceId === forceId && officer.location.kind !== 'captive' && officer.id !== force.leaderId,
+  );
+  const best = bestOfficer(officers, 'intelligence');
+  if (!best) return null;
+  const cityId = (best.location.kind === 'city' ? best.location.cityId : Object.values(state.cities).find((city) => city.ownerId === forceId)?.id) as CityId | undefined;
+  if (!cityId) return null;
+  const command: GameCommand = { type: 'appointStrategist', cityId, officerId: best.id };
+  return commandIfLegal(state, forceId, command);
+}
+
+// AI流言：己方资金富余、治安良好时，向治安最差的敌城散布流言（削弱敌方民忠）
+function chooseAiRumorCommand(state: GameState, forceId: ForceId): GameCommand | null {
+  const city = Object.values(state.cities).find((c) => c.ownerId === forceId && c.gold >= RUMOR_GOLD_COST + 3000 && c.order >= 70);
+  if (!city) return null;
+  const officer = bestOfficer(availableOfficers(state, forceId, city), 'intelligence');
+  if (!officer) return null;
+  if (state.actionPoints[forceId] < RUMOR_AP_COST) return null;
+  const enemyCities = Object.values(state.cities)
+    .filter((c) => !!c.ownerId && c.ownerId !== forceId && !areNonAggressed(state, forceId, c.ownerId))
+    .sort((a, b) => a.order - b.order || b.troops - a.troops);
+  const target = enemyCities[0];
+  if (!target) return null;
+  const command: GameCommand = { type: 'rumor', cityId: city.id, officerId: officer.id, targetCityId: target.id };
+  return commandIfLegal(state, forceId, command);
+}
+
+// AI俘虏处置：忠诚合格的俘虏登用；武勇高者继续关押；其余释放
+function chooseAiCaptiveDisposeCommand(state: GameState, forceId: ForceId): GameCommand | null {
+  const captives = Object.values(state.officers).filter(
+    (officer) => officer.location.kind === 'captive' && officer.location.captorForceId === forceId,
+  );
+  for (const captive of captives) {
+    const cityId: CityId = captive.location.kind === 'captive' ? captive.location.cityId : Object.keys(state.cities)[0] as CityId;
+    const city = state.cities[cityId];
+    if (!city) continue;
+    const action = (() => {
+      if (capturableByLoyalty(captive)) return 'recruit' as const;
+      if ((captive.stats.war ?? 0) >= 75) return 'release' as const; // 武勇高的勇将释放以换取好感
+      return 'release' as const;
+    })();
+    // 登用时需本城另有可代执行的武将（非君主、未行动）
+    if (action === 'recruit') {
+      const hasExecutor = Object.values(state.officers).some((o) =>
+        o.forceId === forceId && o.location.kind === 'city' && o.location.cityId === cityId
+        && !o.acted && o.id !== state.forces[forceId]?.leaderId);
+      if (!hasExecutor) continue;
+    }
+    if (state.actionPoints[forceId] < CAPTIVE_DISPOSE_AP_COST) continue;
+    const command: GameCommand = { type: 'captiveDispose', cityId, targetOfficerId: captive.id, action };
+    if (validateCommand(state, forceId, command).length === 0) return command;
+  }
+  return null;
+}
+
+// AI外交：视局势决定亲善/停战/结盟/破盟（不消耗行动力之外的额外资源，仅耗钱）
+function chooseAiDiplomacyCommand(state: GameState, forceId: ForceId): GameCommand | null {
+  const force = state.forces[forceId];
+  if (!force) return null;
+  const cities = Object.values(state.cities).filter((c) => c.ownerId === forceId);
+  const richest = [...cities].sort((a, b) => b.gold - a.gold)[0];
+  if (!richest || richest.gold < 5000) return null;
+  const officer = bestOfficer(availableOfficers(state, forceId, richest), 'politics');
+  if (!officer) return null;
+  if (state.actionPoints[forceId] < DIPLOMACY_AP_COST) return null;
+
+  const myTroops = cities.reduce((sum, c) => sum + c.troops, 0);
+  const others = Object.values(state.forces)
+    .filter((f) => f.id !== forceId)
+    .map((f) => {
+      const fCities = Object.values(state.cities).filter((c) => c.ownerId === f.id);
+      return {
+        force: f,
+        troops: fCities.reduce((sum, c) => sum + c.troops, 0),
+        cityCount: fCities.length,
+      };
+    })
+    .sort((a, b) => b.troops - a.troops);
+  const strongest = others[0];
+  if (!strongest) return null;
+  const strongestCity = Object.values(state.cities).find((c) => c.ownerId === strongest.force.id);
+
+  const attempt = (command: GameCommand): GameCommand | null => (
+    validateCommand(state, forceId, command).length === 0 ? command : null
+  );
+
+  // 1. 我方已足够强（城市数领先至少3座）且与最强者结盟 → 撕毁盟约
+  if (areAllies(state, forceId, strongest.force.id) && cities.length >= strongest.cityCount + 3) {
+    return attempt({ type: 'diplomacy', cityId: richest.id, officerId: officer.id, targetForceId: strongest.force.id, action: 'break' });
+  }
+
+  // 2. 敌方远强于我 → 停战（送金示好）
+  if (strongest.troops > myTroops * 1.3 && !areAllies(state, forceId, strongest.force.id)) {
+    const areNonAggressedNow = (state.forces[forceId]?.truces?.[strongest.force.id] ?? 0) > 0;
+    if (!areNonAggressedNow) {
+      const gold = Math.min(5000, richest.gold);
+      return attempt({ type: 'diplomacy', cityId: richest.id, officerId: officer.id, targetForceId: strongest.force.id, action: 'truce', gold, months: 6 });
+    }
+  }
+
+  // 3. 好感度较高的势力尝试结盟（双方实力相近且未结盟）
+  const friendly = others
+    .filter((o) => !areAllies(state, forceId, o.force.id) && forceDiplomacy(state, forceId, o.force.id) >= 50)
+    .sort((a, b) => forceDiplomacy(state, forceId, b.force.id) - forceDiplomacy(state, forceId, a.force.id))[0];
+  if (friendly && Math.abs(cities.length - friendly.cityCount) <= 2) {
+    const gold = Math.min(5000, Math.max(2000, richest.gold));
+    return attempt({ type: 'diplomacy', cityId: richest.id, officerId: officer.id, targetForceId: friendly.force.id, action: 'alliance', gold });
+  }
+
+  // 4. 有钱没仗打时面向最强势力亲善，为后续结盟铺垫
+  if (strongestCity && richest.gold >= GOODWILL_GOLD_COST + 4000 && forceDiplomacy(state, forceId, strongest.force.id) < 60) {
+    return attempt({ type: 'diplomacy', cityId: richest.id, officerId: officer.id, targetForceId: strongest.force.id, action: 'goodwill' });
+  }
+  return null;
+}
+
+// AI委任军团：当势力城市较多时，把非直辖城市委任给高统率武将管理（不消耗行动力）
+function chooseAiLegionCommand(state: GameState, forceId: ForceId): GameCommand | null {
+  const force = state.forces[forceId];
+  if (!force) return null;
+  const cities = Object.values(state.cities).filter((c) => c.ownerId === forceId);
+  if (cities.length < 3) return null;
+  const existing = legionsOf(state, forceId);
+  const legionedCityIds = new Set(existing.flatMap((legion) => legion.cityIds));
+  const leader = state.officers[force.leaderId];
+  const capitalId: CityId | undefined = leader?.location.kind === 'city' ? leader.location.cityId : cities[0]?.id;
+  const capital = capitalId ? state.cities[capitalId] : undefined;
+  const spare = cities.find((city) => city.id !== capital?.id && !legionedCityIds.has(city.id));
+  if (!spare) return null;
+
+  const commanders = Object.values(state.officers).filter(
+    (o) => o.forceId === forceId && o.id !== force.leaderId && o.location.kind === 'city' && !o.deathMonth,
+  );
+  const commander = [...commanders].sort((a, b) => b.stats.leadership - a.stats.leadership)[0];
+  if (!commander) return null;
+
+  const avgTraining = cities.reduce((sum, c) => sum + c.training, 0) / cities.length;
+  const policy = avgTraining < 60 ? 'military' : 'balanced';
+  const cityId = commander.location.kind === 'city' ? commander.location.cityId : capitalId;
+  if (!cityId) return null;
+  const command: GameCommand = { type: 'legion', cityId, commanderId: commander.id, targetCityId: spare.id, policy };
+  return commandIfLegal(state, forceId, command);
+}
+
 function chooseAiDecision(state: GameState, forceId: ForceId): AiDecision {
   const cities = Object.values(state.cities).filter((city) => city.ownerId === forceId);
   const selected = (command: GameCommand): AiDecision => ({ command, cursor: state.rngCursor });
@@ -173,21 +343,21 @@ function chooseAiDecision(state: GameState, forceId: ForceId): AiDecision {
       if (command) return selected(command);
     }
   }
-  for (const city of cities) {
-    if (city.food < city.troops * 2) {
-      const command = developmentCommand(state, forceId, city, 'agriculture');
-      if (command) return selected(command);
-    }
-  }
-  for (const city of cities) {
-    if (city.gold < 3000) {
-      const command = developmentCommand(state, forceId, city, 'commerce');
-      if (command) return selected(command);
-    }
-  }
   for (const city of [...cities].sort((a, b) => a.training - b.training)) {
     if (city.training < 70 && city.troops > 0) {
       const command = cityCommand(state, forceId, city, 'train', 'leadership');
+      if (command) return selected(command);
+    }
+  }
+  // 设施建设：无兵舍的城优先建兵舍（征兵前置），其次补锻冶（兵装生产前置）
+  for (const facility of ['barracks', 'forge'] as const) {
+    for (const city of cities) {
+      if (hasPlotFacility(city, facility)) continue;
+      const plotIndex = cityPlots(city).findIndex((_plot, index) => canBuildPlot(city, index));
+      if (plotIndex < 0 || city.gold < plotCost(facility)) continue;
+      const officer = bestOfficer(availableOfficers(state, forceId, city), 'politics');
+      if (!officer) continue;
+      const command = commandIfLegal(state, forceId, { type: 'buildFacilityPlot', cityId: city.id, officerId: officer.id, plotIndex, facility });
       if (command) return selected(command);
     }
   }
@@ -221,28 +391,44 @@ function chooseAiDecision(state: GameState, forceId: ForceId): AiDecision {
     const grantCommand = chooseAiGrantTreasureCommand(state, forceId);
     if (grantCommand) return selected(grantCommand);
   }
+  // 官职任命：为功绩足够的武将授予更优官职（不消耗行动力，优先于常规开发）
+  {
+    const appointCommand = chooseAiAppointPositionCommand(state, forceId);
+    if (appointCommand) return selected(appointCommand);
+  }
   // 探索：城中有未出土宝物或在野武将时，派智力最高的武将探索
   {
     const exploreCommand = chooseAiExploreCommand(state, forceId);
     if (exploreCommand) return selected(exploreCommand);
   }
-
-  const candidates: Array<{ command: GameCommand; weight: number }> = [];
-  for (const city of cities) {
-    for (const focus of ['commerce', 'agriculture'] as const) {
-      const command = developmentCommand(state, forceId, city, focus);
-      if (command) candidates.push({ command, weight: Math.max(1, 101 - city[focus]) });
-    }
+  // 军师任命：智力最高的己方武将担任军师（不消耗行动力）
+  {
+    const strategistCommand = chooseAiStrategistCommand(state, forceId);
+    if (strategistCommand) return selected(strategistCommand);
   }
-  if (candidates.length === 0) return { command: null, cursor: state.rngCursor };
-
-  const roll = nextRandom(state.seed, state.rngCursor);
-  let target = roll.value * candidates.reduce((sum, candidate) => sum + candidate.weight, 0);
-  for (const candidate of candidates) {
-    target -= candidate.weight;
-    if (target <= 0) return { command: candidate.command, cursor: roll.cursor };
+  // 俘虏处置：忠诚合格的俘虏登用、不适用的释放
+  {
+    const captiveCommand = chooseAiCaptiveDisposeCommand(state, forceId);
+    if (captiveCommand) return selected(captiveCommand);
   }
-  return { command: candidates.at(-1)!.command, cursor: roll.cursor };
+  // 流言：资金富余时向治安最差的敌城散布流言
+  {
+    const rumorCommand = chooseAiRumorCommand(state, forceId);
+    if (rumorCommand) return selected(rumorCommand);
+  }
+  // 外交：视敌我实力对比进行亲善/停战/结盟/破盟
+  {
+    const diplomacyCommand = chooseAiDiplomacyCommand(state, forceId);
+    if (diplomacyCommand) return selected(diplomacyCommand);
+  }
+  // 委任军团：城市较多时委任给高统率武将管理
+  {
+    const legionCommand = chooseAiLegionCommand(state, forceId);
+    if (legionCommand) return selected(legionCommand);
+  }
+
+  // 内政发展（原 develop 命令）已移除，AI 无更多可用内政命令
+  return { command: null, cursor: state.rngCursor };
 }
 
 export function chooseAiCommand(state: GameState, forceId: ForceId): GameCommand | null {

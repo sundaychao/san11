@@ -1,5 +1,7 @@
 import type { ArmyUnit, City, Facility, GameState } from '../types';
 import { techLevelOf } from '../techs';
+import { effectsOfKind, resolveUnitSkills } from '../skills';
+import { rangedTargetBlockedByForest } from '../skills/rules/combat';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { cellAt, cityCenter, unitIsIncapacitated } from './movementRules';
 
@@ -30,13 +32,29 @@ export function gridDistanceWithin(from: GridCoord, to: GridCoord, maxDistance: 
 }
 
 export function unitAttackRange(state: GameState, unit: ArmyUnit) {
-  if (cellAt(state, unit)?.terrain === 'water') return 2;
-  if (['crossbow', 'siege'].includes(unit.troopType ?? 'sword')) {
+  let range = 1;
+  if (cellAt(state, unit)?.terrain === 'water') range = 2;
+  else if (['crossbow', 'siege'].includes(unit.troopType ?? 'sword')) {
     // 科技：弩兵3级劲弩射程+1
-    if (unit.troopType === 'crossbow' && unit.forceId && techLevelOf(state, unit.forceId, 'crossbow') >= 3) return 3;
-    return 2;
+    if (unit.troopType === 'crossbow' && unit.forceId && techLevelOf(state, unit.forceId, 'crossbow') >= 3) range = 3;
+    else range = 2;
   }
-  return 1;
+  // 白马：骑兵可远程攻击；射程：井阑和投石射程+1
+  range += skillAttackRangeBonus(state, unit);
+  return range;
+}
+
+/** 攻击射程特技加成：白马（骑兵+1）/射程（井阑投石+1） */
+export function skillAttackRangeBonus(state: GameState, unit: ArmyUnit) {
+  const troopType = unit.troopType ?? 'sword';
+  const cavalryRanged = effectsOfKind(resolveUnitSkills(state, unit), 'unitAttackRangeBonus')
+    .filter(({ effect }) => !effect.troopTypes || effect.troopTypes.includes(troopType))
+    .reduce((sum, { effect }) => sum + effect.add, 0);
+  const siegeRanged = troopType === 'siege'
+    ? effectsOfKind(resolveUnitSkills(state, unit), 'siegeRangeBonus')
+      .reduce((sum, { effect }) => sum + effect.add, 0)
+    : 0;
+  return cavalryRanged + siegeRanged;
 }
 
 function isUnitInAttackRange(state: GameState, attacker: ArmyUnit, target: ArmyUnit) {
@@ -67,6 +85,8 @@ export function attackableUnits(state: GameState, attackerId: string, origin?: G
   const range = unitAttackRange(state, attackerAtOrigin);
   return Object.values(state.units)
     .filter((unit) => unit.id !== attacker.id && unit.forceId !== attacker.forceId && isUnitInAttackRange(state, attackerAtOrigin, unit))
+    // 射手：无射手特技时弩兵不能攻击森林中的目标
+    .filter((unit) => !rangedTargetBlockedByForest(state, attackerAtOrigin, unit))
     .sort((a, b) => (
       gridDistanceWithin(attackerAtOrigin, a, range) - gridDistanceWithin(attackerAtOrigin, b, range) ||
       a.id.localeCompare(b.id)

@@ -8,9 +8,10 @@ function isWaterTerrain(terrain: TerrainType | undefined) {
 }
 
 export function movementAllowanceBonus(state: GameState, unit: ArmyUnit, terrain?: TerrainType) {
+  const unitKind: 'combat' | 'transport' = unit.kind === 'transport' ? 'transport' : 'combat';
   let bonus = effectsOfKind(resolveUnitSkills(state, unit), 'movementAllowance')
     .filter(({ effect }) => (
-      unit.kind !== 'transport' &&
+      (effect.kinds ?? ['combat']).includes(unitKind) &&
       (!effect.troopTypes || effect.troopTypes.includes(unit.troopType ?? 'sword')) &&
       (!effect.waterOnly || isWaterTerrain(terrain))
     ))
@@ -34,7 +35,7 @@ export function formationMovementAllowanceBonus(
 ) {
   return effectsOfKind(resolveOfficerSkills(state, officerIds), 'movementAllowance')
     .filter(({ effect }) => (
-      kind !== 'transport' &&
+      (effect.kinds ?? ['combat']).includes(kind) &&
       (!effect.troopTypes || effect.troopTypes.includes(troopType)) &&
       !effect.waterOnly
     ))

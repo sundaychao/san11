@@ -11,11 +11,11 @@ describe('game engine', () => {
 
     const next = engine.dispatch({
       type: 'issueCommand',
-      command: { type: 'develop', cityId: 'jiangling', officerId: 'guan-yu', focus: 'commerce' },
+      command: { type: 'train', cityId: 'jiangling', officerId: 'guan-yu' },
     });
 
     expect(next).not.toBe(initial);
-    expect(next.cities.jiangling.commerce).toBeGreaterThan(initial.cities.jiangling.commerce);
+    expect(next.cities.jiangling.training).toBeGreaterThan(initial.cities.jiangling.training);
     expect(engine.getState()).toEqual(next);
     expect(snapshots).toEqual([next]);
 
@@ -44,10 +44,10 @@ describe('game engine', () => {
 
     const result = engine.dispatchWithEvents({
       type: 'issueCommand',
-      command: { type: 'develop', cityId: 'jiangling', officerId: 'guan-yu', focus: 'commerce' },
+      command: { type: 'train', cityId: 'jiangling', officerId: 'guan-yu' },
     });
 
-    expect(result.events).toEqual([{ type: 'command-executed', commandType: 'develop' }]);
+    expect(result.events).toEqual([{ type: 'command-executed', commandType: 'train' }]);
     expect(received).toEqual(['command-executed']);
   });
 });

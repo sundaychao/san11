@@ -20,11 +20,15 @@ export const MOVEMENT_SKILLS: SkillDefinition[] = [
     { kind: 'ignoreEnemyZoc', terrain: 'land' },
     { kind: 'tacticCritical', condition: { kind: 'targetWarLower' }, excludeTroopTypes: ['siege'] },
   ]),
-  movementSkill('遁走', '陆地移动忽略敌方ZOC'),
   activeMovementSkill('强行', '非兵器、非运输陆地部队移动力增加5', [
     { kind: 'movementAllowance', add: 5, excludeKinds: ['transport'], troopTypes: ['sword', 'spear', 'halberd', 'crossbow', 'cavalry'] },
   ]),
-  movementSkill('长驱', '骑兵移动力增加'),
+  activeMovementSkill('遁走', '陆地移动忽略敌方ZOC', [
+    { kind: 'ignoreEnemyZoc', terrain: 'land' },
+  ]),
+  activeMovementSkill('长驱', '骑兵移动力增加3', [
+    { kind: 'movementAllowance', add: 3, troopTypes: ['cavalry'] },
+  ]),
   activeMovementSkill('推进', '水上移动忽略敌方ZOC', [
     { kind: 'ignoreEnemyZoc', terrain: 'water' },
   ]),
@@ -32,6 +36,8 @@ export const MOVEMENT_SKILLS: SkillDefinition[] = [
     { kind: 'movementAllowance', add: 6, waterOnly: true },
   ]),
   movementSkill('踏破', '降低栈道、落石等地形伤害'),
-  movementSkill('搬运', '运输部队移动力增加'),
+  activeMovementSkill('搬运', '运输部队移动力增加5', [
+    { kind: 'movementAllowance', add: 5, kinds: ['transport'] },
+  ]),
   movementSkill('解毒', '免受毒泉伤害'),
 ];

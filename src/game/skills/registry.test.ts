@@ -9,7 +9,33 @@ const NAVAL_SKILLS = [
   '推进', '操舵', '强袭', '水将', '水神',
 ] as const;
 
-const ACTIVE_SKILLS = [...FIRST_STAGE_SKILLS, ...NAVAL_SKILLS] as const;
+const COMBAT_SKILLS = [
+  // 攻击类
+  '扫讨', '威风', '昂扬', '连击', '急袭', '强袭', '乱战', '攻城', '掎角', '捕缚',
+  '心攻', '驱逐', '枪将', '戟将', '弓将', '骑将', '水将', '勇将', '神将', '斗神',
+  '枪神', '戟神', '弓神', '骑神', '工神', '水神', '霸王', '疾走', '射手',
+  '精妙', '强夺', '射程', '白马',
+  // 防御类
+  '不屈', '金刚', '铁壁', '怒发', '藤甲', '强运', '血路',
+] as const;
+
+const STRATEGY_SKILLS = [
+  // 计略类
+  '火攻', '言毒', '机智', '诡计', '虚实', '妙计', '秘计', '看破', '神算', '鬼谋', '深谋', '反计', '倾国',
+  // 辅助类（计略免疫）
+  '规律', '沉着', '明镜',
+] as const;
+
+const MOVEMENT_INTERNAL_DISASTER_SKILLS = [
+  // 行军类
+  '遁走', '长驱', '搬运',
+  // 内政类
+  '繁殖', '发明', '造船', '度支', '指导', '眼力',
+  // 辅助类
+  '诗想',
+  // 灾害类
+  '祈祷',
+] as const;
 
 describe('skill registry', () => {
   it('registers exactly one hundred and one original skills in the confirmed category counts', () => {
@@ -23,13 +49,16 @@ describe('skill registry', () => {
     )).toEqual({ 行军: 9, 攻击: 35, 防御: 8, 计略: 20, 辅助: 7, 内政: 9, 收入: 4, 灾害: 8, 关系: 1 });
   });
 
-  it('activates the fifteen first-stage skills plus the five naval skills and leaves the other eighty-one inactive', () => {
+  it('activates the fifteen first-stage skills, the five naval skills, the completed combat skills, and the strategy skills', () => {
     const active = ORIGINAL_SKILLS.filter((skill) => skill.implementationStatus === 'active');
-    const inactive = ORIGINAL_SKILLS.filter((skill) => skill.implementationStatus !== 'active');
+    const activeNames = new Set(active.map((skill) => skill.name));
 
-    expect(active.map((skill) => skill.name).sort()).toEqual([...ACTIVE_SKILLS].sort());
-    expect(active).toHaveLength(20);
-    expect(inactive).toHaveLength(81);
+    for (const name of [...FIRST_STAGE_SKILLS, ...NAVAL_SKILLS, ...COMBAT_SKILLS, ...STRATEGY_SKILLS, ...MOVEMENT_INTERNAL_DISASTER_SKILLS]) {
+      expect(activeNames.has(name), `${name} 应为 active`).toBe(true);
+    }
+    expect(active).toHaveLength(new Set([...FIRST_STAGE_SKILLS, ...NAVAL_SKILLS, ...COMBAT_SKILLS, ...STRATEGY_SKILLS, ...MOVEMENT_INTERNAL_DISASTER_SKILLS]).size);
+
+    const inactive = ORIGINAL_SKILLS.filter((skill) => skill.implementationStatus !== 'active');
     expect(inactive.every((skill) => skill.implementationStatus === 'planned' || skill.implementationStatus === 'blocked'))
       .toBe(true);
   });

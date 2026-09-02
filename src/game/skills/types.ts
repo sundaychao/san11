@@ -8,10 +8,13 @@ export type SkillCondition =
   | { kind: 'always' }
   | { kind: 'targetWarLower' }
   | { kind: 'targetIntelligenceLower' }
-  | { kind: 'troopsBelow'; amount: number };
+  | { kind: 'targetIntelligenceHigher' }
+  | { kind: 'troopsBelow'; amount: number }
+  | { kind: 'attackerTerrain'; terrain: 'forest' }
+  | { kind: 'damageBelow'; amount: number };
 
 export type SkillEffect =
-  | { kind: 'movementAllowance'; add: number; troopTypes?: TroopType[]; excludeKinds?: Array<'transport'>; waterOnly?: boolean }
+  | { kind: 'movementAllowance'; add: number; troopTypes?: TroopType[]; excludeKinds?: Array<'transport'>; waterOnly?: boolean; kinds?: Array<'combat' | 'transport'> }
   | { kind: 'ignoreEnemyZoc'; terrain: 'land' | 'water' }
   | { kind: 'tacticCritical'; condition: SkillCondition; troopTypes?: TroopType[]; excludeTroopTypes?: TroopType[]; navalOnly?: boolean }
   | { kind: 'normalAttackCritical'; condition: SkillCondition }
@@ -20,12 +23,40 @@ export type SkillEffect =
   | { kind: 'noCounterAttack'; chance: number; terrain: 'land' | 'water' }
   | { kind: 'strategyEnergyCost'; set: number }
   | { kind: 'strategyGuaranteed'; strategyIds: StrategyId[]; condition: SkillCondition }
-  | { kind: 'strategyImmunity'; strategyIds: StrategyId[] | 'all' }
+  | { kind: 'strategyImmunity'; strategyIds: StrategyId[] | 'all'; condition?: SkillCondition }
+  | { kind: 'strategySuccessBonus'; add: number; nonFemaleOnly?: boolean }
+  | { kind: 'strategyRangeBonus'; add: number }
+  | { kind: 'strategyCritical'; condition: SkillCondition }
+  | { kind: 'reflectStrategy' }
+  | { kind: 'strategyCastFailConfuse' }
   | { kind: 'fireDamageMultiplier'; multiplier: number }
+  | { kind: 'nonFireDamageMultiplier'; multiplier: number }
   | { kind: 'buildPowerMultiplier'; multiplier: number }
   | { kind: 'turnStartEnergy'; add: number }
   | { kind: 'commandYieldMultiplier'; command: GameCommand['type']; multiplier: number; armamentTypes?: ArmamentType[] }
   | { kind: 'cityIncomeMultiplier'; resource: 'gold' | 'food'; multiplier: number }
+  | { kind: 'attackDrainEnergy'; amount: number }
+  | { kind: 'breakUnitEnergy'; amount: number }
+  | { kind: 'absorbTroops'; ratio: number }
+  | { kind: 'recoverEnergyOnTacticHit'; amount: number }
+  | { kind: 'siegeDamageMultiplier'; multiplier: number }
+  | { kind: 'tacticConfuse'; condition: SkillCondition; troopTypes?: TroopType[] }
+  | { kind: 'jointAttackSingle' }
+  | { kind: 'jointAttackConfuse'; chance: number }
+  | { kind: 'guaranteedCapture' }
+  | { kind: 'captureImmune' }
+  | { kind: 'injuryImmune' }
+  | { kind: 'ignoreForestBlock' }
+  | { kind: 'cityFoodConsumptionMultiplier'; multiplier: number }
+  | { kind: 'researchTechPCostMultiplier'; multiplier: number }
+  | { kind: 'exploreTalentGuaranteed' }
+  | { kind: 'armamentProductionSpeed'; multiplier: number; armamentTypes: ArmamentType[] }
+  | { kind: 'musicTowerEnergyMultiplier'; multiplier: number }
+  | { kind: 'harvestBlessed' }
+  | { kind: 'siegeRangeBonus'; add: number }
+  | { kind: 'unitAttackRangeBonus'; add: number; troopTypes?: TroopType[] }
+  | { kind: 'stealTreasureOnBreak' }
+  | { kind: 'techPDoubleOnBreak' }
   | { kind: 'complexHandler'; handler: 'chainStrategy' };
 
 export type ComplexHandlerEffect = Extract<SkillEffect, { kind: 'complexHandler' }>;

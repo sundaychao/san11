@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, Coins, FlaskConical, Gem, GraduationCap, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
 import { useState } from 'react';
-import { COMMAND_AP } from '../game/commands';
+import { COMMAND_AP, OFFICER_COMMANDS, cityAvailableOfficers } from '../game/commands';
+import { hasPlotFacility } from '../game/innerAffairs';
 import { useGame } from '../game/store/GameProvider';
 import type { GameCommand, GameState } from '../game/types';
 
@@ -23,7 +24,7 @@ interface CityPanelProps {
 }
 
 const COMMANDS: Array<{ type: CommandType; label: string; Icon: typeof Landmark }> = [
-  { type: 'develop', label: '开发', Icon: Landmark },
+  { type: 'buildFacilityPlot', label: '开发', Icon: Hammer },
   { type: 'recruit', label: '征兵', Icon: Users },
   { type: 'produceArmament', label: '生产兵装', Icon: Hammer },
   { type: 'train', label: '训练', Icon: Swords },
@@ -50,6 +51,7 @@ export function CityPanel({ onCommand, onOpenCultivatePicker }: CityPanelProps) 
     officer.forceId === city.ownerId && officer.location.kind === 'city' && officer.location.cityId === city.id,
   );
   const owned = city.ownerId === state.playerForceId;
+  const hasAvailableOfficers = cityAvailableOfficers(state, state.playerForceId, city.id).length > 0;
 
   return (
     <aside className={`city-panel tool-panel${collapsed ? ' is-collapsed' : ''}`} aria-label="城市经营面板">
@@ -80,8 +82,6 @@ export function CityPanel({ onCommand, onOpenCultivatePicker }: CityPanelProps) 
 
       <section className="city-progress" aria-label="城市发展">
         {[
-          ['商业', city.commerce],
-          ['农业', city.agriculture],
           ['治安', city.order],
           ['训练', city.training],
         ].map(([label, value]) => (
@@ -108,8 +108,12 @@ export function CityPanel({ onCommand, onOpenCultivatePicker }: CityPanelProps) 
           <section className="command-grid" aria-label="城市指令">
             {COMMANDS.map(({ type, label, Icon }) => {
               let disabled = state.actionPoints[state.playerForceId] < COMMAND_AP[type];
-              let title: string | undefined;
+              let title: string | undefined = disabled ? `行动力不足 ${COMMAND_AP[type]}` : undefined;
               let displayLabel = label;
+              if (OFFICER_COMMANDS.has(type) && !hasAvailableOfficers) {
+                disabled = true;
+                title = '城中没有可行动的武将';
+              }
               if (type === 'trade') {
                 if (city.merchantTradedThisTenDay) {
                   disabled = true;
@@ -121,6 +125,9 @@ export function CityPanel({ onCommand, onOpenCultivatePicker }: CityPanelProps) 
               } else if (type === 'grantTreasure' && !Object.values(state.treasures ?? {}).some((treasure) => treasure.ownerId === state.playerForceId)) {
                 disabled = true;
                 title = '尚无已出土的宝物';
+              } else if (type === 'recruit' && !hasPlotFacility(city, 'barracks')) {
+                disabled = true;
+                title = '需先建设兵舍才能征兵';
               } else if (type === 'research' && techResearching(state)) {
                 disabled = true;
                 title = '科技研究中';

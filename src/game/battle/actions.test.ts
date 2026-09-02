@@ -497,13 +497,13 @@ describe('battle deployment and movement actions', () => {
 
   it('rejects deployment that would leave fewer than 500 city troops', () => {
     const state = createGame('liu', 1);
-    state.cities.wuling.troops = 10400;
+    state.cities.wuling.troops = 7400;
 
     expect(() => deployUnit(state, 'liu', {
       cityId: 'wuling',
       officerId: 'zhang-fei',
       targetCityId: 'changsha',
-      troops: 10000,
+      troops: 7000,
       food: 1000,
     })).toThrow(/500/);
   });
@@ -654,7 +654,7 @@ describe('battle deployment and movement actions', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
-      troops: 10000,
+      troops: 7000,
       food: 6000,
     });
     setUniformTerrain(state, 'plain');
@@ -706,12 +706,13 @@ describe('battle deployment and movement actions', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
-      troops: 10000,
+      troops: 7000,
       food: 6000,
     });
     setUniformTerrain(state, 'plain');
     const unit = Object.values(state.units)[0];
     readyUnitAt(state, unit.id, { q: 10, r: 10 }, 'sword');
+    state.units[unit.id].troops = 10_000;
     state.facilities = {
       tower: { id: 'tower', type: 'arrowTower', forceId: 'liu', q: 11, r: 10, durability: 150, completed: false },
     };
@@ -745,12 +746,13 @@ describe('battle deployment and movement actions', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
-      troops: 10000,
+      troops: 7000,
       food: 6000,
     });
     setUniformTerrain(state, 'plain');
     const unit = Object.values(state.units)[0];
     readyUnitAt(state, unit.id, { q: 10, r: 10 }, 'sword');
+    state.units[unit.id].troops = 10_000;
     state.facilities = {
       building: { id: 'building', type: 'arrowTower', forceId: 'liu', q: 11, r: 10, durability: 150, completed: false },
       damagedCompleted: { id: 'damagedCompleted', type: 'musicTower', forceId: 'liu', q: 10, r: 11, durability: 500, completed: true },
@@ -2229,7 +2231,7 @@ describe('battle deployment and movement actions', () => {
     const next = attackUnit(state, 'liu', attacker.id, target.id);
 
     expect(next.units[target.id]).toBeUndefined();
-    expect(next.rngCursor).toBe(state.rngCursor + 1);
+    expect(next.rngCursor).toBe(state.rngCursor + 2);
     expect(next.battleDamageReports).toHaveLength(1);
     expect(next.units[attacker.id]).toMatchObject({ energy: 90, acted: true });
   });

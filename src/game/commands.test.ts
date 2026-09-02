@@ -1,47 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { ARMAMENT_GOLD_COST, produceArmamentYield } from './armaments';
 import { COMMAND_AP, TRADE_MAX_GRAIN, executeCommand, grainPriceOf, quoteTrade, rollGrainPrices, rollMerchants, tradeEffectPercent, transferDuration, validateCommand } from './commands';
+import type { PlotType } from './innerAffairs';
 import { createGame } from './scenario/jingxiang208';
+import type { GameState } from './types';
+
+/** 为江陵预置军事设施（征兵需兵舍，枪/戟/弩需锻冶，冲车/井阑需工房，军马需厩舍，楼船需造船） */
+function withFacilities(state: GameState, facilities: PlotType[] = ['barracks', 'forge', 'smithy', 'stable', 'shipyard']) {
+  const city = state.cities.jiangling;
+  const plots = city.plots ?? (city.plots = []);
+  facilities.forEach((facility, index) => {
+    plots[index] = { ...plots[index], id: `test-${facility}`, type: facility, level: 1, constructing: undefined };
+  });
+  return state;
+}
 
 describe('command engine', () => {
-  it('develops commerce and consumes resources and officer action', () => {
-    const state = createGame('liu', 1);
-    const next = executeCommand(state, 'liu', {
-      type: 'develop', cityId: 'jiangling', officerId: 'liu-bei', focus: 'commerce',
-    });
-
-    expect(next.cities.jiangling.commerce).toBe(state.cities.jiangling.commerce + 8);
-    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 500);
-    expect(next.actionPoints.liu).toBe(60);
-    expect(next.officers['liu-bei'].acted).toBe(true);
-    expect(state.officers['liu-bei'].acted).toBe(false);
-  });
-
-  it('caps developed values at 100', () => {
-    const state = createGame('liu', 1);
-    state.cities.jiangling.agriculture = 99;
-
-    const next = executeCommand(state, 'liu', {
-      type: 'develop', cityId: 'jiangling', officerId: 'liu-bei', focus: 'agriculture',
-    });
-
-    expect(next.cities.jiangling.agriculture).toBe(100);
-  });
-
-  it('returns specific validation messages without mutating state', () => {
-    const state = createGame('liu', 1);
-    state.cities.jiangling.gold = 100;
-
-    const errors = validateCommand(state, 'liu', {
-      type: 'develop', cityId: 'jiangling', officerId: 'liu-bei', focus: 'commerce',
-    });
-
-    expect(errors).toContain('资金不足 500');
-    expect(state.cities.jiangling.gold).toBe(100);
-  });
-
   it('recruits troops with population, food, gold, and order costs', () => {
-    const state = createGame('liu', 1);
+    const state = withFacilities(createGame('liu', 1));
     const next = executeCommand(state, 'liu', {
       type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
     });
@@ -60,7 +36,7 @@ describe('command engine', () => {
   });
 
   it('applies 名声 after the existing recruit formula without changing costs', () => {
-    const state = createGame('liu', 1);
+    const state = withFacilities(createGame('liu', 1));
     state.officers['liu-bei'].skill = '名声';
     const next = executeCommand(state, 'liu', {
       type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
@@ -77,7 +53,7 @@ describe('command engine', () => {
   });
 
   it('clears stale battle reports when executing a city command', () => {
-    const state = createGame('liu', 1);
+    const state = withFacilities(createGame('liu', 1));
     state.battleDamageReports = [{
       id: 'old-damage',
       unitId: 'old-target',
@@ -100,7 +76,7 @@ describe('command engine', () => {
   });
 
   it('produces selected armaments with gold and officer action costs', () => {
-    const state = createGame('liu', 1);
+    const state = withFacilities(createGame('liu', 1));
     const currentCrossbows = state.cities.jiangling.armaments?.crossbow ?? 0;
     const next = executeCommand(state, 'liu', {
       type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'crossbow',
@@ -120,7 +96,7 @@ describe('command engine', () => {
   });
 
   it('applies 能吏 to spear, halberd, and crossbow production only', () => {
-    const state = createGame('liu', 1);
+    const state = withFacilities(createGame('liu', 1));
     state.officers['liu-bei'].skill = '能吏';
     const base = produceArmamentYield(state.officers['liu-bei'], 'crossbow');
     const before = state.cities.jiangling.armaments!.crossbow;
@@ -135,7 +111,7 @@ describe('command engine', () => {
   });
 
   it('does not apply 能吏 to delayed armament production', () => {
-    const state = createGame('liu', 1);
+    const state = withFacilities(createGame('liu', 1));
     state.officers['liu-bei'].skill = '能吏';
     const next = executeCommand(state, 'liu', {
       type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'ram',
@@ -153,7 +129,7 @@ describe('command engine', () => {
   });
 
   it('starts a one-month special armament production task with two units', () => {
-    const state = createGame('liu', 1);
+    const state = withFacilities(createGame('liu', 1));
     const currentRams = state.cities.jiangling.armaments?.ram ?? 0;
     const next = executeCommand(state, 'liu', {
       type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'ram',
@@ -193,26 +169,28 @@ describe('command engine', () => {
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 300);
   });
 
-  it('finds a local talent with a successful seeded roll', () => {
+  it('starts a debate when finding a local talent to recruit', () => {
     const state = createGame('liu', 1);
     const next = executeCommand(state, 'liu', {
       type: 'talent', cityId: 'jiangling', officerId: 'liu-bei',
     });
 
-    expect(next.officers['zhao-yun'].forceId).toBe('liu');
-    expect(next.rngCursor).toBe(1);
-    expect(next.logs.at(-1)?.message).toContain('赵云');
+    expect(next.debateSession?.status).toBe('ongoing');
+    expect(next.debateSession?.recruiterId).toBe('liu-bei');
+    expect(next.debateSession?.targetId).toBe('zhao-yun');
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 500);
+    expect(next.officers['liu-bei'].acted).toBe(true);
   });
 
-  it('logs a failed talent search from an unsuccessful seeded roll', () => {
+  it('does not recruit the talent before the debate finishes regardless of seed', () => {
     const state = createGame('liu', 14336);
     const next = executeCommand(state, 'liu', {
       type: 'talent', cityId: 'jiangling', officerId: 'liu-bei',
     });
 
+    expect(next.debateSession?.status).toBe('ongoing');
     expect(next.officers['zhao-yun'].forceId).toBeNull();
-    expect(next.rngCursor).toBe(1);
-    expect(next.logs.at(-1)?.message).toContain('未能登用');
+    expect(next.logs.some((log) => log.message.includes('舌战'))).toBe(true);
   });
 
   it('starts a personnel-only transfer with travel time based on city distance', () => {
@@ -434,24 +412,9 @@ describe('command engine', () => {
     })).toContain('该方向科技已研究完毕');
   });
 
-  it('awards techP from civil actions, trade, and recruitment of talent', () => {
-    const state = createGame('liu', 1);
-    state.forces.liu.techP = 0;
-    state.forces.liu.techs = { civil: 1 };
-    const startAgriculture = state.cities.jiangling.agriculture;
-
-    // 内政开发 +30
-    const next = executeCommand(state, 'liu', {
-      type: 'develop', cityId: 'jiangling', officerId: 'liu-bei', focus: 'agriculture',
-    });
-    expect(next.forces.liu.techP).toBe(30);
-    // 屯田科技（civil 1级）+25%：刘备政治80基础8 → 10
-    expect(next.cities.jiangling.agriculture).toBe(startAgriculture + 10);
-  });
-
   it('boosts recruit yield with the corvee civil tech', () => {
-    const state = createGame('liu', 1);
-    const plain = createGame('liu', 1);
+    const state = withFacilities(createGame('liu', 1));
+    const plain = withFacilities(createGame('liu', 1));
     state.forces.liu.techs = { civil: 3 };
     plain.forces.liu.techs = {};
 

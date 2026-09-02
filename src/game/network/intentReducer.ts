@@ -17,6 +17,8 @@ import {
 } from '../battle/actions';
 import type { GridCoord } from '../battle/grid';
 import { executeCommand } from '../commands';
+import { dismissDebate, resolveDebateRethink, resolveDebateRound } from '../debate';
+import { executeDuel } from '../duel';
 import type { ForceId, GameState } from '../types';
 import type { GameIntent } from './intents';
 
@@ -114,6 +116,16 @@ export function reduceGameIntent(
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
       return attackCity(moved, forceId, intent.attackerId, intent.cityId);
     }
+    case 'duelUnit': {
+      const moved = moveIfRequested(state, forceId, intent.unitId, intent.destination);
+      return executeDuel(moved, forceId, intent.unitId, intent.targetUnitId, intent.stance);
+    }
+    case 'debateRound':
+      return resolveDebateRound(state, intent.cardIndex);
+    case 'debateRethink':
+      return resolveDebateRethink(state);
+    case 'debateDismiss':
+      return dismissDebate(state);
     default:
       return assertNever(intent);
   }

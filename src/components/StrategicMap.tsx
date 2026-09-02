@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type 
 import { unitIsIncapacitated } from '../game/battle/actions';
 import { coordsWithinRange, gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
+import { PLOT_LABELS, CITY_ATTACK_RANGE, CITY_ATTACK_MIN } from '../game/innerAffairs';
 import type { EditableCityMarker } from '../game/map-editor/editor';
 import { useGame } from '../game/store/GameProvider';
 import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GridCell, StrategyResultReport, TroopType } from '../game/types';
@@ -104,14 +105,26 @@ interface StrategicMapProps {
   onAttackCityTargetSelect?(cityId: CityId): void;
   onFacilityTargetSelect?(facilityId: string): void;
   onFacilityContextMenu?(facilityId: string, position: { x: number; y: number }): void;
+  /** 右键点击设施/城市设施：关闭撤销菜单 */
+  onFacilityMenuClose?(): void;
   onFacilityHover?(facilityId: string, position: { x: number; y: number }): void;
   onFacilityLeave?(): void;
   onMapContextMenu?(position: { x: number; y: number }): void;
   onMapContextClose?(): void;
+  /** 建设用地目标（等待玩家点击） */
+  constructionTargets?: GridCoord[];
+  /** 点击建设用地目标 */
+  onConstructionTargetSelect?(coord: GridCoord, position: { x: number; y: number }): void;
+  /** 点击城池建设用地设施（建设中/已建成），打开撤销菜单 */
+  onCityPlotSelect?(cityId: string, plotIndex: number, position: { x: number; y: number }): void;
+  /** 悬停城市设施（建设用地上的设施） */
+  onCityPlotHover?(cityId: CityId, plotIndex: number, position: { x: number; y: number }): void;
+  onCityPlotLeave?(): void;
 }
 
 export function StrategicMap({
   backgroundImage,
+  constructionTargets = [],
   deployTargets = [],
   editorCities,
   editorGrid,
@@ -129,6 +142,7 @@ export function StrategicMap({
   onCityMenu,
   onCityInfoMenu,
   onCellHover,
+  onConstructionTargetSelect,
   onDeployTargetSelect,
   onEditorCellPaint,
   onFirePlotTargetSelect,
@@ -145,8 +159,12 @@ export function StrategicMap({
   onAttackCityTargetSelect,
   onFacilityTargetSelect,
   onFacilityContextMenu,
+  onFacilityMenuClose,
   onFacilityHover,
   onFacilityLeave,
+  onCityPlotSelect,
+  onCityPlotHover,
+  onCityPlotLeave,
   selectedDeployTarget,
   selectedUnitId,
 }: StrategicMapProps) {
@@ -157,6 +175,7 @@ export function StrategicMap({
     scale: Math.round(((state?.gridWidth ?? DEFAULT_GRID_WIDTH) / FARTHEST_VISIBLE_CELLS) * 100) / 100,
   }));
   const [hoveredFacilityId, setHoveredFacilityId] = useState<string | null>(null);
+  const [hoveredCityId, setHoveredCityId] = useState<CityId | null>(null);
   const [viewport, setViewport] = useState<{ width: number; height: number } | null>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const regionRef = useRef<HTMLElement | null>(null);
@@ -289,6 +308,7 @@ export function StrategicMap({
   const deployMode = deployTargetKeys.size > 0;
   const moveTargetKeys = new Set(moveTargets.map((coord) => `${coord.q},${coord.r}`));
   const firePlotTargetKeys = new Set(firePlotTargets.map((coord) => `${coord.q},${coord.r}`));
+  const constructionTargetKeys = new Set(constructionTargets.map((coord) => `${coord.q},${coord.r}`));
   const attackTargetCityIdSet = new Set(attackTargetCityIds);
   const attackTargetFacilityIdSet = new Set(attackTargetFacilityIds);
   const attackTargetUnitIdSet = new Set(attackTargetUnitIds);
@@ -303,6 +323,7 @@ export function StrategicMap({
   }
   const moveMode = moveTargetKeys.size > 0;
   const firePlotMode = firePlotTargetKeys.size > 0;
+  const constructionMode = constructionTargetKeys.size > 0;
   const renderTerrain = renderTerrainByScale;
   // 全图视图下地形格子不渲染时，模式目标格子（部署/移动/火计）仍需独立渲染，否则玩家无法看到可点击目标
   const modeTargetCells = !renderTerrain && (deployMode || moveMode || firePlotMode)
@@ -329,6 +350,19 @@ export function StrategicMap({
         const keys = new Set(displayGrid.map(gridKey));
         return coordsWithinRange(hoveredFacility, hoveredFacilityRange)
           .filter((coord) => keys.has(gridKey(coord)) && (coord.q !== hoveredFacility.q || coord.r !== hoveredFacility.r));
+      })()
+    : [];
+  // 城池攻击范围格子（鼠标悬停城池时显示，外1~2圈）
+  const cityAttackRangeCells = hoveredCityId
+    ? (() => {
+        const city = state.cities[hoveredCityId];
+        if (!city) return [];
+        const keys = new Set(displayGrid.map(gridKey));
+        const coords: GridCoord[] = [];
+        for (let d = CITY_ATTACK_MIN; d <= CITY_ATTACK_RANGE; d += 1) {
+          coords.push(...coordsWithinRange({ q: city.gridQ, r: city.gridR }, d));
+        }
+        return coords.filter((c) => keys.has(gridKey(c)));
       })()
     : [];
   const dismissUnitHover = () => onUnitLeave?.();
@@ -572,27 +606,33 @@ export function StrategicMap({
             style={zoomStyle()}
           />
         )}
-        <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}${moveMode ? ' is-moving' : ''}${firePlotMode ? ' is-strategy-targeting' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${worldWidth} ${worldHeight}`} preserveAspectRatio="none" aria-hidden="true" style={zoomStyle()}>
+        <svg className={`battle-grid-overlay${editorMode ? ' is-editing' : ''}${deployMode ? ' is-deploying' : ''}${moveMode ? ' is-moving' : ''}${firePlotMode ? ' is-strategy-targeting' : ''}${constructionMode ? ' is-construction-targeting' : ''}`} data-testid="battle-grid-overlay" viewBox={`0 0 ${worldWidth} ${worldHeight}`} preserveAspectRatio="none" aria-hidden="true" style={zoomStyle()}>
           {cellsToRender.map((cell) => {
             const position = displayCellPosition(cell.q, cell.r);
             const cellKey = `${cell.q},${cell.r}`;
             const isDeployTarget = deployTargetKeys.has(cellKey);
             const isMoveTarget = moveTargetKeys.has(cellKey);
             const isFirePlotTarget = firePlotTargetKeys.has(cellKey);
+            const isConstructionTarget = constructionTargetKeys.has(cellKey);
             const isSelectedDeployTarget = selectedDeployKey === cellKey;
             const isFacilityOccupied = facilityOccupiedKeys.has(cellKey);
             const cityIdAtCell = cityFootprintByKey.get(cellKey);
             return (
               <rect
                 key={`${cell.q},${cell.r}`}
-                data-testid={editorMode ? `editor-cell-${cell.q}-${cell.r}` : isDeployTarget ? `deploy-target-${cell.q}-${cell.r}` : isMoveTarget ? `move-target-${cell.q}-${cell.r}` : isFirePlotTarget ? `strategy-target-${cell.q}-${cell.r}` : `map-cell-${cell.q}-${cell.r}`}
+                data-testid={editorMode ? `editor-cell-${cell.q}-${cell.r}` : isConstructionTarget ? `construction-target-${cell.q}-${cell.r}` : isDeployTarget ? `deploy-target-${cell.q}-${cell.r}` : isMoveTarget ? `move-target-${cell.q}-${cell.r}` : isFirePlotTarget ? `strategy-target-${cell.q}-${cell.r}` : `map-cell-${cell.q}-${cell.r}`}
                 x={position.x}
                 y={position.y}
                 width={CELL_SIZE}
                 height={CELL_SIZE}
-                className={`battle-cell terrain-${cell.terrain}${isFacilityOccupied ? ' is-facility-occupied' : ''}${isDeployTarget ? ' is-deploy-target' : ''}${isMoveTarget ? ' is-move-target' : ''}${isFirePlotTarget ? ' is-strategy-target' : ''}${isSelectedDeployTarget ? ' is-selected-deploy-target' : ''}`}
+                className={`battle-cell terrain-${cell.terrain}${isFacilityOccupied ? ' is-facility-occupied' : ''}${isDeployTarget ? ' is-deploy-target' : ''}${isMoveTarget ? ' is-move-target' : ''}${isFirePlotTarget ? ' is-strategy-target' : ''}${isConstructionTarget ? ' is-construction-target' : ''}${isSelectedDeployTarget ? ' is-selected-deploy-target' : ''}`}
                 onPointerDown={(event) => {
                   if (event.button !== 0) return;
+                  if (isConstructionTarget) {
+                    event.stopPropagation();
+                    onConstructionTargetSelect?.({ q: cell.q, r: cell.r }, { x: event.clientX + 12, y: event.clientY + 4 });
+                    return;
+                  }
                   if (isFirePlotTarget) {
                     event.stopPropagation();
                     onFirePlotTargetSelect?.({ q: cell.q, r: cell.r });
@@ -627,6 +667,7 @@ export function StrategicMap({
                 onPointerEnter={(event) => {
                   onCellHover?.(cell);
                   if (cityIdAtCell) {
+                    setHoveredCityId(cityIdAtCell);
                     onCityHover?.(cityIdAtCell, { x: event.clientX + 57, y: event.clientY + 47 });
                   }
                   if (!editorMode || event.buttons !== 1) return;
@@ -634,11 +675,67 @@ export function StrategicMap({
                   onEditorCellPaint?.({ q: cell.q, r: cell.r });
                 }}
                 onPointerLeave={() => {
-                  if (cityIdAtCell) onCityLeave?.();
+                  if (cityIdAtCell) {
+                    setHoveredCityId(null);
+                    onCityLeave?.();
+                  }
                 }}
               />
             );
           })}
+          {/* 建设用地设施覆盖层：显示已建成设施 / 建设中状态 */}
+          {!editorMode && Object.values(state.cities).flatMap((city) =>
+            (city.plots ?? []).map((plot, idx) => {
+              if (!plot || plot.q == null || plot.r == null) return null;
+              if (plot.type === 'empty' && !plot.constructing) return null;
+              const position = displayCellPosition(plot.q, plot.r);
+              const label = plot.constructing
+                ? `建设中 ${plot.constructing.remainingTenDays}旬`
+                : plot.type
+                  ? `${PLOT_LABELS[plot.type]} Lv${plot.level}`
+                  : null;
+              if (!label) return null;
+              const facilityLabel = plot.constructing
+                ? PLOT_LABELS[plot.constructing.facility] ?? plot.type ?? '?'
+                : (plot.type ? PLOT_LABELS[plot.type] : '?');
+              return (
+                <g
+                  key={`plot-${city.id}-${idx}`}
+                  className={`construction-overlay${plot.constructing ? ' is-building' : ''}`}
+                  data-testid="city-plot-overlay"
+                  data-plot-id={plot.id}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) return;
+                    event.stopPropagation();
+                    onCityPlotSelect?.(city.id, idx, { x: event.clientX + 12, y: event.clientY + 4 });
+                  }}
+                  onContextMenu={(event) => {
+                    // 右键：关闭撤销菜单（左键打开）
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onFacilityMenuClose?.();
+                  }}
+                  onPointerEnter={(event) => {
+                    onCityPlotHover?.(city.id, idx, { x: event.clientX + 57, y: event.clientY + 47 });
+                  }}
+                  onPointerLeave={() => {
+                    onCityPlotLeave?.();
+                  }}
+                >
+                  <rect x={position.x + 2} y={position.y + 2} width={CELL_SIZE - 4} height={CELL_SIZE - 4} rx={2} ry={2} fill="rgba(0,0,0,0.35)" stroke={plot.constructing ? '#ffb300' : '#d4b06a'} strokeWidth={1} />
+                  <text x={position.x + CELL_SIZE / 2} y={position.y + CELL_SIZE / 2 - 3} textAnchor="middle" dominantBaseline="middle" fill={plot.constructing ? '#ffd842' : '#fff6d6'} fontSize={9} fontWeight={700}>{facilityLabel}</text>
+                  {plot.constructing && (
+                    <text x={position.x + CELL_SIZE / 2} y={position.y + CELL_SIZE / 2 + 8} textAnchor="middle" dominantBaseline="middle" fill="#ffe082" fontSize={8}>
+                      {plot.constructing.remainingTenDays}
+                    </text>
+                  )}
+                  {!plot.constructing && plot.level > 1 && (
+                    <text x={position.x + CELL_SIZE - 6} y={position.y + CELL_SIZE - 5} textAnchor="middle" dominantBaseline="middle" fill="#ffd842" fontSize={8} fontWeight={700}>{plot.level}</text>
+                  )}
+                </g>
+              );
+            }).filter((x): x is NonNullable<typeof x> => x !== null)
+          )}
           {displayCities.flatMap((city) => (
             sevenCellCityFootprint(city).map((coord) => {
               const position = displayCellPosition(coord.q, coord.r);
@@ -668,10 +765,12 @@ export function StrategicMap({
                   }}
                   onPointerEnter={(event) => {
                     if (!gameCity) return;
+                    setHoveredCityId(gameCity.id);
                     onCityHover?.(gameCity.id, { x: event.clientX + 57, y: event.clientY + 47 });
                   }}
                   onPointerLeave={() => {
                     if (!gameCity) return;
+                    setHoveredCityId(null);
                     onCityLeave?.();
                   }}
                 />
@@ -691,6 +790,22 @@ export function StrategicMap({
                 width={CELL_SIZE}
                 height={CELL_SIZE}
                 className="facility-range-cell"
+              />
+            );
+          })}
+          {/* 城池攻击范围呼吸闪烁覆盖层（鼠标悬停城池时显示） */}
+          {cityAttackRangeCells.map((coord) => {
+            const position = displayCellPosition(coord.q, coord.r);
+            return (
+              <rect
+                key={`city-attack-range-${coord.q}-${coord.r}`}
+                data-testid="city-attack-range-cell"
+                data-city-attack-position={`${coord.q},${coord.r}`}
+                x={position.x}
+                y={position.y}
+                width={CELL_SIZE}
+                height={CELL_SIZE}
+                className="city-attack-range-cell"
               />
             );
           })}
@@ -717,12 +832,15 @@ export function StrategicMap({
                   }
                   if (isFacilityTarget) {
                     onFacilityTargetSelect?.(facility.id);
+                    return;
                   }
+                  onFacilityContextMenu?.(facility.id, { x: event.clientX + 10, y: event.clientY + 4 });
                 }}
                 onContextMenu={(event) => {
+                  // 右键：关闭撤销菜单（左键打开）
                   event.preventDefault();
                   event.stopPropagation();
-                  onFacilityContextMenu?.(facility.id, { x: event.clientX + 10, y: event.clientY + 4 });
+                  onFacilityMenuClose?.();
                 }}
                 onPointerEnter={(event) => {
                   setHoveredFacilityId(facility.id);

@@ -25,6 +25,7 @@ import { movementAllowanceForProfile } from './definitions';
 import type { GridCoord } from './grid';
 import { strategyEnergyCostForUnit } from './strategies';
 import { formationMovementAllowanceBonus } from '../skills';
+import { troopMovementBonusForTroop } from '../techs';
 import { TROOP_LABELS } from '../armaments';
 import type { ArmyUnit, City, CityId, Facility, FacilityType, GameState, TroopType } from '../types';
 
@@ -99,7 +100,8 @@ export function getDeploymentTargets(state: GameState, input: DeploymentTargetQu
   if (input.kind === 'transport') return deploymentCells(state, input.cityId, undefined, 'transport');
   const troopType = input.troopType ?? 'sword';
   const movementAllowance = movementAllowanceForProfile(troopType) +
-    formationMovementAllowanceBonus(state, input.officerIds ?? [], troopType);
+    formationMovementAllowanceBonus(state, input.officerIds ?? [], troopType) +
+    troopMovementBonusForTroop(state, state.turnForceId, troopType);
   return deploymentCells(state, input.cityId, movementAllowance, troopType);
 }
 

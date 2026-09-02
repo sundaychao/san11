@@ -71,7 +71,12 @@ export function resolveCitySkills(state: GameState, cityId: CityId): ActiveSkill
 }
 
 export function resolveCommandSkills(state: GameState, command: GameCommand): ActiveSkill[] {
-  if (command.type === 'transfer' || command.type === 'abilityResearch' || command.type === 'grantTreasure') return [];
+  if (
+    command.type === 'transfer' || command.type === 'abilityResearch' || command.type === 'grantTreasure'
+    || command.type === 'appointPosition' || command.type === 'captiveDispose' || command.type === 'marry'
+    || command.type === 'cancelCityPlot'
+    || command.type === 'legion' || command.type === 'appointStrategist'
+  ) return [];
   if (command.type === 'explore') return resolveOfficerSkills(state, command.officerIds);
   return resolveOfficerSkills(state, [command.officerId]);
 }

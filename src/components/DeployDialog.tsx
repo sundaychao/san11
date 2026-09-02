@@ -3,6 +3,7 @@ import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useAudioEventAdapter, type AudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { armamentsOf, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT } from '../game/armaments';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
+import { unitTroopCapOf } from '../game/ranks';
 import { useGame } from '../game/store/GameProvider';
 import { officerSkillsText } from '../game/skills';
 import type { CityId, Officer, OfficerAptitudes, Stats, TroopType } from '../game/types';
@@ -326,13 +327,14 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const cityArmaments = armamentsOf(city.armaments);
   const armamentStock = armamentType ? cityArmaments[armamentType] : null;
   const shipStock = cityArmaments.ship;
+  const leaderCap = unitTroopCapOf(state, state.playerForceId, activeOfficerId);
   const troopMax = Math.min(
-    10000,
+    leaderCap,
     Math.max(0, city.troops - 500),
     armamentStock ?? Number.POSITIVE_INFINITY,
   );
   const troopMin = 1000;
-  const troopRangeDisabled = troopMax < troopMin;
+  const troopRangeDisabled = troopMax < troopMin || leaderCap < troopMin;
   const troopRangeMax = Math.max(troopMin, troopMax);
   const activeTroops = String(troopRangeDisabled
     ? troopMin
@@ -348,7 +350,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const errors = [
     state.actionPoints[state.playerForceId] < DEPLOY_AP_COST ? `行动力不足 ${DEPLOY_AP_COST}` : '',
     !activeOfficerId ? '没有可出征武将' : '',
-    !Number.isInteger(troopAmount) || troopAmount < 1000 || troopAmount > 10000 ? '士兵必须为 1000-10000' : '',
+    !Number.isInteger(troopAmount) || troopAmount < 1000 || troopAmount > leaderCap ? `士兵必须为 1000-${leaderCap}` : '',
     city.troops - troopAmount < 500 ? '城市至少保留 500 兵力' : '',
     !Number.isInteger(goldAmount) || goldAmount < 0 || goldAmount > city.gold ? '资金不足' : '',
     !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > city.food ? '兵粮不足' : '',

@@ -18,7 +18,6 @@ function hasLegalActions(state: GameState) {
     .some((officer) => {
       const cityId = officer.location.kind === 'city' ? officer.location.cityId : officer.cityId;
       const commands: GameCommand[] = [
-        { type: 'develop', cityId, officerId: officer.id, focus: 'commerce' },
         { type: 'recruit', cityId, officerId: officer.id },
         { type: 'train', cityId, officerId: officer.id },
         { type: 'patrol', cityId, officerId: officer.id },

@@ -30,4 +30,8 @@ export type GameIntent =
   | { type: 'repairFacility'; unitId: string; facilityId: string; destination?: GridCoord }
   | { type: 'dismantleFacility'; facilityId: string }
   | { type: 'attackCity'; attackerId: string; cityId: CityId; destination?: GridCoord }
+  | { type: 'duelUnit'; unitId: string; targetUnitId: string; stance: 'attack' | 'defense' | 'spirit' | 'finisher'; destination?: GridCoord }
+  | { type: 'debateRound'; cardIndex: number }
+  | { type: 'debateRethink' }
+  | { type: 'debateDismiss' }
   | { type: 'endTenDay' };

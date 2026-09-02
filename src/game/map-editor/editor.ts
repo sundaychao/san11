@@ -55,6 +55,7 @@ const TERRAIN_COLORS: Record<TerrainType, string> = {
   mountain: '#303837',
   water: '#1e4c60',
   ferry: '#a07440',
+  construction: '#8a7a50',
 };
 
 const TERRAIN_CONTROL_COLORS: Record<TerrainType, string> = {
@@ -65,6 +66,7 @@ const TERRAIN_CONTROL_COLORS: Record<TerrainType, string> = {
   mountain: '#2d3332',
   water: '#1f546e',
   ferry: '#b0874c',
+  construction: '#a08c5a',
 };
 
 const CELL_SIZE = 24;
@@ -111,7 +113,7 @@ function cellPosition(q: number, r: number) {
 }
 
 function isTerrain(value: unknown): value is TerrainType {
-  return value === 'road' || value === 'plain' || value === 'forest' || value === 'hill' || value === 'mountain' || value === 'water' || value === 'ferry';
+  return value === 'road' || value === 'plain' || value === 'forest' || value === 'hill' || value === 'mountain' || value === 'water' || value === 'ferry' || value === 'construction';
 }
 
 function isGridCell(value: unknown, width: number, height: number): value is GridCell {

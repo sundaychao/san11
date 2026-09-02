@@ -7,11 +7,18 @@ export {
 } from './legacyCore';
 
 import type { ArmyUnit, CityId, ForceId, GameState } from '../types';
-import { nextRandom } from '../random';
-import { addTechP } from '../commands';
-import { TECHP_PER_CITY_CAPTURE, techLevelOf, troopDamageMultiplier } from '../techs';
-import { resolveUnitSkills } from '../skills';
-import { normalAttackIsCritical, reduceIncomingDamageBySkills, rollNoCounterAttack, rollRepeatNormalAttack } from '../skills/rules/combat';
+import { TECHP_PER_CITY_CAPTURE, techLevelOf, troopDamageMultiplier, addTechP } from '../techs';
+import {
+  absorbTroopsOnCritical,
+  drainTargetEnergyBySkills,
+  jointAttackRollConfuse,
+  jointAttackSplitsToSingle,
+  normalAttackIsCritical,
+  reduceIncomingDamageBySkills,
+  rollNoCounterAttack,
+  rollRepeatNormalAttack,
+  siegeDamageMultiplier,
+} from '../skills/rules/combat';
 import { attackableFacilities, attackableUnits, jointAttackableUnits } from './targetRules';
 import {
   areAdjacent,
@@ -56,6 +63,9 @@ function applyNormalAttackHit(
 
   const damage = computeNormalAttackDamage(next, attacker, target, critical);
   target.troops -= damage;
+  // 扫讨/威风：攻击时降低敌方气力；心攻：会心时吸收敌军士兵
+  drainTargetEnergyBySkills(next, attacker, target);
+  absorbTroopsOnCritical(next, attacker, damage, critical);
   next.battleDamageReports ??= [];
   next.battleDamageReports.push({
     id: `damage-${next.month}-${next.tenDay}-${next.rngCursor}-${targetId}`,
@@ -137,8 +147,9 @@ export function jointAttackUnit(state: GameState, forceId: ForceId, attackerId: 
   });
 
   // 铁壁：目标拥有铁壁时，齐攻只按一次普通攻击处理（仅主攻者造成一次伤害）
-  const targetHasIronWall = resolveUnitSkills(next, nextTarget).some((skill) => skill.definition.name === '铁壁');
-  const hittingUnits = targetHasIronWall ? participants.filter((unit) => unit.id === attackerId) : participants;
+  const hittingUnits = jointAttackSplitsToSingle(next, nextTarget)
+    ? participants.filter((unit) => unit.id === attackerId)
+    : participants;
 
   let totalDamage = 0;
   let anyCritical = false;
@@ -147,6 +158,9 @@ export function jointAttackUnit(state: GameState, forceId: ForceId, attackerId: 
     const damage = computeNormalAttackDamage(next, participant, nextTarget, critical);
     totalDamage += damage;
     anyCritical = anyCritical || critical;
+    // 扫讨/威风：齐攻同样降低敌方气力；心攻：会心时吸收敌军士兵
+    drainTargetEnergyBySkills(next, participant, nextTarget);
+    absorbTroopsOnCritical(next, participant, damage, critical);
     participant.energy = Math.max(0, participant.energy - 10);
     participant.acted = true;
   }
@@ -165,11 +179,8 @@ export function jointAttackUnit(state: GameState, forceId: ForceId, attackerId: 
   }
 
   // 掎角：任一参战者拥有掎角且目标存活时，有概率使目标混乱
-  const hasJiaojiao = hittingUnits.some((unit) => resolveUnitSkills(next, unit).some((skill) => skill.definition.name === '掎角'));
-  if (hasJiaojiao && nextTarget.troops > 0) {
-    const roll = nextRandom(next.seed, next.rngCursor);
-    next.rngCursor = roll.cursor;
-    if (roll.value < 0.5) nextTarget.confusedTenDays = 1;
+  if (nextTarget.troops > 0 && jointAttackRollConfuse(next, hittingUnits, nextTarget)) {
+    nextTarget.confusedTenDays = 1;
   }
 
   if (nextTarget.troops <= 0) {
@@ -207,7 +218,7 @@ export function attackFacility(state: GameState, forceId: ForceId, attackerId: s
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];
   const nextFacility = next.facilities![facilityId];
-  const multiplier = (nextAttacker.troopType ?? 'sword') === 'siege' ? 1.3 : 0.55;
+  const multiplier = ((nextAttacker.troopType ?? 'sword') === 'siege' ? 1.3 : 0.55) * siegeDamageMultiplier(next, nextAttacker);
   const damage = Math.max(80, Math.round(damageRoll(next, nextAttacker, 'plain') * multiplier));
   nextFacility.durability = Math.max(0, nextFacility.durability - damage);
   nextAttacker.energy -= 10;
@@ -229,7 +240,7 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   const nextAttacker = next.units[attackerId];
   const nextCity = next.cities[cityId];
   const damage = damageRoll(next, nextAttacker, 'plain');
-  const multiplier = (nextAttacker.troopType ?? 'sword') === 'siege' ? 1.4 : 0.2;
+  const multiplier = ((nextAttacker.troopType ?? 'sword') === 'siege' ? 1.4 : 0.2) * siegeDamageMultiplier(next, nextAttacker);
   nextCity.troops = Math.max(0, nextCity.troops - Math.round(damage * 0.65));
   nextCity.durability = Math.max(0, nextCity.durability - Math.round(damage * multiplier));
   nextAttacker.energy -= 10;

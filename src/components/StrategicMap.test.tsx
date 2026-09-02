@@ -19,6 +19,7 @@ const TERRAIN_LABELS: Record<TerrainType, string> = {
   mountain: '高山',
   water: '水域',
   ferry: '渡口',
+  construction: '建设用地',
 };
 
 function renderGame(state = createGame('liu', 1)) {
@@ -446,11 +447,22 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     };
     renderGame(state);
 
-    fireEvent.contextMenu(screen.getByTestId('battle-facility-marker'), { clientX: 320, clientY: 180 });
+    // 左键点击设施打开撤销菜单
+    fireEvent.pointerDown(screen.getByTestId('battle-facility-marker'), { button: 0, clientX: 320, clientY: 180 });
 
     expect(screen.getByTestId('facility-context-menu')).toBeVisible();
 
+    // 右键点击设施关闭菜单
+    fireEvent.contextMenu(screen.getByTestId('battle-facility-marker'), { clientX: 320, clientY: 180 });
+    expect(screen.queryByTestId('facility-context-menu')).not.toBeInTheDocument();
+
+    // 再次左键打开并完成撤销流程
+    fireEvent.pointerDown(screen.getByTestId('battle-facility-marker'), { button: 0, clientX: 320, clientY: 180 });
     await user.click(screen.getByTestId('facility-dismantle-button'));
+
+    // 点击撤销后先弹出确认弹窗（是/否）
+    expect(screen.getByTestId('cancel-confirm-menu')).toBeVisible();
+    await user.click(screen.getByTestId('cancel-confirm-yes'));
 
     expect(screen.queryByTestId('battle-facility-marker')).not.toBeInTheDocument();
   });
@@ -849,6 +861,6 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     expect(ownedCityMarker).toBeTruthy();
     await user.click(ownedCityMarker!);
 
-    expect(within(screen.getByTestId('city-command-menu')).getAllByRole('button')).toHaveLength(3);
+    expect(within(screen.getByTestId('city-command-menu')).getAllByRole('button')).toHaveLength(6);
   });
 });
