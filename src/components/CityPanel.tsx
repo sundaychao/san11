@@ -2,10 +2,18 @@ import { ChevronDown, ChevronUp, Coins, FlaskConical, Gem, GraduationCap, Hammer
 import { useState } from 'react';
 import { COMMAND_AP, OFFICER_COMMANDS, cityAvailableOfficers } from '../game/commands';
 import { hasPlotFacility } from '../game/innerAffairs';
+import { officerHealthSummary } from '../game/health';
 import { useGame } from '../game/store/GameProvider';
-import type { GameCommand, GameState } from '../game/types';
+import type { GameCommand, GameState, Officer } from '../game/types';
 
 type CommandType = GameCommand['type'];
+
+/** 城市武将名单 chip 的伤病提示：受伤武将显示等级与痊愈旬数 */
+function rosterHealth(officer: Officer) {
+  const health = officerHealthSummary(officer);
+  if (!health) return null;
+  return { label: `${health.label}·${health.remainingTenDays}旬`, title: `${health.label}：能力下降 ${Math.round((1 - health.multiplier) * 100)}%，约 ${health.remainingTenDays} 旬后痊愈` };
+}
 
 /** 是否有科技正在研究中（城间任意己方武将执行 research 任务） */
 function techResearching(state: GameState): boolean {
@@ -95,11 +103,14 @@ export function CityPanel({ onCommand, onOpenCultivatePicker }: CityPanelProps) 
       <section className="officer-roster" aria-label="所属武将">
         <h3>所属武将 <span>{officers.length}</span></h3>
         <div>
-          {officers.map((officer) => (
-            <span key={officer.id} className={officer.acted ? 'has-acted' : ''}>
-              {officer.name}<small>{officer.acted ? '已行动' : '待命'}</small>
-            </span>
-          ))}
+          {officers.map((officer) => {
+            const health = rosterHealth(officer);
+            return (
+              <span key={officer.id} className={`${officer.acted ? 'has-acted' : ''}${health ? ' has-injury' : ''}`} title={health?.title}>
+                {officer.name}<small>{health?.label ?? (officer.acted ? '已行动' : '待命')}</small>
+              </span>
+            );
+          })}
         </div>
       </section>
 

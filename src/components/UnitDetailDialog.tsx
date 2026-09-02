@@ -2,7 +2,9 @@ import { X } from 'lucide-react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { TROOP_LABELS, VEHICLE_LABELS } from '../game/armaments';
 import { effectiveUnitAbilities, fireStrategySuccessChance, tacticCriticalChance } from '../game/battle/actions';
-import type { ArmyUnit, GameState } from '../game/types';
+import { effectiveStat } from '../game/health';
+import type { ArmyUnit, GameState, Officer } from '../game/types';
+import { OfficerHealthBadge } from './OfficerHealthBadge';
 import { closePopupOnContextMenu } from './popupEvents';
 
 interface UnitDetailDialogProps {
@@ -60,12 +62,16 @@ export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps
         <section className="unit-detail-commanders" aria-label="所属武将">
           <article>
             <span>主将</span>
-            <strong>{leader?.name ?? '未知'}</strong>
-            <small>{leader ? `统率 ${leader.stats.leadership} 武力 ${leader.stats.war}` : '-'}</small>
+            <strong>{leader?.name ?? '未知'}{leader ? <OfficerHealthBadge officer={leader} /> : null}</strong>
+            <small>{leader ? `统率 ${effectiveStat(leader, 'leadership')} 武力 ${effectiveStat(leader, 'war')}` : '-'}</small>
           </article>
           <article>
             <span>副将</span>
-            <strong>{deputies.map((officer) => officer.name).join(' / ') || '-'}</strong>
+            <strong>{deputies.length > 0
+              ? deputies.map((officer: Officer, index) => (
+                <span key={officer.id}>{index > 0 ? ' / ' : ''}{officer.name}<OfficerHealthBadge officer={officer} /></span>
+              ))
+              : '-'}</strong>
             <small>{deputies.length > 0 ? `${deputies.length} 人` : '无'}</small>
           </article>
         </section>

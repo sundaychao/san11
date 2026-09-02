@@ -869,7 +869,9 @@ describe('command interface', { timeout: 30000 }, () => {
 
   it('opens a transport dialog from the military menu and places a transport unit', async () => {
     const user = userEvent.setup();
-    renderState();
+    const state = createGame('liu', 3);
+    state.officers['liu-bei'].health = { level: 'light', remainingTenDays: 6 };
+    renderState(state);
 
     const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
     expect(jianglingMarker).toBeTruthy();
@@ -880,6 +882,11 @@ describe('command interface', { timeout: 30000 }, () => {
 
     const dialog = screen.getByRole('dialog', { name: '输送编制' });
     expect(within(dialog).getByLabelText('执行武将')).toBeVisible();
+    // 带伤武将：选项显示衰减后的统/政并带伤标注（刘备统78→70、政80→72 @轻伤90%）
+    const beisOption = within(dialog).getByRole('option', { name: /刘备/ });
+    expect(beisOption).toHaveTextContent('统70');
+    expect(beisOption).toHaveTextContent('政72');
+    expect(beisOption).toHaveTextContent('（轻伤）');
     expect(within(dialog).getByLabelText('输送士兵')).toBeVisible();
     expect(within(dialog).getByLabelText('输送资金')).toBeVisible();
     expect(within(dialog).getByLabelText('输送兵粮')).toBeVisible();

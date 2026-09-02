@@ -2,8 +2,9 @@ import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
+import { effectiveStat, officerHealthSummary } from '../game/health';
 import { useGame } from '../game/store/GameProvider';
-import type { CityId } from '../game/types';
+import type { CityId, Officer } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
 export interface TransportConfirmInput {
@@ -23,6 +24,13 @@ interface TransportDialogProps {
 function toAmount(value: string) {
   const amount = Number(value);
   return Number.isFinite(amount) ? amount : -1;
+}
+
+/** 输送选将下拉文案：用衰减后的有效统/政（带伤武将会标注） */
+function transportOfficerLabel(officer: Officer) {
+  const health = officerHealthSummary(officer);
+  const injured = health ? `（${health.label}）` : '';
+  return `${officer.name} · 统${effectiveStat(officer, 'leadership')} 政${effectiveStat(officer, 'politics')}${injured}`;
 }
 
 export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogProps) {
@@ -98,7 +106,7 @@ export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogP
             <select aria-label="执行武将" value={activeOfficerId} onChange={(event) => setOfficerId(event.target.value)}>
               {officers.map((officer) => (
                 <option key={officer.id} value={officer.id} disabled={officer.acted}>
-                  {officer.name} · 统{officer.stats.leadership} 政{officer.stats.politics}{officer.acted ? '（已行动）' : ''}
+                  {transportOfficerLabel(officer)}{officer.acted ? '（已行动）' : ''}
                 </option>
               ))}
             </select>

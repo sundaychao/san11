@@ -554,6 +554,8 @@ button { color: inherit; }
 .officer-roster small { color: #a4c78e; font-size: 9px; }
 .officer-roster .has-acted { color: #9d998d; }
 .officer-roster .has-acted small { color: #bd7d73; }
+.officer-roster .has-injury { color: #e8b4ae; }
+.officer-roster .has-injury small { color: var(--danger); font-size: 10px; font-weight: 700; }
 .command-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
 .command-grid button { min-width: 0; min-height: 54px; display: grid; place-items: center; gap: 2px; padding: 5px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.07); cursor: pointer; }
 .command-grid button:hover, .command-grid button:focus-visible { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.19); outline: none; }
