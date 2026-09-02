@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ARMAMENT_GOLD_COST, produceArmamentYield } from './armaments';
 import { COMMAND_AP, TRADE_MAX_GRAIN, executeCommand, grainPriceOf, quoteTrade, rollGrainPrices, rollMerchants, tradeEffectPercent, transferDuration, validateCommand } from './commands';
 import type { PlotType } from './innerAffairs';
+import { armamentYieldMultiplier, barracksYieldMultiplier } from './innerAffairs';
 import { createGame } from './scenario/jingxiang208';
 import type { GameState } from './types';
 
@@ -22,14 +23,16 @@ describe('command engine', () => {
       type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
     });
 
-    expect(next.cities.jiangling.troops).toBe(state.cities.jiangling.troops + 1290);
+    // 基础 1290 × 兵舍1级加成 1.15 = 1483
+    const expected = Math.round(1290 * barracksYieldMultiplier(state.cities.jiangling));
+    expect(next.cities.jiangling.troops).toBe(state.cities.jiangling.troops + expected);
     expect(next.cities.jiangling.population).toBe(state.cities.jiangling.population - 500);
     expect(next.cities.jiangling.food).toBe(state.cities.jiangling.food - 500);
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 800);
     expect(next.cities.jiangling.order).toBe(state.cities.jiangling.order - 2);
     expect(next.cityEffectReports).toEqual([expect.objectContaining({
       cityId: 'jiangling',
-      amount: 1290,
+      amount: expected,
       label: '士兵',
       kind: 'recruit',
     })]);
@@ -43,7 +46,9 @@ describe('command engine', () => {
     });
     const base = 300 + state.officers['liu-bei'].stats.charisma * 10;
 
-    expect(next.cities.jiangling.troops - state.cities.jiangling.troops).toBe(Math.round(base * 1.5));
+    // 名声 ×1.5 与兵舍1级 ×1.15 同时生效
+    expect(next.cities.jiangling.troops - state.cities.jiangling.troops)
+      .toBe(Math.round(base * 1.5 * barracksYieldMultiplier(state.cities.jiangling)));
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 800);
     expect(next.cities.jiangling.food).toBe(state.cities.jiangling.food - 500);
     expect(next.cities.jiangling.population).toBe(state.cities.jiangling.population - 500);
@@ -82,14 +87,16 @@ describe('command engine', () => {
       type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'crossbow',
     });
 
-    expect(next.cities.jiangling.armaments?.crossbow).toBe(currentCrossbows + 1840);
+    // 基础 1840 × 锻冶1级加成 1.15 = 2116
+    const expected = Math.round(1840 * armamentYieldMultiplier(state.cities.jiangling, 'crossbow'));
+    expect(next.cities.jiangling.armaments?.crossbow).toBe(currentCrossbows + expected);
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 1000);
     expect(next.actionPoints.liu).toBe(60);
     expect(next.officers['liu-bei'].acted).toBe(true);
     expect(next.logs.at(-1)?.message).toContain('弩');
     expect(next.cityEffectReports).toEqual([expect.objectContaining({
       cityId: 'jiangling',
-      amount: 1840,
+      amount: expected,
       label: '弩',
       kind: 'armament',
     })]);
@@ -104,7 +111,9 @@ describe('command engine', () => {
       type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'crossbow',
     });
 
-    expect(next.cities.jiangling.armaments!.crossbow - before).toBe(Math.round(base * 1.5));
+    const expected = Math.round(produceArmamentYield(state.officers['liu-bei'], 'crossbow')
+      * 1.5 * armamentYieldMultiplier(state.cities.jiangling, 'crossbow'));
+    expect(next.cities.jiangling.armaments!.crossbow - before).toBe(expected);
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - ARMAMENT_GOLD_COST);
     expect(next.actionPoints.liu).toBe(state.actionPoints.liu - COMMAND_AP.produceArmament);
     expect(next.officers['liu-bei'].acted).toBe(true);
@@ -423,7 +432,11 @@ describe('command engine', () => {
 
     const boostedGain = boosted.cities.jiangling.troops - state.cities.jiangling.troops;
     const baseGain = base.cities.jiangling.troops - plain.cities.jiangling.troops;
-    expect(boostedGain).toBe(Math.round(baseGain * 1.3));
+    // 科技徭役 ×1.3 与兵舍1级 ×1.15 均以同一基础值计算，不应对已取整的结果再乘一次
+    const rawBase = 300 + state.officers['liu-bei'].stats.charisma * 10;
+    const facility = barracksYieldMultiplier(state.cities.jiangling);
+    expect(baseGain).toBe(Math.round(rawBase * facility));
+    expect(boostedGain).toBe(Math.round(rawBase * facility * 1.3));
   });
 
   it('applies troop damage and movement techs to combat math', async () => {

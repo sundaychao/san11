@@ -3,8 +3,10 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { App } from '../app/App';
 import { deployUnit } from '../game/battle/actions';
+import { cityPlots, PLOT_BASE_VALUE } from '../game/innerAffairs';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
+import type { CityId } from '../game/types';
 import { MANUAL_SAVE_KEY, writeSave } from '../game/persistence';
 import { settleTenDay } from '../game/turn';
 import { GameShell } from './GameShell';
@@ -23,6 +25,23 @@ function zoomToTerrain() {
   for (let i = 0; i < 20; i += 1) {
     fireEvent.wheel(viewport, { deltaY: -120 });
   }
+}
+
+/**
+ * 为城市预置一座已建成的设施。
+ * 当前规则中，征兵要求城市已建成兵舍，生产兵装要求已建成锻冶/工房/厩舍/造船之一，
+ * 未建成时对应命令按钮为禁用状态。
+ */
+function seedCityFacility(state: ReturnType<typeof createGame>, cityId: CityId, type: 'barracks' | 'forge') {
+  const city = state.cities[cityId];
+  const plots = cityPlots(city);
+  const emptyPlot = plots.find((plot) => plot.type === 'empty' && !plot.constructing);
+  if (emptyPlot) {
+    emptyPlot.type = type;
+    emptyPlot.level = 1;
+    return;
+  }
+  plots.push({ id: `${cityId}-${type}`, type, level: 1, value: PLOT_BASE_VALUE, q: city.gridQ, r: city.gridR });
 }
 
 function mockFileDownloads() {
@@ -585,8 +604,11 @@ describe('game interface shell', () => {
 
   it('opens a recruit officer selection dialog from the urban city menu', async () => {
     const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    // 当前规则：征兵要求城市已建成兵舍
+    seedCityFacility(state, 'jiangling', 'barracks');
     render(
-      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+      <GameProvider initialState={state} storage={window.localStorage}>
         <GameShell />
       </GameProvider>,
     );
@@ -606,8 +628,12 @@ describe('game interface shell', () => {
   it('shows temporary city gain numbers after recruit and armament production', () => {
     vi.useFakeTimers();
     try {
+      const state = createGame('liu', 1);
+      // 征兵需兵舍；生产弩属于锻冶类兵装，需已建成锻冶
+      seedCityFacility(state, 'jiangling', 'barracks');
+      seedCityFacility(state, 'jiangling', 'forge');
       render(
-        <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameProvider initialState={state} storage={window.localStorage}>
           <GameShell />
         </GameProvider>,
       );
@@ -620,7 +646,8 @@ describe('game interface shell', () => {
       fireEvent.click(within(screen.getByRole('dialog', { name: '征兵' })).getByRole('button', { name: '决定·征兵' }));
 
       const recruitEffect = screen.getByTestId('city-effect-number');
-      expect(recruitEffect).toHaveTextContent('士兵 +1,290');
+      // 基础 1290 × 兵舍1级加成 1.15 = 1483
+      expect(recruitEffect).toHaveTextContent('士兵 +1,483');
       expect(recruitEffect.closest('[data-testid="city-marker"]')).toBe(jianglingMarker);
 
       act(() => vi.advanceTimersByTime(2000));
@@ -637,7 +664,7 @@ describe('game interface shell', () => {
 
       expect(screen.queryByRole('dialog', { name: '生产兵装' })).not.toBeInTheDocument();
       expect(screen.getByText(/生产江陵弩/)).toBeVisible();
-      expect(screen.getByTestId('city-effect-number')).toHaveTextContent('弩 +1,696');
+      expect(screen.getByTestId('city-effect-number')).toHaveTextContent('弩 +1,950');
 
       act(() => vi.advanceTimersByTime(1999));
       expect(screen.getByTestId('city-effect-number')).toBeVisible();

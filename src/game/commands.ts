@@ -12,7 +12,7 @@ import { DIPLOMACY_AP_COST, GOODWILL_GOLD_COST, DIPLOMACY_GOLD_MAX, REINFORCEMEN
 import { CAPTIVE_RECRUIT_LOYALTY_THRESHOLD, capturableByLoyalty, executeCaptive, recruitCaptiveChance, releaseCaptive, resolveRecruitCaptive } from './captives';
 import { MARRY_TECHP_COST, RELATIONSHIP_LABELS, enterRelationship, relationshipValidation } from './relationship';
 import { createDebate } from './debate';
-import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, hasEnemyUnitsNear, hasPlotFacility, isPlotOccupiedByOtherCity, plotCost, plotCountIncludingConstructing, plotTotalLevel, smithyYieldMultiplier, startBuildCityPlot, UNIQUE_FACILITIES } from './innerAffairs';
+import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, hasEnemyUnitsNear, hasPlotFacility, isPlotOccupiedByOtherCity, plotCost, plotCountIncludingConstructing, plotTotalLevel, startBuildCityPlot, UNIQUE_FACILITIES } from './innerAffairs';
 import type { City, CityId, ForceId, GameCommand, GameState, Legion, Officer, TechBranchId } from './types';
 
 export const COMMAND_AP = {
@@ -602,7 +602,9 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'recruit': {
       const officer = next.officers[command.officerId];
       const baseGain = 300 + officer.stats.charisma * 10;
-      const gain = Math.round(baseGain * commandYieldMultiplier(next, command) * recruitMultiplier(next, forceId));
+      // 设施加成：兵舍每级 +15%（与军团自动化路径保持一致）
+      const gain = Math.round(baseGain * commandYieldMultiplier(next, command)
+        * recruitMultiplier(next, forceId) * barracksYieldMultiplier(city));
       city.gold -= 800;
       city.food -= 500;
       city.population -= 500;
@@ -626,7 +628,9 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       const officer = next.officers[command.officerId];
       const current = armamentsOf(city.armaments);
       const baseGain = produceArmamentYield(officer, command.armamentType);
-      const gain = Math.round(baseGain * commandYieldMultiplier(next, command));
+      // 设施加成：按该兵装所需设施（锻冶/工房/厩舍/造船）的等级，每级 +15%
+      const gain = Math.round(baseGain * commandYieldMultiplier(next, command)
+        * armamentYieldMultiplier(city, command.armamentType));
       city.gold -= ARMAMENT_GOLD_COST;
       if (isDelayedArmament(command.armamentType)) {
         officer.location = {

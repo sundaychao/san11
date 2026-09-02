@@ -516,9 +516,13 @@ export function barracksYieldMultiplier(city: City): number {
   return 1 + (plotTotalLevel(city, 'barracks') * 15) / 100;
 }
 
-/** 工房加成系数：每级工房兵装产量 +15% */
-export function smithyYieldMultiplier(city: City): number {
-  return 1 + (plotTotalLevel(city, 'smithy') * 15) / 100;
+/**
+ * 兵装加成系数：按该兵装**所需设施**的等级计算，每级 +15%。
+ * 枪/戟/弩取锻冶等级，冲车/井阑取工房等级，军马取厩舍等级，楼船取造船等级。
+ * 早先的 smithyYieldMultiplier 固定取工房等级，对枪/戟/弩（实际需要锻冶）无效，故改为按兵装取对应设施。
+ */
+export function armamentYieldMultiplier(city: City, armamentType: ArmamentType): number {
+  return 1 + (plotTotalLevel(city, ARMAMENT_FACILITY[armamentType]) * 15) / 100;
 }
 
 /** 据等级计算设施产出（1级=base，每级×系数） */
