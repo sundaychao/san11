@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { useGame } from '../game/store/GameProvider';
 import { ARMAMENT_LABELS } from '../game/armaments';
+import { officerAge } from '../game/health';
 import { officerLoyalty } from '../game/loyalty';
 import { PLOT_LABELS } from '../game/innerAffairs';
 import { TECH_BRANCH_LABELS } from '../game/techs';
@@ -20,6 +21,7 @@ type OfficerListTab = '所属' | '能力' | '特技' | '适性' | '状态';
 type SortDirection = 'desc' | 'asc';
 type SortKey =
   | 'name'
+  | 'age'
   | 'owner'
   | 'loyalty'
   | 'location'
@@ -61,6 +63,12 @@ function locationText(officer: Officer, state: GameState) {
 
 function ownershipText(officer: Officer, state: GameState) {
   return officer.forceId ? `${state.forces[officer.forceId].name}军` : '在野';
+}
+
+function ageText(officer: Officer, state: GameState) {
+  const age = officerAge(state, officer);
+  if (age === null) return '—';
+  return officer.deathMonth !== undefined ? `终年${age}` : `${age}岁`;
 }
 
 function taskInfo(officer: Officer, state: GameState) {
@@ -120,6 +128,7 @@ function columnsForTab(activeTab: OfficerListTab): OfficerColumn[] {
   if (activeTab === '所属') return [
     { label: '武将', sortKey: 'name' },
     { label: '所属', sortKey: 'owner' },
+    { label: '年龄', sortKey: 'age' },
     { label: '忠诚', sortKey: 'loyalty' },
     { label: '所在', sortKey: 'location' },
   ];
@@ -158,6 +167,7 @@ function renderOfficerCells(officer: Officer, state: GameState, activeTab: Offic
     return (
       <>
         <td>{ownershipText(officer, state)}</td>
+        <td>{ageText(officer, state)}</td>
         <td>{officerLoyalty(officer)}</td>
         <td>{locationText(officer, state)}</td>
       </>
@@ -217,6 +227,7 @@ function defaultOfficerCompare(left: Officer, right: Officer) {
 
 function sortValue(officer: Officer, state: GameState, sortKey: SortKey) {
   if (sortKey === 'name') return officer.name;
+  if (sortKey === 'age') return officerAge(state, officer) ?? -1;
   if (sortKey === 'owner') return ownershipText(officer, state);
   if (sortKey === 'loyalty') return officerLoyalty(officer);
   if (sortKey === 'location') return locationText(officer, state);

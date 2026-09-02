@@ -158,6 +158,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const ownershipRow = officerRow('刘备');
     expect(ownershipRow).toHaveTextContent('刘备军');
     expect(ownershipRow).toHaveTextContent('江陵');
+    expect(ownershipRow).toHaveTextContent('47岁');
 
     await user.click(within(dialog).getByRole('button', { name: '能力' }));
     const abilityRow = officerRow('刘备');

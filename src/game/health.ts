@@ -149,9 +149,23 @@ const SCENARIO_START_YEARS: Record<GameState['scenarioId'], number> = {
   'mobile-duel': 208,
 };
 
-/** 当前公元年份（局内 month 从 1 起，每 12 个月推进一年） */
+/** 指定月份的公元年份（局内 month 从 1 起，每 12 个月推进一年） */
+export function scenarioYearAt(scenarioId: GameState['scenarioId'], month: number): number {
+  return SCENARIO_START_YEARS[scenarioId] + Math.floor((month - 1) / 12);
+}
+
+/** 当前公元年份 */
 export function scenarioYear(state: GameState): number {
-  return SCENARIO_START_YEARS[state.scenarioId] + Math.floor((state.month - 1) / 12);
+  return scenarioYearAt(state.scenarioId, state.month);
+}
+
+/** 武将岁数：死亡则按死亡月份返回享年，健在返回当前年龄 */
+export function officerAge(state: GameState, officer: Officer): number | null {
+  if (officer.birthYear === undefined) return null;
+  const year = officer.deathMonth !== undefined
+    ? scenarioYearAt(state.scenarioId, officer.deathMonth)
+    : scenarioYear(state);
+  return year - officer.birthYear;
 }
 
 /** 老龄病逝：58 岁起每岁 +2%/月，上限 30% */
