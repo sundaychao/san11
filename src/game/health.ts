@@ -107,3 +107,24 @@ export function applyDefeatInjuries(state: GameState, officers: Officer[], wound
 export function effectiveStat(officer: Officer, key: keyof Officer['stats']): number {
   return Math.round(officer.stats[key] * injuryMultiplier(officer));
 }
+
+/** 部队被歼灭时武将战死的基础概率 */
+export const DEFEAT_DEATH_CHANCE = 0.12;
+/** 单挑中将对方 HP 打到 0 时的讨取概率 */
+export const DUEL_KILL_CHANCE = 0.25;
+
+/** 武将是否可被战死（强运/护卫等 injuryImmune 效果免死） */
+export function canDieInBattle(state: GameState, officer: Officer): boolean {
+  return effectsOfKind(resolveOfficerSkills(state, [officer.id]), 'injuryImmune').length === 0;
+}
+
+/** 战死判定：掷点成功则武将阵亡并写日志；返回是否死亡 */
+export function rollDeath(state: GameState, officer: Officer, chance: number, cause = '阵亡'): boolean {
+  if (officer.deathMonth !== undefined) return false;
+  if (!canDieInBattle(state, officer)) return false;
+  const roll = nextRandom(state.seed, state.rngCursor);
+  state.rngCursor = roll.cursor;
+  if (roll.value >= chance) return false;
+  markDeath(state, officer, cause);
+  return true;
+}

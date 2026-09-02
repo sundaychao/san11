@@ -1,3 +1,4 @@
+import { injuryMultiplier } from '../health';
 import type { AptitudeGrade, ArmyUnit, GameState, Officer, OfficerAptitudes } from '../types';
 
 export interface SourcedAbility<T> {
@@ -59,8 +60,9 @@ export function effectiveUnitAbilities(state: GameState, unit: ArmyUnit): Effect
   const leader = state.officers[unit.leaderId] ?? officers[0];
   if (!leader) throw new Error('Unit leader does not exist');
 
-  const warOfficer = firstMaximum(officers, (officer) => officer.stats.war);
-  const intelligenceOfficer = firstMaximum(officers, (officer) => officer.stats.intelligence);
+  // 带伤武将能力按伤势衰减（轻伤90%/中等75%/重伤50%）
+  const warOfficer = firstMaximum(officers, (officer) => Math.round(officer.stats.war * injuryMultiplier(officer)));
+  const intelligenceOfficer = firstMaximum(officers, (officer) => Math.round(officer.stats.intelligence * injuryMultiplier(officer)));
   const aptitudeKey = unit.kind === 'transport' || unit.troopType === 'sword'
     ? null
     : unit.troopType ?? null;
@@ -69,9 +71,9 @@ export function effectiveUnitAbilities(state: GameState, unit: ArmyUnit): Effect
     : null;
 
   return {
-    leadership: { value: leader.stats.leadership, officerId: leader.id },
-    war: { value: warOfficer.stats.war, officerId: warOfficer.id },
-    intelligence: { value: intelligenceOfficer.stats.intelligence, officerId: intelligenceOfficer.id },
+    leadership: { value: Math.round(leader.stats.leadership * injuryMultiplier(leader)), officerId: leader.id },
+    war: { value: Math.round(warOfficer.stats.war * injuryMultiplier(warOfficer)), officerId: warOfficer.id },
+    intelligence: { value: Math.round(intelligenceOfficer.stats.intelligence * injuryMultiplier(intelligenceOfficer)), officerId: intelligenceOfficer.id },
     aptitude: aptitudeOfficer && aptitudeKey
       ? { grade: (aptitudeOfficer.aptitudes ?? DEFAULT_OFFICER_APTITUDES)[aptitudeKey], officerId: aptitudeOfficer.id }
       : { grade: null, officerId: null },

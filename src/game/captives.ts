@@ -3,7 +3,7 @@ import { effectsOfKind, resolveOfficerSkills } from './skills';
 import { clampLoyalty, recruitmentInitialLoyalty, setOfficerLoyalty } from './loyalty';
 import { compatDifference } from './diplomacy';
 import { treasureDefinition } from './treasures';
-import { applyDefeatInjuries } from './health';
+import { applyDefeatInjuries, DEFEAT_DEATH_CHANCE, rollDeath } from './health';
 import type { ArmyUnit, CityId, ForceId, GameState, Officer } from './types';
 
 /**
@@ -71,12 +71,13 @@ export function captureChance(
 
 /**
  * 部队被击破后的俘获结算：
- * - 对部队内每名武将按捕获率独立掷点，捕获成功则成为战俘（进入击破方归所城市）；
- * - 未被俘者退回最近己城；所有参战者均有概率负伤（强运免疫）。
- * 返回值：被俘武将名单。
+ * - 每名武将先进行战死判定（概率阵亡，强运/护卫免死）；
+ * - 幸存者按捕获率独立掷点，捕获成功则成为战俘（进入击破方归所城市）；
+ * - 未被俘者退回最近己城；所有幸存者均有概率负伤（强运免疫）。
+ * 返回值：被俘与阵亡武将名单。
  */
-export function captureOfficersOnDestroy(state: GameState, unit: ArmyUnit, looter?: ArmyUnit): string[] {
-  if (!looter || looter.forceId === unit.forceId) return [];
+export function captureOfficersOnDestroy(state: GameState, unit: ArmyUnit, looter?: ArmyUnit): { captured: string[]; dead: string[] } {
+  if (!looter || looter.forceId === unit.forceId) return { captured: [], dead: [] };
   const adjacentCount = Object.values(state.units).filter(
     (candidate) => candidate.forceId === looter.forceId
       && candidate.id !== unit.id
@@ -84,12 +85,18 @@ export function captureOfficersOnDestroy(state: GameState, unit: ArmyUnit, loote
   ).length;
   const officerIds = unit.officerIds ?? [unit.leaderId];
   const captured: string[] = [];
+  const dead: string[] = [];
   const retreatCity = Object.values(state.cities).find((city) => city.ownerId === unit.forceId);
   const captureHome = state.cities[looter.homeCityId];
 
   for (const officerId of officerIds) {
     const officer = state.officers[officerId];
     if (!officer) continue;
+    // 战死判定：部队覆灭时概率阵亡（强运/护卫免死，rollDeath 内部处理）
+    if (rollDeath(state, officer, DEFEAT_DEATH_CHANCE, '于部队覆灭中阵亡')) {
+      dead.push(officer.name);
+      continue;
+    }
     const chance = captureChance(state, officer, looter, adjacentCount);
     const roll = nextRandom(state.seed, state.rngCursor);
     state.rngCursor = roll.cursor;
@@ -108,12 +115,14 @@ export function captureOfficersOnDestroy(state: GameState, unit: ArmyUnit, loote
       officer.acted = false;
     }
   }
-  // 负伤结算：未被俘获的败军武将概率负伤（强运免疫由 applyDefeatInjuries 内部处理）
+  // 负伤结算：未被俘获/未阵亡的败军武将概率负伤（强运免疫由 applyDefeatInjuries 内部处理）
   const survivors = officerIds
     .map((officerId) => state.officers[officerId])
-    .filter((officer): officer is Officer => Boolean(officer) && officer.location.kind !== 'captive');
+    .filter((officer): officer is Officer => Boolean(officer)
+      && officer.location.kind !== 'captive'
+      && officer.deathMonth === undefined);
   if (survivors.length > 0) applyDefeatInjuries(state, survivors);
-  return captured;
+  return { captured, dead };
 }
 
 /**

@@ -278,6 +278,8 @@ export interface DuelReport {
   defenderCaptured: boolean;
   attackerInjured: boolean;
   defenderInjured: boolean;
+  attackerDied?: boolean;
+  defenderDied?: boolean;
   attackerUnitLoss: number;
   defenderUnitLoss: number;
 }

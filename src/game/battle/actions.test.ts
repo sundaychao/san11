@@ -2231,7 +2231,8 @@ describe('battle deployment and movement actions', () => {
     const next = attackUnit(state, 'liu', attacker.id, target.id);
 
     expect(next.units[target.id]).toBeUndefined();
-    expect(next.rngCursor).toBe(state.rngCursor + 2);
+    // RNG 构成：伤害 1 + 歼灭结算（战死 1 + 俘获 1 + 败军负伤 1）= 4；关键是没有第二次连击伤害
+    expect(next.rngCursor).toBe(state.rngCursor + 4);
     expect(next.battleDamageReports).toHaveLength(1);
     expect(next.units[attacker.id]).toMatchObject({ energy: 90, acted: true });
   });

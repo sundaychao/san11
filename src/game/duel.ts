@@ -2,7 +2,7 @@ import { nextRandom } from './random';
 import { officerSkillNames } from './skills';
 import { treasureDefinition } from './treasures';
 import { captureChance, hasNamedHorse } from './captives';
-import { applyInjury } from './health';
+import { applyInjury, DUEL_KILL_CHANCE, injuryMultiplier, rollDeath } from './health';
 import type { ArmyUnit, CityId, ForceId, GameState, Officer } from './types';
 
 /**
@@ -47,6 +47,9 @@ export interface DuelResult {
   defenderCaptured: boolean;
   attackerInjured: boolean;
   defenderInjured: boolean;
+  /** 单挑中被讨取（HP 归零后战死） */
+  attackerDied: boolean;
+  defenderDied: boolean;
   attackerUnitLoss: number;
   defenderUnitLoss: number;
 }
@@ -65,13 +68,18 @@ function statWithTreasury(officer: Officer): number {
   return definition.stats.war ?? 0;
 }
 
+/** 单挑有效武力：带伤按伤势衰减（宝物加成不衰减） */
+function effectiveWar(officer: Officer): number {
+  return Math.round(officer.stats.war * injuryMultiplier(officer));
+}
+
 function hpFor(officer: Officer): number {
-  return 60 + officer.stats.war;
+  return 60 + effectiveWar(officer);
 }
 
 function damageFor(state: GameState, actor: Officer, opponent: Officer, stance: DuelStance, rage: number, actorHp: number, canFinisher: boolean): number {
   const base = 8 + (officerSkillNames(actor).includes('斗神') ? 6 : 0);
-  const warDiff = Math.max(0, actor.stats.war - opponent.stats.war);
+  const warDiff = Math.max(0, effectiveWar(actor) - effectiveWar(opponent));
   const weaponBonus = statWithTreasury(actor) * 2;
   const roll = nextRandom(state.seed, state.rngCursor);
   state.rngCursor = roll.cursor;
@@ -123,8 +131,8 @@ export function resolveDuel(state: GameState, participants: DuelParticipants, at
     const defenderStance = pool[Math.floor(roll.value * pool.length)] ?? 'attack';
 
     // 名马先手加成
-    const attackerFirst = participants.attacker.stats.war + (hasNamedHorse(participants.attacker) ? 4 : 0)
-      >= participants.defender.stats.war + (hasNamedHorse(participants.defender) ? 4 : 0);
+    const attackerFirst = effectiveWar(participants.attacker) + (hasNamedHorse(participants.attacker) ? 4 : 0)
+      >= effectiveWar(participants.defender) + (hasNamedHorse(participants.defender) ? 4 : 0);
 
     const attackerDamage = damageFor(state, participants.attacker, participants.defender, attackerStance, attackerRage, attackerHp, attackerHp < 35);
     const defenderDamage = damageFor(state, participants.defender, participants.attacker, defenderStance, defenderRage, defenderHp, defenderHp < 35);
@@ -165,22 +173,34 @@ export function resolveDuel(state: GameState, participants: DuelParticipants, at
   let defenderCaptured = false;
   let attackerInjured = false;
   let defenderInjured = false;
+  let attackerDied = false;
+  let defenderDied = false;
 
-  if (winner === 'attacker') {
+  // 讨取判定：单挑中被击溃（HP 归零）的败者有概率直接战死（强运免死）
+  if (winner === 'attacker' && defenderHp <= 0) {
+    defenderDied = rollDeath(state, participants.defender, DUEL_KILL_CHANCE, '于单挑中被讨取');
+  }
+  if (winner === 'defender' && attackerHp <= 0) {
+    attackerDied = rollDeath(state, participants.attacker, DUEL_KILL_CHANCE, '于单挑中被讨取');
+  }
+
+  if (defenderDied) {
+    defenderInjured = true;
+  } else if (winner === 'attacker') {
     const roll = nextRandom(state.seed, state.rngCursor);
     state.rngCursor = roll.cursor;
     const chance = captureChance(state, participants.defender, participants.attackerUnit, 0) / 100;
     defenderCaptured = roll.value < chance * 0.6;
     defenderInjured = defenderCaptured || applyInjury(state, participants.defender, 'moderate');
     attackerInjured = applyInjury(state, participants.attacker, 'light');
-  } else if (winner === 'defender') {
+  } else if (winner === 'defender' && !attackerDied) {
     const roll = nextRandom(state.seed, state.rngCursor);
     state.rngCursor = roll.cursor;
     const chance = captureChance(state, participants.attacker, participants.defenderUnit, 0) / 100;
     attackerCaptured = roll.value < chance * 0.5;
     attackerInjured = attackerCaptured || applyInjury(state, participants.attacker, 'moderate');
     defenderInjured = applyInjury(state, participants.defender, 'light');
-  } else {
+  } else if (winner === null) {
     attackerInjured = applyInjury(state, participants.attacker, 'light');
     defenderInjured = applyInjury(state, participants.defender, 'light');
   }
@@ -194,6 +214,8 @@ export function resolveDuel(state: GameState, participants: DuelParticipants, at
     defenderCaptured,
     attackerInjured,
     defenderInjured,
+    attackerDied,
+    defenderDied,
     attackerUnitLoss,
     defenderUnitLoss,
   };
@@ -216,6 +238,22 @@ export function aiDuelStance(officer: Officer): DuelStance {
     case 'timid': return 'defense';
     default: return 'spirit';
   }
+}
+
+/** 主将阵亡后的部队处理：副将继任主将；无副将则部队溃散移除 */
+function dissolveOrPromote(state: GameState, unit: ArmyUnit): void {
+  if (state.officers[unit.leaderId] && state.officers[unit.leaderId].deathMonth === undefined) return;
+  const remaining = (unit.officerIds ?? []).filter((id) => {
+    const officer = state.officers[id];
+    return officer && officer.deathMonth === undefined;
+  });
+  const successor = remaining[0];
+  if (successor) {
+    unit.leaderId = successor;
+    unit.officerIds = remaining;
+    return;
+  }
+  delete state.units[unit.id];
 }
 
 /**
@@ -247,20 +285,20 @@ export function executeDuel(state: GameState, communityForce: ForceId, unitId: s
   attackerUnit.troops = Math.max(0, attackerUnit.troops - result.attackerUnitLoss);
   defenderUnit.troops = Math.max(0, defenderUnit.troops - result.defenderUnitLoss);
 
-  // 被俘结算
-  if (result.defenderCaptured) {
+  // 被俘结算（被讨取者跳过——已阵亡）
+  if (result.defenderCaptured && !result.defenderDied) {
     defender.location = { kind: 'captive', cityId: attackerUnit.homeCityId as CityId, captorForceId: attackerUnit.forceId ?? communityForce, capturedTenDays: 0 };
     defender.cityId = attackerUnit.homeCityId;
   }
-  if (result.attackerCaptured) {
+  if (result.attackerCaptured && !result.attackerDied) {
     attacker.location = { kind: 'captive', cityId: defenderUnit.homeCityId as CityId, captorForceId: defenderUnit.forceId ?? communityForce, capturedTenDays: 0 };
     attacker.cityId = defenderUnit.homeCityId;
   }
 
-  // 部队被击溃时非被俘武将退回城市
+  // 部队被击溃时非被俘武将退回城市（被讨取者除外——已阵亡）
   const officerIdSets = {
-    [unitId]: attackerUnit.officerIds ?? [attackerUnit.leaderId],
-    [targetUnitId]: defenderUnit.officerIds ?? [defenderUnit.leaderId],
+    [unitId]: (attackerUnit.officerIds ?? [attackerUnit.leaderId]).filter((id) => id !== attacker.id || !result.attackerDied),
+    [targetUnitId]: (defenderUnit.officerIds ?? [defenderUnit.leaderId]).filter((id) => id !== defender.id || !result.defenderDied),
   };
   for (const [uId, troop] of [[unitId, attackerUnit], [targetUnitId, defenderUnit]] as const) {
     if (troop.troops > 0) continue;
@@ -270,12 +308,17 @@ export function executeDuel(state: GameState, communityForce: ForceId, unitId: s
       const officer = next.officers[officerId];
       if (!officer) continue;
       if (officer.location.kind === 'captive') continue;
+      if (officer.deathMonth !== undefined) continue;
       officer.location = retreatCity ? { kind: 'city', cityId: retreatCity.id } : { kind: 'unaffiliated', cityId: troop.homeCityId };
       officer.cityId = officer.location.cityId;
       officer.acted = false;
     }
     delete next.units[uId];
   }
+
+  // 主将被讨取的部队：副将继任；无副将则部队溃散
+  if (result.attackerDied && next.units[unitId]) dissolveOrPromote(next, next.units[unitId]);
+  if (result.defenderDied && next.units[targetUnitId]) dissolveOrPromote(next, next.units[targetUnitId]);
 
   // 胜者气力+20、攻方标记已行动并消耗气力
   const nextAttacker = next.units[unitId];
@@ -304,6 +347,8 @@ export function executeDuel(state: GameState, communityForce: ForceId, unitId: s
     defenderCaptured: result.defenderCaptured,
     attackerInjured: result.attackerInjured,
     defenderInjured: result.defenderInjured,
+    attackerDied: result.attackerDied,
+    defenderDied: result.defenderDied,
     attackerUnitLoss: result.attackerUnitLoss,
     defenderUnitLoss: result.defenderUnitLoss,
   };

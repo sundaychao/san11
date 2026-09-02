@@ -380,9 +380,17 @@ export function removeUnit(next: GameState, unit: ArmyUnit, looter?: ArmyUnit) {
     }
   }
   delete next.units[unit.id];
-  // 被敌方部队击破：按捕获率俘获敌将，未被俘者退回并概率负伤
+  // 被敌方部队击破：先判定战死，再按捕获率俘获敌将，未被俘者退回并概率负伤
   if (looter && looter.id !== unit.id && looter.forceId !== unit.forceId) {
-    const captured = captureOfficersOnDestroy(next, unit, looter);
+    const { captured, dead } = captureOfficersOnDestroy(next, unit, looter);
+    if (dead.length > 0) {
+      next.logs.push({
+        id: `death-destroy-${next.month}-${next.logs.length}`,
+        month: next.month,
+        forceId: null,
+        message: `${dead.join('、')}所部覆灭，力战阵亡`,
+      });
+    }
     if (captured.length > 0) {
       next.logs.push({
         id: `capture-${next.month}-${next.logs.length}`,

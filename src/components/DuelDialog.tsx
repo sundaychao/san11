@@ -193,12 +193,14 @@ export function DuelDialog({ unitId, origin, onClose }: DuelDialogProps) {
                       : report.winner === 'defender'
                         ? `${report.defenderName}获胜！`
                         : '平局'}
-                    {report.defenderCaptured && `（生擒${report.defenderName}）`}
-                    {report.attackerCaptured && `（${report.attackerName}被生擒）`}
+                    {report.defenderDied && `（${report.defenderName}被讨取！）`}
+                    {report.defenderCaptured && !report.defenderDied && `（生擒${report.defenderName}）`}
+                    {report.attackerCaptured && !report.attackerDied && `（${report.attackerName}被生擒）`}
+                    {report.attackerDied && `（${report.attackerName}被讨取！）`}
                   </p>
                   <p className="duel-outcome-sub">
-                    {report.attackerInjured && `${report.attackerName}负伤 `}
-                    {report.defenderInjured && `${report.defenderName}负伤`}
+                    {!report.attackerDied && report.attackerInjured && `${report.attackerName}负伤 `}
+                    {!report.defenderDied && report.defenderInjured && `${report.defenderName}负伤`}
                   </p>
                   <button type="button" className="primary" data-testid="duel-finish-button" onClick={close}>
                     确定
