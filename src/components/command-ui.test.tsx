@@ -259,6 +259,27 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('flags officers at or above 58 with an elder age-warning style and monthly risk', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    // 刘备 161 年生：把出生年改早 16 年 → 208 年时 63 岁（每月 10% 寿终风险）
+    state.officers['liu-bei'].birthYear = 145;
+    renderState(state);
+
+    await user.click(screen.getByTestId('open-officer-list-button'));
+    const dialog = screen.getByRole('dialog', { name: '武将一览' });
+    const officerRow = (name: string) => within(dialog).getByRole('rowheader', { name }).closest('tr')!;
+
+    const liuBeiRow = officerRow('刘备');
+    expect(liuBeiRow).toHaveTextContent('63岁');
+    const ageCell = within(liuBeiRow).getByTitle('58 岁起每月寿终风险 10%（强运免疫）');
+    expect(ageCell).toHaveClass('is-elder');
+
+    // 对照：47 岁的关羽无警示
+    const guanYuRow = officerRow('关羽');
+    expect(within(guanYuRow).queryByTitle(/58 岁起每月寿终风险/)).not.toBeInTheDocument();
+  });
+
   it('shows current officer task and time only when a task is active', async () => {
     const user = userEvent.setup();
     const transporting = deployTransportUnit(createGame('liu', 3), 'liu', {

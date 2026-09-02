@@ -512,6 +512,7 @@ button { color: inherit; }
 .officer-table th:first-child, .officer-table td:first-child { text-align: left; }
 .officer-table tbody th { color: #fff6d6; font-size: 13px; }
 .officer-table .officer-skill-description { min-width: 280px; color: var(--muted); text-align: left; white-space: normal; }
+.officer-table td.is-elder { color: var(--danger); font-weight: 700; }
 .officer-table tbody tr:hover { background: rgba(197, 173, 111, 0.12); }
 .city-panel h2, .event-log h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; letter-spacing: 0; }
 .city-heading { display: grid; grid-template-columns: 5px 1fr auto auto; gap: 10px; align-items: center; padding-bottom: 13px; border-bottom: 1px solid var(--line); }

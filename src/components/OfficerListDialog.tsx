@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { useGame } from '../game/store/GameProvider';
 import { ARMAMENT_LABELS } from '../game/armaments';
-import { officerAge } from '../game/health';
+import { officerAge, oldAgeDeathChance } from '../game/health';
 import { officerLoyalty } from '../game/loyalty';
 import { PLOT_LABELS } from '../game/innerAffairs';
 import { TECH_BRANCH_LABELS } from '../game/techs';
@@ -69,6 +69,18 @@ function ageText(officer: Officer, state: GameState) {
   const age = officerAge(state, officer);
   if (age === null) return '—';
   return officer.deathMonth !== undefined ? `终年${age}` : `${age}岁`;
+}
+
+/** 寿终风险悬停提示：58 岁起有月度风险（强运免疫） */
+function ageCell(officer: Officer, state: GameState) {
+  const age = officerAge(state, officer);
+  if (age === null) return <td>—</td>;
+  const risk = age >= 58 ? oldAgeDeathChance(age) : 0;
+  return (
+    <td className={risk > 0 && officer.deathMonth === undefined ? 'is-elder' : undefined} title={risk > 0 ? `58 岁起每月寿终风险 ${Math.round(risk * 100)}%（强运免疫）` : undefined}>
+      {ageText(officer, state)}
+    </td>
+  );
 }
 
 function taskInfo(officer: Officer, state: GameState) {
@@ -167,7 +179,7 @@ function renderOfficerCells(officer: Officer, state: GameState, activeTab: Offic
     return (
       <>
         <td>{ownershipText(officer, state)}</td>
-        <td>{ageText(officer, state)}</td>
+        {ageCell(officer, state)}
         <td>{officerLoyalty(officer)}</td>
         <td>{locationText(officer, state)}</td>
       </>
