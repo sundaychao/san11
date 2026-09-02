@@ -280,6 +280,27 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(within(guanYuRow).queryByTitle(/58 岁起每月寿终风险/)).not.toBeInTheDocument();
   });
 
+  it('shows an injury badge next to wounded officers in the list and deployment picker', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    state.officers['guan-yu'].health = { level: 'severe', remainingTenDays: 27 };
+    state.officers['zhang-fei'].health = { level: 'light', remainingTenDays: 6 };
+    state.officers['zhang-fei'].location = { kind: 'city', cityId: 'jiangling' };
+    state.officers['zhang-fei'].cityId = 'jiangling';
+    state.officers['zhang-fei'].acted = false;
+    renderState(state);
+
+    await user.click(screen.getByTestId('open-officer-list-button'));
+    const dialog = screen.getByRole('dialog', { name: '武将一览' });
+    const guanYuRow = within(dialog).getByRole('rowheader', { name: /关羽/ }).closest('tr')!;
+    const severeBadge = within(guanYuRow).getByText('重伤');
+    expect(severeBadge.title).toContain('能力下降 50%');
+    expect(severeBadge.title).toContain('27 旬');
+
+    const zhangFeiRow = within(dialog).getByRole('rowheader', { name: /张飞/ }).closest('tr')!;
+    expect(within(zhangFeiRow).getByText('轻伤').title).toContain('能力下降 10%');
+  });
+
   it('shows current officer task and time only when a task is active', async () => {
     const user = userEvent.setup();
     const transporting = deployTransportUnit(createGame('liu', 3), 'liu', {

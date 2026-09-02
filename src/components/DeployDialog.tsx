@@ -4,9 +4,11 @@ import { useAudioEventAdapter, type AudioEventAdapter } from '../audio/reactAudi
 import { armamentsOf, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT } from '../game/armaments';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { unitTroopCapOf } from '../game/ranks';
+import { effectiveStat } from '../game/health';
 import { useGame } from '../game/store/GameProvider';
 import { officerSkillsText } from '../game/skills';
 import type { CityId, Officer, OfficerAptitudes, Stats, TroopType } from '../game/types';
+import { OfficerHealthBadge } from './OfficerHealthBadge';
 import { closePopupOnContextMenu } from './popupEvents';
 
 export interface DeployConfirmInput {
@@ -79,10 +81,10 @@ function officerAbility(officer: Officer | undefined, troopType: TroopType) {
   const troop = TROOP_TYPES.find((item) => item.troopType === troopType) ?? TROOP_TYPES[0];
   if (!officer) return { attack: troop.attack, defense: troop.defense, intelligence: 0, construction: 0, movement: TROOP_MOVEMENT[troopType] };
   return {
-    attack: officer.stats.leadership,
-    defense: officer.stats.leadership,
-    intelligence: officer.stats.intelligence,
-    construction: officer.stats.politics,
+    attack: effectiveStat(officer, 'leadership'),
+    defense: effectiveStat(officer, 'leadership'),
+    intelligence: effectiveStat(officer, 'intelligence'),
+    construction: effectiveStat(officer, 'politics'),
     movement: TROOP_MOVEMENT[troopType],
   };
 }
@@ -276,7 +278,7 @@ function OfficerPicker({
             const isDeputy = deputyIds.includes(officer.id);
             return (
               <div className={`officer-picker-row${selected ? ' is-selected' : ''}${officer.acted ? ' is-acted' : ''}`} key={officer.id}>
-                <strong>{officer.name}</strong>
+                <strong>{officer.name}<OfficerHealthBadge officer={officer} /></strong>
                 {renderOfficerCells(officer)}
                 <div className="officer-picker-actions">
                   <button type="button" aria-label={`选择${officer.name}为主将`} disabled={officer.acted} className={isLeader ? 'is-active' : undefined} onClick={() => onLeader(officer.id)}>主将</button>
@@ -471,7 +473,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
         </section>
 
         <aside className="deploy-right" aria-label="部队能力">
-          <h3>部队能力 · 主将统率 {activeOfficer?.stats.leadership ?? 0}</h3>
+          <h3>部队能力 · 主将统率 {activeOfficer ? effectiveStat(activeOfficer, 'leadership') : 0}</h3>
           <div className="deploy-ability">
             <span>攻击</span><strong data-testid="deploy-attack">{ability.attack}</strong>
             <span>防御</span><strong data-testid="deploy-defense">{ability.defense}</strong>

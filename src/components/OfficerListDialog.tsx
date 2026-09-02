@@ -9,6 +9,7 @@ import { PLOT_LABELS } from '../game/innerAffairs';
 import { TECH_BRANCH_LABELS } from '../game/techs';
 import { skillDefinition, officerSkillNames, officerSkillsText } from '../game/skills';
 import type { ForceId, GameState, Officer, OfficerAptitudes, Stats } from '../game/types';
+import { OfficerHealthBadge } from './OfficerHealthBadge';
 import { closePopupOnContextMenu } from './popupEvents';
 
 interface OfficerListDialogProps {
@@ -345,7 +346,7 @@ export function OfficerListDialog({ scope = 'player', officerIds, onClose }: Off
             <tbody>
               {officers.map((officer) => (
                 <tr key={officer.id}>
-                  <th scope="row">{officer.name}</th>
+                  <th scope="row">{officer.name}<OfficerHealthBadge officer={officer} /></th>
                   {renderOfficerCells(officer, state, activeTab)}
                 </tr>
               ))}

@@ -35,6 +35,17 @@ export function isInjured(officer: Officer): boolean {
   return Boolean(officer.health);
 }
 
+/** 伤病摘要（供 UI 徽章/提示展示）：等级名、剩余恢复旬数、能力衰减系数 */
+export function officerHealthSummary(officer: Officer): { level: OfficerHealth['level']; label: string; remainingTenDays: number; multiplier: number } | null {
+  if (!officer.health) return null;
+  return {
+    level: officer.health.level,
+    label: HEALTH_LABELS[officer.health.level],
+    remainingTenDays: officer.health.remainingTenDays,
+    multiplier: injuryMultiplier(officer),
+  };
+}
+
 export function injuryTenDays(level: OfficerHealth['level']): number {
   return HEALTH_TEN_DAYS[level];
 }
