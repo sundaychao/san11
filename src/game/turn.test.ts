@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { executeCommand } from './commands';
-import { cityMonthlyGoldIncome, cityMonthlyOfficerSalary } from './innerAffairs';
+import { cityMonthlyGoldIncome, cityMonthlyOfficerSalary, cityQuarterlyFoodIncome, cityPlots } from './innerAffairs';
 import { createGame } from './scenario/jingxiang208';
 import { resolveCitySkills } from './skills/sources';
 import { settleMonth, settleTenDay } from './turn';
@@ -27,12 +27,68 @@ describe('monthly settlement', () => {
     const state = createGame('liu', 4394);
     state.month = 3;
     const before = state.cities.jiangling;
-    const expectedFood = before.food + Math.round(before.agriculture * 60 + before.population / 40);
+    const expectedFood = before.food + cityQuarterlyFoodIncome(before);
 
     const next = settleMonth(state);
 
     expect(next.month).toBe(4);
     expect(next.cities.jiangling.food).toBe(expectedFood);
+  });
+
+  it('dismantles black markets when entering the first lunar month (every year)', () => {
+    const state = createGame('liu', 4394);
+    state.month = 9; // 腊月 → 进入正月（month 10，TopBar 显示"正月"）
+    const jiangling = state.cities.jiangling;
+    cityPlots(jiangling)[0] = { id: 'p0', type: 'blackmarket', level: 1, value: 8, q: 1, r: 1 };
+    cityPlots(jiangling)[1] = { id: 'p1', type: 'market', level: 1, value: 8, q: 2, r: 1 };
+    const wan = state.cities.wan;
+    cityPlots(wan)[0] = { id: 'p2', type: 'blackmarket', level: 1, value: 8, q: 1, r: 1 };
+
+    const next = settleMonth(state);
+
+    expect(next.month).toBe(10);
+    expect(cityPlots(next.cities.jiangling)[0].type).toBe('empty');
+    expect(cityPlots(next.cities.jiangling)[1].type).toBe('market');
+    expect(cityPlots(next.cities.wan)[0].type).toBe('empty');
+    expect(next.logs.some((log) => log.id.startsWith('blackmarket-jiangling'))).toBe(true);
+    expect(next.logs.some((log) => log.id.startsWith('blackmarket-wan'))).toBe(true);
+  });
+
+  it('keeps black markets in non-new-year months', () => {
+    const state = createGame('liu', 4394);
+    state.month = 11; // 二月 → 三月，非正月
+    const jiangling = state.cities.jiangling;
+    cityPlots(jiangling)[0] = { id: 'p0', type: 'blackmarket', level: 1, value: 8, q: 1, r: 1 };
+
+    const next = settleMonth(state);
+
+    expect(next.month).toBe(12);
+    expect(cityPlots(next.cities.jiangling)[0].type).toBe('blackmarket');
+    expect(next.logs.some((log) => log.id.startsWith('blackmarket'))).toBe(false);
+  });
+
+  it('dismantles black markets still under construction at new year, releasing the builder', () => {
+    const state = createGame('liu', 4394);
+    state.month = 9; // 腊月 → 进入正月
+    const jiangling = state.cities.jiangling;
+    // 建设中黑市：type 仍为 empty，仅 constructing.facility 标记为 blackmarket
+    cityPlots(jiangling)[0] = {
+      id: 'p0', type: 'empty', level: 0, value: 0, q: 1, r: 1,
+      constructing: { facility: 'blackmarket', officerId: 'liu-bei', remainingTenDays: 2 },
+    };
+    state.officers['liu-bei'].location = {
+      kind: 'task', cityId: 'jiangling', task: 'construction', facility: 'blackmarket', plotIndex: 0, remainingTenDays: 2,
+    };
+
+    const next = settleMonth(state);
+
+    expect(next.month).toBe(10);
+    expect(cityPlots(next.cities.jiangling)[0].type).toBe('empty');
+    expect(cityPlots(next.cities.jiangling)[0].constructing).toBeUndefined();
+    // 建设武将释放回城待命
+    expect(next.officers['liu-bei'].location).toEqual({ kind: 'city', cityId: 'jiangling' });
+    expect(next.officers['liu-bei'].acted).toBe(false);
+    expect(next.logs.some((log) => log.id.startsWith('blackmarket-jiangling'))).toBe(true);
   });
 
   it('multiplies generated city income once and stops after the resident transfers', () => {
@@ -68,10 +124,9 @@ describe('monthly settlement', () => {
     };
     state.officers['lu-su'].skill = '米道';
     const city = state.cities.changsha;
-    const baseFood = city.agriculture * 60 + city.population / 40;
     const next = settleMonth(state);
 
-    expect(next.cities.changsha.food).toBe(city.food + Math.round(baseFood * 1.5));
+    expect(next.cities.changsha.food).toBe(city.food + Math.round(cityQuarterlyFoodIncome(city) * 1.5));
   });
 
   it('does not multiply existing food outside the quarterly income boundary', () => {
@@ -106,7 +161,7 @@ describe('monthly settlement', () => {
 
     const next = settleMonth(state);
 
-    expect(next.cities.changsha.food).toBe(city.food + Math.round((1 * 60 + 61 / 40) * 1.5));
+    expect(next.cities.changsha.food).toBe(city.food + Math.round(cityQuarterlyFoodIncome(city) * 1.5));
   });
 
   it('preserves unskilled settlement values and RNG results for the same seed', () => {
@@ -198,7 +253,7 @@ describe('ten-day settlement', () => {
     };
     const city = state.cities.changsha;
     const cityFoodAfterSupply = city.food - Math.ceil((city.troops * 500) / 10000);
-    const baseQuarterlyFood = city.agriculture * 60 + city.population / 40;
+    const quarterlyFood = cityQuarterlyFoodIncome(city);
     const skillSources = (current: typeof state) => resolveCitySkills(current, 'changsha').map((skill) => ({
       name: skill.definition.name,
       sourceOfficerIds: skill.sourceOfficerIds,
@@ -212,7 +267,7 @@ describe('ten-day settlement', () => {
     expect(next.tenDay).toBe(1);
     expect(next.officers['zhou-yu'].location).toEqual({ kind: 'city', cityId: 'changsha' });
     expect(skillSources(next)).toEqual([{ name: '米道', sourceOfficerIds: ['zhou-yu'] }]);
-    expect(next.cities.changsha.food).toBe(cityFoodAfterSupply + Math.round(baseQuarterlyFood * 1.5));
+    expect(next.cities.changsha.food).toBe(cityFoodAfterSupply + Math.round(quarterlyFood * 1.5));
     const completionLogIndex = next.logs.findIndex((log) => log.id.startsWith('armament-complete-3-zhou-yu-'));
     const monthFourLogIndex = next.logs.findIndex((log) => log.id === 'month-4');
     expect(completionLogIndex).toBeGreaterThanOrEqual(0);

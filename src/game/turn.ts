@@ -11,7 +11,7 @@ import { movementAllowanceBonus } from './skills/rules/movement';
 import { settleLoyaltyDrift } from './loyalty';
 import { settleCaptives } from './captives';
 import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
-import { settleLegionAutomation, farmMonthlyIncome, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, CITY_GOLD_CAP, CITY_FOOD_CAP, cityTroopCap, DEFAULT_OFFICER_SALARY } from './innerAffairs';
+import { settleLegionAutomation, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, cityQuarterlyFoodIncome, CITY_GOLD_CAP, CITY_FOOD_CAP, cityTroopCap, DEFAULT_OFFICER_SALARY } from './innerAffairs';
 import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
 import { addOfficerMerit, MERIT_PER_MONTH, positionDefinition, rankDefinition, rankForCityCount, rankIndex } from './ranks';
 import { settleForceTurnStart } from './skills/rules/turn';
@@ -225,6 +225,37 @@ export function settleMonth(state: GameState): GameState {
   const enteringMonth = next.month === 24 ? next.month : next.month + 1;
   const shouldSettleQuarterFood = isQuarterStartMonth(enteringMonth);
 
+  // 每年正月（农历新年）：黑市自动拆除（含建设中黑市）
+  // 剧本为建安十三年四月开局，month 1=四月、9=腊月、10=正月，故正月对应 month % 12 === 10（10/22…）
+  if (enteringMonth % 12 === 10) {
+    for (const city of Object.values(next.cities)) {
+      for (const plot of city.plots ?? []) {
+        const isBlackMarketPlot = plot.type === 'blackmarket' || (plot.constructing?.facility ?? null) === 'blackmarket';
+        if (isBlackMarketPlot) {
+          // 建设中黑市跨年被拆：立即释放建设武将回城
+          if (plot.constructing) {
+            const officer = next.officers[plot.constructing.officerId];
+            if (officer && officer.location.kind === 'task' && officer.location.task === 'construction') {
+              officer.location = { kind: 'city', cityId: city.id };
+              officer.cityId = city.id;
+              officer.acted = false;
+            }
+          }
+          plot.constructing = undefined;
+          plot.type = 'empty';
+          plot.level = 0;
+          plot.value = 0;
+          next.logs.push({
+            id: `blackmarket-${city.id}-${enteringMonth}-${next.logs.length}`,
+            month: enteringMonth,
+            forceId: city.ownerId,
+            message: `${city.name}的黑市到期，于正月初一被强制拆除。`,
+          });
+        }
+      }
+    }
+  }
+
   // 季初（1/4/7/10月）忠诚自然波动
   if (shouldSettleQuarterFood) settleLoyaltyDrift(next);
 
@@ -234,22 +265,17 @@ export function settleMonth(state: GameState): GameState {
   // 每月：老龄武将病逝判定（主公继位/太守清空/部队处理在 health 内善后）
   settleAgingDeaths(next);
 
-  // 每月：俘虏忠诚下降/逃生判定 + 农场设施粮食产出（封锁城池无收入）
+  // 每月：俘虏忠诚下降/逃生判定
   settleCaptives(next);
-  for (const city of Object.values(next.cities)) {
-    if (city.ownerId && !isCityBlocked(next, city)) {
-      city.food += farmMonthlyIncome(city);
-    }
-  }
 
   for (const city of Object.values(next.cities)) {
     const blocked = city.ownerId ? isCityBlocked(next, city) : false;
     if (!blocked) {
-      // 城池资金月收入 = (基础人口税收 + 市场总收入) × 治安值 × 0.01
+      // 城池资金月收入 = (基础人口税收 + (普通市场+大市场+鱼市)×造币厂) × 治安值 × 0.01
       city.gold += Math.round(cityMonthlyGoldIncome(city) * cityIncomeMultiplier(next, city.id, 'gold'));
+      // 季初（1/4/7/10月）结算城池季度粮食收入
       if (shouldSettleQuarterFood) {
-        const baseFood = city.agriculture * 60 + city.population / 40;
-        city.food += Math.round(baseFood * cityIncomeMultiplier(next, city.id, 'food'));
+        city.food += Math.round(cityQuarterlyFoodIncome(city) * cityIncomeMultiplier(next, city.id, 'food'));
       }
     }
     const popGrowth = Math.floor((city.population * 0.005 * city.order) / 100);

@@ -56,7 +56,7 @@ export const PLOT_DESCRIPTIONS: Record<PlotType, string> = {
   shipyard: '舰船生产+15%/级',
   mint: '周围市场金钱收入+50%（一城限一）',
   granary: '周围农场粮食收入+50%（一城限一）',
-  blackmarket: '每月80金，1月后强制拆除',
+  blackmarket: '每月80金，无加成，每年正月初一自动拆除',
   grandmarket: '每月300金（大城市限一）',
   fishmarket: '每月200金（有港的城限一）',
   garrisonfarm: '按驻军征收兵粮（一城限一）',
@@ -325,26 +325,89 @@ export function initCityPopulation(state: GameState): void {
   }
 }
 
+/** 单块一级市场基础收入（每月）= 100 */
+export const MARKET_BASE_INCOME = 100;
+/** 单块一级农场基础收入（每季度）= 1500 */
+export const FARM_BASE_INCOME = 1500;
+/** 大市场 = 单块市场基础收入的 3 倍 */
+export const GRAND_MARKET_MULTIPLIER = 3;
+/** 鱼市 = 单块市场基础收入的 2 倍 */
+export const FISH_MARKET_MULTIPLIER = 2;
+/** 黑市 = 单块一级市场基础收入的 0.8 倍（无人口修正、无造币厂影响） */
+export const BLACK_MARKET_INCOME_RATIO = 0.8;
+/** 造币厂效果 = 1.5（作用于普通市场/大市场/鱼市） */
+export const MINT_EFFECT = 1.5;
+/** 谷仓效果 = 1.5（作用于农场/军屯农产出） */
+export const GRANARY_EFFECT = 1.5;
+/** 基础人口粮税系数 = 7（每季度 7×√总人口） */
+export const BASE_FOOD_TAX_COEFFICIENT = 7;
+/** 农村人口修正基数 = 300000（农村人口÷300000，下限0.5、上限1.5） */
+export const RURAL_POPULATION_MODIFIER_BASE = 300_000;
+/** 军屯农士兵折算基数：城内每 30000 兵 = 1 份农场产出 */
+export const GARRISON_FARM_TROOPS_BASE = 30_000;
+/** 军屯农倍率 = 2 */
+export const GARRISON_FARM_MULTIPLIER = 2;
+
+/** 据设施等级计算基础产出（1级=base，每升一级×2） */
+function facilityBaseIncome(base: number, level?: number): number {
+  return base * Math.pow(PLOT_LEVEL_MULTIPLIER, Math.max(0, (level ?? 1) - 1));
+}
+
 /** 基础人口税收（每月）= √总人口（如100万人口→每月1000） */
 export function basePopulationTax(city: City): number {
   return Math.floor(Math.sqrt(city.population));
 }
 
-/** 城市人口收入修正值 = 城市人口÷100000，下限0.5、上限1.5 */
+/** 城市人口收入修正值 = 城市人口÷100000，下限0.5、上限1.5（作用于普通市场） */
 export function cityPopulationIncomeModifier(city: City): number {
   return clamp(cityPopulationOf(city) / 100_000, 0.5, 1.5);
 }
 
-/** 市场总收入（每月）= 100 × 建成市场数 × 造币厂效果(1.5) × 城市人口修正值 */
-export function marketMonthlyGoldIncome(city: City): number {
-  const marketCount = (city.plots ?? []).filter((plot) => plot.type === 'market').length;
-  const mintMultiplier = (city.plots ?? []).some((plot) => plot.type === 'mint') ? 1.5 : 1;
-  return Math.round(100 * marketCount * mintMultiplier * cityPopulationIncomeModifier(city));
+/** 农村人口修正值 = 农村人口÷300000，下限0.5、上限1.5（作用于普通农场） */
+export function ruralPopulationIncomeModifier(city: City): number {
+  return clamp(ruralPopulationOf(city) / RURAL_POPULATION_MODIFIER_BASE, 0.5, 1.5);
 }
 
-/** 城池资金月收入 = (基础人口税收 + 市场总收入) × 治安值 × 0.01 */
+/** 普通市场总收入（每月）= Σ(单块市场等级基础收入) × 城市人口修正值（不受造币厂影响） */
+export function marketMonthlyGoldIncome(city: City): number {
+  const sum = (city.plots ?? []).reduce((acc, plot) => (
+    acc + (plot.type === 'market' ? facilityBaseIncome(MARKET_BASE_INCOME, plot.level) : 0)
+  ), 0);
+  return Math.round(sum * cityPopulationIncomeModifier(city));
+}
+
+/** 大市场收入（每月）= Σ(单块市场等级基础收入×3)，不乘人口修正 */
+export function grandMarketMonthlyGoldIncome(city: City): number {
+  return (city.plots ?? []).reduce((acc, plot) => (
+    acc + (plot.type === 'grandmarket' ? facilityBaseIncome(MARKET_BASE_INCOME, plot.level) * GRAND_MARKET_MULTIPLIER : 0)
+  ), 0);
+}
+
+/** 鱼市收入（每月）= Σ(单块市场等级基础收入×2)，不乘人口修正 */
+export function fishMarketMonthlyGoldIncome(city: City): number {
+  return (city.plots ?? []).reduce((acc, plot) => (
+    acc + (plot.type === 'fishmarket' ? facilityBaseIncome(MARKET_BASE_INCOME, plot.level) * FISH_MARKET_MULTIPLIER : 0)
+  ), 0);
+}
+
+/** 造币厂效果：有造币厂为 1.5，否则 1 */
+export function mintEffect(city: City): number {
+  return (city.plots ?? []).some((plot) => plot.type === 'mint') ? MINT_EFFECT : 1;
+}
+
+/** 黑市收入（每月）= Σ(一级市场基础收入×0.8)，无人口修正、无造币厂影响 */
+export function blackMarketMonthlyGoldIncome(city: City): number {
+  return (city.plots ?? []).reduce((acc, plot) => (
+    acc + (plot.type === 'blackmarket' ? MARKET_BASE_INCOME * BLACK_MARKET_INCOME_RATIO : 0)
+  ), 0);
+}
+
+/** 城池资金月收入 = (基础人口税收 + (普通市场+大市场+鱼市)×造币厂效果 + 黑市收入) × 治安值 × 0.01 */
 export function cityMonthlyGoldIncome(city: City): number {
-  return Math.round((basePopulationTax(city) + marketMonthlyGoldIncome(city)) * city.order * 0.01);
+  const markets = (
+    marketMonthlyGoldIncome(city) + grandMarketMonthlyGoldIncome(city) + fishMarketMonthlyGoldIncome(city)
+  ) * mintEffect(city);
+  return Math.round((basePopulationTax(city) + markets + blackMarketMonthlyGoldIncome(city)) * city.order * 0.01);
 }
 
 /** 城市应有多少个建设用地（按人口大小） */
@@ -699,14 +762,51 @@ export function buildCityPlot(state: GameState, city: City, plotIndex: number, f
   return `${officer.name}在${city.name}修建了${PLOT_LABELS[facility]}`;
 }
 
-/** 农场月产粮（季度结算时计入） */
-export function farmMonthlyIncome(city: City): number {
-  return (city.plots ?? []).reduce((sum, plot) => sum + (plot.type === 'farm' ? plot.value * 10 : 0), 0);
+/** 基础人口粮税（每季度）= 7 × √总人口（如500万总人口→7×√500000≈4949） */
+export function baseFoodTax(city: City): number {
+  return Math.floor(BASE_FOOD_TAX_COEFFICIENT * Math.sqrt(city.population));
 }
 
 /** 城池兵力容纳上限（按规模） */
 export function cityTroopCap(city: City): number {
   return CITY_TROOP_CAP_BY_SIZE[citySizeOf(city)];
+}
+
+/** 普通农场总产出（每季度）= Σ(单块农场等级基础收入) × 农村人口修正值 */
+export function farmQuarterlyIncome(city: City): number {
+  const sum = (city.plots ?? []).reduce((acc, plot) => (
+    acc + (plot.type === 'farm' ? facilityBaseIncome(FARM_BASE_INCOME, plot.level) : 0)
+  ), 0);
+  return Math.round(sum * ruralPopulationIncomeModifier(city));
+}
+
+/** 军屯农产出（每季度）= (城内士兵数÷30000) × 单块农场等级基础收入 × 2 */
+export function garrisonFarmQuarterlyIncome(city: City): number {
+  const plot = (city.plots ?? []).find((p) => p.type === 'garrisonfarm');
+  if (!plot) return 0;
+  const base = facilityBaseIncome(FARM_BASE_INCOME, plot.level);
+  return Math.round((city.troops / GARRISON_FARM_TROOPS_BASE) * base * GARRISON_FARM_MULTIPLIER);
+}
+
+/** 谷仓效果：有谷仓为 1.5，否则 1 */
+export function granaryEffect(city: City): number {
+  return (city.plots ?? []).some((plot) => plot.type === 'granary') ? GRANARY_EFFECT : 1;
+}
+
+/** 城池季度粮食总收入 = (基础人口粮税 + (农场总产出 + 军屯农产出)×谷仓效果) × 治安值 × 0.01 */
+export function cityQuarterlyFoodIncome(city: City): number {
+  const farms = (
+    farmQuarterlyIncome(city) + garrisonFarmQuarterlyIncome(city)
+  ) * granaryEffect(city);
+  return Math.round((baseFoodTax(city) + farms) * city.order * 0.01);
+}
+
+/** 城池下季度预估兵粮支出（9 旬合计：仅城内驻军消耗；
+ *  城外部队的粮由出征时预支进 unit.food，不扣城粮，因此不计入） */
+export function cityNextQuarterFoodExpense(state: GameState, city: City): number {
+  void state; // 保留签名一致性，便于未来扩展（如部队回城补粮场景）
+  // 城内驻军：每万人每旬 500 × 9 旬 = 每季度 4500 / 万
+  return Math.max(0, Math.ceil((city.troops * CITY_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS) / 10_000) * 9);
 }
 
 /** 该城所有武将的月俸禄合计（只要所属城为该城且归属势力，均计入；无官职按 DEFAULT_OFFICER_SALARY=10 金/月） */
@@ -733,22 +833,9 @@ export function cityNextMonthNetGold(state: GameState, city: City): number {
   return income - salary;
 }
 
-/** 城池下个季度基础粮收入（农业×60 + 总人口÷40） */
-export function cityQuarterBaseFoodIncome(city: City): number {
-  return Math.round(city.agriculture * 60 + city.population / 40);
-}
-
-/** 城池下季度预估总粮收入（基础粮 + 三个月农场月产粮） */
+/** 城池下季度预估总粮收入 = 季度粮食总收入（供界面预估，包含治安与谷仓效果） */
 export function cityNextQuarterFoodIncome(city: City): number {
-  return cityQuarterBaseFoodIncome(city) + farmMonthlyIncome(city) * 3;
-}
-
-/** 城池下季度预估兵粮支出（9 旬合计：仅城内驻军消耗；
- *  城外部队的粮由出征时预支进 unit.food，不扣城粮，因此不计入） */
-export function cityNextQuarterFoodExpense(state: GameState, city: City): number {
-  void state; // 保留签名一致性，便于未来扩展（如部队回城补粮场景）
-  // 城内驻军：每万人每旬 500 × 9 旬 = 每季度 4500 / 万
-  return Math.max(0, Math.ceil((city.troops * CITY_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS) / 10_000) * 9);
+  return cityQuarterlyFoodIncome(city);
 }
 
 // ==================== 委任军团 ====================
