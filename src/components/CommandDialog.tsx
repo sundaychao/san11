@@ -2,7 +2,7 @@ import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
-import { COMMAND_AP, COMMAND_LABELS, TRADE_MAX_GRAIN, grainPriceOf, quoteTrade, researchTechPCost, tradeEffectMultiplier, tradeEffectPercent, transferDuration, validateCommand } from '../game/commands';
+import { COMMAND_AP, COMMAND_LABELS, TRADE_MAX_GRAIN, grainPriceOf, patrolGoldCost, quoteTrade, researchTechPCost, tradeEffectMultiplier, tradeEffectPercent, transferDuration, validateCommand } from '../game/commands';
 import { MAX_TECH_LEVEL, TECH_BRANCHES, TECH_COSTS, researchTenDays, techLevelOf } from '../game/techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition, treasureEffectText } from '../game/treasures';
 import { REWARD_GOLD_COST, officerLoyalty, rewardLoyaltyGain } from '../game/loyalty';
@@ -346,7 +346,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
         : type === 'produceArmament'
           ? `资金 ${ARMAMENT_GOLD_COST} · ${ARMAMENT_LABELS[armamentType]} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType) ? '1个月' : '即时'}`
           : type === 'patrol'
-            ? '资金 300'
+            ? `资金 ${patrolGoldCost(city)}`
             : type === 'trade'
               ? `粮价 1金=${grainPrice}粮 · 交易效果 ${tradePercent}%`
               : type === 'reward'

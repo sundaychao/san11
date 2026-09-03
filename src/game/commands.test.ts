@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ARMAMENT_GOLD_COST, produceArmamentYield } from './armaments';
-import { COMMAND_AP, TRADE_MAX_GRAIN, executeCommand, grainPriceOf, quoteTrade, rollGrainPrices, rollMerchants, tradeEffectPercent, transferDuration, validateCommand } from './commands';
+import { COMMAND_AP, TRADE_MAX_GRAIN, executeCommand, grainPriceOf, patrolGoldCost, quoteTrade, rollGrainPrices, rollMerchants, tradeEffectPercent, transferDuration, validateCommand } from './commands';
 import type { PlotType } from './innerAffairs';
 import { armamentYieldMultiplier, barracksYieldMultiplier } from './innerAffairs';
 import { createGame } from './scenario/jingxiang208';
@@ -175,7 +175,17 @@ describe('command engine', () => {
     });
 
     expect(next.cities.jiangling.order).toBe(100);
-    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 300);
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - patrolGoldCost(state.cities.jiangling));
+  });
+
+  it('charges patrol cost proportional to city population (50 gold per 100,000)', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.population = 1_000_000;
+    expect(patrolGoldCost(state.cities.jiangling)).toBe(500);
+    state.cities.jiangling.population = 475_000;
+    expect(patrolGoldCost(state.cities.jiangling)).toBe(238);
+    state.cities.jiangling.population = 10_000;
+    expect(patrolGoldCost(state.cities.jiangling)).toBe(5);
   });
 
   it('starts a debate when finding a local talent to recruit', () => {

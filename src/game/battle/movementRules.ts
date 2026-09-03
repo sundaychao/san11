@@ -175,12 +175,36 @@ function reachableCostsFrom(
   return costs;
 }
 
+/** 本方城池 footprint 格集合（可穿越 + 可作为移动终点/回城） */
+export function ownCityTransitKeysFor(state: GameState, forceId: ForceId): Set<string> {
+  const keys = new Set<string>();
+  for (const city of Object.values(state.cities)) {
+    if (city.ownerId !== forceId) continue;
+    for (const coord of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) {
+      keys.add(gridKey(coord));
+    }
+  }
+  return keys;
+}
+
+/** 目标格所属的本方城池（在 footprint 内则返回该城） */
+export function ownCityAt(state: GameState, forceId: ForceId, coord: GridCoord): City | undefined {
+  for (const city of Object.values(state.cities)) {
+    if (city.ownerId !== forceId) continue;
+    for (const cell of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) {
+      if (cell.q === coord.q && cell.r === coord.r) return city;
+    }
+  }
+  return undefined;
+}
+
 export function reachableCosts(state: GameState, unit: ArmyUnit) {
   return reachableCostsFrom(state, unit, unit.movementRemaining, movementProfileForUnit(unit), {
     ignoredUnitId: unit.id,
     movingForceId: unit.forceId,
     ignoreEnemyZoc: unitIgnoresEnemyZocTerrain(state, unit),
     vehicle: unit.vehicle,
+    allowedCityTransitKeys: ownCityTransitKeysFor(state, unit.forceId),
   });
 }
 

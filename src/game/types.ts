@@ -118,6 +118,10 @@ export interface City {
   gold: number;
   food: number;
   population: number;
+  /** 城市人口（城镇居民；影响市场收入修正。旧存档缺失时按城市规模估算占比15%~20%） */
+  cityPopulation?: number;
+  /** 农村人口（乡村居民；总人口=城市人口+农村人口） */
+  ruralPopulation?: number;
   troops: number;
   commerce: number;
   agriculture: number;

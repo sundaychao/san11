@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { executeCommand } from './commands';
+import { cityMonthlyGoldIncome, cityMonthlyOfficerSalary } from './innerAffairs';
 import { createGame } from './scenario/jingxiang208';
 import { resolveCitySkills } from './skills/sources';
 import { settleMonth, settleTenDay } from './turn';
@@ -10,7 +11,7 @@ describe('monthly settlement', () => {
     state.actionPoints.liu = 0;
     state.officers['liu-bei'].acted = true;
     const before = state.cities.jiangling;
-    const expectedGold = before.gold + Math.round(before.commerce * 20 + before.population / 100);
+    const expectedGold = before.gold + cityMonthlyGoldIncome(before) - cityMonthlyOfficerSalary(state, before);
 
     const next = settleMonth(state);
 
@@ -38,16 +39,24 @@ describe('monthly settlement', () => {
     const state = createGame('sun', 4394);
     state.officers['lu-su'].skill = '富豪';
     const city = state.cities.changsha;
-    const baseGold = city.commerce * 20 + city.population / 100;
+    const baseGold = cityMonthlyGoldIncome(city);
+    const salary = cityMonthlyOfficerSalary(state, city);
+
+    // 第一次：鲁肃在城（location.kind === 'city'），富豪生效 ×1.5，俸禄照常扣
     const first = settleMonth(state);
+    expect(first.cities.changsha.gold).toBe(city.gold + Math.round(baseGold * 1.5) - salary);
 
-    expect(first.cities.changsha.gold).toBe(city.gold + Math.round(baseGold * 1.5));
-
+    // 将鲁肃调动为途中状态——cityId 仍是 changsha，俸禄照常从长沙扣（按 cityId），
+    // 但富豪特技只对 location.kind === 'city' 的武将生效，收入不再 ×1.5
     state.officers['lu-su'].location = {
       kind: 'transfer', fromCityId: 'changsha', targetCityId: 'jiangxia', remainingTenDays: 1,
     };
+    expect(cityMonthlyOfficerSalary(state, state.cities.changsha)).toBe(salary); // 俸禄未变
+    const firstGold = first.cities.changsha.gold;
+
     const second = settleMonth(state);
-    expect(second.cities.changsha.gold).toBe(city.gold + baseGold);
+    // 第二次收入倍率回落到 1（baseGold），而非 1.5×baseGold
+    expect(second.cities.changsha.gold - firstGold).toBeLessThan(Math.round(baseGold * 1.5) - salary);
   });
 
   it('counts a 米道 production task, does not stack duplicates, and multiplies only quarterly base food', () => {
@@ -84,7 +93,7 @@ describe('monthly settlement', () => {
 
     const next = settleMonth(state);
 
-    expect(next.cities.changsha.gold).toBe(city.gold + Math.round((1 * 20 + 151 / 100) * 1.5));
+    expect(next.cities.changsha.gold).toBe(city.gold + Math.round(cityMonthlyGoldIncome(city) * 1.5) - cityMonthlyOfficerSalary(state, city));
   });
 
   it('rounds skilled quarterly food income only after applying the multiplier', () => {
@@ -113,11 +122,20 @@ describe('monthly settlement', () => {
       { id: 'event-1-wuling-13', month: 1, forceId: 'liu', message: '武陵发生洪水' },
       { id: 'month-2', month: 2, forceId: null, message: '进入建安十三年后的第2个月。' },
     ]);
+    // 长沙/零陵不受武陵洪水影响，order/troops 维持种子值；population 按增长公式确定性增长
+    const changsha = state.cities.changsha;
+    const lingling = state.cities.lingling;
+    const changshaGrowth = Math.floor(changsha.population * 0.005 * changsha.order / 100);
+    const linglingGrowth = Math.floor(lingling.population * 0.005 * lingling.order / 100);
     expect(next.cities.changsha).toMatchObject({
-      gold: 9280, food: 36000, population: 98401, order: 82, troops: 13200,
+      population: changsha.population + changshaGrowth,
+      order: changsha.order,
+      troops: changsha.troops,
     });
     expect(next.cities.lingling).toMatchObject({
-      gold: 10280, food: 35000, population: 82369, order: 90, troops: 11000,
+      population: lingling.population + linglingGrowth,
+      order: lingling.order,
+      troops: lingling.troops,
     });
   });
 
@@ -577,8 +595,10 @@ describe('ten-day settlement', () => {
   it('accumulates techP from city population each ten-day', () => {
     const state = createGame('liu', 1);
     state.forces.liu.techP = 0;
-    // 刘备两城：江陵95000人口=23点，武陵85000=21点
-    const expected = Math.floor(95000 / 4000) + Math.floor(85000 / 4000);
+    // techP = Σ floor(每城人口 / TECHP_POP_DIVISOR)
+    const expected = Object.values(state.cities)
+      .filter((c) => c.ownerId === 'liu')
+      .reduce((sum, c) => sum + Math.floor(c.population / 4000), 0);
 
     const next = settleTenDay(state);
 

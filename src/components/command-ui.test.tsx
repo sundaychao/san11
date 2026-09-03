@@ -156,7 +156,6 @@ describe('command interface', { timeout: 30000 }, () => {
     const officerRow = (name: string) => within(dialog).getByRole('rowheader', { name }).closest('tr')!;
 
     const ownershipRow = officerRow('刘备');
-    expect(ownershipRow).toHaveTextContent('刘备军');
     expect(ownershipRow).toHaveTextContent('江陵');
     expect(ownershipRow).toHaveTextContent('47岁');
 
@@ -199,7 +198,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const dialog = screen.getByRole('dialog', { name: '武将一览' });
     const playerOfficers = Object.values(state.officers).filter((officer) => officer.forceId === state.playerForceId);
 
-    for (const header of ['武将', '所属', '所在']) {
+    for (const header of ['武将', '城池', '所在']) {
       expect(within(dialog).getByRole('button', { name: `按${header}排序` })).toBeVisible();
     }
 

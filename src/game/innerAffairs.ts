@@ -1,4 +1,5 @@
 import { coordsWithinRange, gridKey, neighborsOf, ringCoordsWithinRange, sevenCellCityFootprint, type GridCoord } from './battle/grid';
+import { positionDefinition } from './ranks';
 import type { ArmamentType, City, CityId, ForceId, GameState, GridCell, Legion, Officer, TerrainType } from './types';
 
 /** 本地 clamp，避免与 commands.ts 的循环依赖 */
@@ -71,26 +72,26 @@ export const PLOT_DESCRIPTIONS: Record<PlotType, string> = {
 
 /** 各设施的建造价格（金） */
 export const PLOT_COSTS: Record<PlotType, number> = {
-  market: 300,
-  farm: 300,
-  barracks: 500,
-  smithy: 700,
-  forge: 500,
-  stable: 600,
-  shipyard: 900,
-  mint: 400,
-  granary: 400,
-  blackmarket: 200,
-  grandmarket: 1000,
-  fishmarket: 800,
-  garrisonfarm: 600,
-  hubu: 800,
-  xingbu: 800,
-  bingbu: 800,
-  gongbu: 800,
-  libu: 800,
-  personnel: 800,
-  taixue: 1200,
+  market: 200,
+  farm: 200,
+  barracks: 300,
+  smithy: 500,
+  forge: 300,
+  stable: 300,
+  shipyard: 500,
+  mint: 500,
+  granary: 500,
+  blackmarket: 50,
+  grandmarket: 600,
+  fishmarket: 400,
+  garrisonfarm: 500,
+  hubu: 500,
+  xingbu: 500,
+  bingbu: 500,
+  gongbu: 500,
+  libu: 500,
+  personnel: 500,
+  taixue: 800,
   tongqueta: 1500,
 };
 
@@ -115,9 +116,9 @@ export const CAPTIVE_DISPOSE_AP_COST = 10;
 export type CitySize = 'small' | 'medium' | 'large';
 
 /** 小都市人口阈值 */
-export const CITY_SIZE_SMALL_MAX_POP = 50_000;
+export const CITY_SIZE_SMALL_MAX_POP = 250_000;
 /** 大都市人口阈值 */
-export const CITY_SIZE_LARGE_MIN_POP = 100_000;
+export const CITY_SIZE_LARGE_MIN_POP = 500_000;
 
 /** 城市大小对应的建设用地数量（距城8圈外：小城6、中城9、大城12） */
 export const PLOT_COUNT_BY_SIZE: Record<CitySize, number> = {
@@ -125,6 +126,23 @@ export const PLOT_COUNT_BY_SIZE: Record<CitySize, number> = {
   medium: 9,
   large: 12,
 };
+
+/** 城池金币容纳上限 */
+export const CITY_GOLD_CAP = 200_000;
+/** 城池兵粮容纳上限 */
+export const CITY_FOOD_CAP = 2_000_000;
+/** 城池兵力容纳上限（按规模：小城8万、中城10万、大城15万） */
+export const CITY_TROOP_CAP_BY_SIZE: Record<CitySize, number> = {
+  small: 80_000,
+  medium: 100_000,
+  large: 150_000,
+};
+/** 每个无官职武将默认月俸禄（金） */
+export const DEFAULT_OFFICER_SALARY = 10;
+/** 城内士兵每旬每万人粮食消耗 */
+export const CITY_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS = 500;
+/** 城外部队每旬每万人粮食消耗 */
+export const UNIT_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS = 1000;
 
 /** 城池攻击范围（城池外1~3圈）：敌方部队进入此区域时每旬受箭矢攻击 */
 export const CITY_ATTACK_RANGE = 3;
@@ -277,6 +295,56 @@ export function citySizeOf(city: City): CitySize {
   if (city.population >= CITY_SIZE_LARGE_MIN_POP) return 'large';
   if (city.population >= CITY_SIZE_SMALL_MAX_POP) return 'medium';
   return 'small';
+}
+
+/** 各规模城市初始「城市人口」占总人口比例（小城15% / 中城17.5% / 大城20%） */
+export const CITY_POPULATION_RATIO_BY_SIZE: Record<CitySize, number> = {
+  small: 0.15,
+  medium: 0.175,
+  large: 0.2,
+};
+
+/** 城市人口：旧存档缺失字段时按当前规模占比估算 */
+export function cityPopulationOf(city: City): number {
+  if (city.cityPopulation != null) return city.cityPopulation;
+  return Math.round(city.population * CITY_POPULATION_RATIO_BY_SIZE[citySizeOf(city)]);
+}
+
+/** 农村人口：总人口扣除城市人口 */
+export function ruralPopulationOf(city: City): number {
+  if (city.ruralPopulation != null) return city.ruralPopulation;
+  return Math.max(0, city.population - cityPopulationOf(city));
+}
+
+/** 开局按规模为每城初始化城市/农村人口（总人口不变，城市人口占15%~20%） */
+export function initCityPopulation(state: GameState): void {
+  for (const city of Object.values(state.cities)) {
+    const cityPopulation = Math.round(city.population * CITY_POPULATION_RATIO_BY_SIZE[citySizeOf(city)]);
+    city.cityPopulation = cityPopulation;
+    city.ruralPopulation = Math.max(0, city.population - cityPopulation);
+  }
+}
+
+/** 基础人口税收（每月）= √总人口（如100万人口→每月1000） */
+export function basePopulationTax(city: City): number {
+  return Math.floor(Math.sqrt(city.population));
+}
+
+/** 城市人口收入修正值 = 城市人口÷100000，下限0.5、上限1.5 */
+export function cityPopulationIncomeModifier(city: City): number {
+  return clamp(cityPopulationOf(city) / 100_000, 0.5, 1.5);
+}
+
+/** 市场总收入（每月）= 100 × 建成市场数 × 造币厂效果(1.5) × 城市人口修正值 */
+export function marketMonthlyGoldIncome(city: City): number {
+  const marketCount = (city.plots ?? []).filter((plot) => plot.type === 'market').length;
+  const mintMultiplier = (city.plots ?? []).some((plot) => plot.type === 'mint') ? 1.5 : 1;
+  return Math.round(100 * marketCount * mintMultiplier * cityPopulationIncomeModifier(city));
+}
+
+/** 城池资金月收入 = (基础人口税收 + 市场总收入) × 治安值 × 0.01 */
+export function cityMonthlyGoldIncome(city: City): number {
+  return Math.round((basePopulationTax(city) + marketMonthlyGoldIncome(city)) * city.order * 0.01);
 }
 
 /** 城市应有多少个建设用地（按人口大小） */
@@ -631,14 +699,56 @@ export function buildCityPlot(state: GameState, city: City, plotIndex: number, f
   return `${officer.name}在${city.name}修建了${PLOT_LABELS[facility]}`;
 }
 
-/** 市场旬产金额（各市场 value 之和） */
-export function marketTenDayIncome(city: City): number {
-  return (city.plots ?? []).reduce((sum, plot) => sum + (plot.type === 'market' ? plot.value : 0), 0);
-}
-
 /** 农场月产粮（季度结算时计入） */
 export function farmMonthlyIncome(city: City): number {
   return (city.plots ?? []).reduce((sum, plot) => sum + (plot.type === 'farm' ? plot.value * 10 : 0), 0);
+}
+
+/** 城池兵力容纳上限（按规模） */
+export function cityTroopCap(city: City): number {
+  return CITY_TROOP_CAP_BY_SIZE[citySizeOf(city)];
+}
+
+/** 该城所有武将的月俸禄合计（只要所属城为该城且归属势力，均计入；无官职按 DEFAULT_OFFICER_SALARY=10 金/月） */
+export function cityMonthlyOfficerSalary(state: GameState, city: City): number {
+  if (!city.ownerId) return 0;
+  let total = 0;
+  for (const officer of Object.values(state.officers)) {
+    if (officer.forceId !== city.ownerId) continue;
+    if (officer.cityId !== city.id) continue;
+    if (officer.positionId) {
+      const pos = positionDefinition(officer.positionId);
+      total += pos?.salary ?? DEFAULT_OFFICER_SALARY;
+    } else {
+      total += DEFAULT_OFFICER_SALARY;
+    }
+  }
+  return total;
+}
+
+/** 城池下个月净资金（收入 - 俸禄开支，供界面预估用，不含其他随机开支） */
+export function cityNextMonthNetGold(state: GameState, city: City): number {
+  const income = cityMonthlyGoldIncome(city);
+  const salary = cityMonthlyOfficerSalary(state, city);
+  return income - salary;
+}
+
+/** 城池下个季度基础粮收入（农业×60 + 总人口÷40） */
+export function cityQuarterBaseFoodIncome(city: City): number {
+  return Math.round(city.agriculture * 60 + city.population / 40);
+}
+
+/** 城池下季度预估总粮收入（基础粮 + 三个月农场月产粮） */
+export function cityNextQuarterFoodIncome(city: City): number {
+  return cityQuarterBaseFoodIncome(city) + farmMonthlyIncome(city) * 3;
+}
+
+/** 城池下季度预估兵粮支出（9 旬合计：仅城内驻军消耗；
+ *  城外部队的粮由出征时预支进 unit.food，不扣城粮，因此不计入） */
+export function cityNextQuarterFoodExpense(state: GameState, city: City): number {
+  void state; // 保留签名一致性，便于未来扩展（如部队回城补粮场景）
+  // 城内驻军：每万人每旬 500 × 9 旬 = 每季度 4500 / 万
+  return Math.max(0, Math.ceil((city.troops * CITY_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS) / 10_000) * 9);
 }
 
 // ==================== 委任军团 ====================
@@ -816,8 +926,9 @@ function runLegionAction(state: GameState, city: City, officer: Officer, action:
       return `${officer.name}征募士兵${gained}`;
     }
     case 'patrol': {
-      if (city.gold < 300) return null;
-      city.gold -= 300;
+      const cost = Math.max(1, Math.ceil((city.population / 100_000) * 50));
+      if (city.gold < cost) return null;
+      city.gold -= cost;
       city.order = clamp(city.order + gain(4 + Math.floor(officer.stats.charisma / 20)), 0, 100);
       officer.acted = true;
       return `${officer.name}巡察安抚百姓`;

@@ -1,5 +1,5 @@
-import { initialArmaments } from '../armaments';
-import { initConstructionPlots } from '../innerAffairs';
+﻿import { initialArmaments } from '../armaments';
+import { initCityPopulation, initConstructionPlots } from '../innerAffairs';
 import { DEFAULT_OFFICER_LOYALTY, LEADER_INITIAL_LOYALTY } from '../loyalty';
 import { TREASURES } from '../treasures';
 import type { City, CityId, Force, ForceId, GameState, GridCell, Officer, OfficerAptitudes, Stats, TreasureState } from '../types';
@@ -51,14 +51,14 @@ const forces: Record<ForceId, Force> = {
 export const SCENARIO_FORCES = forces;
 
 const citySeeds: CitySeed[] = [
-  { id: 'wan', name: '宛', ownerId: 'cao', governorId: 'cao-cao', gold: 9000, food: 30000, population: 120000, troops: 16000, commerce: 60, agriculture: 45, order: 82, training: 72, mapX: 0.37, mapY: 0.17 },
-  { id: 'xiangyang', name: '襄阳', ownerId: 'cao', governorId: 'cao-ren', gold: 8200, food: 34000, population: 115000, troops: 14500, commerce: 52, agriculture: 55, order: 78, training: 68, mapX: 0.25, mapY: 0.42 },
-  { id: 'jiangling', name: '江陵', ownerId: 'liu', governorId: 'liu-bei', gold: 7600, food: 38000, population: 95000, troops: 13500, commerce: 48, agriculture: 65, order: 80, training: 72, mapX: 0.47, mapY: 0.53 },
-  { id: 'wuling', name: '武陵', ownerId: 'liu', governorId: 'zhang-fei', gold: 6800, food: 32000, population: 85000, troops: 12000, commerce: 42, agriculture: 58, order: 84, training: 66, mapX: 0.15, mapY: 0.68 },
-  { id: 'jiangxia', name: '江夏', ownerId: 'sun', governorId: 'sun-quan', gold: 8500, food: 32000, population: 100000, troops: 15000, commerce: 56, agriculture: 52, order: 78, training: 74, mapX: 0.78, mapY: 0.17 },
-  { id: 'changsha', name: '长沙', ownerId: 'sun', governorId: 'lu-su', gold: 7300, food: 36000, population: 98000, troops: 13200, commerce: 50, agriculture: 60, order: 82, training: 70, mapX: 0.78, mapY: 0.38 },
-  { id: 'lingling', name: '零陵', ownerId: 'biao', governorId: 'liu-biao', gold: 8500, food: 35000, population: 82000, troops: 11000, commerce: 48, agriculture: 62, order: 90, training: 65, mapX: 0.57, mapY: 0.87 },
-  { id: 'guiyang', name: '桂阳', ownerId: 'biao', governorId: 'wen-pin', gold: 7100, food: 36000, population: 80000, troops: 11500, commerce: 47, agriculture: 63, order: 88, training: 67, mapX: 0.84, mapY: 0.71 },
+  { id: 'wan', name: '宛', ownerId: 'cao', governorId: 'cao-cao', gold: 9000, food: 30000, population: 600000, troops: 16000, commerce: 60, agriculture: 45, order: 82, training: 72, mapX: 0.37, mapY: 0.17 },
+  { id: 'xiangyang', name: '襄阳', ownerId: 'cao', governorId: 'cao-ren', gold: 8200, food: 34000, population: 575000, troops: 14500, commerce: 52, agriculture: 55, order: 78, training: 68, mapX: 0.25, mapY: 0.42 },
+  { id: 'jiangling', name: '江陵', ownerId: 'liu', governorId: 'liu-bei', gold: 7600, food: 38000, population: 475000, troops: 13500, commerce: 48, agriculture: 65, order: 80, training: 72, mapX: 0.47, mapY: 0.53 },
+  { id: 'wuling', name: '武陵', ownerId: 'liu', governorId: 'zhang-fei', gold: 6800, food: 32000, population: 425000, troops: 12000, commerce: 42, agriculture: 58, order: 84, training: 66, mapX: 0.15, mapY: 0.68 },
+  { id: 'jiangxia', name: '江夏', ownerId: 'sun', governorId: 'sun-quan', gold: 8500, food: 32000, population: 500000, troops: 15000, commerce: 56, agriculture: 52, order: 78, training: 74, mapX: 0.78, mapY: 0.17 },
+  { id: 'changsha', name: '长沙', ownerId: 'sun', governorId: 'lu-su', gold: 7300, food: 36000, population: 490000, troops: 13200, commerce: 50, agriculture: 60, order: 82, training: 70, mapX: 0.78, mapY: 0.38 },
+  { id: 'lingling', name: '零陵', ownerId: 'biao', governorId: 'liu-biao', gold: 8500, food: 35000, population: 410000, troops: 11000, commerce: 48, agriculture: 62, order: 90, training: 65, mapX: 0.57, mapY: 0.87 },
+  { id: 'guiyang', name: '桂阳', ownerId: 'biao', governorId: 'wen-pin', gold: 7100, food: 36000, population: 400000, troops: 11500, commerce: 47, agriculture: 63, order: 88, training: 67, mapX: 0.84, mapY: 0.71 },
 ];
 
 export const CITY_IDS = citySeeds.map((city) => city.id);
@@ -312,5 +312,7 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
   };
   // 初始化建设用地地形与每城地格坐标
   initConstructionPlots(state);
+  // 开局按城市规模初始化城市人口（15%~20%）与农村人口
+  initCityPopulation(state);
   return state;
 }

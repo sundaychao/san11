@@ -18,12 +18,17 @@ interface OfficerListDialogProps {
   onClose(): void;
 }
 
+function scopeIsAll(scope: OfficerListDialogProps['scope']) {
+  return scope === 'all';
+}
+
 type OfficerListTab = '所属' | '能力' | '特技' | '适性' | '状态';
 type SortDirection = 'desc' | 'asc';
 type SortKey =
   | 'name'
   | 'age'
-  | 'owner'
+  | 'force'
+  | 'homeCity'
   | 'loyalty'
   | 'location'
   | keyof Stats
@@ -60,6 +65,10 @@ function locationText(officer: Officer, state: GameState) {
   if (officer.location.kind === 'unit') return '部队';
   if (officer.location.kind === 'transfer') return '在途';
   return state.cities[officer.location.cityId].name;
+}
+
+function homeCityText(officer: Officer, state: GameState) {
+  return state.cities[officer.cityId]?.name ?? '—';
 }
 
 function ownershipText(officer: Officer, state: GameState) {
@@ -137,14 +146,20 @@ function taskInfo(officer: Officer, state: GameState) {
   return { status: '', task: '', time: '' };
 }
 
-function columnsForTab(activeTab: OfficerListTab): OfficerColumn[] {
-  if (activeTab === '所属') return [
-    { label: '武将', sortKey: 'name' },
-    { label: '所属', sortKey: 'owner' },
-    { label: '年龄', sortKey: 'age' },
-    { label: '忠诚', sortKey: 'loyalty' },
-    { label: '所在', sortKey: 'location' },
-  ];
+function columnsForTab(activeTab: OfficerListTab, scope: OfficerListDialogProps['scope']): OfficerColumn[] {
+  if (activeTab === '所属') {
+    const cols: OfficerColumn[] = [
+      { label: '武将', sortKey: 'name' },
+    ];
+    if (scopeIsAll(scope)) cols.push({ label: '势力', sortKey: 'force' });
+    cols.push(
+      { label: '城池', sortKey: 'homeCity' },
+      { label: '年龄', sortKey: 'age' },
+      { label: '忠诚', sortKey: 'loyalty' },
+      { label: '所在', sortKey: 'location' },
+    );
+    return cols;
+  }
   if (activeTab === '能力') return [
     { label: '武将', sortKey: 'name' },
     { label: '统帅', sortKey: 'leadership' },
@@ -175,11 +190,22 @@ function columnsForTab(activeTab: OfficerListTab): OfficerColumn[] {
   ];
 }
 
-function renderOfficerCells(officer: Officer, state: GameState, activeTab: OfficerListTab) {
+function renderOfficerCells(officer: Officer, state: GameState, activeTab: OfficerListTab, scope: OfficerListDialogProps['scope']) {
   if (activeTab === '所属') {
+    if (scopeIsAll(scope)) {
+      return (
+        <>
+          <td>{ownershipText(officer, state)}</td>
+          <td>{homeCityText(officer, state)}</td>
+          {ageCell(officer, state)}
+          <td>{officerLoyalty(officer)}</td>
+          <td>{locationText(officer, state)}</td>
+        </>
+      );
+    }
     return (
       <>
-        <td>{ownershipText(officer, state)}</td>
+        <td>{homeCityText(officer, state)}</td>
         {ageCell(officer, state)}
         <td>{officerLoyalty(officer)}</td>
         <td>{locationText(officer, state)}</td>
@@ -241,7 +267,8 @@ function defaultOfficerCompare(left: Officer, right: Officer) {
 function sortValue(officer: Officer, state: GameState, sortKey: SortKey) {
   if (sortKey === 'name') return officer.name;
   if (sortKey === 'age') return officerAge(state, officer) ?? -1;
-  if (sortKey === 'owner') return ownershipText(officer, state);
+  if (sortKey === 'force') return ownershipText(officer, state);
+  if (sortKey === 'homeCity') return homeCityText(officer, state);
   if (sortKey === 'loyalty') return officerLoyalty(officer);
   if (sortKey === 'location') return locationText(officer, state);
   if (sortKey === 'skill') return officerSkillsText(officer);
@@ -286,7 +313,7 @@ export function OfficerListDialog({ scope = 'player', officerIds, onClose }: Off
         left.id.localeCompare(right.id);
     });
   }, [officerIds, scope, sort, state]);
-  const columns = columnsForTab(activeTab);
+  const columns = columnsForTab(activeTab, scope);
   const changeTab = (tab: OfficerListTab) => {
     setActiveTab(tab);
     setSort(null);
@@ -347,7 +374,7 @@ export function OfficerListDialog({ scope = 'player', officerIds, onClose }: Off
               {officers.map((officer) => (
                 <tr key={officer.id}>
                   <th scope="row">{officer.name}<OfficerHealthBadge officer={officer} /></th>
-                  {renderOfficerCells(officer, state, activeTab)}
+                  {renderOfficerCells(officer, state, activeTab, scope)}
                 </tr>
               ))}
             </tbody>

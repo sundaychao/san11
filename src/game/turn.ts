@@ -11,7 +11,7 @@ import { movementAllowanceBonus } from './skills/rules/movement';
 import { settleLoyaltyDrift } from './loyalty';
 import { settleCaptives } from './captives';
 import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
-import { settleLegionAutomation, marketTenDayIncome, farmMonthlyIncome, settlePlotConstruction, settleCityRangedAttack, isCityBlocked } from './innerAffairs';
+import { settleLegionAutomation, farmMonthlyIncome, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, CITY_GOLD_CAP, CITY_FOOD_CAP, cityTroopCap, DEFAULT_OFFICER_SALARY } from './innerAffairs';
 import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
 import { addOfficerMerit, MERIT_PER_MONTH, positionDefinition, rankDefinition, rankForCityCount, rankIndex } from './ranks';
 import { settleForceTurnStart } from './skills/rules/turn';
@@ -197,13 +197,15 @@ function settleRanksMeritSalaries(next: GameState) {
   }
   for (const officer of Object.values(next.officers)) {
     if (officer.forceId) addOfficerMerit(officer, MERIT_PER_MONTH);
-    if (!officer.forceId || !officer.positionId) continue;
-    const position = positionDefinition(officer.positionId);
-    if (!position) continue;
+    if (!officer.forceId) continue;
+    // 俸禄：只要该武将所属城（officer.cityId）归属其势力，就按月扣俸禄
+    // 无论该武将是在城内、带兵在外、在途或执行任务——从所属城结算
     const city = next.cities[officer.cityId];
-    if (city && city.ownerId === officer.forceId) {
-      city.gold = Math.max(0, city.gold - position.salary);
-    }
+    if (!city || city.ownerId !== officer.forceId) continue;
+    const salary = officer.positionId
+      ? (positionDefinition(officer.positionId)?.salary ?? DEFAULT_OFFICER_SALARY)
+      : DEFAULT_OFFICER_SALARY;
+    city.gold = Math.max(0, city.gold - salary);
   }
   for (const promotion of promotions) {
     next.logs.push({
@@ -243,15 +245,28 @@ export function settleMonth(state: GameState): GameState {
   for (const city of Object.values(next.cities)) {
     const blocked = city.ownerId ? isCityBlocked(next, city) : false;
     if (!blocked) {
-      const baseGold = city.commerce * 20 + city.population / 100;
-      city.gold += Math.round(baseGold * cityIncomeMultiplier(next, city.id, 'gold'));
+      // 城池资金月收入 = (基础人口税收 + 市场总收入) × 治安值 × 0.01
+      city.gold += Math.round(cityMonthlyGoldIncome(city) * cityIncomeMultiplier(next, city.id, 'gold'));
       if (shouldSettleQuarterFood) {
         const baseFood = city.agriculture * 60 + city.population / 40;
         city.food += Math.round(baseFood * cityIncomeMultiplier(next, city.id, 'food'));
       }
     }
-    city.population += Math.floor((city.population * 0.005 * city.order) / 100);
+    const popGrowth = Math.floor((city.population * 0.005 * city.order) / 100);
+    city.population += popGrowth;
+    // 城市/农村人口按各自占比同步增长（保持初始比例）
+    if (city.cityPopulation != null && city.ruralPopulation != null) {
+      const totalSplit = city.cityPopulation + city.ruralPopulation;
+      const cityShare = totalSplit > 0 ? Math.round(popGrowth * (city.cityPopulation / totalSplit)) : 0;
+      city.cityPopulation += cityShare;
+      city.ruralPopulation += popGrowth - cityShare;
+    }
     applyPossibleEvent(next, city);
+    // 应用城池金/粮/兵力容量上限
+    if (city.gold > CITY_GOLD_CAP) city.gold = CITY_GOLD_CAP;
+    if (city.food > CITY_FOOD_CAP) city.food = CITY_FOOD_CAP;
+    const troopCap = cityTroopCap(city);
+    if (city.troops > troopCap) city.troops = troopCap;
   }
   for (const forceId of FORCE_IDS) next.actionPoints[forceId] = BASE_TEN_DAY_ACTION_POINTS;
   for (const officer of Object.values(next.officers)) officer.acted = false;
@@ -496,10 +511,7 @@ export function settleTenDay(state: GameState): GameState {
 
   for (const city of Object.values(next.cities)) {
     settleCitySupply(next, city);
-    // 市场设施每旬产出金钱（被封锁的城池无收入）
-    if (city.ownerId && !isCityBlocked(next, city)) {
-      city.gold += marketTenDayIncome(city);
-    }
+    // 市场/基础收入统一在每月结算（settleMonth）按新公式计入，此旬不再单独产出
   }
   for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
   applyGroundFireDamageToUnits(next, 'ten-day-fire');

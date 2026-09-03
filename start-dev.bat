@@ -15,7 +15,6 @@ start "SAN11 Frontend" cmd /k "npm.cmd run dev -- --host 127.0.0.1 --port 5174"
 
 echo.
 echo Two command windows have been opened. Close those windows to stop the services.
-echo Opening the frontend page...
-timeout /t 3 /nobreak >nul
-start "" "http://127.0.0.1:5174"
+echo Frontend: http://127.0.0.1:5174
+
 endlocal

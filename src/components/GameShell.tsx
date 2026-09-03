@@ -7,6 +7,7 @@ import type { GridCoord } from '../game/battle/grid';
 import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticFacilityTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
 import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { canBuildPlotAtCoord, constructTenDaysFor, hasEnemyUnitsNear, isPlotOccupiedByOtherCity, PLOT_GOLD_COST, PLOT_LABELS, startBuildCityPlot, type PlotType } from '../game/innerAffairs';
+import { ownCityAt } from '../game/battle/movementRules';
 import {
   clearEditor,
   createEditorState,
@@ -141,6 +142,11 @@ export function GameShell() {
     | { kind: 'facility'; facilityId: string; label: string; position: { x: number; y: number } }
     | null
   >(null);
+  /** 回城确认弹窗（部队点击本方城池后弹出） */
+  const [returnCityConfirm, setReturnCityConfirm] = useState<
+    | { unitId: string; coord: GridCoord; label: string; position: { x: number; y: number } }
+    | null
+  >(null);
   const [mapContextMenu, setMapContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [showGlobalIntel, setShowGlobalIntel] = useState(false);
   const [showMapIntelOptions, setShowMapIntelOptions] = useState(false);
@@ -160,6 +166,7 @@ export function GameShell() {
   const facilityContextMenuRef = useRef<HTMLElement>(null);
   const plotContextMenuRef = useRef<HTMLElement>(null);
   const cancelConfirmRef = useRef<HTMLElement>(null);
+  const returnCityConfirmRef = useRef<HTMLElement>(null);
   const uploadedMapUrlRef = useRef<string | null>(null);
   const unitHoverCloseTimerRef = useRef<number | null>(null);
   const canOperateCurrentTurn = !state || state.turnForceId === state.playerForceId;
@@ -609,8 +616,14 @@ export function GameShell() {
     setTargetingUnitStrategy(null);
     setTargetingFacility(null);
     setTargetingRepair(null);
+    // 目标为本方城池格 → 弹出「是/否」回城确认框
+    if (state && ownCityAt(state, state.playerForceId, coord)) {
+      const city = ownCityAt(state, state.playerForceId, coord)!;
+      setReturnCityConfirm({ unitId: selectedUnitId, coord, label: city.name, position });
+      return;
+    }
     setUnitCommandMenu({ unitId: selectedUnitId, position, destination: coord });
-  }, [canOperateCurrentTurn, moveTargets, selectedUnitId]);
+  }, [canOperateCurrentTurn, emitAudioEvent, moveUnit, moveTargets, selectedUnitId, state]);
 
   const beginPendingDeployAction = useCallback(() => {
     if (!pendingDeployCommand || !pendingDeployPreview) return null;
@@ -1063,13 +1076,33 @@ export function GameShell() {
     setCancelConfirm(null);
   }, [emitAudioEvent]);
 
+  /** 确认回城：执行 moveUnit 并关闭确认弹窗 */
+  const confirmReturnCity = useCallback(() => {
+    if (!returnCityConfirm) return;
+    emitAudioEvent({ type: 'unit-moved' });
+    try {
+      moveUnit(returnCityConfirm.unitId, returnCityConfirm.coord);
+      setSelectedUnitId(null);
+    } catch (error) {
+      console.warn('回城失败:', error);
+    }
+    setReturnCityConfirm(null);
+  }, [emitAudioEvent, moveUnit, returnCityConfirm]);
+
+  /** 取消回城 */
+  const dismissReturnCityConfirm = useCallback(() => {
+    emitAudioEvent({ type: 'menu-left-click' });
+    setReturnCityConfirm(null);
+  }, [emitAudioEvent]);
+
   const openMapContextMenu = useCallback((position: { x: number; y: number }) => {
     // 撤销菜单/确认弹窗打开时，右键空白处仅关闭它们，不弹地图主菜单（与城池菜单行为一致）
-    if (facilityContextMenu || plotContextMenu || cancelConfirm) {
+    if (facilityContextMenu || plotContextMenu || cancelConfirm || returnCityConfirm) {
       emitAudioEvent({ type: 'menu-right-click' });
       setFacilityContextMenu(null);
       setPlotContextMenu(null);
       setCancelConfirm(null);
+      setReturnCityConfirm(null);
       return;
     }
     if (unitCommandMenu || unitTacticMenu || unitStrategyMenu || unitFacilityMenu) {
@@ -1132,7 +1165,7 @@ export function GameShell() {
     setTargetingRepair(null);
     setShowMapIntelOptions(false);
     setMapContextMenu(position);
-  }, [cancelConfirm, cityMenu, deployCityId, editorState, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, plotContextMenu, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
+  }, [cancelConfirm, cityMenu, deployCityId, editorState, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, plotContextMenu, returnCityConfirm, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
 
   const proceedTenDayFromMap = useCallback(() => {
     setMapContextMenu(null);
@@ -1340,6 +1373,22 @@ export function GameShell() {
     document.addEventListener('mousedown', closeOnLeftClickOutside);
     return () => document.removeEventListener('mousedown', closeOnLeftClickOutside);
   }, [cancelConfirm]);
+
+  useEffect(() => {
+    if (!returnCityConfirm) return undefined;
+    const closeOnLeftClickOutside = (event: globalThis.MouseEvent) => {
+      if (event.button !== 0) return;
+      if (returnCityConfirmRef.current?.contains(event.target as Node)) return;
+      setReturnCityConfirm(null);
+    };
+
+    // 弹窗在 pointerdown 中打开（早于 mousedown），延迟挂监听避免同一次点击立即关闭
+    const timer = window.setTimeout(() => document.addEventListener('mousedown', closeOnLeftClickOutside), 0);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('mousedown', closeOnLeftClickOutside);
+    };
+  }, [returnCityConfirm]);
 
   useEffect(() => {
     if (!unitCommandMenu) return undefined;
@@ -1769,6 +1818,33 @@ export function GameShell() {
               >
                 {plotEnemyNear ? '敌近无法撤销' : `撤销${plotLabel}`}
               </button>
+            </div>
+          </nav>
+        );
+      })()}
+      {returnCityConfirm && (() => {
+        const style = {
+          left: Math.max(8, Math.min(returnCityConfirm.position.x, window.innerWidth - 160)),
+          top: Math.max(8, Math.min(returnCityConfirm.position.y, window.innerHeight - 140)),
+        } as CSSProperties;
+        return (
+          <nav
+            ref={returnCityConfirmRef}
+            className="city-command-menu tool-panel"
+            data-testid="return-city-confirm-menu"
+            style={style}
+            aria-label="回城确认"
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              emitAudioEvent({ type: 'menu-right-click' });
+              setReturnCityConfirm(null);
+            }}
+          >
+            <div className="city-command-secondary">
+              <div className="city-command-menu-title">是否进入{returnCityConfirm.label}？</div>
+              <button type="button" data-testid="return-city-confirm-yes" onClick={confirmReturnCity}>是</button>
+              <button type="button" data-testid="return-city-confirm-no" onClick={dismissReturnCityConfirm}>否</button>
             </div>
           </nav>
         );

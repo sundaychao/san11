@@ -1,0 +1,322 @@
+﻿
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90mD:/MyProjects/san11[39m
+
+ [31m❯[39m [30m[42m client [49m[39m src/game/innerAffairs-plots.test.ts [2m([22m[2m7 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 125[2mms[22m[39m
+     [32m✓[39m 人口跌破大城市阈值时不截断地格（已建设施不消失）[32m 32[2mms[22m[39m
+[31m     [31m×[31m 人口涨过大城市阈值时不新增无坐标地格[39m[32m 18[2mms[22m[39m
+[31m     [31m×[31m 剧本创建时按城市大小分配地格数量[39m[32m 19[2mms[22m[39m
+     [32m✓[39m 开局按规模设置城市人口占比（大城20%、中城约17.5%），且城乡人口之和等于总人口[32m 14[2mms[22m[39m
+     [32m✓[39m 基础人口税收 = √总人口（100万 → 每月1000）[32m 12[2mms[22m[39m
+     [32m✓[39m 市场总收入 = 100×市场数×造币厂1.5×人口修正（修正0.5~1.5）[32m 15[2mms[22m[39m
+     [32m✓[39m 城池资金月收入 = (基础人口税收+市场总收入)×治安×0.01[32m 11[2mms[22m[39m
+ [31m❯[39m [30m[42m client [49m[39m src/game/turn.test.ts [2m([22m[2m35 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[33m 2060[2mms[22m[39m
+     [32m✓[39m settles monthly gold and restores monthly actions without monthly food income[32m 42[2mms[22m[39m
+     [32m✓[39m adds city food only when entering a quarter-start month[32m 41[2mms[22m[39m
+     [32m✓[39m multiplies generated city income once and stops after the resident transfers[32m 65[2mms[22m[39m
+     [32m✓[39m counts a 米道 production task, does not stack duplicates, and multiplies only quarterly base food[32m 37[2mms[22m[39m
+     [32m✓[39m does not multiply existing food outside the quarterly income boundary[32m 35[2mms[22m[39m
+     [32m✓[39m rounds skilled gold income only after applying the multiplier[32m 40[2mms[22m[39m
+     [32m✓[39m rounds skilled quarterly food income only after applying the multiplier[32m 33[2mms[22m[39m
+[31m     [31m×[31m preserves unskilled settlement values and RNG results for the same seed[39m[32m 41[2mms[22m[39m
+     [32m✓[39m replays the same events from the same game state[32m 69[2mms[22m[39m
+     [32m✓[39m finishes after settling month 24[32m 32[2mms[22m[39m
+     [32m✓[39m does not mutate the previous month[32m 108[2mms[22m[39m
+     [32m✓[39m clears previous battle damage reports when advancing the month[32m 34[2mms[22m[39m
+     [32m✓[39m keeps a completing same-city 米道 production officer as the exact quarterly income source[32m 63[2mms[22m[39m
+     [32m✓[39m clears previous battle reports when advancing the ten-day turn[32m 38[2mms[22m[39m
+     [32m✓[39m consumes city food in proportion to garrison size[32m 35[2mms[22m[39m
+     [32m✓[39m consumes field unit food in proportion to unit size[32m 33[2mms[22m[39m
+     [32m✓[39m ticks down unit plot statuses each ten-day[32m 37[2mms[22m[39m
+     [32m✓[39m restores a three-turn confused unit one turn at a time[32m 116[2mms[22m[39m
+     [32m✓[39m records arrow tower automatic damage reports when entering a new ten-day turn[32m 44[2mms[22m[39m
+     [32m✓[39m damages units that remain on burning ground when entering a new ten-day turn[32m 36[2mms[22m[39m
+     [32m✓[39m ticks down and removes burning ground within its remaining ten-day duration[32m 32[2mms[22m[39m
+     [32m✓[39m damages facilities that remain on burning ground when entering a new ten-day turn[32m 32[2mms[22m[39m
+     [32m✓[39m fires only the current player force arrow tower when entering a new ten-day turn[32m 43[2mms[22m[39m
+     [32m✓[39m completes special armament production after one month[32m 144[2mms[22m[39m
+     [32m✓[39m never lets city food become negative during supply consumption[32m 41[2mms[22m[39m
+     [32m✓[39m restores action points each ten-day and carries over half of the unused points[32m 37[2mms[22m[39m
+     [32m✓[39m carries action points across the month boundary into the next first ten-day[32m 66[2mms[22m[39m
+     [32m✓[39m advances personnel transfers and arrives after the required ten-days[32m 148[2mms[22m[39m
+     [32m✓[39m completes tech research and raises the force branch level[32m 36[2mms[22m[39m
+     [32m✓[39m keeps a mid-progress research task running across ten-days[32m 37[2mms[22m[39m
+[31m     [31m×[31m accumulates techP from city population each ten-day[39m[32m 34[2mms[22m[39m
+     [32m✓[39m regenerates unit energy faster and beyond 100 with military techs[32m 41[2mms[22m[39m
+     [32m✓[39m raises city order each ten-day with the benevolent-rule civil tech[32m 37[2mms[22m[39m
+     [32m✓[39m completes ability research after its months and lets cultivation raise an officer[32m 198[2mms[22m[39m
+     [32m✓[39m grants a learned skill to an officer after cultivating a researched skill node[32m 152[2mms[22m[39m
+node.exe : [90mstderr[2m | src/components/StrategicMap.test.tsx[2m > [22m[2mStrategicMap[2m > [22m[2mkeeps the 
+city menu open after a real click sequence on an owned footprint square
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([90mstderr[2m...ootprint square:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[22m[39mEncountered two children with the same key, `city-attack-range-92-120`. Keys should be unique so that compone
+nts maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the be
+havior is unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-92-119`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-92-121`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-91-119`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-91-120`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-93-119`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-93-120`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-92-118`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-91-118`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-93-118`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-92-122`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-91-121`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-93-121`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-90-119`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-90-120`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-90-121`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-94-119`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-94-120`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-94-121`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+
+[90mstderr[2m | src/components/StrategicMap.test.tsx[2m > [22m[2mStrategicMap[2m > [22m[2mkeeps the city menu o
+pen after a real click sequence on an owned footprint square
+[22m[39mEncountered two children with the same key, `city-attack-range-92-120`. Keys should be unique so that compone
+nts maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the be
+havior is unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-92-119`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-92-121`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-91-119`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-91-120`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-93-119`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-93-120`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-92-118`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-91-118`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-93-118`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-92-122`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-91-121`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-93-121`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-90-119`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-90-120`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-90-121`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-94-119`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-94-120`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+Encountered two children with the same key, `city-attack-range-94-121`. Keys should be unique so that components mainta
+in their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is 
+unsupported and could change in a future version.
+
+ [31m❯[39m [30m[42m client [49m[39m src/components/StrategicMap.test.tsx [2m([22m[2m38 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 11465[2mms[22m[39m
+     [33m[2m✓[22m[39m selects a city from its map marker [33m 541[2mms[22m[39m
+     [32m✓[39m selects a city and opens the same menu from any cell in its seven-cell footprint[32m 211[2mms[22m[39m
+     [32m✓[39m opens a city menu when the underlying map cell is clicked inside its seven-cell footprint[32m 211[2mms[22m[39m
+     [32m✓[39m represents a city with seven grid cells and no standalone fort icon[32m 160[2mms[22m[39m
+     [33m[2m✓[22m[39m opens the city menu from every rendered city footprint square [33m 448[2mms[22m[39m
+     [32m✓[39m keeps the city menu open after a real click sequence on an owned footprint square[32m 217[2mms[22m[39m
+     [32m✓[39m zooms the image and city layer together[32m 127[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps zoom within the supported range [33m 571[2mms[22m[39m
+     [33m[2m✓[22m[39m shows the hovered grid coordinate at the bottom center of the interface [33m 1044[2mms[22m[39m
+     [32m✓[39m shows coordinates and terrain while hovering the normal map grid[32m 220[2mms[22m[39m
+     [32m✓[39m marks unfinished facilities as under construction without showing their effect range[32m 193[2mms[22m[39m
+     [32m✓[39m darkens map cells occupied by facilities[32m 115[2mms[22m[39m
+     [32m✓[39m uses the owning force color for support facility backgrounds[32m 127[2mms[22m[39m
+     [32m✓[39m shows arrow tower automatic damage numbers from battle reports[32m 155[2mms[22m[39m
+     [32m✓[39m renders critical damage and failed strategy feedback at their report coordinates[32m 166[2mms[22m[39m
+     [32m✓[39m stacks two fire-arrow damage reports at the same ordinary grid position[32m 166[2mms[22m[39m
+     [32m✓[39m keeps top-row critical labels separated while preserving the normal damage baseline[32m 142[2mms[22m[39m
+     [32m✓[39m shows facility status while hovering a facility marker[32m 140[2mms[22m[39m
+     [33m[2m✓[22m[39m opens a right-click menu for own facilities and dismantles them [33m 400[2mms[22m[39m
+     [33m[2m✓[22m[39m marks a player unit with remaining movement as not acted until it moves [33m 1199[2mms[22m[39m
+     [33m[2m✓[22m[39m blocks city and unit command entry while another player is active [33m 546[2mms[22m[39m
+     [32m✓[39m shows the map proceed command as disabled while another player is active[32m 131[2mms[22m[39m
+     [33m[2m✓[22m[39m does not mark or open commands for a confused player unit [33m 368[2mms[22m[39m
+     [33m[2m✓[22m[39m shows the active opponent unit ready badge while another player is active [33m 545[2mms[22m[39m
+     [33m[2m✓[22m[39m shows unit information while hovering a field unit and hides it after leaving [33m 686[2mms[22m[39m
+     [33m[2m✓[22m[39m marks units with distinct force ids and force colors [33m 341[2mms[22m[39m
+     [33m[2m✓[22m[39m shows range overlays while hovering arrow towers, drums, music towers, or fortresses [33m 304[2mms[22m[39m
+     [33m[2m✓[22m[39m hides unit information when the hovered unit marker is clicked [33m 331[2mms[22m[39m
+     [33m[2m✓[22m[39m hides unit information when the hovered unit marker is right clicked [33m 364[2mms[22m[39m
+     [32m✓[39m shows city information beside a hovered city and hides it after leaving[32m 171[2mms[22m[39m
+     [32m✓[39m hides city information when the hovered city marker is clicked[32m 156[2mms[22m[39m
+     [32m✓[39m hides city information when the hovered city marker is right clicked[32m 246[2mms[22m[39m
+     [32m✓[39m places city markers from their grid center instead of the old map percentage[32m 170[2mms[22m[39m
+     [32m✓[39m renders the mobile duel map with its own 16 by 33 grid dimensions[32m 97[2mms[22m[39m
+     [32m✓[39m puts the local city at the bottom for the top-side online player[32m 86[2mms[22m[39m
+     [32m✓[39m keeps all seven city cells aligned with the rotated guest grid[32m 73[2mms[22m[39m
+[31m     [31m×[31m shows troop and population values next to the city name on map markers[39m[32m 120[2mms[22m[39m
+     [32m✓[39m shows top-level management command categories for an owned city[32m 175[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 5 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m client [49m[39m src/components/StrategicMap.test.tsx[2m > [22mStrategicMap[2m
+ > [22mshows troop and population values next to the city name on map markers
+[31m[1mError[22m: [2mexpect([22m[31melement[31m[2m).toHaveTextContent()[22m
+
+Expected element to have text content:
+[32m  95000[31m
+Received:
+[31m  475000[31m[39m
+[36m [2m❯[22m src/components/StrategicMap.test.tsx:[2m852:76[22m[39m
+    [90m850|[39m     expect(within(jianglingMarker!).getByTestId('city-marker-troops'))…
+    [90m851|[39m     expect(within(jianglingMarker!).getByTestId('city-marker-stat-divi…
+    [90m852|[39m     expect(within(jianglingMarker!).getByTestId('city-marker-populatio…
+    [90m   |[39m                                                                            [31m^[39m
+    [90m853|[39m     expect(jianglingMarker!.querySelector('.city-marker-stat i')).not.…
+    [90m854|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m client [49m[39m src/game/innerAffairs-plots.test.ts[2m > [22m建设用地数量在剧本创建时固定，不随
+人口波动[2m > [22m人口涨过大城市阈值时不新增无坐标地格
+[31m[1mTypeError[22m: Cannot read properties of undefined (reading 'plots')[39m
+[36m [2m❯[22m cityPlots src/game/innerAffairs.ts:[2m360:13[22m[39m
+    [90m358|[39m  *  涨过阈值补足的地格没有坐标、地图上无法选中建设。 */[39m
+    [90m359|[39m [35mexport[39m [35mfunction[39m [34mcityPlots[39m(city[33m:[39m [33mCity[39m) {
+    [90m360|[39m   [35mif[39m ([33m![39mcity[33m.[39mplots) city[33m.[39mplots [33m=[39m [][33m;[39m
+    [90m   |[39m             [31m^[39m
+    [90m361|[39m   [35mreturn[39m city[33m.[39mplots[33m;[39m
+    [90m362|[39m }
+[90m [2m❯[22m src/game/innerAffairs-plots.test.ts:[2m18:20[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m client [49m[39m src/game/innerAffairs-plots.test.ts[2m > [22m建设用地数量在剧本创建时固定，不随
+人口波动[2m > [22m剧本创建时按城市大小分配地格数量
+[31m[1mAssertionError[22m: expected 9 to be 12 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 12[39m
+[31m+ 9[39m
+
+[36m [2m❯[22m src/game/innerAffairs-plots.test.ts:[2m33:28[22m[39m
+    [90m 31|[39m         : city.population >= 50_000 ? PLOT_COUNT_BY_SIZE.medium : PLOT…
+    [90m 32|[39m       [35mconst[39m plots [33m=[39m [34mcityPlots[39m(city)[33m;[39m
+    [90m 33|[39m       [34mexpect[39m(plots[33m.[39mlength)[33m.[39m[34mtoBe[39m(expected)[33m;[39m
+    [90m   |[39m                            [31m^[39m
+    [90m 34|[39m       expect(plots.every((p) => p.q != null && p.r != null)).toBe(true…
+    [90m 35|[39m     }
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m client [49m[39m src/game/turn.test.ts[2m > [22mmonthly settlement[2m > [22mp
+reserves unskilled settlement values and RNG results for the same seed
+[31m[1mAssertionError[22m: expected { id: 'changsha', name: '长沙', …(22) } to match object { gold: 7507, food: 36000,
+ …(3) }
+(26 matching properties omitted from actual)[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[2m    "food": 36000,[22m
+[32m-   "gold": 7507,[39m
+[31m+   "gold": 7824,[39m
+[2m    "order": 82,[22m
+[32m-   "population": 98401,[39m
+[31m+   "population": 492009,[39m
+[2m    "troops": 13200,[22m
+[2m  }[22m
+
+[36m [2m❯[22m src/game/turn.test.ts:[2m126:34[22m[39m
+    [90m124|[39m     ])[33m;[39m
+    [90m125|[39m     [90m// 长沙7300 + 257（√98000≈313 × 治安82 × 0.01，无市场） - 俸禄[39m
+    [90m126|[39m     [34mexpect[39m(next[33m.[39mcities[33m.[39mchangsha)[33m.[39m[34mtoMatchObject[39m({
+    [90m   |[39m                                  [31m^[39m
+    [90m127|[39m       gold: 7557 - cityMonthlyOfficerSalary(state, state.cities.changs…
+    [90m128|[39m     })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m client [49m[39m src/game/turn.test.ts[2m > [22mten-day settlement[2m > [22ma
+ccumulates techP from city population each ten-day
+[31m[1mAssertionError[22m: expected 224 to be 44 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 44[39m
+[31m+ 224[39m
+
+[36m [2m❯[22m src/game/turn.test.ts:[2m595:35[22m[39m
+    [90m593|[39m     [35mconst[39m next [33m=[39m [34msettleTenDay[39m(state)[33m;[39m
+    [90m594|[39m
+    [90m595|[39m     expect(next.forces.liu.techP).toBe(state.forces.liu.techP + expect…
+    [90m   |[39m                                   [31m^[39m
+    [90m596|[39m   })[33m;[39m
+    [90m597|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m3 failed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[31m5 failed[39m[22m[2m | [22m[1m[32m75 passed[39m[22m[90m (80)[39m
+[2m   Start at [22m 17:44:40
+[2m   Duration [22m 14.08s[2m (transform 2.87s, setup 438ms, import 3.76s, tests 13.65s, environment 2.11s)[22m
+

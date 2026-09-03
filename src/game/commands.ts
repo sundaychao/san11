@@ -139,11 +139,16 @@ export function transferDuration(source: City, target: City) {
   return Math.max(1, Math.ceil(transferDistance(source, target) / 10));
 }
 
-function commandGoldCost(command: GameCommand) {
+/** 巡查费用：每 100,000 人口 50 金 */
+export function patrolGoldCost(city: City): number {
+  return Math.max(1, Math.ceil((city.population / 100_000) * 50));
+}
+
+function commandGoldCost(command: GameCommand, city?: City) {
   switch (command.type) {
     case 'recruit': return 800;
     case 'produceArmament': return ARMAMENT_GOLD_COST;
-    case 'patrol': return 300;
+    case 'patrol': return city ? patrolGoldCost(city) : 300;
     case 'talent': return 500;
     case 'abilityResearch': return ABILITY_RESEARCH_GOLD;
     case 'reward': return REWARD_GOLD_COST;
@@ -407,7 +412,7 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
   }
   if (!city) return [...new Set(errors)];
 
-  const goldCost = commandGoldCost(command);
+  const goldCost = commandGoldCost(command, city);
   if (city.gold < goldCost) errors.push(`资金不足 ${goldCost}`);
   if (command.type === 'recruit') {
     if (!hasPlotFacility(city, 'barracks')) errors.push('需先建设兵舍才能征兵');
@@ -672,7 +677,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     }
     case 'patrol': {
       const officer = next.officers[command.officerId];
-      city.gold -= 300;
+      city.gold -= patrolGoldCost(city);
       const gain = 4 + Math.floor(officer.stats.charisma / 20);
       city.order = clamp(city.order + gain, 0, 100);
       message = `${officer.name}巡察${city.name}，安抚百姓`;

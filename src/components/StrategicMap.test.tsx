@@ -849,7 +849,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
 
     expect(within(jianglingMarker!).getByTestId('city-marker-troops')).toHaveTextContent('13500');
     expect(within(jianglingMarker!).getByTestId('city-marker-stat-divider')).toBeVisible();
-    expect(within(jianglingMarker!).getByTestId('city-marker-population')).toHaveTextContent('95000');
+    expect(within(jianglingMarker!).getByTestId('city-marker-population')).toHaveTextContent('475000');
     expect(jianglingMarker!.querySelector('.city-marker-stat i')).not.toBeInTheDocument();
   });
 

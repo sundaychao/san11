@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Coins, FlaskConical, Gem, GraduationCap, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
+﻿import { ChevronDown, ChevronUp, Coins, FlaskConical, Gem, GraduationCap, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
 import { useState } from 'react';
 import { COMMAND_AP, OFFICER_COMMANDS, cityAvailableOfficers } from '../game/commands';
 import { hasPlotFacility } from '../game/innerAffairs';
@@ -91,7 +91,7 @@ export function CityPanel({ onCommand, onOpenCultivatePicker }: CityPanelProps) 
       <section className="city-progress" aria-label="城市发展">
         {[
           ['治安', city.order],
-          ['训练', city.training],
+          ['士气', city.training],
         ].map(([label, value]) => (
           <div key={label}>
             <span>{label}</span><strong>{value}</strong>

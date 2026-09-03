@@ -755,6 +755,11 @@ export function StrategicMap({
                   onPointerDown={(event) => {
                     if (!gameCity || event.button !== 0) return;
                     event.stopPropagation();
+                    // 选中部队时点击本方城池 footprint 内的可达格 → 回城，不弹城池菜单
+                    if (selectedUnitId && moveTargetKeys.has(`${coord.q},${coord.r}`)) {
+                      onMoveTargetSelect?.({ q: coord.q, r: coord.r }, { x: event.clientX + 12, y: event.clientY + 4 });
+                      return;
+                    }
                     selectCityFromMap(gameCity.id, { x: event.clientX + 12, y: event.clientY });
                   }}
                   onContextMenu={(event) => {
@@ -917,6 +922,15 @@ export function StrategicMap({
                   onCityInfoMenu?.(city.id, { x: event.clientX + 12, y: event.clientY });
                 }}
                 onClick={(event) => {
+                  // 选中部队时点本方城池：优先回城（footprint 内任一可达格，含中心格）
+                  if (selectedUnitId) {
+                    const footprint = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR });
+                    const reachable = footprint.find((coord) => moveTargetKeys.has(`${coord.q},${coord.r}`));
+                    if (reachable) {
+                      onMoveTargetSelect?.(reachable, { x: event.clientX + 12, y: event.clientY + 4 });
+                      return;
+                    }
+                  }
                   selectCityFromMap(city.id, { x: event.clientX + 12, y: event.clientY });
                 }}
                 onPointerEnter={(event) => onCityHover?.(city.id, { x: event.clientX + 57, y: event.clientY + 47 })}
