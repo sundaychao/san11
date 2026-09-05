@@ -1,5 +1,6 @@
 import { DEFAULT_ONLINE_SERVER_URL } from '../../network/socketClient';
 import type { AuthSessionView, OnlineRoomListItem, OnlineRoomView } from '../network/protocol';
+import type { RoomMap } from '../network/session';
 import type { ForceId } from '../types';
 
 export interface OnlineClientState {
@@ -10,6 +11,7 @@ export interface OnlineClientState {
   serverUrl: string;
   roomId: string | null;
   phase: OnlineRoomView['phase'] | null;
+  map: RoomMap;
   hostPlayerId: string | null;
   playerId: string | null;
   revision: number;
@@ -39,6 +41,7 @@ export function createOnlineClientState(input: { resumingRoom: boolean; serverUr
     serverUrl: input.serverUrl ?? DEFAULT_ONLINE_SERVER_URL,
     roomId: null,
     phase: null,
+    map: 'small',
     hostPlayerId: null,
     playerId: null,
     revision: 0,

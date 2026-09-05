@@ -17,6 +17,8 @@ export interface RankDef {
 }
 
 export const BASE_OFFICER_TROOP_CAP = 7000;
+/** 武将开局初始功绩 */
+export const INITIAL_OFFICER_MERIT = 4000;
 /** 执行一次城市命令增加的功绩 */
 export const MERIT_PER_COMMAND = 20;
 /** 每月所有武将被动增加的功绩 */
@@ -81,9 +83,10 @@ interface PositionTier {
 }
 
 // 原版官职表（按功绩/所需爵位分层；每层含文官与将军两组）
+// 偏离原版：最低一档功绩要求为 0，无需功绩即可任免
 const POSITION_TIERS: PositionTier[] = [
-  { merit: 4000, salary: 15, rankNeeded: 'zhou-cishi', troopCommand: 6000, statBonus: { politics: 1 }, names: ['主簿', '谏议大夫', '侍郎', '中郎'] },
-  { merit: 4000, salary: 15, rankNeeded: 'zhou-cishi', troopCommand: 7000, statBonus: null, names: ['忠义校尉', '昭信校尉', '儒林校尉', '建议校尉'] },
+  { merit: 0, salary: 15, rankNeeded: 'zhou-cishi', troopCommand: 6000, statBonus: { politics: 1 }, names: ['主簿', '谏议大夫', '侍郎', '中郎'] },
+  { merit: 0, salary: 15, rankNeeded: 'zhou-cishi', troopCommand: 7000, statBonus: null, names: ['忠义校尉', '昭信校尉', '儒林校尉', '建议校尉'] },
   { merit: 5000, salary: 10, rankNeeded: 'zhou-cishi', troopCommand: 5000, statBonus: { politics: 1 }, names: ['左仆射', '右仆射', '典农校尉', '议郎'] },
   { merit: 6000, salary: 10, rankNeeded: 'zhou-cishi', troopCommand: 7000, statBonus: null, names: ['奋威校尉', '长水校尉', '破贼校尉', '武卫校尉'] },
   { merit: 8000, salary: 20, rankNeeded: 'zhou-mu', troopCommand: 6000, statBonus: { politics: 2 }, names: ['太乐令', '大仓令', '武库令', '卫士令'] },
@@ -120,9 +123,9 @@ export function positionDefinition(positionId: string | undefined): PositionDef 
   return positionId ? POSITIONS.find((position) => position.id === positionId) ?? null : null;
 }
 
-/** 带默认值的功绩读取 */
+/** 带默认值的功绩读取（未显式记录时按初始功绩计） */
 export function officerMerit(officer: Officer): number {
-  return officer.merit ?? 0;
+  return officer.merit ?? INITIAL_OFFICER_MERIT;
 }
 
 /** 增加功绩（不设上限，供命令/时间结算调用） */
@@ -130,8 +133,29 @@ export function addOfficerMerit(officer: Officer, amount: number): void {
   officer.merit = Math.max(0, officerMerit(officer) + amount);
 }
 
+/**
+ * 武将是否正带部队在城外：随军（location.kind === 'unit'）且所在部队未驻于本势力城市格。
+ * 带部队在城外的武将不可任免官职（需部队驻于友城格内方可在城中除授）。
+ */
+export function officerIsOnCampaign(state: GameState, officerId: string): boolean {
+  const officer = state.officers[officerId];
+  if (!officer) return false;
+  const loc = officer.location;
+  if (loc.kind !== 'unit') return false;
+  const unit = state.units[loc.unitId];
+  if (!unit) return false;
+  return !Object.values(state.cities).some(
+    (city) => city.ownerId === officer.forceId && city.gridQ === unit.q && city.gridR === unit.r,
+  );
+}
+
 export function forceRankOf(state: GameState, forceId: ForceId): RankId {
-  return state.forces[forceId]?.rank ?? 'none';
+  const force = state.forces[forceId];
+  if (!force) return 'none';
+  if (force.rank) return force.rank;
+  // 兼容开局未结算/旧存档：爵位缺失时按城市数量推算，避免全体官职因"无爵"被锁
+  const cityCount = Object.values(state.cities).filter((city) => city.ownerId === forceId).length;
+  return rankForCityCount(cityCount).id;
 }
 
 /**

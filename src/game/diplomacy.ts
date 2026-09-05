@@ -70,6 +70,50 @@ export function compatDifference(state: GameState, a: ForceId, b: ForceId): numb
   return Math.min(diff, 150 - diff);
 }
 
+/** 两个相性数值间的圆环最短距离（0~75） */
+export function circleCompatDiff(xingA: number, xingB: number): number {
+  const diff = Math.abs(xingA - xingB);
+  return Math.min(diff, 150 - diff);
+}
+
+/** 读取武将相性：武将无独立相性字段时沿用其势力相性 */
+export function affinityOf(state: GameState, officer: Officer): number {
+  const own = officer.xing;
+  if (typeof own === 'number') return own;
+  return officer.forceId ? forceXing(state, officer.forceId) : 0;
+}
+
+/** 相性差档位（映射原版三档），factor 用于掉忠/登庸修正 */
+export interface CompatTier {
+  key: 'close' | 'mid' | 'far';
+  label: string;
+  factor: number;
+}
+
+export function compatTierOf(diff: number): CompatTier {
+  if (diff <= 24) return { key: 'close', label: '同相', factor: 0.5 };
+  if (diff <= 49) return { key: 'mid', label: '中庸', factor: 1.0 };
+  return { key: 'far', label: '相克', factor: 1.5 };
+}
+
+/** 武将与其势力君主间的相性差与档位（在野/无君主时逐级退化） */
+export function officerCompatWithRuler(
+  state: GameState,
+  officer: Officer,
+  forceId: ForceId,
+): { diff: number; tier: CompatTier } {
+  const rulerId = state.forces[forceId]?.leaderId;
+  const ruler = rulerId ? state.officers[rulerId] : undefined;
+  const rulerXing = ruler ? affinityOf(state, ruler) : (rulerId ? forceXing(state, forceId) : forceXing(state, forceId));
+  const diff = circleCompatDiff(affinityOf(state, officer), rulerXing);
+  return { diff, tier: compatTierOf(diff) };
+}
+
+/** 亲爱/厌恶武将 id 集合（对跟对方没有筛选，返回名称由调用方映射） */
+export function likeAndHateIds(officer: Officer): { likes: string[]; hates: string[] } {
+  return { likes: officer.likes ?? [], hates: officer.hates ?? [] };
+}
+
 /** 亲疏系数 c：执行者与目标君主为义兄弟/配偶 → 1.5，否则 1.0 */
 function relationshipCoefficient(state: GameState, from: ForceId, to: ForceId, officer: Officer): number {
   const targetLeader = state.forces[to]?.leaderId;

@@ -1,5 +1,8 @@
 import { coordsWithinRange, gridKey, neighborsOf, ringCoordsWithinRange, sevenCellCityFootprint, type GridCoord } from './battle/grid';
 import { positionDefinition } from './ranks';
+import { armamentProductionTenDays, isDelayedArmament, produceArmamentYield } from './armaments';
+import type { TechBranchId } from './types';
+import { TECH_COSTS, TECH_BRANCHES, researchTenDays } from './techs';
 import type { ArmamentType, City, CityId, ForceId, GameState, GridCell, Legion, Officer, TerrainType } from './types';
 
 /** 本地 clamp，避免与 commands.ts 的循环依赖 */
@@ -253,13 +256,15 @@ export function cancelCityPlot(state: GameState, city: City, plotIndex: number):
     : plot.type !== 'empty'
       ? PLOT_LABELS[plot.type]
       : '';
-  // 撤销建设中的设施时，立即释放负责建设的武将
+  // 撤销建设中的设施时，立即释放负责建设的武将（1~3人）
   if (plot.constructing) {
-    const officer = state.officers[plot.constructing.officerId];
-    if (officer && officer.location.kind === 'task' && officer.location.task === 'construction') {
-      officer.location = { kind: 'city', cityId: city.id };
-      officer.cityId = city.id;
-      officer.acted = false;
+    for (const officerId of plot.constructing.officerIds) {
+      const officer = state.officers[officerId];
+      if (officer && officer.location.kind === 'task' && officer.location.task === 'construction') {
+        officer.location = { kind: 'city', cityId: city.id };
+        officer.cityId = city.id;
+        officer.acted = false;
+      }
     }
   }
   plot.constructing = undefined;
@@ -424,15 +429,45 @@ export function cityPlots(city: City) {
   return city.plots;
 }
 
-/** 建设耗时基数（旬） */
-export const CONSTRUCT_BASE_TEN_DAYS = 10;
-/** 建设最少耗时（旬） */
-export const CONSTRUCT_MIN_TEN_DAYS = 2;
-/** 建设武将政治值对耗时的影响系数：政治 100 → 减半时间 */
-export function constructTenDaysFor(politics: number): number {
-  // 政治 0 → CONSTRUCT_BASE (10旬)，政治 100 → 约 5 旬
-  const reduction = (politics / 100) * CONSTRUCT_BASE_TEN_DAYS * 0.5;
-  return Math.max(CONSTRUCT_MIN_TEN_DAYS, Math.round(CONSTRUCT_BASE_TEN_DAYS - reduction));
+/** 多人执行指令（建设/征兵/训练/巡查/兵装/科技研究）最多可选武将数 */
+export const COMMAND_OFFICER_MAX = 3;
+
+/** 建设综合政治力 = 最高政治 + 其余2人政治之和 ÷ 3（四舍五入，不足3人按0补位） */
+export function constructionPolitics(officers: Officer[]): number {
+  const sorted = officers.map((officer) => officer.stats.politics).sort((a, b) => b - a);
+  const rest = sorted.slice(1).reduce((sum, value) => sum + value, 0);
+  return Math.round((sorted[0] ?? 0) + rest / 3);
+}
+
+/** 每旬建设量 = 综合政治力 × 1.5，保底为最大耐久 ÷ 12 */
+export function constructionPerTenDays(politics: number): number {
+  return Math.max(politics * 1.5, PLOT_MAX_DURABILITY / 12);
+}
+
+/** 建设耗时（旬）= ⌈最大耐久 ÷ 每旬建设量⌉（至少1旬） */
+export function constructTenDaysForOfficers(officers: Officer[]): number {
+  const perTenDays = constructionPerTenDays(constructionPolitics(officers));
+  return Math.max(1, Math.ceil(PLOT_MAX_DURABILITY / perTenDays));
+}
+
+/** 征兵基础量 = 1000 + 魅力总和 × (治安+20) × 5 ÷ 100（魅力纯等权重加和） */
+export function recruitBaseYield(officers: Officer[], city: City): number {
+  const charismaSum = officers.reduce((sum, officer) => sum + officer.stats.charisma, 0);
+  return 1000 + (charismaSum * (city.order + 20) * 5) / 100;
+}
+
+/** 训练气力提升 = 【(武力总和 + 武力最大值) ÷ 基数】+ 3，基数 = 士兵数÷2000 + 20 */
+export function trainMoraleGain(officers: Officer[], troops: number): number {
+  const warSum = officers.reduce((sum, officer) => sum + officer.stats.war, 0);
+  const warMax = officers.reduce((max, officer) => Math.max(max, officer.stats.war), 0);
+  const base = troops / 2000 + 20;
+  return Math.floor((warSum + warMax) / base) + 3;
+}
+
+/** 巡查治安提升 = 【统率总和 ÷ 28】+ 2（统率纯等权重加和） */
+export function patrolOrderGain(officers: Officer[]): number {
+  const leadershipSum = officers.reduce((sum, officer) => sum + officer.stats.leadership, 0);
+  return Math.floor(leadershipSum / 28) + 2;
 }
 
 /** 从起始格 BFS 扩展，在候选集内选取互相邻接的最多 maxSize 个格子。 */
@@ -689,23 +724,28 @@ export function isPlotOccupiedByOtherCity(state: GameState, cityId: string, q: n
   );
 }
 
-/** 启动建设设施：扣金，设定建设中状态（不立即完成）。返回预计旬数 */
-export function startBuildCityPlot(city: City, plotIndex: number, facility: PlotType, officer: Officer): { tenDays: number; message: string } {
+/** 启动建设设施：扣金，设定建设中状态（不立即完成）。1~3名武将共同施工。返回预计旬数 */
+export function startBuildCityPlot(city: City, plotIndex: number, facility: PlotType, officers: Officer[]): { tenDays: number; message: string } {
   const plots = cityPlots(city);
   const plot = plots[plotIndex];
   if (!plot || !canBuildPlot(city, plotIndex)) throw new Error('该地格无法建设');
+  if (officers.length === 0) throw new Error('至少指派一名武将');
   city.gold = Math.max(0, city.gold - plotCost(facility));
-  const tenDays = constructTenDaysFor(officer.stats.politics);
+  const tenDays = constructTenDaysForOfficers(officers);
   plot.constructing = {
     facility,
-    officerId: officer.id,
+    officerIds: officers.map((officer) => officer.id),
     remainingTenDays: tenDays,
   };
   // 建设启动即拥有满耐久（建设中也可悬停查看耐久值）
   plot.durability = PLOT_MAX_DURABILITY;
   // 建设期间武将进入任务状态，整个工期被占用（无法执行其他命令）
-  officer.location = { kind: 'task', cityId: city.id, task: 'construction', facility, plotIndex, remainingTenDays: tenDays };
-  return { tenDays, message: `${officer.name}在${city.name}选定${PLOT_LABELS[facility]}建设，预计 ${tenDays} 旬完成（政治 ${officer.stats.politics}）` };
+  for (const officer of officers) {
+    officer.location = { kind: 'task', cityId: city.id, task: 'construction', facility, plotIndex, remainingTenDays: tenDays };
+  }
+  const names = officers.map((officer) => officer.name).join('、');
+  const politics = constructionPolitics(officers);
+  return { tenDays, message: `${names}在${city.name}选定${PLOT_LABELS[facility]}建设，预计 ${tenDays} 旬完成（综合政治 ${politics}）` };
 }
 
 /** 每旬推进所有城市地格建设进度。返回完成信息数组 */
@@ -719,18 +759,20 @@ export function settlePlotConstruction(state: GameState): string[] {
       plot.constructing.remainingTenDays -= 1;
       if (plot.constructing.remainingTenDays <= 0) {
         const facility = plot.constructing.facility;
-        const officerId = plot.constructing.officerId;
+        const officerIds = [...plot.constructing.officerIds];
         plot.constructing = undefined;
         plot.type = facility;
         plot.level = 1;
         plot.value = plotValueFor(1);
         plot.durability = PLOT_MAX_DURABILITY;
-        // 建设完成：释放武将回城（若仍处于建设任务状态）
-        const officer = state.officers[officerId];
-        if (officer && officer.location.kind === 'task' && officer.location.task === 'construction') {
-          officer.location = { kind: 'city', cityId: city.id };
-          officer.cityId = city.id;
-          officer.acted = false;
+        // 建设完成：释放全部建设武将回城（若仍处于建设任务状态）
+        for (const officerId of officerIds) {
+          const officer = state.officers[officerId];
+          if (officer && officer.location.kind === 'task' && officer.location.task === 'construction') {
+            officer.location = { kind: 'city', cityId: city.id };
+            officer.cityId = city.id;
+            officer.acted = false;
+          }
         }
         completed.push(`${city.name}的${PLOT_LABELS[facility]}建设完成`);
       }
@@ -740,8 +782,8 @@ export function settlePlotConstruction(state: GameState): string[] {
 }
 
 /** 旧兼容接口：同步完成 construction（用于直接建设）。当前实现为异步建设，此函数保留但调用 startBuildCityPlot 的同步完成路径（供测试/军团自动用） */
-export function buildCityPlot(state: GameState, city: City, plotIndex: number, facility: PlotType, officer: Officer): string {
-  const result = startBuildCityPlot(city, plotIndex, facility, officer);
+export function buildCityPlot(state: GameState, city: City, plotIndex: number, facility: PlotType, officers: Officer[]): string {
+  const result = startBuildCityPlot(city, plotIndex, facility, officers);
   // 同步立即完成（兼容旧调用处）
   const plots = cityPlots(city);
   const plot = plots[plotIndex];
@@ -753,13 +795,15 @@ export function buildCityPlot(state: GameState, city: City, plotIndex: number, f
     plot.constructing = undefined;
   }
   // 同步完成路径：武将无需占用工期，立即恢复待命
-  if (officer.location.kind === 'task' && officer.location.task === 'construction') {
-    officer.location = { kind: 'city', cityId: city.id };
-    officer.cityId = city.id;
-    officer.acted = false;
+  for (const officer of officers) {
+    if (officer.location.kind === 'task' && officer.location.task === 'construction') {
+      officer.location = { kind: 'city', cityId: city.id };
+      officer.cityId = city.id;
+      officer.acted = false;
+    }
   }
   void state;
-  return `${officer.name}在${city.name}修建了${PLOT_LABELS[facility]}`;
+  return `${officers.map((officer) => officer.name).join('、')}在${city.name}修建了${PLOT_LABELS[facility]}`;
 }
 
 /** 基础人口粮税（每季度）= 7 × √总人口（如500万总人口→7×√500000≈4949） */
@@ -925,7 +969,7 @@ export function applyLegionCommand(
 
 /**
  * 每旬军团自动执行：
- * 对每个军团，在其编制城市中挑选一名「在本城待命且未行动」的武将，按方针执行内政动作：
+ * 对每个军团，在其编制城市中挑选至多3名「在本城待命且未行动」的武将，按方针执行内政动作：
  * - 内政优先：开发（商业/农业轮流）；
  * - 军备优先：训练 > 征兵 > 生产兵装；
  * - 均衡：按城市缺额（治安/训练/人口）选择。
@@ -942,17 +986,23 @@ export function settleLegionAutomation(state: GameState): string[] {
       for (const cityId of legion.cityIds) {
         const city = state.cities[cityId];
         if (!city || city.ownerId !== force.id) continue;
-        // 军团长本人（本城待命）优先，其次本城未行动的其它武将
-        const executor = commander.location.kind === 'city' && commander.location.cityId === cityId && !commander.acted
-          ? commander
-          : Object.values(state.officers).find(
-              (officer) => officer.forceId === force.id && officer.location.kind === 'city'
-                && officer.location.cityId === cityId && !officer.acted && officer.id !== force.leaderId,
-            );
-        if (!executor) continue;
+        // 军团长本人（本城待命）优先，其余按武力降序补足至3人
+        const idle = Object.values(state.officers).filter(
+          (officer) => officer.forceId === force.id && officer.location.kind === 'city'
+            && officer.location.cityId === cityId && !officer.acted && officer.id !== force.leaderId,
+        ).sort((a, b) => b.stats.war - a.stats.war);
+        const executors: Officer[] = [];
+        if (commander.location.kind === 'city' && commander.location.cityId === cityId && !commander.acted) {
+          executors.push(commander);
+        }
+        for (const officer of idle) {
+          if (executors.length >= COMMAND_OFFICER_MAX) break;
+          if (!executors.includes(officer)) executors.push(officer);
+        }
+        if (executors.length === 0) continue;
 
         const action = pickLegionAction(legion.policy, city);
-        const performed = runLegionAction(state, city, executor, action);
+        const performed = runLegionAction(state, city, executors, action);
         if (performed) events.push(`【${state.cities[cityId].name}·委任】${performed}`);
       }
     }
@@ -977,59 +1027,161 @@ function pickLegionAction(policy: Legion['policy'], city: City): LegionAction {
   return (city.commerce + city.agriculture) / 2 < city.agriculture ? 'developCommerce' : 'developAgriculture';
 }
 
-function runLegionAction(state: GameState, city: City, officer: Officer, action: LegionAction): string | null {
+function runLegionAction(state: GameState, city: City, officers: Officer[], action: LegionAction): string | null {
+  if (officers.length === 0) return null;
+  void state;
+  const names = officers.map((officer) => officer.name).join('、');
   const gain = (base: number) => Math.max(1, Math.round(base));
   switch (action) {
     case 'developCommerce': {
       if (city.gold < 500) return null;
       city.gold -= 500;
-      city.commerce = clamp(city.commerce + gain(4 + Math.floor(officer.stats.politics / 20)), 0, 100);
-      officer.acted = true;
-      return `${officer.name}开发商业 ${city.commerce}`;
+      const politics = constructionPolitics(officers);
+      city.commerce = clamp(city.commerce + gain(4 + Math.floor(politics / 20)), 0, 100);
+      for (const officer of officers) officer.acted = true;
+      return `${names}开发商业 ${city.commerce}`;
     }
     case 'developAgriculture': {
       if (city.gold < 500) return null;
       city.gold -= 500;
-      city.agriculture = clamp(city.agriculture + gain(4 + Math.floor(officer.stats.politics / 20)), 0, 100);
-      officer.acted = true;
-      return `${officer.name}开发农业 ${city.agriculture}`;
+      const politics = constructionPolitics(officers);
+      city.agriculture = clamp(city.agriculture + gain(4 + Math.floor(politics / 20)), 0, 100);
+      for (const officer of officers) officer.acted = true;
+      return `${names}开发农业 ${city.agriculture}`;
     }
     case 'train': {
       if (city.food < 300) return null;
       city.food -= 300;
-      city.training = clamp(city.training + gain(5 + Math.floor(officer.stats.leadership / 20)), 0, 100);
-      officer.acted = true;
-      return `${officer.name}训练守军`;
+      city.training = clamp(city.training + trainMoraleGain(officers, city.troops), 0, 100);
+      for (const officer of officers) officer.acted = true;
+      return `${names}训练守军`;
     }
     case 'recruit': {
       if (city.gold < 800 || city.food < 500 || city.population < 500) return null;
       city.gold -= 800;
       city.food -= 500;
       city.population -= 500;
-      const gained = gain((300 + officer.stats.charisma * 10) * barracksYieldMultiplier(city));
+      const gained = gain(recruitBaseYield(officers, city) * barracksYieldMultiplier(city));
       city.troops += gained;
       city.order = clamp(city.order - 2, 0, 100);
-      officer.acted = true;
-      return `${officer.name}征募士兵${gained}`;
+      for (const officer of officers) officer.acted = true;
+      return `${names}征募士兵${gained}`;
     }
     case 'patrol': {
       const cost = Math.max(1, Math.ceil((city.population / 100_000) * 50));
       if (city.gold < cost) return null;
       city.gold -= cost;
-      city.order = clamp(city.order + gain(4 + Math.floor(officer.stats.charisma / 20)), 0, 100);
-      officer.acted = true;
-      return `${officer.name}巡察安抚百姓`;
+      city.order = clamp(city.order + patrolOrderGain(officers), 0, 100);
+      for (const officer of officers) officer.acted = true;
+      return `${names}巡察安抚百姓`;
     }
     case 'produceSpear': {
       if (city.gold < 300) return null;
       city.gold -= 300;
       const current = city.armaments?.spear ?? 0;
       const armaments = city.armaments ?? { spear: 0, halberd: 0, crossbow: 0, cavalry: 0, ram: 0, tower: 0, ship: 0 };
-      city.armaments = { ...armaments, spear: current + gain(120 + officer.stats.war) };
-      officer.acted = true;
-      return `${officer.name}生产枪兵`;
+      city.armaments = { ...armaments, spear: current + gain(1000 + officers.length * 500) };
+      for (const officer of officers) officer.acted = true;
+      return `${names}生产枪兵`;
     }
     default:
       return null;
   }
+}
+
+/** 多人指令推荐武将：按"相关属性降序→逐个加入→无增益即停止"的贪心策略选 1~3 人，
+ *  效果达到最佳（工期达1旬/产量/士气/治安达上限）后不再增加武将，避免浪费人力。
+ *  注：征兵与兵装(即时)永不饱和（加人总在提升），直接取前 3 高属性者。 */
+export type DefaultOfficersContext =
+  | { type: 'buildFacilityPlot' }
+  | { type: 'produceArmament'; armamentType: ArmamentType; speedMultiplier?: number }
+  | { type: 'recruit' }
+  | { type: 'train' }
+  | { type: 'patrol' }
+  | { type: 'research'; branch: TechBranchId }
+  | { type: 'produceRam' | 'produceTower' | 'produceShip' }; // 兼容旧枚举调用
+
+/** 将 score（越大越好）最小化型（工期/耗时）指标统一翻转为"增益分数"，保证越大=越优 */
+function inverseCost(daysOrTenDays: number): number {
+  // 工期上限 999 旬足够大；倒过来使 1 旬 = 1.0，999 旬 ≈ 0.001
+  return 1 / Math.max(1, daysOrTenDays);
+}
+
+export function defaultOfficersFor(
+  city: City,
+  availableOfficers: Officer[],
+  context: DefaultOfficersContext,
+): string[] {
+  if (availableOfficers.length === 0) return [];
+
+  type StatKey = keyof Officer['stats'];
+  let sortByStat: StatKey;
+  let score: (subset: Officer[]) => number; // 分数越大=越优
+
+  switch (context.type) {
+    case 'buildFacilityPlot':
+      sortByStat = 'politics';
+      score = (subset) => inverseCost(constructTenDaysForOfficers(subset));
+      break;
+    case 'produceArmament':
+    case 'produceRam':
+    case 'produceTower':
+    case 'produceShip': {
+      const armamentType: ArmamentType = context.type === 'produceArmament'
+        ? context.armamentType
+        : (context.type === 'produceShip' ? 'ship' : context.type === 'produceTower' ? 'tower' : 'ram');
+      sortByStat = 'intelligence';
+      const multiplier = context.type === 'produceArmament' ? (context.speedMultiplier ?? 1) : 1;
+      if (isDelayedArmament(armamentType)) {
+        score = (subset) => inverseCost(armamentProductionTenDays(subset, multiplier));
+      } else {
+        // 产量永不饱和：直接按智排名取前3（此处 score 用于验证递增性：每次加入必涨）
+        score = (subset) => produceArmamentYield(subset, armamentType);
+      }
+      break;
+    }
+    case 'recruit':
+      sortByStat = 'charisma';
+      score = (subset) => recruitBaseYield(subset, city);
+      break;
+    case 'train':
+      sortByStat = 'war';
+      // 训练受 (100 - currentTraining) 上限影响，用 clamp 后的值作为 score
+      score = (subset) => Math.min(trainMoraleGain(subset, city.troops), Math.max(0, 100 - city.training));
+      break;
+    case 'patrol':
+      sortByStat = 'leadership';
+      score = (subset) => Math.min(patrolOrderGain(subset), Math.max(0, 100 - city.order));
+      break;
+    case 'research': {
+      sortByStat = TECH_BRANCHES.find((branch) => branch.id === context.branch)?.researchStat ?? 'politics';
+      // 按最高等级的 baseDays 作近似最大天数估算（等级越高 baseDays 越大，越能给人才留出加入空间）
+      const maxBaseDays = TECH_COSTS.reduce((max, cost) => Math.max(max, cost.baseDays), 0);
+      score = (subset) => {
+        const statSum = subset.reduce((sum, officer) => sum + officer.stats[sortByStat], 0);
+        return inverseCost(researchTenDays(maxBaseDays, statSum));
+      };
+      break;
+    }
+    default:
+      // 兜底：统御排序
+      sortByStat = 'leadership';
+      score = (subset) => subset.reduce((sum, officer) => sum + officer.stats[sortByStat], 0);
+  }
+
+  const candidates = [...availableOfficers].sort((a, b) => b.stats[sortByStat] - a.stats[sortByStat]);
+  const chosen: Officer[] = [];
+
+  for (const officer of candidates) {
+    if (chosen.length >= COMMAND_OFFICER_MAX) break;
+    // 若加入此人不会让 score 变得比当前更好 → 停止增加（说明已饱和或后续更差的候选人带不来增益）
+    if (chosen.length > 0) {
+      const before = score(chosen);
+      const after = score([...chosen, officer]);
+      if (after <= before) break;
+    }
+    chosen.push(officer);
+  }
+
+  return chosen.map((officer) => officer.id);
 }

@@ -1,12 +1,13 @@
 import type { ForceId, GameState } from '../types';
 import type { GameIntent } from './intents';
-import type { OnlinePlayer, OnlineRoomPhase } from './session';
+import type { OnlinePlayer, OnlineRoomPhase, RoomMap } from './session';
 
 export interface OnlineRoomView {
   id: string;
   revision: number;
   hostPlayerId: string;
   phase: OnlineRoomPhase;
+  map: RoomMap;
   players: OnlinePlayer[];
   turnPlayerIds: string[];
   activePlayerId: string | null;
@@ -17,6 +18,7 @@ export interface OnlineRoomView {
 export interface OnlineRoomListItem {
   id: string;
   hostName: string;
+  map?: RoomMap;
   playerCount: number;
   maxPlayers: number;
   selectedForceIds: ForceId[];
@@ -46,6 +48,7 @@ export interface AuthSessionPayload {
 export interface CreateRoomPayload {
   token: string;
   seed?: number;
+  map?: RoomMap;
 }
 
 export interface JoinRoomPayload {

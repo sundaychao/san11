@@ -1,6 +1,7 @@
 import {
   attackCity,
   attackFacility,
+  attackPlot,
   attackUnit,
   buildFacility,
   deployTransportUnit,
@@ -17,7 +18,7 @@ import {
 } from '../battle/actions';
 import type { GridCoord } from '../battle/grid';
 import { executeCommand } from '../commands';
-import { dismissDebate, resolveDebateRethink, resolveDebateRound } from '../debate';
+import { dismissDebate, resolveDebateAbandon, resolveDebateRethink, resolveDebateRound } from '../debate';
 import { executeDuel } from '../duel';
 import type { ForceId, GameState } from '../types';
 import type { GameIntent } from './intents';
@@ -35,6 +36,12 @@ function moveIfRequested(
   destination?: GridCoord,
 ) {
   return destination ? moveUnit(state, forceId, unitId, destination) : state;
+}
+
+/** 舌战会话是否属于当前行动势力（AI 或其他玩家的舌战不可操作） */
+function debateOwnedByForce(state: GameState, forceId: ForceId): boolean {
+  const session = state.debateSession;
+  return !!session && state.officers[session.recruiterId]?.forceId === forceId;
 }
 
 export function reduceGameIntent(
@@ -58,6 +65,8 @@ export function reduceGameIntent(
           return jointAttackUnit(deployed.state, forceId, deployed.unitId, intent.action.targetId);
         case 'attackFacility':
           return attackFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityId);
+        case 'attackPlot':
+          return attackPlot(deployed.state, forceId, deployed.unitId, intent.action.cityId, intent.action.plotIndex);
         case 'attackCity':
           return attackCity(deployed.state, forceId, deployed.unitId, intent.action.cityId);
         case 'useUnitTactic':
@@ -90,6 +99,10 @@ export function reduceGameIntent(
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
       return attackFacility(moved, forceId, intent.attackerId, intent.facilityId);
     }
+    case 'attackPlot': {
+      const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
+      return attackPlot(moved, forceId, intent.attackerId, intent.cityId, intent.plotIndex);
+    }
     case 'useUnitTactic': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
       return useUnitTactic(moved, forceId, intent.attackerId, intent.targetId, intent.tacticId);
@@ -121,11 +134,13 @@ export function reduceGameIntent(
       return executeDuel(moved, forceId, intent.unitId, intent.targetUnitId, intent.stance);
     }
     case 'debateRound':
-      return resolveDebateRound(state, intent.cardIndex);
+      return debateOwnedByForce(state, forceId) ? resolveDebateRound(state, intent.cardUid) : state;
     case 'debateRethink':
-      return resolveDebateRethink(state);
+      return debateOwnedByForce(state, forceId) ? resolveDebateRethink(state) : state;
+    case 'debateAbandon':
+      return debateOwnedByForce(state, forceId) ? resolveDebateAbandon(state) : state;
     case 'debateDismiss':
-      return dismissDebate(state);
+      return debateOwnedByForce(state, forceId) ? dismissDebate(state) : state;
     default:
       return assertNever(intent);
   }

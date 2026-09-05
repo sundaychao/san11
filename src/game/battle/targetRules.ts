@@ -1,3 +1,4 @@
+import { PLOT_LABELS, PLOT_MAX_DURABILITY, type PlotType } from '../innerAffairs';
 import type { ArmyUnit, City, Facility, GameState } from '../types';
 import { techLevelOf } from '../techs';
 import { effectsOfKind, resolveUnitSkills } from '../skills';
@@ -118,6 +119,50 @@ export function attackableFacilities(state: GameState, attackerId: string, origi
       gridDistanceWithin(attackerAtOrigin, a, range) - gridDistanceWithin(attackerAtOrigin, b, range) ||
       a.id.localeCompare(b.id)
     ));
+}
+
+/** 射程内可攻击的敌方开发设施（都市地格市场/农场/兵舍等，具备战场坐标 q/r 的已建成或建设中地格） */
+export interface PlotAttackTarget {
+  cityId: string;
+  plotIndex: number;
+  q: number;
+  r: number;
+  type: PlotType;
+  label: string;
+  durability: number;
+  forceId: ArmyUnit['forceId'];
+}
+
+export function attackablePlots(state: GameState, attackerId: string, origin?: GridCoord): PlotAttackTarget[] {
+  const attacker = state.units[attackerId];
+  if (!attacker || attacker.kind === 'transport') return [];
+  const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
+  const range = unitAttackRange(state, attackerAtOrigin);
+  const targets: PlotAttackTarget[] = [];
+  for (const city of Object.values(state.cities)) {
+    if (city.ownerId === attacker.forceId) continue;
+    city.plots?.forEach((plot, plotIndex) => {
+      if (plot.q == null || plot.r == null) return;
+      if (plot.type === 'empty' && !plot.constructing) return;
+      if (gridDistanceWithin(attackerAtOrigin, { q: plot.q, r: plot.r }, range) > range) return;
+      // 空地被过滤后，剩下的一定是非 empty（要么建成设施，要么建设中）
+      const type = (plot.constructing ? plot.constructing.facility : plot.type) as PlotType;
+      targets.push({
+        cityId: city.id,
+        plotIndex,
+        q: plot.q,
+        r: plot.r,
+        type,
+        label: PLOT_LABELS[type],
+        durability: plot.durability ?? PLOT_MAX_DURABILITY,
+        forceId: city.ownerId,
+      });
+    });
+  }
+  return targets.sort((a, b) => (
+    gridDistanceWithin(attackerAtOrigin, a, range) - gridDistanceWithin(attackerAtOrigin, b, range) ||
+    `${a.cityId}:${a.plotIndex}`.localeCompare(`${b.cityId}:${b.plotIndex}`)
+  ));
 }
 
 export function jointAttackableUnits(state: GameState, attackerId: string, origin?: GridCoord): ArmyUnit[] {

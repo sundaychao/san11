@@ -1,18 +1,19 @@
 import { nextRandom } from './random';
-import { REWARD_AP_COST, REWARD_GOLD_COST, officerLoyalty, recruitmentInitialLoyalty, rewardLoyaltyGain, setOfficerLoyalty } from './loyalty';
-import { addOfficerMerit, applyPositionStatDelta, MERIT_PER_COMMAND, officerMerit, positionDefinition, forceRankOf, rankDefinition, rankIndex } from './ranks';
-import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, isDelayedArmament, produceArmamentYield, DELAYED_ARMAMENT_TEN_DAYS } from './armaments';
+import { REWARD_AP_COST, REWARD_GOLD_COST, REWARD_LOYALTY_GAIN, officerLoyalty, recruitmentInitialLoyalty, setOfficerLoyalty } from './loyalty';
+import { addOfficerMerit, applyPositionStatDelta, MERIT_PER_COMMAND, officerIsOnCampaign, officerMerit, positionDefinition, forceRankOf, rankDefinition, rankIndex } from './ranks';
+import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, armamentProductionTenDays, isDelayedArmament, produceArmamentYield } from './armaments';
 import { ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, CULTIVATE_TEN_DAYS, abilityCultivateRemaining, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
-import { commandYieldMultiplier } from './skills/rules/city';
-import { effectsOfKind, officerSkillNames, resolveOfficerSkills } from './skills';
-import { MAX_TECH_LEVEL, RESEARCH_AP_COST, TECH_BRANCHES, TECH_COSTS, TECHP_PER_CIVIL_ACTION, TECHP_PER_TRADE, addTechP, recruitMultiplier, researchTenDays, techLevelOf } from './techs';
+import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from './skills/rules/city';
+import { effectsOfKind, officerSkillNames, resolveCommandSkills, resolveOfficerSkills } from './skills';
+import { MAX_TECH_LEVEL, RESEARCH_AP_COST, TECH_BRANCHES, TECH_COSTS, TECHP_PER_CIVIL_ACTION, TECHP_PER_CONSTRUCTION, TECHP_PER_PATROL, TECHP_PER_PRODUCE_ARMAMENT, TECHP_PER_TRADE, TECHP_PER_TRAIN, addTechP, recruitMultiplier, researchTenDays, techLevelOf } from './techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_CHANCE, EXPLORE_GOLD_MAX, EXPLORE_GOLD_MIN, EXPLORE_GOLD_PER_OFFICER, EXPLORE_TREASURE_BASE_CHANCE, EXPLORE_TREASURE_INT_BONUS_MAX, treasureDefinition } from './treasures';
 import { RUMOR_AP_COST, RUMOR_GOLD_COST, resolveRumor, POACH_AP_COST, POACH_GOLD_COST, resolvePoach, canPoach } from './rumor';
 import { DIPLOMACY_AP_COST, GOODWILL_GOLD_COST, DIPLOMACY_GOLD_MAX, REINFORCEMENT_TEN_DAYS, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, adjustDiplomacy, areAllies, forceHasCity, goodwillGain, resolveAlliance, resolveRequestTroops, resolveTruce } from './diplomacy';
 import { CAPTIVE_RECRUIT_LOYALTY_THRESHOLD, capturableByLoyalty, executeCaptive, recruitCaptiveChance, releaseCaptive, resolveRecruitCaptive } from './captives';
-import { MARRY_TECHP_COST, RELATIONSHIP_LABELS, enterRelationship, relationshipValidation } from './relationship';
+import { MARRY_TECHP_COST, RELATIONSHIP_LABELS, areRelated, enterRelationship, relationshipValidation } from './relationship';
 import { createDebate } from './debate';
-import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, hasEnemyUnitsNear, hasPlotFacility, isPlotOccupiedByOtherCity, plotCost, plotCountIncludingConstructing, plotTotalLevel, startBuildCityPlot, UNIQUE_FACILITIES } from './innerAffairs';
+import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, COMMAND_OFFICER_MAX,
+                             hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
 import type { City, CityId, ForceId, GameCommand, GameState, Legion, Officer, TechBranchId } from './types';
 
 export const COMMAND_AP = {
@@ -27,6 +28,8 @@ export const COMMAND_AP = {
   abilityResearch: 20,
   cultivate: 20,
   transfer: 10,
+  summon: 10,
+  sworn: 10,
   trade: 20,
   reward: REWARD_AP_COST,
   appointPosition: 0,
@@ -46,13 +49,15 @@ export const COMMAND_LABELS: Record<GameCommand['type'], string> = {
   produceArmament: '生产兵装',
   train: '训练',
   patrol: '巡察',
-  talent: '人才',
+  talent: '登庸',
   explore: '探索',
   grantTreasure: '收授宝物',
   research: '科技研究',
   abilityResearch: '能力研究',
   cultivate: '培育武将',
-  transfer: '调动',
+  transfer: '移动',
+  summon: '召唤',
+  sworn: '义兄弟',
   trade: '商人',
   reward: '褒奖',
   appointPosition: '任命官职',
@@ -100,6 +105,9 @@ export function rollMerchants(state: GameState): void {
     state.rngCursor = roll.cursor;
     city.merchantPresent = roll.value < MERCHANT_ARRIVAL_CHANCE;
     city.merchantTradedThisTenDay = false;
+    // 训练/巡查次数每旬重置
+    city.trainedThisTenDay = false;
+    city.patrolledThisTenDay = false;
   }
 }
 
@@ -151,7 +159,7 @@ function commandGoldCost(command: GameCommand, city?: City) {
     case 'patrol': return city ? patrolGoldCost(city) : 300;
     case 'talent': return 500;
     case 'abilityResearch': return ABILITY_RESEARCH_GOLD;
-    case 'reward': return REWARD_GOLD_COST;
+    case 'reward': return REWARD_GOLD_COST * command.officerIds.length;
     case 'rumor': return RUMOR_GOLD_COST;
     case 'poach': return POACH_GOLD_COST;
     case 'diplomacy': return command.action === 'goodwill' ? GOODWILL_GOLD_COST : 0;
@@ -165,42 +173,85 @@ export function researchGoldCost(state: GameState, forceId: ForceId, branch: Tec
   return TECH_COSTS[techLevelOf(state, forceId, branch)]?.gold ?? 0;
 }
 
-/** 研究下一级科技的技巧P消耗（指导：消耗减半） */
-export function researchTechPCost(state: GameState, forceId: ForceId, branch: TechBranchId, officerId?: string): number {
+/** 研究下一级科技的技巧P消耗（指导：消耗减半；多名执行武将中任一人持有即生效） */
+export function researchTechPCost(state: GameState, forceId: ForceId, branch: TechBranchId, officerIds?: string[]): number {
   const base = TECH_COSTS[techLevelOf(state, forceId, branch)]?.techP ?? 0;
-  if (!officerId) return base;
-  const multiplier = effectsOfKind(resolveOfficerSkills(state, [officerId]), 'researchTechPCostMultiplier')
+  if (!officerIds || officerIds.length === 0) return base;
+  const multiplier = effectsOfKind(resolveOfficerSkills(state, officerIds), 'researchTechPCostMultiplier')
     .reduce((lowest, { effect }) => Math.min(lowest, effect.multiplier), 1);
   return Math.max(0, Math.round(base * multiplier));
 }
 
 function validateTransfer(state: GameState, forceId: ForceId, command: Extract<GameCommand, { type: 'transfer' }>) {
   const errors: string[] = [];
-  const source = state.cities[command.cityId];
   const target = state.cities[command.targetCityId];
   if (!target || target.ownerId !== forceId) errors.push('只能调往己方城市');
   if (command.targetCityId === command.cityId) errors.push('目标城市不能与出发城市相同');
-  if (command.officerIds.length === 0) errors.push('至少调动一名武将');
+  if (command.officerIds.length === 0) errors.push('至少移动一名武将');
+  if (isCityBlocked(state, state.cities[command.cityId])) errors.push('城池被敌方封锁，无法调动武将');
 
   for (const officerId of command.officerIds) {
     const officer = state.officers[officerId];
     if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== command.cityId) {
-      errors.push('只能调动出发城市内的己方武将');
+      errors.push('只能移动出发城市内的己方武将');
       break;
     }
-    if (source?.governorId === officerId) {
-      errors.push('太守不可调离任所');
+    if (officer.acted) {
+      errors.push(`${officer.name}本月已行动，无法移动`);
       break;
     }
   }
   return errors;
 }
 
-function localOfficer(state: GameState, forceId: ForceId, command: Exclude<GameCommand, { type: 'transfer' } | { type: 'abilityResearch' } | { type: 'explore' } | { type: 'grantTreasure' } | { type: 'appointPosition' } | { type: 'captiveDispose' } | { type: 'marry' } | { type: 'legion' } | { type: 'cancelCityPlot' } | { type: 'appointStrategist' }>) {
+/** 召唤：将本方势力其他城池的待命武将召唤至本城，耗时与移动相同 */
+function validateSummon(state: GameState, forceId: ForceId, command: Extract<GameCommand, { type: 'summon' }>) {
+  const errors: string[] = [];
+  const target = state.cities[command.cityId];
+  if (command.officerIds.length === 0) errors.push('至少召唤一名武将');
+  for (const officerId of command.officerIds) {
+    const officer = state.officers[officerId];
+    if (!officer || officer.forceId !== forceId) {
+      errors.push('只能召唤本方势力的武将');
+      break;
+    }
+    const sourceCity = officer.location.kind === 'city' ? state.cities[officer.location.cityId] : undefined;
+    if (officer.location.kind !== 'city' || !sourceCity) {
+      errors.push(`只能召唤${officer.name}所在城池的待命武将`);
+      break;
+    }
+    if (sourceCity.ownerId !== forceId) {
+      errors.push('只能召唤本方势力城池的武将');
+      break;
+    }
+    if (officer.location.cityId === command.cityId) {
+      errors.push(`${officer.name}已在${target.name}，无需召唤`);
+      break;
+    }
+    if (officer.acted) {
+      errors.push(`${officer.name}本月已行动`);
+      break;
+    }
+  }
+  return errors;
+}
+
+type SingleOfficerCommand = Exclude<GameCommand, { type: 'transfer' } | { type: 'summon' } | { type: 'sworn' } | { type: 'abilityResearch' } | { type: 'explore' } | { type: 'grantTreasure' } | { type: 'appointPosition' } | { type: 'captiveDispose' } | { type: 'marry' } | { type: 'legion' } | { type: 'cancelCityPlot' } | { type: 'appointStrategist' } | { type: 'recruit' } | { type: 'produceArmament' } | { type: 'train' } | { type: 'patrol' } | { type: 'research' } | { type: 'buildFacilityPlot' } | { type: 'reward' }>;
+
+function localOfficer(state: GameState, forceId: ForceId, command: SingleOfficerCommand) {
   const officer = state.officers[command.officerId];
   return officer?.forceId === forceId && officer.location.kind === 'city' && officer.location.cityId === command.cityId
     ? officer
     : undefined;
+}
+
+/** 多人执行指令（征兵/兵装/训练/巡查/科技研究/开发建设）：提取执行武将数组 */
+export function commandOfficerIds(command: GameCommand): string[] | null {
+  if (command.type === 'recruit' || command.type === 'produceArmament' || command.type === 'train'
+    || command.type === 'patrol' || command.type === 'research' || command.type === 'buildFacilityPlot') {
+    return command.officerIds;
+  }
+  return null;
 }
 
 /** 城市中可执行命令的武将（本城待命、未行动、在世） */
@@ -214,7 +265,7 @@ export function cityAvailableOfficers(state: GameState, forceId: ForceId, cityId
 /** 需要本城武将执行的命令类型（执行时消耗一名武将行动） */
 export const OFFICER_COMMANDS: ReadonlySet<GameCommand['type']> = new Set([
   'recruit', 'produceArmament', 'train', 'patrol', 'talent', 'explore',
-  'trade', 'reward', 'research', 'rumor', 'poach', 'diplomacy', 'buildFacilityPlot', 'marry',
+  'trade', 'reward', 'research', 'rumor', 'poach', 'diplomacy', 'buildFacilityPlot', 'marry', 'sworn',
 ]);
 
 export function validateCommand(state: GameState, forceId: ForceId, command: GameCommand): string[] {
@@ -229,12 +280,66 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     errors.push('城中没有可行动的武将');
   }
 
-  if (command.type !== 'transfer' && command.type !== 'abilityResearch' && command.type !== 'explore' && command.type !== 'grantTreasure' && command.type !== 'appointPosition' && command.type !== 'captiveDispose' && command.type !== 'marry' && command.type !== 'legion' && command.type !== 'cancelCityPlot' && command.type !== 'appointStrategist') {
-    const officer = localOfficer(state, forceId, command);
-    if (!officer) {
-      errors.push('武将不在目标城市');
-    } else if (officer.acted) {
-      errors.push(`${officer.name}本月已行动`);
+  // 褒奖：可勾选多位本城待命的己方武将（不受行动状态限制），按忠诚从低到高排序由 UI 决定
+  if (command.type === 'reward') {
+    const invited = command.officerIds;
+    if (invited.length === 0) {
+      errors.push('至少选择一名褒奖武将');
+    } else if (new Set(invited).size !== invited.length) {
+      errors.push('褒奖武将不可重复');
+    } else {
+      for (const officerId of invited) {
+        const officer = state.officers[officerId];
+        if (!officer || officer.forceId !== forceId) {
+          errors.push('只能褒奖己方武将');
+          break;
+        }
+        if (officerIsOnCampaign(state, officerId)) {
+          errors.push('只能褒奖本势力未出征的武将');
+          break;
+        }
+        if (officer.id === state.forces[forceId]?.leaderId) {
+          errors.push('不能褒奖君主');
+          break;
+        }
+        if (officer.rewarded) {
+          errors.push(`${officer.name}本旬已受褒奖`);
+          break;
+        }
+      }
+    }
+  }
+
+  if (command.type !== 'transfer' && command.type !== 'summon' && command.type !== 'sworn' && command.type !== 'abilityResearch' && command.type !== 'explore' && command.type !== 'grantTreasure' && command.type !== 'appointPosition' && command.type !== 'captiveDispose' && command.type !== 'marry' && command.type !== 'legion' && command.type !== 'cancelCityPlot' && command.type !== 'appointStrategist' && command.type !== 'reward') {
+    const officerIds = commandOfficerIds(command);
+    if (officerIds) {
+      // 多人执行指令：1~3名本城待命、未行动、不重复的己方武将
+      if (officerIds.length === 0) {
+        errors.push('至少指派一名武将');
+      } else if (officerIds.length > COMMAND_OFFICER_MAX) {
+        errors.push(`至多指派${COMMAND_OFFICER_MAX}名武将`);
+      } else if (new Set(officerIds).size !== officerIds.length) {
+        errors.push('执行武将不可重复');
+      } else {
+        for (const officerId of officerIds) {
+          const officer = state.officers[officerId];
+          if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== command.cityId) {
+            errors.push('只能指派本城待命的己方武将');
+            break;
+          }
+          if (officer.acted) {
+            errors.push(`${officer.name}本月已行动`);
+            break;
+          }
+        }
+      }
+    } else {
+      const officer = localOfficer(state, forceId, command as SingleOfficerCommand);
+      if (!officer) {
+        errors.push('武将不在目标城市');
+      } else if (officer.acted) {
+        errors.push(`${officer.name}本月已行动`);
+      }
     }
   }
 
@@ -276,6 +381,8 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
       errors.push('只能任命己方武将官职');
     } else if (state.forces[forceId]?.leaderId === officer.id) {
       errors.push('君主无需任命官职');
+    } else if (officerIsOnCampaign(state, officer.id)) {
+      errors.push(`${officer.name}正带部队在城外，无法任免官职`);
     } else if (command.positionId) {
       const position = positionDefinition(command.positionId);
       if (!position) {
@@ -364,6 +471,36 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     if ((state.forces[forceId]?.techP ?? 0) < MARRY_TECHP_COST) errors.push(`技巧P不足 ${MARRY_TECHP_COST}`);
   }
 
+  if (command.type === 'sworn') {
+    const officers = command.officerIds.map((id) => state.officers[id]).filter((o): o is Officer => Boolean(o));
+    if (command.officerIds.length < 2) {
+      errors.push('至少选择两名武将结义');
+    } else if (command.officerIds.length > 3) {
+      errors.push('至多选择三名武将结义');
+    } else if (officers.length !== command.officerIds.length) {
+      errors.push('武将无效');
+    } else if (new Set(command.officerIds).size !== command.officerIds.length) {
+      errors.push('结义武将不可重复');
+    } else {
+      const genders = new Set(officers.map((o) => o.gender ?? 'male'));
+      if (genders.size > 1) errors.push('结义双方性别须相同');
+      const leaderId = state.forces[forceId]?.leaderId;
+      for (const officer of officers) {
+        if (officer.forceId !== forceId) errors.push(`只能与己方武将结义（${officer.name}）`);
+        if (officer.id === leaderId) errors.push('君主不能参与结义');
+        if (officer.location.kind !== 'city' || officer.location.cityId !== command.cityId) errors.push(`${officer.name}必须在本城待命`);
+        if (officer.acted) errors.push(`${officer.name}本月已行动`);
+        if (officer.deathMonth) errors.push('已故武将无法结义');
+      }
+      for (let i = 0; i < officers.length; i++) {
+        for (let j = i + 1; j < officers.length; j++) {
+          if (areRelated(officers[i], officers[j])) errors.push(`${officers[i].name}与${officers[j].name}已结为关系`);
+        }
+      }
+    }
+    if ((state.forces[forceId]?.techP ?? 0) < MARRY_TECHP_COST) errors.push(`技巧P不足 ${MARRY_TECHP_COST}`);
+  }
+
   if (command.type === 'legion') {
     if (command.commanderId && command.commanderId !== 'none') {
       const commander = state.officers[command.commanderId];
@@ -419,7 +556,11 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     if (city.food < 500) errors.push('兵粮不足 500');
     if (city.population < 500) errors.push('人口不足 500');
   }
-  if (command.type === 'train' && city.food < 300) errors.push('兵粮不足 300');
+  if (command.type === 'train') {
+    if (city.trainedThisTenDay) errors.push('本旬该城已训练');
+    if (city.food < 300) errors.push('兵粮不足 300');
+  }
+  if (command.type === 'patrol' && city.patrolledThisTenDay) errors.push('本旬该城已巡查');
   if (command.type === 'produceArmament') {
     if (!ARMAMENT_TYPES.includes(command.armamentType)) {
       errors.push('兵装类型无效');
@@ -428,7 +569,9 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     }
   }
   if (command.type === 'trade') {
-    if (!city.merchantPresent) {
+    if (isCityBlocked(state, city)) {
+      errors.push('城池被敌方封锁，无法进行交易');
+    } else if (!city.merchantPresent) {
       errors.push('商人本旬未到访');
     } else if (city.merchantTradedThisTenDay) {
       errors.push('本旬已完成一次粮食交易');
@@ -453,7 +596,7 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
       else {
         const cost = TECH_COSTS[level];
         if (city.gold < cost.gold) errors.push(`资金不足 ${cost.gold}`);
-        const requiredTechP = researchTechPCost(state, forceId, command.branch, command.officerId);
+        const requiredTechP = researchTechPCost(state, forceId, command.branch, command.officerIds);
         if ((state.forces[forceId]?.techP ?? 0) < requiredTechP) errors.push(`技巧P不足 ${requiredTechP}`);
         // 每旬每势力同时只能研究一项（含城间）
         const busy = Object.values(state.officers).some((officer) =>
@@ -487,6 +630,7 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     }
   }
   if (command.type === 'transfer') errors.push(...validateTransfer(state, forceId, command));
+  if (command.type === 'summon') errors.push(...validateSummon(state, forceId, command));
   return [...new Set(errors)];
 }
 
@@ -580,6 +724,8 @@ function applyTransfer(state: GameState, command: Extract<GameCommand, { type: '
   for (const officerId of command.officerIds) {
     const officer = state.officers[officerId];
     names.push(officer.name);
+    // 若为出发城太守，调离后该城太守空缺
+    if (source.governorId === officerId) source.governorId = null;
     officer.location = {
       kind: 'transfer',
       fromCityId: command.cityId,
@@ -589,7 +735,30 @@ function applyTransfer(state: GameState, command: Extract<GameCommand, { type: '
     officer.cityId = command.cityId;
     officer.acted = true;
   }
-  return `${source.name}向${target.name}调动${names.join('、')}，预计${duration}旬抵达`;
+  return `${source.name}向${target.name}移动${names.join('、')}，预计${duration}旬抵达`;
+}
+
+/** 召唤结算：各武将自所在城池向本城移动，耗时与移动相同 */
+function applySummon(state: GameState, command: Extract<GameCommand, { type: 'summon' }>) {
+  const target = state.cities[command.cityId];
+  const parts: string[] = [];
+  for (const officerId of command.officerIds) {
+    const officer = state.officers[officerId];
+    const source = state.cities[officer.location.kind === 'city' ? officer.location.cityId : command.cityId];
+    const duration = transferDuration(source, target);
+    // 若为所在城太守，被召唤后该城太守空缺
+    if (source.governorId === officerId) source.governorId = null;
+    officer.location = {
+      kind: 'transfer',
+      fromCityId: source.id,
+      targetCityId: command.cityId,
+      remainingTenDays: duration,
+    };
+    // cityId 保留在原出发城池（与移动一致），抵达后再归属本城
+    officer.acted = true;
+    parts.push(`${officer.name}自${source.name}向${target.name}移动，预计${duration}旬抵达`);
+  }
+  return parts.join('；');
 }
 
 export function executeCommand(state: GameState, forceId: ForceId, command: GameCommand): GameState {
@@ -605,9 +774,10 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
 
   switch (command.type) {
     case 'recruit': {
-      const officer = next.officers[command.officerId];
-      const baseGain = 300 + officer.stats.charisma * 10;
-      // 设施加成：兵舍每级 +15%（与军团自动化路径保持一致）
+      const officers = command.officerIds.map((officerId) => next.officers[officerId]);
+      const names = officers.map((officer) => officer.name).join('、');
+      // 征兵量 = 1000 + 魅力总和 × (治安+20) × 5 ÷ 100，再乘特技/科技/兵舍修正
+      const baseGain = recruitBaseYield(officers, city);
       const gain = Math.round(baseGain * commandYieldMultiplier(next, command)
         * recruitMultiplier(next, forceId) * barracksYieldMultiplier(city));
       city.gold -= 800;
@@ -616,7 +786,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       city.troops += gain;
       city.order = clamp(city.order - 2, 0, 100);
       addTechP(next, forceId, TECHP_PER_CIVIL_ACTION);
-      message = `${officer.name}在${city.name}征募士兵`;
+      message = `${names}在${city.name}征募士兵${gain.toLocaleString('en-US')}`;
       next.cityEffectReports = [{
         id: `city-effect-${next.month}-${next.logs.length}`,
         cityId: city.id,
@@ -626,33 +796,41 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         label: '士兵',
         kind: 'recruit',
       }];
-      officer.acted = true;
+      for (const officer of officers) officer.acted = true;
       break;
     }
     case 'produceArmament': {
-      const officer = next.officers[command.officerId];
+      const officers = command.officerIds.map((officerId) => next.officers[officerId]);
+      const names = officers.map((officer) => officer.name).join('、');
       const current = armamentsOf(city.armaments);
-      const baseGain = produceArmamentYield(officer, command.armamentType);
-      // 设施加成：按该兵装所需设施（锻冶/工房/厩舍/造船）的等级，每级 +15%
+      // 生产数量 = 1000 + 最高智力×10 + 其余2人智力各×5，再乘特技/设施修正
+      const baseGain = produceArmamentYield(officers, command.armamentType);
       const gain = Math.round(baseGain * commandYieldMultiplier(next, command)
         * armamentYieldMultiplier(city, command.armamentType));
       city.gold -= ARMAMENT_GOLD_COST;
       if (isDelayedArmament(command.armamentType)) {
-        officer.location = {
-          kind: 'task',
-          cityId: city.id,
-          task: 'armament',
-          armamentType: command.armamentType,
-          amount: gain,
-          remainingTenDays: DELAYED_ARMAMENT_TEN_DAYS,
-        };
-        message = `${officer.name}开始生产${city.name}${ARMAMENT_LABELS[command.armamentType]}，预计1个月完成`;
+        // 兵器/舰船：按综合智力计算工期，逐旬推进（发明/造船特技日数减半）
+        const tenDays = armamentProductionTenDays(officers, armamentProductionSpeedMultiplier(next, command));
+        for (const [index, officer] of officers.entries()) {
+          officer.location = {
+            kind: 'task',
+            cityId: city.id,
+            task: 'armament',
+            armamentType: command.armamentType,
+            amount: gain,
+            remainingTenDays: tenDays,
+            lead: index === 0,
+          };
+        }
+        addTechP(next, forceId, TECHP_PER_PRODUCE_ARMAMENT);
+        message = `${names}开始生产${city.name}${ARMAMENT_LABELS[command.armamentType]}，预计${tenDays}旬完成`;
       } else {
         city.armaments = {
           ...current,
           [command.armamentType]: current[command.armamentType] + gain,
         };
-        message = `${officer.name}生产${city.name}${ARMAMENT_LABELS[command.armamentType]}，增加了${gain.toLocaleString('en-US')}`;
+        addTechP(next, forceId, TECHP_PER_PRODUCE_ARMAMENT);
+        message = `${names}生产${city.name}${ARMAMENT_LABELS[command.armamentType]}，增加了${gain.toLocaleString('en-US')}`;
         next.cityEffectReports = [{
           id: `city-effect-${next.month}-${next.logs.length}`,
           cityId: city.id,
@@ -663,25 +841,33 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
           kind: 'armament',
         }];
       }
-      officer.acted = true;
+      for (const officer of officers) officer.acted = true;
       break;
     }
     case 'train': {
-      const officer = next.officers[command.officerId];
+      const officers = command.officerIds.map((officerId) => next.officers[officerId]);
+      const names = officers.map((officer) => officer.name).join('、');
       city.food -= 300;
-      const gain = 5 + Math.floor(officer.stats.leadership / 20);
+      city.trainedThisTenDay = true;
+      // 气力提升 = 【(武力总和 + 武力最大值) ÷ 基数】+ 3，基数 = 士兵数÷2000 + 20
+      const gain = trainMoraleGain(officers, city.troops);
       city.training = clamp(city.training + gain, 0, 100);
-      message = `${officer.name}训练${city.name}守军`;
-      officer.acted = true;
+      addTechP(next, forceId, TECHP_PER_TRAIN);
+      message = `${names}训练${city.name}守军，气力+${gain}`;
+      for (const officer of officers) officer.acted = true;
       break;
     }
     case 'patrol': {
-      const officer = next.officers[command.officerId];
+      const officers = command.officerIds.map((officerId) => next.officers[officerId]);
+      const names = officers.map((officer) => officer.name).join('、');
       city.gold -= patrolGoldCost(city);
-      const gain = 4 + Math.floor(officer.stats.charisma / 20);
+      city.patrolledThisTenDay = true;
+      // 治安提升 = 【统率总和 ÷ 28】+ 2
+      const gain = patrolOrderGain(officers);
       city.order = clamp(city.order + gain, 0, 100);
-      message = `${officer.name}巡察${city.name}，安抚百姓`;
-      officer.acted = true;
+      addTechP(next, forceId, TECHP_PER_PATROL);
+      message = `${names}巡察${city.name}，治安+${gain}`;
+      for (const officer of officers) officer.acted = true;
       break;
     }
     case 'talent': {
@@ -743,27 +929,32 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       break;
     }
     case 'research': {
-      const officer = next.officers[command.officerId];
+      const officers = command.officerIds.map((officerId) => next.officers[officerId]);
+      const names = officers.map((officer) => officer.name).join('、');
       const branchDef = TECH_BRANCHES.find((candidate) => candidate.id === command.branch)!;
       const level = techLevelOf(next, forceId, command.branch);
       const cost = TECH_COSTS[level];
       city.gold -= cost.gold;
       const force = next.forces[forceId];
-      // 指导：研究技巧P消耗减半
-      force.techP = Math.max(0, (force.techP ?? 0) - researchTechPCost(next, forceId, command.branch, command.officerId));
-      const statValue = branchDef.researchStat === 'leadership'
+      // 指导：研究技巧P消耗减半（多名执行武将中任一人持有即生效）
+      force.techP = Math.max(0, (force.techP ?? 0) - researchTechPCost(next, forceId, command.branch, command.officerIds));
+      // 相关能力纯等权重加和：枪/戟/弩/骑兵→统率，军制/内政→政治
+      const statSum = officers.reduce((sum, officer) => sum + (branchDef.researchStat === 'leadership'
         ? officer.stats.leadership
-        : officer.stats.politics;
-      const tenDays = researchTenDays(cost.baseTenDays, statValue);
-      officer.location = {
-        kind: 'task',
-        cityId: city.id,
-        task: 'research',
-        branch: command.branch,
-        remainingTenDays: tenDays,
-      };
-      officer.acted = true;
-      message = `${officer.name}在${city.name}开始研究${branchDef.name}系「${branchDef.levels[level].name}」，预计${tenDays}旬完成`;
+        : officer.stats.politics), 0);
+      const tenDays = researchTenDays(cost.baseDays, statSum);
+      for (const [index, officer] of officers.entries()) {
+        officer.location = {
+          kind: 'task',
+          cityId: city.id,
+          task: 'research',
+          branch: command.branch,
+          remainingTenDays: tenDays,
+          lead: index === 0,
+        };
+      }
+      for (const officer of officers) officer.acted = true;
+      message = `${names}在${city.name}开始研究${branchDef.name}系「${branchDef.levels[level].name}」，预计${tenDays}旬完成`;
       break;
     }
     case 'abilityResearch': {
@@ -809,14 +1000,20 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'transfer':
       message = applyTransfer(next, command);
       break;
+    case 'summon':
+      message = applySummon(next, command);
+      break;
     case 'reward': {
-      const officer = next.officers[command.officerId];
-      const current = officerLoyalty(officer);
-      const gain = rewardLoyaltyGain(current);
-      city.gold -= REWARD_GOLD_COST;
-      setOfficerLoyalty(officer, current + gain);
-      message = `褒奖${officer.name}，忠诚 ${current} → ${officerLoyalty(officer)}`;
-      officer.acted = true;
+      const names: string[] = [];
+      for (const officerId of command.officerIds) {
+        const officer = next.officers[officerId];
+        const current = officerLoyalty(officer);
+        setOfficerLoyalty(officer, current + REWARD_LOYALTY_GAIN);
+        officer.rewarded = true;
+        names.push(`${officer.name} ${current} → ${officerLoyalty(officer)}`);
+      }
+      city.gold -= REWARD_GOLD_COST * command.officerIds.length;
+      message = `褒奖${names.join('、')}，忠诚+${REWARD_LOYALTY_GAIN}`;
       break;
     }
     case 'appointPosition': {
@@ -1011,16 +1208,31 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       message = `${a.name}与${b.name}${label}${messages.length > 0 ? `，${messages[0]}` : ''}`;
       break;
     }
+    case 'sworn': {
+      const officers = command.officerIds.map((id) => next.officers[id]);
+      const force = next.forces[forceId];
+      force.techP = (force.techP ?? 0) - MARRY_TECHP_COST;
+      for (let i = 0; i < officers.length; i++) {
+        for (let j = i + 1; j < officers.length; j++) {
+          enterRelationship(next, officers[i], officers[j], 'sworn');
+        }
+      }
+      for (const officer of officers) officer.acted = true;
+      message = `${officers.map((o) => o.name).join('、')}结为义兄弟`;
+      break;
+    }
     case 'legion': {
       const result = applyLegionCommand(next, forceId, command.commanderId, command.targetCityId, command.policy ?? 'balanced');
       message = result.message;
       break;
     }
     case 'buildFacilityPlot': {
-      const officer = next.officers[command.officerId];
-      const result = startBuildCityPlot(city, command.plotIndex, command.facility, officer);
+      const officers = command.officerIds.map((officerId) => next.officers[officerId]);
+      const result = startBuildCityPlot(city, command.plotIndex, command.facility, officers);
+      // 建设黑市不加技巧P，其他设施+30
+      if (command.facility !== 'blackmarket') addTechP(next, forceId, TECHP_PER_CONSTRUCTION);
       message = result.message;
-      officer.acted = true;
+      for (const officer of officers) officer.acted = true;
       break;
     }
     case 'cancelCityPlot': {
@@ -1039,7 +1251,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
 
   // 依行动累积功绩（任命官职/授予宝物/能力研究本身不计功绩）
   if (command.type !== 'appointPosition' && command.type !== 'grantTreasure' && command.type !== 'abilityResearch') {
-    const involvedIds = command.type === 'explore' || command.type === 'transfer'
+    const involvedIds = 'officerIds' in command && Array.isArray(command.officerIds)
       ? command.officerIds
       : 'officerId' in command && command.officerId
         ? [command.officerId]

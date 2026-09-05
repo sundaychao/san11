@@ -64,7 +64,7 @@ describe('StartScreen online rooms', () => {
     render(<StartScreen />);
 
     expect(screen.getByText('ABCD')).toBeVisible();
-    expect(screen.getByText('Host')).toBeVisible();
+    expect(screen.getByText('Host · 小地图')).toBeVisible();
     expect(screen.getByText('1/4')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: '进入 ABCD' }));
@@ -100,7 +100,17 @@ describe('StartScreen online rooms', () => {
 
     await user.click(screen.getByRole('button', { name: '创建新房间' }));
 
-    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test' });
+    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'small' });
+  });
+
+  it('lets the host create a large homeland-mapped room', async () => {
+    const user = userEvent.setup();
+    render(<StartScreen />);
+
+    await user.click(screen.getByRole('radio', { name: /大地图/ }));
+    await user.click(screen.getByRole('button', { name: '创建新房间' }));
+
+    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'homeland' });
   });
 
   it('keeps creating a room available while the lobby connection is refreshing', async () => {
@@ -112,7 +122,7 @@ describe('StartScreen online rooms', () => {
     expect(createButton).toBeEnabled();
 
     await user.click(createButton);
-    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test' });
+    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'small' });
   });
 
   it('refreshes the room list from the current server', async () => {

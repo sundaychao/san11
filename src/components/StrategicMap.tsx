@@ -87,6 +87,8 @@ interface StrategicMapProps {
   attackTargetCityIds?: CityId[];
   attackTargetFacilityIds?: string[];
   attackTargetUnitIds?: string[];
+  /** 可攻击的开发设施：`cityId:plotIndex` 集合，命中时高亮为攻击目标 */
+  attackTargetPlotKeys?: Set<string>;
   damageReports?: BattleDamageReport[];
   strategyResultReports?: StrategyResultReport[];
   cityEffectReports?: CityEffectReport[];
@@ -135,6 +137,7 @@ export function StrategicMap({
   attackTargetCityIds = [],
   attackTargetFacilityIds = [],
   attackTargetUnitIds = [],
+  attackTargetPlotKeys,
   damageReports = [],
   strategyResultReports = [],
   cityEffectReports = [],
@@ -698,14 +701,21 @@ export function StrategicMap({
               const facilityLabel = plot.constructing
                 ? PLOT_LABELS[plot.constructing.facility] ?? plot.type ?? '?'
                 : (plot.type ? PLOT_LABELS[plot.type] : '?');
+              const isAttackPlotTarget = attackTargetPlotKeys?.has(`${city.id}:${idx}`) ?? false;
               return (
                 <g
                   key={`plot-${city.id}-${idx}`}
-                  className={`construction-overlay${plot.constructing ? ' is-building' : ''}`}
+                  className={`construction-overlay${plot.constructing ? ' is-building' : ''}${isAttackPlotTarget ? ' is-attack-target' : ''}`}
                   data-testid="city-plot-overlay"
                   data-plot-id={plot.id}
                   onPointerDown={(event) => {
                     if (event.button !== 0) return;
+                    // 火计目标：优先于地块菜单处理（否则覆盖层吞掉底层格子的瞄准点击）
+                    if (plot.q != null && plot.r != null && firePlotTargetKeys.has(`${plot.q},${plot.r}`)) {
+                      event.stopPropagation();
+                      onFirePlotTargetSelect?.({ q: plot.q, r: plot.r });
+                      return;
+                    }
                     event.stopPropagation();
                     onCityPlotSelect?.(city.id, idx, { x: event.clientX + 12, y: event.clientY + 4 });
                   }}
@@ -755,8 +765,14 @@ export function StrategicMap({
                   onPointerDown={(event) => {
                     if (!gameCity || event.button !== 0) return;
                     event.stopPropagation();
+                    const footprintKey = `${coord.q},${coord.r}`;
+                    // 火计目标：优先于移动回城/城池菜单（否则覆盖层吞掉对城池格放火计的点击）
+                    if (firePlotTargetKeys.has(footprintKey)) {
+                      onFirePlotTargetSelect?.({ q: coord.q, r: coord.r });
+                      return;
+                    }
                     // 选中部队时点击本方城池 footprint 内的可达格 → 回城，不弹城池菜单
-                    if (selectedUnitId && moveTargetKeys.has(`${coord.q},${coord.r}`)) {
+                    if (selectedUnitId && moveTargetKeys.has(footprintKey)) {
                       onMoveTargetSelect?.({ q: coord.q, r: coord.r }, { x: event.clientX + 12, y: event.clientY + 4 });
                       return;
                     }

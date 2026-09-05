@@ -18,9 +18,9 @@ function hasLegalActions(state: GameState) {
     .some((officer) => {
       const cityId = officer.location.kind === 'city' ? officer.location.cityId : officer.cityId;
       const commands: GameCommand[] = [
-        { type: 'recruit', cityId, officerId: officer.id },
-        { type: 'train', cityId, officerId: officer.id },
-        { type: 'patrol', cityId, officerId: officer.id },
+        { type: 'recruit', cityId, officerIds: [officer.id] },
+        { type: 'train', cityId, officerIds: [officer.id] },
+        { type: 'patrol', cityId, officerIds: [officer.id] },
         { type: 'talent', cityId, officerId: officer.id },
       ];
       if (targetCity && targetCity.id !== cityId) {
@@ -61,6 +61,7 @@ export function TopBar() {
         <div className="top-metric"><span>旬</span><strong data-testid="ten-day-label">{TEN_DAY_LABELS[state.tenDay]}</strong></div>
         <div className="top-metric"><span>势力</span><strong className="top-force-name" style={{ color: force.color }}>{force.name}</strong></div>
         <div className="top-metric"><span>行动力</span><strong data-testid="action-points">{state.actionPoints[state.playerForceId]}</strong></div>
+        <div className="top-metric"><span>技巧P</span><strong data-testid="tech-points">{(force.techP ?? 0).toLocaleString('en-US')}</strong></div>
         {isOnline && (
           <div className="top-metric online-top-status">
             <span>{online.connected ? '联网' : '断线'}</span>

@@ -301,10 +301,10 @@ describe('老龄病逝（寿命系统）', () => {
     }
   });
 
-  it('剧本数据：48 名武将均有出生年', () => {
+  it('剧本数据：56 名武将均有出生年', () => {
     const state = createGame('liu', 1);
     const officers = Object.values(state.officers);
-    expect(officers.length).toBe(48);
+    expect(officers.length).toBe(56);
     expect(officers.every((officer) => typeof officer.birthYear === 'number')).toBe(true);
   });
 });

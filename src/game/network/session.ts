@@ -1,5 +1,5 @@
 import { runAiTurn } from '../ai';
-import { FORCE_IDS } from '../scenario/jingxiang208';
+import { createGame, FORCE_IDS } from '../scenario/jingxiang208';
 import { createMobileDuelGame } from '../scenario/mobileDuel';
 import { settleForceTurnStart } from '../skills/rules/turn';
 import { settleTenDay } from '../turn';
@@ -8,6 +8,13 @@ import { reduceGameIntent } from './intentReducer';
 import type { GameIntent } from './intents';
 
 export const ONLINE_DUEL_MAX_PLAYERS = 2;
+
+/** 对战地图：small=荆襄小地图（2人），homeland=单机大地图（最多4人，不足用电脑势力补位） */
+export type RoomMap = 'small' | 'homeland';
+
+export function roomMaxPlayers(map: RoomMap): number {
+  return map === 'homeland' ? 4 : ONLINE_DUEL_MAX_PLAYERS;
+}
 
 export interface OnlinePlayer {
   id: string;
@@ -24,6 +31,7 @@ export interface OnlineRoom {
   phase: OnlineRoomPhase;
   revision: number;
   seed: number;
+  map: RoomMap;
   state: GameState | null;
   players: Record<string, OnlinePlayer>;
   playerOrder: string[];
@@ -38,6 +46,7 @@ export interface CreateOnlineRoomInput {
   hostPlayerId: string;
   hostName?: string;
   seed?: number;
+  map?: RoomMap;
 }
 
 export interface JoinOnlineRoomInput {
@@ -69,6 +78,7 @@ export function createOnlineRoom(input: CreateOnlineRoomInput): OnlineRoom {
     phase: 'lobby',
     revision: 1,
     seed: input.seed ?? Date.now(),
+    map: input.map ?? 'small',
     state: null,
     players: {
       [input.hostPlayerId]: {
@@ -88,8 +98,12 @@ export function createOnlineRoom(input: CreateOnlineRoomInput): OnlineRoom {
 
 export function joinOnlineRoom(room: OnlineRoom, input: JoinOnlineRoomInput): OnlineRoom {
   const isNewPlayer = !room.players[input.playerId];
-  if (isNewPlayer && Object.keys(room.players).length >= ONLINE_DUEL_MAX_PLAYERS) {
-    throw new Error('手机双人对战房间只支持 2 名玩家');
+  if (isNewPlayer && Object.keys(room.players).length >= roomMaxPlayers(room.map)) {
+    throw new Error(
+      room.map === 'homeland'
+        ? '大地图房间最多支持 4 名玩家'
+        : '手机双人对战房间只支持 2 名玩家',
+    );
   }
   if (room.phase !== 'lobby') throw new Error('游戏已经开始');
   return {
@@ -134,18 +148,31 @@ export function startOnlineRoom(room: OnlineRoom, input: StartOnlineRoomInput): 
   if (input.playerId !== room.hostPlayerId) throw new Error('只有房主可以开始游戏');
   if (room.phase !== 'lobby') throw new Error('游戏已经开始');
 
+  // 大地图房间不需要2名真人玩家：少于4人时其余势力由电脑代理
+  const minPlayers = room.map === 'homeland' ? 1 : 2;
   const players = Object.values(room.players);
-  if (players.length > ONLINE_DUEL_MAX_PLAYERS) throw new Error('手机双人对战房间只支持 2 名玩家');
-  if (players.length < 2) throw new Error('至少需要 2 名玩家');
+  if (players.length > roomMaxPlayers(room.map)) throw new Error('该房间人数已达上限');
+  if (players.length < minPlayers) {
+    throw new Error(room.map === 'homeland' ? '至少需要 1 名玩家' : '至少需要 2 名玩家');
+  }
   if (players.some((player) => !player.forceId)) throw new Error('所有玩家都需要选择势力');
 
   const hostForceId = room.players[room.hostPlayerId]?.forceId;
   const turnPlayerIds = room.playerOrder.filter((playerId) => Boolean(room.players[playerId]?.forceId));
-  const guestForceId = turnPlayerIds
-    .map((playerId) => room.players[playerId]?.forceId)
-    .find((forceId): forceId is ForceId => Boolean(forceId && forceId !== hostForceId));
-  if (!guestForceId) throw new Error('手机双人地图需要第二名玩家选择势力');
   if (!hostForceId) throw new Error('房主需要选择势力');
+
+  let state: GameState;
+  if (room.map === 'homeland') {
+    // 复用单机大地图剧本，仅把人类玩家并入，其余势力在局间由 AI 控制
+    state = createGame(hostForceId, room.seed);
+  } else {
+    // 小地图保留原手机双人对战
+    const guestForceId = turnPlayerIds
+      .map((playerId) => room.players[playerId]?.forceId)
+      .find((forceId): forceId is ForceId => Boolean(forceId && forceId !== hostForceId));
+    if (!guestForceId) throw new Error('手机双人地图需要第二名玩家选择势力');
+    state = createMobileDuelGame(hostForceId, guestForceId, room.seed);
+  }
 
   return {
     ...room,
@@ -154,7 +181,7 @@ export function startOnlineRoom(room: OnlineRoom, input: StartOnlineRoomInput): 
     turnPlayerIds,
     activePlayerId: turnPlayerIds[0] ?? null,
     completedTurnPlayerIds: [],
-    state: createMobileDuelGame(hostForceId, guestForceId, room.seed),
+    state,
   };
 }
 
@@ -221,6 +248,7 @@ function stateForForceTurnStart(state: GameState, activeForceId: ForceId) {
   next.battleDamageReports = [];
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
+  next.cityEffectReports = [];
   settleForceTurnStart(next, activeForceId);
   return next;
 }

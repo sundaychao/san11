@@ -5,13 +5,14 @@ import type { GameIntentPayload, OnlineRoomListItem, OnlineRoomView, OnlineSnaps
 import {
   createOnlineRoom,
   joinOnlineRoom,
-  ONLINE_DUEL_MAX_PLAYERS,
   playerState,
   reduceOnlineIntent,
+  roomMaxPlayers,
   selectPlayerForce,
   setPlayerConnected,
   startOnlineRoom,
   type OnlineRoom,
+  type RoomMap,
 } from '../src/game/network/session';
 import type { GameDatabase } from './database';
 
@@ -57,6 +58,7 @@ export function roomView(room: OnlineRoom): OnlineRoomView {
     revision: room.revision,
     hostPlayerId: room.hostPlayerId,
     phase: room.phase,
+    map: room.map,
     players: Object.values(room.players),
     turnPlayerIds: room.turnPlayerIds,
     activePlayerId: room.activePlayerId,
@@ -164,7 +166,7 @@ export class RoomManager {
     if (currentRoom?.players[playerId]) this.removePlayerFromRoom(currentRoom, playerId);
   }
 
-  createRoom(input: { playerId: string; playerName: string; seed?: number }) {
+  createRoom(input: { playerId: string; playerName: string; seed?: number; map?: RoomMap }) {
     this.pruneExpiredLobbyDisconnects();
     this.leaveAnyCurrentRoom(input.playerId);
     const roomId = createRoomCode(new Set(this.rooms.keys()));
@@ -173,6 +175,7 @@ export class RoomManager {
       hostPlayerId: input.playerId,
       hostName: input.playerName,
       seed: input.seed,
+      map: input.map,
     });
     this.rooms.set(room.id, room);
     this.playerRooms.set(input.playerId, room.id);
@@ -218,8 +221,9 @@ export class RoomManager {
       .map((room) => ({
         id: room.id,
         hostName: room.players[room.hostPlayerId]?.name ?? '房主',
+        map: room.map,
         playerCount: Object.keys(room.players).length,
-        maxPlayers: ONLINE_DUEL_MAX_PLAYERS,
+        maxPlayers: roomMaxPlayers(room.map),
         selectedForceIds: [...new Set(Object.values(room.players).flatMap((player) => (
           player.forceId ? [player.forceId] : []
         )))],

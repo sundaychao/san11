@@ -41,7 +41,7 @@ export function CityPlotInfoPanel({ city, plotIndex, state, position }: CityPlot
         <i aria-hidden="true" style={{ '--force-color': force?.color ?? '#888' } as CSSProperties} />
         <strong>
           {constructing
-            ? (state.officers[constructing.officerId]?.name ?? '-')
+            ? (constructing.officerIds.map((officerId) => state.officers[officerId]?.name).filter(Boolean).join('、') || '-')
             : (leader?.name ?? force?.name ?? '-')}
         </strong>
       </div>

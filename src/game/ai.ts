@@ -1,12 +1,13 @@
 import { executeCommand, researchTechPCost, validateCommand } from './commands';
 import { dispatchTerritoryDefenseForForce } from './battle/actions';
+import { autoResolveDebate, dismissDebate } from './debate';
 import { TECH_BRANCHES, TECH_COSTS, MAX_TECH_LEVEL, techLevelOf } from './techs';
 import { ABILITY_NODES, ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition } from './treasures';
 import { POSITIONS, forceRankOf, officerMerit, positionDefinition, rankIndex } from './ranks';
 import { RUMOR_AP_COST, RUMOR_GOLD_COST } from './rumor';
 import { DIPLOMACY_AP_COST, GOODWILL_GOLD_COST, areAllies, areNonAggressed, forceDiplomacy } from './diplomacy';
-import { CAPTIVE_DISPOSE_AP_COST, canBuildPlot, cityPlots, hasPlotFacility, plotCost } from './innerAffairs';
+import { CAPTIVE_DISPOSE_AP_COST, canBuildPlot, cityPlots, COMMAND_OFFICER_MAX, hasPlotFacility, plotCost } from './innerAffairs';
 import { capturableByLoyalty } from './captives';
 import { legionsOf } from './innerAffairs';
 import { nextRandom } from './random';
@@ -22,6 +23,11 @@ function bestOfficer(officers: Officer[], stat: keyof Officer['stats']) {
   return [...officers].sort((left, right) => right.stats[stat] - left.stats[stat])[0];
 }
 
+/** 按指定能力降序取前 count 名武将（多人执行指令用） */
+function bestOfficers(officers: Officer[], stat: keyof Officer['stats'], count: number) {
+  return [...officers].sort((left, right) => right.stats[stat] - left.stats[stat]).slice(0, count);
+}
+
 function commandIfLegal(state: GameState, forceId: ForceId, command: GameCommand | null) {
   return command && validateCommand(state, forceId, command).length === 0 ? command : null;
 }
@@ -33,8 +39,16 @@ function cityCommand(
   type: 'recruit' | 'train' | 'patrol' | 'talent',
   stat: keyof Officer['stats'],
 ) {
-  const officer = bestOfficer(availableOfficers(state, forceId, city), stat);
-  return officer ? commandIfLegal(state, forceId, { type, cityId: city.id, officerId: officer.id }) : null;
+  const officers = availableOfficers(state, forceId, city);
+  if (type === 'talent') {
+    const officer = bestOfficer(officers, stat);
+    return officer ? commandIfLegal(state, forceId, { type, cityId: city.id, officerId: officer.id }) : null;
+  }
+  // 多人执行指令：按相关能力取至多3名武将
+  const picked = bestOfficers(officers, stat, COMMAND_OFFICER_MAX);
+  return picked.length > 0
+    ? commandIfLegal(state, forceId, { type, cityId: city.id, officerIds: picked.map((officer) => officer.id) })
+    : null;
 }
 
 function chooseAiResearchCommand(state: GameState, forceId: ForceId): GameCommand | null {
@@ -61,11 +75,13 @@ function chooseAiResearchCommand(state: GameState, forceId: ForceId): GameComman
     for (const city of sortedCities) {
       if (city.gold < cost.gold + 2000) continue;
       const officers = availableOfficers(state, forceId, city);
-      const officer = bestOfficer(officers, branch.researchStat);
-      if (!officer) continue;
+      // 多人研究：按研究属性取至多3名武将，人数越多研究越快
+      const picked = bestOfficers(officers, branch.researchStat, COMMAND_OFFICER_MAX);
+      if (picked.length === 0) continue;
+      const officerIds = picked.map((officer) => officer.id);
       // 指导：研究技巧P消耗减半后仍不足则跳过
-      if (techP < researchTechPCost(state, forceId, branch.id, officer.id)) continue;
-      const command: GameCommand = { type: 'research', cityId: city.id, officerId: officer.id, branch: branch.id };
+      if (techP < researchTechPCost(state, forceId, branch.id, officerIds)) continue;
+      const command: GameCommand = { type: 'research', cityId: city.id, officerIds, branch: branch.id };
       if (validateCommand(state, forceId, command).length === 0) return command;
     }
   }
@@ -355,9 +371,9 @@ function chooseAiDecision(state: GameState, forceId: ForceId): AiDecision {
       if (hasPlotFacility(city, facility)) continue;
       const plotIndex = cityPlots(city).findIndex((_plot, index) => canBuildPlot(city, index));
       if (plotIndex < 0 || city.gold < plotCost(facility)) continue;
-      const officer = bestOfficer(availableOfficers(state, forceId, city), 'politics');
-      if (!officer) continue;
-      const command = commandIfLegal(state, forceId, { type: 'buildFacilityPlot', cityId: city.id, officerId: officer.id, plotIndex, facility });
+      const picked = bestOfficers(availableOfficers(state, forceId, city), 'politics', COMMAND_OFFICER_MAX);
+      if (picked.length === 0) continue;
+      const command = commandIfLegal(state, forceId, { type: 'buildFacilityPlot', cityId: city.id, officerIds: picked.map((officer) => officer.id), plotIndex, facility });
       if (command) return selected(command);
     }
   }
@@ -443,6 +459,11 @@ export function runAiTurn(initial: GameState, forceId: ForceId): GameState {
     if (!decision.command) break;
     if (decision.cursor !== state.rngCursor) state = { ...state, rngCursor: decision.cursor };
     state = executeCommand(state, forceId, decision.command);
+    // AI 触发的舌战立即自动演算结算（不弹给玩家操作），并清除已结束会话避免残留
+    if (state.debateSession?.status === 'ongoing'
+      && state.officers[state.debateSession.recruiterId]?.forceId === forceId) {
+      state = dismissDebate(autoResolveDebate(state));
+    }
     guard += 1;
   }
   return state;

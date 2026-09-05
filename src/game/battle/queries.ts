@@ -23,6 +23,7 @@ import {
 } from './actions';
 import { movementAllowanceForProfile } from './definitions';
 import type { GridCoord } from './grid';
+import { attackablePlots, type PlotAttackTarget } from './targetRules';
 import { strategyEnergyCostForUnit } from './strategies';
 import { formationMovementAllowanceBonus } from '../skills';
 import { troopMovementBonusForTroop } from '../techs';
@@ -57,6 +58,7 @@ export interface UnitActionQuery {
   attackUnits: ArmyUnit[];
   attackCities: City[];
   attackFacilities: Facility[];
+  attackPlots: PlotAttackTarget[];
   jointAttackUnits: ArmyUnit[];
   repairFacilities: Facility[];
   tacticOptions: UnitTacticOption[];
@@ -148,6 +150,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
       attackUnits: [],
       attackCities: [],
       attackFacilities: [],
+      attackPlots: [],
       jointAttackUnits: [],
       repairFacilities: [],
       tacticOptions: [],
@@ -161,6 +164,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
   const attackUnits = attackableUnits(state, unitId, origin);
   const attackCities = attackableCities(state, unitId, origin);
   const attackFacilities = attackableFacilities(state, unitId, origin);
+  const attackPlots = attackablePlots(state, unitId, origin);
   const jointAttackUnits = jointAttackableUnits(state, unitId, origin);
   const repairFacilities = repairableFacilities(state, unitId, origin);
   const tacticOptions = getUnitTacticOptions(state, unitId, origin);
@@ -180,7 +184,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
     ? emptyCommandAvailability()
     : {
         wait: true,
-        attack: attackUnits.length > 0 || attackCities.length > 0 || attackFacilities.length > 0,
+        attack: attackUnits.length > 0 || attackCities.length > 0 || attackFacilities.length > 0 || attackPlots.length > 0,
         duel: attackUnits.length > 0,
         jointAttack: jointAttackUnits.length > 0,
         tactic: availableTactics.length > 0,
@@ -194,6 +198,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
     attackUnits,
     attackCities,
     attackFacilities,
+    attackPlots,
     jointAttackUnits,
     repairFacilities,
     tacticOptions,

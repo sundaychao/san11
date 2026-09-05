@@ -68,7 +68,7 @@ export const TECH_BRANCHES: TechBranchDef[] = [
       { name: '熟练兵', description: '部队气力上限+20' },
       { name: '随军参谋', description: '出征部队初始气力增加（政治×20%）' },
       { name: '军制改革', description: '出征兵力上限+3000' },
-      { name: '治军严明', description: '部队每旬气力恢复翻倍' },
+      { name: '掌握人心', description: '部队每旬气力恢复翻倍；且季初掉忠2/3概率免疫、敌方挖角成功率下降' },
     ],
   },
   {
@@ -93,31 +93,38 @@ export const TECH_BRANCH_LABELS: Record<TechBranchId, string> = {
   civil: '内政',
 };
 
-// 各级研究消耗：金钱、技巧P、基础耗时（旬）
-export const TECH_COSTS: { gold: number; techP: number; baseTenDays: number }[] = [
-  { gold: 1000, techP: 1000, baseTenDays: 3 },
-  { gold: 2000, techP: 2000, baseTenDays: 4 },
-  { gold: 5000, techP: 3000, baseTenDays: 6 },
-  { gold: 10000, techP: 5000, baseTenDays: 9 },
+// 各级研究消耗：金钱、技巧P、基础耗时（日：60/70/90/120日 = 6/7/9/12旬）
+export const TECH_COSTS: { gold: number; techP: number; baseDays: number }[] = [
+  { gold: 1000, techP: 1000, baseDays: 60 },
+  { gold: 2000, techP: 2000, baseDays: 70 },
+  { gold: 5000, techP: 3000, baseDays: 90 },
+  { gold: 10000, techP: 5000, baseDays: 120 },
 ];
 
 export const RESEARCH_AP_COST = 20;
 export const MAX_TECH_LEVEL = 4;
 
-/** 技巧P获取来源数值 */
+/** 技巧P获取来源数值（对齐血色衣冠6.0分档，P0版） */
 export const TECHP_PER_BREAK_UNIT = 200;
 export const TECHP_PER_CITY_CAPTURE = 2000;
 export const TECHP_PER_RECRUIT_OFFICER = 150;
 export const TECHP_PER_TRADE = 80;
-export const TECHP_PER_CIVIL_ACTION = 30;
-export const TECHP_POP_DIVISOR = 4000;
+export const TECHP_PER_CIVIL_ACTION = 30; // 征兵
+export const TECHP_PER_PRODUCE_ARMAMENT = 8; // 生产兵装
+export const TECHP_PER_TRAIN = 8; // 训练（取原版浮动区间7~10的中值）
+export const TECHP_PER_PATROL = 12; // 巡查
+export const TECHP_PER_CONSTRUCTION = 30; // 开发建设（黑市除外）
+export const TECHP_PER_DEFENSE_BUILD = 5; // 修建防御设施（修补一次）
+export const TECHP_CITY_POP_DIVISOR = 3000; // 城市人口系数除数（城市人口÷此值≈每旬技巧P）
+export const TECHP_RURAL_POP_DIVISOR = 12000; // 农村人口系数除数
+export const TECHP_MAX = 60000; // 技巧P上限（对齐血色衣冠6.0 SIRE配置）
 
 /** 技巧P入账（击破/占领/登庸/交易/内政等）。
  * 定义于此叶子模块，避免 commands.ts 与战斗模块形成循环依赖（启动时 TDZ 崩溃）。 */
 export function addTechP(state: GameState, forceId: ForceId, amount: number): void {
   const force = state.forces[forceId];
   if (!force || amount <= 0) return;
-  force.techP = (force.techP ?? 0) + amount;
+  force.techP = Math.min(TECHP_MAX, (force.techP ?? 0) + amount);
 }
 
 /** 获取势力已研究等级（0-4） */
@@ -165,7 +172,13 @@ export function recruitMultiplier(state: GameState, forceId: ForceId): number {
   return techLevelOf(state, forceId, 'civil') >= 3 ? 1.3 : 1;
 }
 
-/** 研究耗时：基础旬数随武将相关属性缩短（每20点属性省1旬） */
-export function researchTenDays(baseTenDays: number, statValue: number): number {
-  return Math.max(1, baseTenDays - Math.floor(statValue / 20));
+/** 「掌握人心」：军制4级。季初掉忠2/3概率免疫，且敌方挖角成功率下降 */
+export function hasMasterHearts(state: GameState, forceId: ForceId): boolean {
+  return techLevelOf(state, forceId, 'military') >= 4;
+}
+
+/** 研究耗时（旬）：研究日数 = 基本日数 −【相关能力总和÷7】（最低10日），相关能力为执行武将纯等权重加和 */
+export function researchTenDays(baseDays: number, statSum: number): number {
+  const days = Math.max(10, baseDays - Math.floor(statSum / 7));
+  return Math.ceil(days / 10);
 }

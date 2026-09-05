@@ -8,7 +8,12 @@ export type AudioEvent =
   | { type: 'menu-waiting-for-target' }
   | { type: 'menu-left-click' }
   | { type: 'menu-click-on' }
-  | { type: 'menu-right-click' };
+  | { type: 'menu-right-click' }
+  | { type: 'debate-shout' }
+  | { type: 'debate-sophistry' }
+  | { type: 'debate-draw' }
+  | { type: 'debate-victory' }
+  | { type: 'debate-defeat' };
 
 export interface AudioEventAdapter {
   emit(event: AudioEvent): void;

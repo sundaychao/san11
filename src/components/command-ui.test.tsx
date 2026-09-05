@@ -218,10 +218,10 @@ describe('command interface', { timeout: 30000 }, () => {
     }
 
     await user.click(within(dialog).getByRole('button', { name: '按智力排序' }));
-    expect(officerNamesIn(dialog).slice(0, 3)).toEqual(['诸葛亮', '马谡', '刘备']);
+    expect(officerNamesIn(dialog).slice(0, 3)).toEqual(['诸葛亮', '黄月英', '马谡']);
 
     await user.click(within(dialog).getByRole('button', { name: '按智力排序' }));
-    expect(officerNamesIn(dialog).slice(0, 3)).toEqual(['张飞', '糜芳', '廖化']);
+    expect(officerNamesIn(dialog).slice(0, 3)).toEqual(['甘氏', '张飞', '糜芳']);
 
     await user.click(within(dialog).getByRole('button', { name: '适性' }));
     for (const header of ['武将', '枪', '戟', '弩', '骑', '兵器', '水军']) {
@@ -232,7 +232,7 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(officerNamesIn(dialog).slice(0, 2)).toEqual(['关羽', '张飞']);
 
     await user.click(within(dialog).getByRole('button', { name: '按枪排序' }));
-    expect(officerNamesIn(dialog).slice(0, 2)).toEqual(['简雍', '孙乾']);
+    expect(officerNamesIn(dialog).slice(0, 2)).toEqual(['黄月英', '简雍']);
 
     await user.click(within(dialog).getByRole('button', { name: '特技' }));
     for (const header of ['武将', '特技']) {
@@ -240,7 +240,7 @@ describe('command interface', { timeout: 30000 }, () => {
     }
 
     await user.click(within(dialog).getByRole('button', { name: '状态' }));
-    for (const header of ['武将', '状态', '任务', '时间']) {
+    for (const header of ['武将', '状态', '任务', '性别']) {
       expect(within(dialog).getByRole('button', { name: `按${header}排序` })).toBeVisible();
     }
   });
@@ -325,10 +325,8 @@ describe('command interface', { timeout: 30000 }, () => {
     const jianYongRow = within(dialog).getByRole('row', { name: /简雍/ });
     const liuBeiRow = within(dialog).getByRole('row', { name: /刘备/ });
     expect(guanYuRow).toHaveTextContent('执行中');
-    expect(guanYuRow).toHaveTextContent('调动 江陵→武陵');
-    expect(guanYuRow).toHaveTextContent('3旬');
+    expect(guanYuRow).toHaveTextContent('移动 江陵→武陵');
     expect(jianYongRow).toHaveTextContent('输送');
-    expect(jianYongRow).toHaveTextContent('进行中');
     expect(liuBeiRow).not.toHaveTextContent('执行中');
     expect(liuBeiRow).toHaveTextContent('待命');
   });
@@ -339,7 +337,14 @@ describe('command interface', { timeout: 30000 }, () => {
 
     await user.click(screen.getByRole('button', { name: '巡察' }));
     const dialog = screen.getByRole('dialog', { name: '巡察' });
-    await user.selectOptions(within(dialog).getByLabelText('执行武将'), 'liu-bei');
+    // 打开执行武将勾选弹窗：默认已按增益贪心勾选统率 Top3（关羽、陈到、刘备）。
+    // 反选关羽+陈到，只留刘备 1 人执行
+    await user.click(within(dialog).getByRole('button', { name: '执行武将' }));
+    const picker = screen.getByRole('dialog', { name: '选择执行武将' });
+    await user.click(within(picker).getByLabelText('陈到'));
+    await user.click(within(picker).getByLabelText('关羽'));
+    await user.click(within(picker).getByRole('button', { name: '确定（1人）' }));
+    expect(screen.queryByRole('dialog', { name: '选择执行武将' })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: '决定·巡察' }));
 
     expect(screen.queryByRole('dialog', { name: '巡察' })).not.toBeInTheDocument();
@@ -394,7 +399,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const launcher = screen.getByRole('button', { name: '巡察' });
 
     await user.click(launcher);
-    expect(screen.getByLabelText('执行武将')).toHaveFocus();
+    expect(screen.getByRole('button', { name: '执行武将' })).toHaveFocus();
     await user.keyboard('{Escape}');
 
     expect(screen.queryByRole('dialog', { name: '巡察' })).not.toBeInTheDocument();
@@ -418,18 +423,22 @@ describe('command interface', { timeout: 30000 }, () => {
     const user = userEvent.setup();
     renderState();
 
-    await user.click(screen.getByRole('button', { name: '调动' }));
-    const dialog = screen.getByRole('dialog', { name: '调动' });
+    await user.click(screen.getByRole('button', { name: '移动' }));
+    const dialog = screen.getByRole('dialog', { name: '移动' });
     expect(within(dialog).queryByLabelText('执行武将')).not.toBeInTheDocument();
-    expect(within(dialog).queryByLabelText('调动资金')).not.toBeInTheDocument();
-    expect(within(dialog).queryByText('调动兵粮')).not.toBeInTheDocument();
-    expect(within(dialog).queryByText('调动兵力')).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('移动资金')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('移动兵粮')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('移动兵力')).not.toBeInTheDocument();
 
-    await user.click(within(dialog).getByLabelText(/关羽/));
-    await user.click(within(dialog).getByRole('button', { name: '决定·调动' }));
+    await user.click(within(dialog).getByRole('button', { name: '移动人员' }));
+    const picker = screen.getByRole('dialog', { name: '选择执行武将' });
+    await user.click(within(picker).getByLabelText(/关羽/));
+    await user.click(within(picker).getByRole('button', { name: '确定（1人）' }));
+    expect(screen.queryByRole('dialog', { name: '选择执行武将' })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: '决定·移动' }));
 
-    expect(screen.queryByRole('dialog', { name: '调动' })).not.toBeInTheDocument();
-    expect(screen.getByText(/调动关羽/)).toBeVisible();
+    expect(screen.queryByRole('dialog', { name: '移动' })).not.toBeInTheDocument();
+    expect(screen.getByText(/移动关羽/)).toBeVisible();
   });
 
   it('closes the deployment setup popup on right click', async () => {
@@ -703,7 +712,7 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(names()[0]).toBe('关羽');
 
     await user.click(within(fixedArea).getByRole('button', { name: '按统帅排序' }));
-    expect(names()[0]).toBe('简雍');
+    expect(names()[0]).toBe('甘氏');
 
     await user.click(within(officerDialog).getByRole('button', { name: '适性' }));
     await user.click(within(fixedArea).getByRole('button', { name: '按枪排序' }));

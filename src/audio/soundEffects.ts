@@ -7,6 +7,11 @@ const MENU_WAITING_FOR_TARGET_SOUND_URL = new URL('../../assets/sound/menu/waiti
 const MENU_LEFT_MOUSE_SOUND_URL = new URL('../../assets/sound/menu/leftMouse.mp3', import.meta.url).href;
 const MENU_CLICK_ON_SOUND_URL = new URL('../../assets/sound/menu/clickOn.mp3', import.meta.url).href;
 const MENU_RIGHT_MOUSE_SOUND_URL = new URL('../../assets/sound/menu/rightMouse.mp3', import.meta.url).href;
+const DEBATE_SHOUT_SOUND_URL = new URL('../../assets/sound/debate/shout.mp3', import.meta.url).href;
+const DEBATE_SOPHISTRY_SOUND_URL = new URL('../../assets/sound/debate/sophistry.mp3', import.meta.url).href;
+const DEBATE_DRAW_SOUND_URL = new URL('../../assets/sound/debate/draw.mp3', import.meta.url).href;
+const DEBATE_VICTORY_SOUND_URL = new URL('../../assets/sound/debate/victory.mp3', import.meta.url).href;
+const DEBATE_DEFEAT_SOUND_URL = new URL('../../assets/sound/debate/defeat.mp3', import.meta.url).href;
 
 function playSound(url: string) {
   if (typeof Audio === 'undefined') return;
@@ -53,4 +58,24 @@ export function playClickOnSound() {
 
 export function playRightMouseSound() {
   playSound(MENU_RIGHT_MOUSE_SOUND_URL);
+}
+
+export function playDebateShoutSound() {
+  playSound(DEBATE_SHOUT_SOUND_URL);
+}
+
+export function playDebateSophistrySound() {
+  playSound(DEBATE_SOPHISTRY_SOUND_URL);
+}
+
+export function playDebateDrawSound() {
+  playSound(DEBATE_DRAW_SOUND_URL);
+}
+
+export function playDebateVictorySound() {
+  playSound(DEBATE_VICTORY_SOUND_URL);
+}
+
+export function playDebateDefeatSound() {
+  playSound(DEBATE_DEFEAT_SOUND_URL);
 }

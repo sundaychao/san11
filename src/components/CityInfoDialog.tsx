@@ -8,6 +8,7 @@ import {
   cityNextQuarterFoodIncome,
   cityNextQuarterFoodExpense,
   cityTroopCap,
+  cityIncomeMultiplierByBlockade,
   CITY_GOLD_CAP,
   CITY_FOOD_CAP,
   citySizeOf,
@@ -37,12 +38,13 @@ export function CityInfoDialog({ cityId, onClose }: CityInfoDialogProps) {
   const force = city.ownerId ? state.forces[city.ownerId] : undefined;
   const governor = city.governorId ? state.officers[city.governorId] : undefined;
 
-  // 收入/支出预估
-  const goldIncome = cityMonthlyGoldIncome(city);
+  // 收入/支出预估（兵临城下封锁时收入为0）
+  const incomeMultiplier = cityIncomeMultiplierByBlockade(state, city);
+  const goldIncome = cityMonthlyGoldIncome(city) * incomeMultiplier;
   const goldExpense = cityMonthlyOfficerSalary(state, city);
   const expectedGold = Math.min(CITY_GOLD_CAP, city.gold + goldIncome - goldExpense);
 
-  const foodIncome = cityNextQuarterFoodIncome(city);
+  const foodIncome = cityNextQuarterFoodIncome(city) * incomeMultiplier;
   const foodExpense = cityNextQuarterFoodExpense(state, city);
   const expectedFood = Math.max(0, Math.min(CITY_FOOD_CAP, city.food + foodIncome - foodExpense));
 

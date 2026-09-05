@@ -9,13 +9,13 @@ describe('city skill rules', () => {
     state.officers['guan-yu'].skill = '能吏';
 
     expect(commandYieldMultiplier(state, {
-      type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
+      type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'],
     })).toBe(1.5);
     expect(commandYieldMultiplier(state, {
-      type: 'produceArmament', cityId: 'jiangling', officerId: 'guan-yu', armamentType: 'crossbow',
-    })).toBe(1.5);
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['guan-yu'], armamentType: 'crossbow',
+    })).toBe(2);
     expect(commandYieldMultiplier(state, {
-      type: 'produceArmament', cityId: 'jiangling', officerId: 'guan-yu', armamentType: 'cavalry',
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['guan-yu'], armamentType: 'cavalry',
     })).toBe(1);
   });
 
@@ -25,7 +25,7 @@ describe('city skill rules', () => {
     state.officers['guan-yu'].skill = '名声';
 
     expect(commandYieldMultiplier(state, {
-      type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
+      type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'],
     })).toBe(1);
   });
 
@@ -35,12 +35,12 @@ describe('city skill rules', () => {
 
     for (const armamentType of ['spear', 'halberd', 'crossbow'] as const) {
       expect(commandYieldMultiplier(state, {
-        type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType,
-      })).toBe(1.5);
+        type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType,
+      })).toBe(2);
     }
     for (const armamentType of ['cavalry', 'ram', 'tower', 'ship'] as const) {
       expect(commandYieldMultiplier(state, {
-        type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType,
+        type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType,
       })).toBe(1);
     }
   });

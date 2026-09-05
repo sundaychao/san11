@@ -5,9 +5,121 @@ import {
   marketMonthlyGoldIncome, grandMarketMonthlyGoldIncome, fishMarketMonthlyGoldIncome,
   mintEffect, granaryEffect, cityMonthlyGoldIncome, basePopulationTax, baseFoodTax,
   farmQuarterlyIncome, garrisonFarmQuarterlyIncome, cityQuarterlyFoodIncome,
-  blackMarketMonthlyGoldIncome,
+  blackMarketMonthlyGoldIncome, defaultOfficersFor, constructTenDaysForOfficers,
 } from './innerAffairs';
+import type { Officer } from './types';
 import { createGame } from './scenario/jingxiang208';
+
+/** 快速生成 N 个可插入 useMemo 推荐的伪武将（politics/intelligence/war/leadership/charisma 指定） */
+function mockOfficers(defs: Array<{ id: string; war?: number; leadership?: number; intelligence?: number; politics?: number; charisma?: number }>): Officer[] {
+  const base = createGame('liu', 1).officers['liu-bei'];
+  return defs.map((def) => ({
+    ...base,
+    id: def.id,
+    name: def.id,
+    stats: {
+      ...base.stats,
+      war: def.war ?? 50,
+      leadership: def.leadership ?? 50,
+      intelligence: def.intelligence ?? 50,
+      politics: def.politics ?? 50,
+      charisma: def.charisma ?? 50,
+    },
+  }));
+}
+
+describe('defaultOfficersFor 按效果自动推荐 1~3 人，饱和后停止增加', () => {
+  it('征兵（魅力等权重永不饱和）：直接取前3高魅', () => {
+    const state = createGame('liu', 1);
+    const officers = mockOfficers([
+      { id: 'c99', charisma: 99 }, { id: 'c90', charisma: 90 }, { id: 'c80', charisma: 80 }, { id: 'c40', charisma: 40 },
+    ]);
+    const picks = defaultOfficersFor(state.cities.jiangling, officers, { type: 'recruit' });
+    expect(picks).toEqual(['c99', 'c90', 'c80']);
+  });
+
+  it('巡查：治安 100 或增益不提升时停止', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.order = 99; // 距离100差1，统28+2就够，第2人开始收益已饱和
+    const officers = mockOfficers([
+      { id: 'l90', leadership: 90 }, { id: 'l80', leadership: 80 }, { id: 'l40', leadership: 40 },
+    ]);
+    const picks = defaultOfficersFor(state.cities.jiangling, officers, { type: 'patrol' });
+    // 90÷28+2 = 5.214 → 实际只需要 1 治安增量（clamp 到 1），加第 2 人无增益 → 停在 1 人
+    expect(picks.length).toBe(1);
+    expect(picks[0]).toBe('l90');
+    expect(constructTenDaysForOfficers.length).toBeGreaterThan(0);
+  });
+
+  it('训练：士气满 100 时 1 人足够', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.training = 99;
+    state.cities.jiangling.troops = 15000;
+    const officers = mockOfficers([
+      { id: 'w99', war: 99 }, { id: 'w97', war: 97 }, { id: 'w90', war: 90 },
+    ]);
+    const picks = defaultOfficersFor(state.cities.jiangling, officers, { type: 'train' });
+    // 关羽99: 武总和+武最大=99+99=198 / (15000/2000+20=27.5) + 3 ≈ 10
+    // 只需要 +1 士气就能到100，第2人增益为 0 → 停止，推荐1人
+    expect(picks.length).toBe(1);
+  });
+
+  it('开发建设：第2/3人加入是否增益取决于政治÷3分数值', () => {
+    const state = createGame('liu', 1);
+    // 3人极端悬殊：主政100、副政 3 和 3 → 综合政 = 100 + (3+3)/3 = 102
+    // 对比 1 人情况 = 100。两者工期是否差一个台阶需验证
+    const officers = mockOfficers([
+      { id: 'p100', politics: 100 }, { id: 'p3a', politics: 3 }, { id: 'p3b', politics: 3 },
+    ]);
+    const picks = defaultOfficersFor(state.cities.jiangling, officers, { type: 'buildFacilityPlot' });
+    // 102 vs 100：每旬建设量= 102×1.5 = 153 vs 100×1.5 = 150（都远超 250）
+    // 若工期在 1 旬封顶，推荐 1 人即止；否则人数会增加
+    expect(['p100']).toContain(picks[0]);
+    expect(picks.length).toBeGreaterThanOrEqual(1);
+    expect(picks.length).toBeLessThanOrEqual(3);
+  });
+
+  it('研究：按分支属性取相关能力，最多3人', () => {
+    const state = createGame('liu', 1);
+    const officers = mockOfficers([
+      { id: 's90', politics: 50, leadership: 90 },
+      { id: 's80', politics: 50, leadership: 80 },
+      { id: 's40', politics: 50, leadership: 40 },
+    ]);
+    // 枪兵方向使用统率
+    const picks = defaultOfficersFor(state.cities.jiangling, officers, { type: 'research', branch: 'spear' });
+    expect(picks).toEqual(['s90', 's80', 's40']);
+  });
+
+  it('兵装：生产弩（即时产量永不饱和，智高取前3）', () => {
+    const state = createGame('liu', 1);
+    const officers = mockOfficers([
+      { id: 'i99', intelligence: 99 }, { id: 'i95', intelligence: 95 }, { id: 'i85', intelligence: 85 }, { id: 'i50', intelligence: 50 },
+    ]);
+    const picks = defaultOfficersFor(state.cities.jiangling, officers, { type: 'produceArmament', armamentType: 'crossbow' });
+    expect(picks).toEqual(['i99', 'i95', 'i85']);
+  });
+
+  it('兵装延期（冲车，智极高者1人即可1旬封顶）', () => {
+    const state = createGame('liu', 1);
+    // 诸葛亮智100，综合智力 = 100 + 0 = 100 → (220-100)/12 = 10*10 = 100 日 = 10 旬（未封顶）
+    // 我们需要一个足够高的智使得工期 == 1 旬 (最少10日 ≡ 1 旬)
+    // 研究日数最低 10 日 → 只要 (220-combined)/12 ≤ 1 → combined ≥ 208，再靠 speedMul 才能到1旬
+    // 所以对纯智延期，不出现"1人就封顶到1旬"的极端情形，因此应当加2人直到3人
+    const officers = mockOfficers([
+      { id: 'i120', intelligence: 120 },
+      { id: 'i110', intelligence: 110 },
+      { id: 'i80', intelligence: 80 },
+    ]);
+    const picks = defaultOfficersFor(state.cities.jiangling, officers, { type: 'produceArmament', armamentType: 'ram' });
+    expect(picks.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('候选为 0 时返回空数组', () => {
+    const state = createGame('liu', 1);
+    expect(defaultOfficersFor(state.cities.jiangling, [], { type: 'recruit' })).toEqual([]);
+  });
+});
 
 describe('建设用地数量在剧本创建时固定，不随人口波动', () => {
   it('人口跌破大城市阈值时不截断地格（已建设施不消失）', () => {

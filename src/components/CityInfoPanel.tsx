@@ -16,9 +16,10 @@ export function CityInfoPanel({ city, state, position }: CityInfoPanelProps) {
   const force = state.forces[city.ownerId];
   const governor = city.governorId ? state.officers[city.governorId] : undefined;
   const localOfficers = Object.values(state.officers).filter((officer) =>
-    officer.forceId === city.ownerId && officer.location.kind === 'city' && officer.location.cityId === city.id,
+    officer.forceId === city.ownerId && officer.cityId === city.id,
   );
-  const forceOfficers = Object.values(state.officers).filter((officer) => officer.forceId === city.ownerId);
+  // 现役：分子=该城当前待命武将数，分母=当前城池的武将数量（非势力）
+  const idleOfficers = localOfficers.filter((officer) => officer.location.kind === 'city' && !officer.acted);
   const style = {
     left: Math.max(8, Math.min(position.x, window.innerWidth - 190)),
     top: Math.max(8, Math.min(position.y, window.innerHeight - 260)),
@@ -40,7 +41,7 @@ export function CityInfoPanel({ city, state, position }: CityInfoPanelProps) {
         <div><dt>治安</dt><dd>{city.order}/100</dd></div>
         <div><dt>耐久</dt><dd>{formatNumber(city.durability)}</dd></div>
         <div><dt>士兵</dt><dd>{formatNumber(city.troops)}</dd></div>
-        <div><dt>现役</dt><dd>{localOfficers.length}/{forceOfficers.length}</dd></div>
+        <div><dt>现役</dt><dd>{idleOfficers.length}/{localOfficers.length}</dd></div>
       </dl>
     </aside>
   );

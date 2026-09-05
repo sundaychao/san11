@@ -7,7 +7,8 @@ export {
 } from './legacyCore';
 
 import type { ArmyUnit, CityId, ForceId, GameState } from '../types';
-import { TECHP_PER_CITY_CAPTURE, techLevelOf, troopDamageMultiplier, addTechP } from '../techs';
+import { techLevelOf, troopDamageMultiplier } from '../techs';
+import { captureCityOnCapture } from '../captives';
 import {
   absorbTroopsOnCritical,
   drainTargetEnergyBySkills,
@@ -19,7 +20,8 @@ import {
   rollRepeatNormalAttack,
   siegeDamageMultiplier,
 } from '../skills/rules/combat';
-import { attackableFacilities, attackableUnits, jointAttackableUnits } from './targetRules';
+import { attackableFacilities, attackablePlots, attackableUnits, jointAttackableUnits } from './targetRules';
+import { PLOT_MAX_DURABILITY } from '../innerAffairs';
 import {
   areAdjacent,
   assertUnitTurn,
@@ -99,6 +101,7 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
   next.battleDamageReports = [];
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
+  next.cityEffectReports = [];
 
   if (!applyNormalAttackHit(next, attackerId, targetId, critical)) return next;
   if (rollRepeatNormalAttack(next, nextAttacker)) {
@@ -137,6 +140,7 @@ export function jointAttackUnit(state: GameState, forceId: ForceId, attackerId: 
   next.battleDamageReports = [];
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
+  next.cityEffectReports = [];
 
   // 参与齐攻的部队 = 主攻者自身 + 与目标相邻且本旬仍可行动的友军战斗部队
   const participants = Object.values(next.units).filter((unit) => {
@@ -229,6 +233,36 @@ export function attackFacility(state: GameState, forceId: ForceId, attackerId: s
   return next;
 }
 
+export function attackPlot(state: GameState, forceId: ForceId, attackerId: string, cityId: CityId, plotIndex: number): GameState {
+  const attacker = assertUnitTurn(state, forceId, attackerId);
+  const city = state.cities[cityId];
+  const plot = city?.plots?.[plotIndex];
+  if (!city || !plot) throw new Error('目标设施不存在');
+  if (plot.q == null || plot.r == null) throw new Error('目标设施不在地图上');
+  if (city.ownerId === forceId) throw new Error('不能攻击己方势力设施');
+  if (attacker.energy < 10) throw new Error('气力不足');
+  if (!attackablePlots(state, attackerId).some((target) => target.cityId === cityId && target.plotIndex === plotIndex)) throw new Error('目标不在攻击范围');
+
+  const next = structuredClone(state);
+  const nextAttacker = next.units[attackerId];
+  const nextPlot = next.cities[cityId].plots![plotIndex];
+  const multiplier = ((nextAttacker.troopType ?? 'sword') === 'siege' ? 1.3 : 0.55) * siegeDamageMultiplier(next, nextAttacker);
+  const damage = Math.max(80, Math.round(damageRoll(next, nextAttacker, 'plain') * multiplier));
+  nextPlot.durability = Math.max(0, (nextPlot.durability ?? PLOT_MAX_DURABILITY) - damage);
+  nextAttacker.energy -= 10;
+  nextAttacker.acted = true;
+  next.facilityRepairReports = [];
+  next.strategyResultReports = [];
+  if (nextPlot.durability <= 0) {
+    // 破坏地格：设施拆除，地格清空
+    nextPlot.type = 'empty';
+    nextPlot.level = 0;
+    nextPlot.value = 0;
+    nextPlot.constructing = undefined;
+  }
+  return next;
+}
+
 export function attackCity(state: GameState, forceId: ForceId, attackerId: string, cityId: CityId): GameState {
   const attacker = assertUnitTurn(state, forceId, attackerId);
   const city = state.cities[cityId];
@@ -248,26 +282,7 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
   if (nextCity.troops === 0 || nextCity.durability === 0) {
-    const oldOwner = nextCity.ownerId;
-    nextCity.ownerId = forceId;
-    // 占领城市获得技巧P
-    addTechP(next, forceId, TECHP_PER_CITY_CAPTURE);
-    nextCity.order = Math.max(0, nextCity.order - 20);
-    nextCity.gold = Math.floor(nextCity.gold / 2);
-    nextCity.food = Math.floor(nextCity.food / 2);
-    nextCity.governorId = null;
-    const garrison = Math.min(1000, Math.floor(nextAttacker.troops * 0.2));
-    const transfer = Math.min(garrison, Math.max(0, nextAttacker.troops - 1));
-    nextCity.troops = transfer;
-    nextAttacker.troops -= transfer;
-    nextCity.durability = Math.ceil(nextCity.maxDurability * 0.2);
-    for (const officer of Object.values(next.officers)) {
-      if (officer.forceId === oldOwner && officer.location.kind === 'city' && officer.location.cityId === cityId) {
-        const retreat = Object.values(next.cities).find((candidate) => candidate.ownerId === oldOwner);
-        officer.location = retreat ? { kind: 'city', cityId: retreat.id } : { kind: 'unaffiliated', cityId };
-        officer.cityId = officer.location.cityId;
-      }
-    }
+    captureCityOnCapture(next, nextAttacker, cityId);
   }
   return next;
 }

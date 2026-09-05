@@ -1,6 +1,11 @@
 import { createContext, useContext, type PropsWithChildren } from 'react';
 import {
   playClickOnSound,
+  playDebateDefeatSound,
+  playDebateDrawSound,
+  playDebateShoutSound,
+  playDebateSophistrySound,
+  playDebateVictorySound,
   playFireEverythingSound,
   playLeftMouseSound,
   playRightMouseSound,
@@ -43,6 +48,21 @@ function playAudioEvent(event: AudioEvent) {
       return;
     case 'menu-right-click':
       playRightMouseSound();
+      return;
+    case 'debate-shout':
+      playDebateShoutSound();
+      return;
+    case 'debate-sophistry':
+      playDebateSophistrySound();
+      return;
+    case 'debate-draw':
+      playDebateDrawSound();
+      return;
+    case 'debate-victory':
+      playDebateVictorySound();
+      return;
+    case 'debate-defeat':
+      playDebateDefeatSound();
       return;
   }
 }

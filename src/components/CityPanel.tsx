@@ -1,7 +1,7 @@
-﻿import { ChevronDown, ChevronUp, Coins, FlaskConical, Gem, GraduationCap, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
+import { ChevronDown, ChevronUp, Coins, FlaskConical, Gem, GraduationCap, Hammer, Landmark, Route, ShieldCheck, Swords, UserSearch, Users } from 'lucide-react';
 import { useState } from 'react';
 import { COMMAND_AP, OFFICER_COMMANDS, cityAvailableOfficers } from '../game/commands';
-import { hasPlotFacility } from '../game/innerAffairs';
+import { hasPlotFacility, isCityBlocked } from '../game/innerAffairs';
 import { officerHealthSummary } from '../game/health';
 import { useGame } from '../game/store/GameProvider';
 import type { GameCommand, GameState, Officer } from '../game/types';
@@ -42,7 +42,7 @@ const COMMANDS: Array<{ type: CommandType; label: string; Icon: typeof Landmark 
   { type: 'grantTreasure', label: '收授宝物', Icon: Gem },
   { type: 'research', label: '科技研究', Icon: FlaskConical },
   { type: 'abilityResearch', label: '能力研究', Icon: GraduationCap },
-  { type: 'transfer', label: '调动', Icon: Route },
+  { type: 'transfer', label: '移动', Icon: Route },
 ];
 
 const formatNumber = (value: number) => value.toLocaleString('en-US');
@@ -126,7 +126,10 @@ export function CityPanel({ onCommand, onOpenCultivatePicker }: CityPanelProps) 
                 title = '城中没有可行动的武将';
               }
               if (type === 'trade') {
-                if (city.merchantTradedThisTenDay) {
+                if (isCityBlocked(state, city)) {
+                  disabled = true;
+                  title = '城池被敌方封锁，无法进行交易';
+                } else if (city.merchantTradedThisTenDay) {
                   disabled = true;
                   title = '本旬已完成一次粮食交易';
                 } else if (!city.merchantPresent) {
@@ -136,6 +139,18 @@ export function CityPanel({ onCommand, onOpenCultivatePicker }: CityPanelProps) 
               } else if (type === 'grantTreasure' && !Object.values(state.treasures ?? {}).some((treasure) => treasure.ownerId === state.playerForceId)) {
                 disabled = true;
                 title = '尚无已出土的宝物';
+              } else if (type === 'train' && city.trainedThisTenDay) {
+                disabled = true;
+                title = '本旬该城已训练';
+              } else if (type === 'patrol' && city.patrolledThisTenDay) {
+                disabled = true;
+                title = '本旬该城已巡查';
+              } else if (type === 'transfer' && !hasAvailableOfficers) {
+                disabled = true;
+                title = '城中没有可行动的武将';
+              } else if ((type === 'transfer' || type === 'buildFacilityPlot') && isCityBlocked(state, city)) {
+                disabled = true;
+                title = type === 'transfer' ? '城池被敌方封锁，无法调动武将' : '城池被敌方封锁，无法开发建设';
               } else if (type === 'recruit' && !hasPlotFacility(city, 'barracks')) {
                 disabled = true;
                 title = '需先建设兵舍才能征兵';

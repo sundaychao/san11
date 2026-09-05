@@ -32,7 +32,7 @@ function Probe() {
       <output aria-label="month">{game.state?.month ?? 0}</output>
       <output aria-label="logs">{game.state?.logs.length ?? 0}</output>
       <button onClick={() => game.startGame('liu', 1)}>start</button>
-      <button onClick={() => game.issueCommand({ type: 'patrol', cityId: 'jiangling', officerId: 'liu-bei' })}>patrol</button>
+      <button onClick={() => game.issueCommand({ type: 'patrol', cityId: 'jiangling', officerIds: ['liu-bei'] })}>patrol</button>
       <button onClick={() => game.endMonth()}>end</button>
       <button onClick={() => game.manualSave()}>save</button>
       <button onClick={() => game.resetGame()}>reset</button>
@@ -523,7 +523,7 @@ describe('GameProvider', () => {
     expect(screen.getByLabelText('first-target-troops')).toHaveTextContent('2700');
     expect(screen.getByLabelText('second-target-troops')).toHaveTextContent('2700');
     expect(screen.getByLabelText('first-target-energy')).toHaveTextContent('90');
-    expect(screen.getByLabelText('second-target-energy')).toHaveTextContent('60');
+    expect(screen.getByLabelText('second-target-energy')).toHaveTextContent('70');
     expect(screen.getByLabelText('damage-reports')).toHaveTextContent('cao-target');
   });
 

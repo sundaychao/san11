@@ -1,6 +1,8 @@
 import { initialArmaments } from '../armaments';
 import { initCityPopulation, initConstructionPlots } from '../innerAffairs';
 import { DEFAULT_OFFICER_LOYALTY, LEADER_INITIAL_LOYALTY } from '../loyalty';
+import { INITIAL_OFFICER_MERIT, rankForCityCount } from '../ranks';
+import { derivePersonality } from '../debate';
 import { TREASURES } from '../treasures';
 import type { City, CityId, Force, ForceId, GameState, GridCell, Officer, OfficerAptitudes, Stats, TreasureState } from '../types';
 import china42Data from './china42.json';
@@ -110,6 +112,12 @@ const officerProfiles: Partial<Record<string, { skill: string; aptitudes: Office
   'huang-zhong': { skill: '弓神', aptitudes: aptitudes('A', 'B', 'S', 'A', 'C', 'C') },
   'wei-yan': { skill: '猛者', aptitudes: aptitudes('S', 'A', 'B', 'A', 'C', 'C') },
   'ma-liang': { skill: '能吏', aptitudes: aptitudes('C', 'C', 'B', 'C', 'A', 'C') },
+  'cai-wenji': { skill: '诗想', aptitudes: aptitudes('C', 'C', 'C', 'B', 'C', 'C') },
+  'zhen-ji': { skill: '倾国', aptitudes: aptitudes('C', 'C', 'B', 'C', 'C', 'C') },
+  'huang-yueying': { skill: '工神', aptitudes: aptitudes('C', 'C', 'S', 'C', 'S', 'A') },
+  'sun-shangxiang': { skill: '弓将', aptitudes: aptitudes('A', 'B', 'S', 'B', 'C', 'C') },
+  'xiao-qiao': { skill: '乐奏', aptitudes: aptitudes('C', 'C', 'C', 'C', 'C', 'C') },
+  'fan-shi': { skill: '乐奏', aptitudes: aptitudes('C', 'C', 'C', 'C', 'C', 'C') },
 };
 
 // 武将性格（义理/野望）：影响季初忠诚波动与挖角难度；未列出的武将取默认 义理55/野望50
@@ -139,6 +147,8 @@ const officerSeeds: OfficerSeed[] = [
   { id: 'yu-jin', name: '于禁', forceId: 'cao', cityId: 'xiangyang', stats: stats(84, 78, 70, 66, 65) },
   { id: 'yue-jin', name: '乐进', forceId: 'cao', cityId: 'wan', stats: stats(80, 84, 62, 48, 66) },
   { id: 'guo-jia', name: '郭嘉', forceId: 'cao', cityId: 'xiangyang', stats: stats(45, 18, 98, 85, 86) },
+  { id: 'cai-wenji', name: '蔡文姬', forceId: 'cao', cityId: 'wan', stats: stats(6, 4, 76, 80, 85), gender: 'female' },
+  { id: 'zhen-ji', name: '甄氏', forceId: 'cao', cityId: 'wan', stats: stats(30, 40, 76, 62, 94), gender: 'female' },
   { id: 'liu-bei', name: '刘备', forceId: 'liu', cityId: 'jiangling', stats: stats(78, 75, 78, 80, 99) },
   { id: 'guan-yu', name: '关羽', forceId: 'liu', cityId: 'jiangling', stats: stats(95, 97, 76, 62, 94) },
   { id: 'zhang-fei', name: '张飞', forceId: 'liu', cityId: 'wuling', stats: stats(85, 98, 35, 22, 45) },
@@ -149,6 +159,8 @@ const officerSeeds: OfficerSeed[] = [
   { id: 'chen-dao', name: '陈到', forceId: 'liu', cityId: 'jiangling', stats: stats(82, 86, 62, 48, 70) },
   { id: 'liao-hua', name: '廖化', forceId: 'liu', cityId: 'wuling', stats: stats(74, 78, 58, 45, 64) },
   { id: 'ma-su', name: '马谡', forceId: 'liu', cityId: 'wuling', stats: stats(68, 55, 88, 72, 62) },
+  { id: 'gan-shi', name: '甘氏', forceId: 'liu', cityId: 'jiangling', stats: stats(6, 4, 18, 22, 42), gender: 'female' },
+  { id: 'huang-yueying', name: '黄月英', forceId: 'liu', cityId: 'wuling', stats: stats(51, 30, 88, 87, 79), gender: 'female' },
   { id: 'sun-quan', name: '孙权', forceId: 'sun', cityId: 'jiangxia', stats: stats(78, 67, 83, 89, 94) },
   { id: 'zhou-yu', name: '周瑜', forceId: 'sun', cityId: 'jiangxia', stats: stats(97, 71, 96, 86, 93) },
   { id: 'lu-su', name: '鲁肃', forceId: 'sun', cityId: 'changsha', stats: stats(78, 56, 92, 94, 91) },
@@ -159,6 +171,8 @@ const officerSeeds: OfficerSeed[] = [
   { id: 'taishi-ci', name: '太史慈', forceId: 'sun', cityId: 'jiangxia', stats: stats(88, 93, 70, 50, 82) },
   { id: 'lu-meng', name: '吕蒙', forceId: 'sun', cityId: 'changsha', stats: stats(86, 81, 89, 74, 78) },
   { id: 'ling-tong', name: '凌统', forceId: 'sun', cityId: 'changsha', stats: stats(78, 86, 58, 44, 70) },
+  { id: 'sun-shangxiang', name: '孙尚香', forceId: 'sun', cityId: 'jiangxia', stats: stats(69, 83, 64, 45, 83), gender: 'female' },
+  { id: 'xiao-qiao', name: '小乔', forceId: 'sun', cityId: 'jiangxia', stats: stats(16, 14, 70, 56, 92), gender: 'female' },
   { id: 'liu-biao', name: '刘表', forceId: 'biao', cityId: 'lingling', stats: stats(67, 42, 69, 83, 84) },
   { id: 'kuai-yue', name: '蒯越', forceId: 'biao', cityId: 'lingling', stats: stats(48, 31, 89, 91, 82) },
   { id: 'cai-mao', name: '蔡瑁', forceId: 'biao', cityId: 'guiyang', stats: stats(75, 68, 72, 73, 58) },
@@ -169,6 +183,8 @@ const officerSeeds: OfficerSeed[] = [
   { id: 'liu-cong', name: '刘琮', forceId: 'biao', cityId: 'guiyang', stats: stats(42, 28, 60, 68, 62) },
   { id: 'han-song', name: '韩嵩', forceId: 'biao', cityId: 'lingling', stats: stats(36, 20, 82, 86, 76) },
   { id: 'deng-xi', name: '邓羲', forceId: 'biao', cityId: 'guiyang', stats: stats(45, 34, 78, 80, 70) },
+  { id: 'cai-shi', name: '蔡氏', forceId: 'biao', cityId: 'lingling', stats: stats(12, 10, 52, 62, 68), gender: 'female' },
+  { id: 'fan-shi', name: '樊氏', forceId: 'biao', cityId: 'guiyang', stats: stats(14, 12, 40, 44, 76), gender: 'female' },
   { id: 'zhao-yun', name: '赵云', forceId: null, cityId: 'jiangling', stats: stats(91, 96, 76, 65, 81) },
   { id: 'pang-tong', name: '庞统', forceId: null, cityId: 'xiangyang', stats: stats(78, 36, 98, 92, 69) },
   { id: 'huang-zhong', name: '黄忠', forceId: null, cityId: 'changsha', stats: stats(88, 94, 68, 60, 74) },
@@ -192,19 +208,19 @@ const officerBirthYears: Record<string, number> = {
   // 曹操势力
   'cao-cao': 155, 'cao-ren': 168, 'xun-yu': 163, 'xu-huang': 165,
   'xiahou-dun': 157, 'xiahou-yuan': 160, 'zhang-liao': 169, 'yu-jin': 165,
-  'yue-jin': 165, 'guo-jia': 170,
+  'yue-jin': 165, 'guo-jia': 170, 'cai-wenji': 177, 'zhen-ji': 183,
   // 刘备势力
   'liu-bei': 161, 'guan-yu': 160, 'zhang-fei': 165, 'zhuge-liang': 181,
   'jian-yong': 163, 'sun-qian': 165, 'mi-fang': 170, 'chen-dao': 175,
-  'liao-hua': 185, 'ma-su': 190,
+  'liao-hua': 185, 'ma-su': 190, 'gan-shi': 185, 'huang-yueying': 186,
   // 孙权势力
   'sun-quan': 182, 'zhou-yu': 175, 'lu-su': 172, 'gan-ning': 172,
   'cheng-pu': 148, 'huang-gai': 150, 'han-dang': 152, 'taishi-ci': 166,
-  'lu-meng': 178, 'ling-tong': 189,
+  'lu-meng': 178, 'ling-tong': 189, 'sun-shangxiang': 191, 'xiao-qiao': 178,
   // 刘表势力
   'liu-biao': 142, 'kuai-yue': 155, 'cai-mao': 158, 'wen-pin': 160,
   'huang-zu': 150, 'zhang-yun': 160, 'liu-qi': 172, 'liu-cong': 182,
-  'han-song': 150, 'deng-xi': 160,
+  'han-song': 150, 'deng-xi': 160, 'cai-shi': 160, 'fan-shi': 165,
   // 在野/人才池
   'zhao-yun': 160, 'pang-tong': 179, 'huang-zhong': 148, 'wei-yan': 172,
   'ma-liang': 187, 'jiang-wan': 193, 'yi-ji': 165, 'mi-zhu': 165,
@@ -264,15 +280,24 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
       ...officer,
       birthYear: officerBirthYears[officer.id],
       loyalty: officer.forceId === null ? 0 : force?.leaderId === officer.id ? LEADER_INITIAL_LOYALTY : DEFAULT_OFFICER_LOYALTY,
+      merit: officer.merit ?? INITIAL_OFFICER_MERIT,
       ambition: personality?.ambition ?? 50,
       righteousness: personality?.righteousness ?? 55,
       location: { kind: officer.forceId === null ? 'unaffiliated' : 'city', cityId: officer.cityId } as Officer['location'],
       stats: { ...officer.stats },
+      personality: derivePersonality(officer.stats),
       skill: profile?.skill ?? '无',
       aptitudes: { ...(profile?.aptitudes ?? defaultAptitudes) },
       acted: false,
     };
   }));
+
+  // 开局即按城市数量初始化爵位（不等月末结算，否则首月全体官职被"无爵"锁定）
+  const initialForces = structuredClone(forces);
+  for (const force of Object.values(initialForces)) {
+    const cityCount = Object.values(cities).filter((city) => city.ownerId === force.id).length;
+    force.rank = rankForCityCount(cityCount).id;
+  }
 
   const state: GameState = {
     schemaVersion: 2,
@@ -285,7 +310,7 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
     playerForceId,
     phase: 'playing',
     actionPoints: { cao: 80, liu: 80, sun: 80, biao: 80 },
-    forces: structuredClone(forces),
+    forces: initialForces,
     cities,
     officers,
     grid: getChina42Grid(),

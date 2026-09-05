@@ -144,6 +144,29 @@ describe('online room session', () => {
     expect(playerState(started, 'guest')?.playerForceId).toBe('cao');
   });
 
+  it('allows a homeland host to start alone and fills the rest with AI forces', () => {
+    const created = createOnlineRoom({ roomId: 'ABCD', hostPlayerId: 'host', hostName: 'Host', seed: 1, map: 'homeland' });
+    // 大地图不同于小地图：房主一人选势力即可开局，其余势力由电脑代管
+    expect(() => startOnlineRoom(created, { playerId: 'host' })).toThrow('所有玩家都需要选择势力');
+    const ready = selectPlayerForce(created, { playerId: 'host', forceId: 'liu' });
+    const started = startOnlineRoom(ready, { playerId: 'host' });
+
+    expect(started.phase).toBe('playing');
+    expect(started.state?.scenarioId).toBe('jingxiang-208');
+    expect(started.state?.playerForceId).toBe('liu');
+    expect(started.turnPlayerIds).toEqual(['host']);
+  });
+
+  it('limits a homeland lobby room to four players', () => {
+    const created = createOnlineRoom({ roomId: 'ABCD', hostPlayerId: 'host', hostName: 'Host', seed: 1, map: 'homeland' });
+    const joined = ['p2', 'p3'].reduce((room, playerId) =>
+      joinOnlineRoom(room, { playerId, playerName: playerId }), created);
+    const four = joinOnlineRoom(joined, { playerId: 'p4', playerName: 'p4' });
+
+    expect(Object.keys(four.players).length).toBe(4);
+    expect(() => joinOnlineRoom(four, { playerId: 'p5', playerName: 'p5' })).toThrow('大地图房间最多支持 4 名玩家');
+  });
+
   it('creates a room and personalizes the game state for each joined player', () => {
     const joined = readyStartedRoom();
 
@@ -157,11 +180,11 @@ describe('online room session', () => {
     const room = readyStartedRoom();
     const stale = reduceOnlineIntent(room, 'host', room.revision - 1, {
       type: 'issueCommand',
-      command: { type: 'patrol', cityId: 'jiangling', officerId: 'liu-bei' },
+      command: { type: 'patrol', cityId: 'jiangling', officerIds: ['liu-bei'] },
     });
     const wrongForce = reduceOnlineIntent(room, 'host', room.revision, {
       type: 'issueCommand',
-      command: { type: 'patrol', cityId: 'xiangyang', officerId: 'cao-ren' },
+      command: { type: 'patrol', cityId: 'xiangyang', officerIds: ['cao-ren'] },
     });
 
     expect(stale.ok).toBe(false);
@@ -176,7 +199,7 @@ describe('online room session', () => {
     const room = readyStartedRoom();
     const commanded = reduceOnlineIntent(room, 'host', room.revision, {
       type: 'issueCommand',
-      command: { type: 'patrol', cityId: 'jiangling', officerId: 'liu-bei' },
+      command: { type: 'patrol', cityId: 'jiangling', officerIds: ['liu-bei'] },
     });
 
     expect(commanded.ok).toBe(true);
@@ -518,7 +541,7 @@ describe('online room session', () => {
 
     const guestCommand = reduceOnlineIntent(room, 'guest', room.revision, {
       type: 'issueCommand',
-      command: { type: 'patrol', cityId: 'xiangyang', officerId: 'cao-ren' },
+      command: { type: 'patrol', cityId: 'xiangyang', officerIds: ['cao-ren'] },
     });
     expect(guestCommand.ok).toBe(false);
     if (guestCommand.ok) throw new Error('inactive player should be rejected');

@@ -13,7 +13,10 @@ export function RoomLobbyScreen() {
   const self = online.players.find((player) => player.id === online.playerId);
   const isHost = online.playerId === online.hostPlayerId;
   const occupiedForceIds = new Set(online.players.flatMap((player) => player.forceId ? [player.forceId] : []));
-  const readyToStart = online.players.length >= 2 && online.players.every((player) => player.forceId);
+  const isHomeland = online.map === 'homeland';
+  const minPlayers = isHomeland ? 1 : 2;
+  const readyToStart = online.players.length >= minPlayers && online.players.every((player) => player.forceId);
+  const mapLabel = isHomeland ? '大地图（最多4人，不足电脑补位）' : '小地图（荆襄双人对战）';
 
   const chooseForce = async (forceId: ForceId) => {
     try {
@@ -36,7 +39,7 @@ export function RoomLobbyScreen() {
       <section className="room-lobby-card tool-panel" aria-labelledby="room-lobby-title">
         <header>
           <div>
-            <p>联网对战</p>
+            <p>联网对战 · {mapLabel}</p>
             <h1 id="room-lobby-title">房间 {roomId}</h1>
           </div>
           <button type="button" onClick={disconnectOnline} aria-label="离开房间">
@@ -84,7 +87,7 @@ export function RoomLobbyScreen() {
         </section>
 
         <footer>
-          <p>{readyToStart ? '双方已选择势力' : '等待其他玩家进入并选择势力'}</p>
+          <p>{readyToStart ? (isHomeland ? `已就绪，可以开始（${online.players.length} 人）` : '双方已选择势力') : '等待玩家进入并选择势力'}</p>
           {isHost ? (
             <button type="button" onClick={() => void start()} disabled={!readyToStart || online.connecting}>
               <Play aria-hidden="true" />

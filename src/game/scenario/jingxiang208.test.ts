@@ -7,7 +7,7 @@ describe('jingxiang 208 scenario', () => {
 
     expect(Object.keys(game.cities)).toHaveLength(8);
     expect(Object.keys(game.officers).length).toBeGreaterThanOrEqual(48);
-    expect(Object.values(game.officers).filter((officer) => officer.forceId)).toHaveLength(40);
+    expect(Object.values(game.officers).filter((officer) => officer.forceId)).toHaveLength(48);
     expect(Object.values(game.officers).filter((officer) => !officer.forceId)).toHaveLength(8);
   });
 
@@ -17,7 +17,7 @@ describe('jingxiang 208 scenario', () => {
       const game = createGame(forceId, 1);
 
       expect(Object.values(game.cities).filter((city) => city.ownerId === forceId)).toHaveLength(2);
-      expect(Object.values(game.officers).filter((officer) => officer.forceId === forceId)).toHaveLength(10);
+      expect(Object.values(game.officers).filter((officer) => officer.forceId === forceId)).toHaveLength(12);
       expect(game.actionPoints[forceId]).toBe(80);
     },
   );

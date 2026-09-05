@@ -90,7 +90,31 @@ export function isDelayedArmament(armamentType: ArmamentType) {
   return DELAYED_ARMAMENT_TYPES.includes(armamentType);
 }
 
-export function produceArmamentYield(officer: Officer, armamentType: ArmamentType) {
+/** 生产数量 = 1000 + 最高智力×10 + 其余2人智力各×5（能吏/繁殖等特技与设施等级修正另计） */
+export function produceArmamentYield(officers: Officer[], armamentType: ArmamentType) {
   if (isDelayedArmament(armamentType)) return 2;
-  return ARMAMENT_BASE_YIELD[armamentType] + officer.stats.politics * 8;
+  const sorted = officers.map((officer) => officer.stats.intelligence).sort((a, b) => b - a);
+  const top = sorted[0] ?? 0;
+  const rest = sorted.slice(1).reduce((sum, value) => sum + value, 0);
+  return ARMAMENT_BASE_YIELD[armamentType] + top * 10 + rest * 5;
+}
+
+/** 兵器/舰船综合智力 = 最高智力 + 其余2人智力和 ÷ 2 */
+export function armamentProductionIntelligence(officers: Officer[]): number {
+  const sorted = officers.map((officer) => officer.stats.intelligence).sort((a, b) => b - a);
+  const top = sorted[0] ?? 0;
+  const rest = sorted.slice(1).reduce((sum, value) => sum + value, 0);
+  return Math.round(top + rest / 2);
+}
+
+/** 兵器/舰船生产日数 = ⌈(220 − 综合智力) ÷ 12⌉ × 10（最低10日；发明/造船等速度特技日数减半） */
+export function armamentProductionDays(officers: Officer[], speedMultiplier = 1): number {
+  const combined = armamentProductionIntelligence(officers);
+  const raw = Math.max(1, Math.ceil((220 - combined) / 12)) * 10;
+  return Math.max(10, Math.round(raw / speedMultiplier));
+}
+
+/** 兵器/舰船生产工期（旬）：日数向上取整换算为旬（至少1旬） */
+export function armamentProductionTenDays(officers: Officer[], speedMultiplier = 1): number {
+  return Math.max(1, Math.ceil(armamentProductionDays(officers, speedMultiplier) / 10));
 }

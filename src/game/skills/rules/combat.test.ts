@@ -350,8 +350,8 @@ describe('m15c skill hooks (行军/内政/灾害/攻击)', () => {
     state.officers['liu-bei'].skill = '指导';
 
     expect(researchTechPCost(state, 'liu', 'civil')).toBe(TECH_COSTS[0].techP);
-    expect(researchTechPCost(state, 'liu', 'civil', 'liu-bei')).toBe(Math.round(TECH_COSTS[0].techP / 2));
-    expect(researchTechPCost(state, 'liu', 'civil', 'guan-yu')).toBe(TECH_COSTS[0].techP);
+    expect(researchTechPCost(state, 'liu', 'civil', ['liu-bei'])).toBe(Math.round(TECH_COSTS[0].techP / 2));
+    expect(researchTechPCost(state, 'liu', 'civil', ['guan-yu'])).toBe(TECH_COSTS[0].techP);
   });
 
   it('眼力 guarantees discovering an in-city talent while exploring', () => {

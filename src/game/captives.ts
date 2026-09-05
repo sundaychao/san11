@@ -4,7 +4,8 @@ import { clampLoyalty, recruitmentInitialLoyalty, setOfficerLoyalty } from './lo
 import { compatDifference } from './diplomacy';
 import { treasureDefinition } from './treasures';
 import { applyDefeatInjuries, applyDeathConsequences, DEFEAT_DEATH_CHANCE, rollDeath } from './health';
-import type { ArmyUnit, CityId, ForceId, GameState, Officer } from './types';
+import { addTechP, TECHP_PER_CITY_CAPTURE } from './techs';
+import type { ArmyUnit, City, CityId, ForceId, GameState, Officer } from './types';
 
 /**
  * 俘虏系统（参考《三国志11》原版）：
@@ -125,6 +126,80 @@ export function captureOfficersOnDestroy(state: GameState, unit: ArmyUnit, loote
   return { captured, dead };
 }
 
+/** 两城间的转移距离（网格曼哈顿距离，与武将调动/召唤一致） */
+function cityTravelDistance(a: City, b: City): number {
+  return Math.abs(a.gridQ - b.gridQ) + Math.abs(a.gridR - b.gridR);
+}
+
+/**
+ * 攻破城池（耐久或守军清零）后的城市易主与守将处置：
+ * - 破城方占领城池（获得技巧P、守军并入、耐久重置为满值 20%）。
+ * - 城内的敌方武将按捕获率独立判定，部分被俘（进入破城方归所城）；强运/名马不受俘。
+ * - 其余守将逃跑：默认前往君主（原势力 leaderId）所在的本方城池；若君主所在城即被破，
+ *   或君主已被俘/不在任何城，则退往离本城最近的本方城池，并按移动距离折抵转移旬数，
+ *   未到达前为迁移中（transfer）状态。
+ */
+export function captureCityOnCapture(state: GameState, attacker: ArmyUnit, cityId: CityId): void {
+  const city = state.cities[cityId];
+  if (!city) return;
+  if (!attacker.forceId || city.ownerId === attacker.forceId) return;
+  const oldOwner = city.ownerId;
+  const attackForceId: ForceId = attacker.forceId;
+
+  // 城市易主基础结算
+  city.ownerId = attackForceId;
+  addTechP(state, attackForceId, TECHP_PER_CITY_CAPTURE);
+  city.order = Math.max(0, city.order - 20);
+  city.gold = Math.floor(city.gold / 2);
+  city.food = Math.floor(city.food / 2);
+  city.governorId = null;
+  const garrison = Math.min(1000, Math.floor(attacker.troops * 0.2));
+  const transferTroops = Math.min(garrison, Math.max(0, attacker.troops - 1));
+  city.troops = transferTroops;
+  attacker.troops -= transferTroops;
+  city.durability = Math.ceil(city.maxDurability * 0.2);
+
+  // 退城目标：默认君主所在城；君主城被破/被俘/不在城时，取离本城最近的本方城
+  const rulerId = state.forces[oldOwner]?.leaderId;
+  const ruler = rulerId ? state.officers[rulerId] : undefined;
+  const ownCities = Object.values(state.cities).filter((candidate) => candidate.ownerId === oldOwner && candidate.id !== cityId);
+  const rulerInCity =
+    ruler && ruler.location.kind === 'city' && ruler.cityId !== cityId && ownCities.some((candidate) => candidate.id === ruler.cityId);
+  const retreatTarget: CityId | undefined = rulerInCity && ruler
+    ? ruler.cityId
+    : ownCities.length > 0
+      ? ownCities.slice().sort((a, b) => cityTravelDistance(city, a) - cityTravelDistance(city, b))[0].id
+      : undefined;
+  const home = state.cities[attacker.homeCityId];
+
+  for (const officer of Object.values(state.officers)) {
+    if (officer.forceId !== oldOwner) continue;
+    if (officer.location.kind !== 'city' || officer.location.cityId !== cityId) continue;
+
+    // 俘获判定
+    const chance = captureChance(state, officer, attacker, 0);
+    const roll = nextRandom(state.seed, state.rngCursor);
+    state.rngCursor = roll.cursor;
+    if (home && roll.value * 100 < chance) {
+      officer.location = { kind: 'captive', cityId: home.id, captorForceId: attackForceId, capturedTenDays: 0 };
+      officer.cityId = home.id;
+      continue;
+    }
+
+    // 逃跑：按移动距离折抵到达时间
+    if (retreatTarget && retreatTarget !== cityId) {
+      const target = state.cities[retreatTarget];
+      const duration = Math.max(1, Math.ceil(cityTravelDistance(city, target) / 10));
+      officer.location = { kind: 'transfer', fromCityId: cityId, targetCityId: retreatTarget, remainingTenDays: duration };
+      officer.cityId = cityId;
+      officer.acted = true;
+    } else {
+      officer.location = { kind: 'unaffiliated', cityId };
+      officer.cityId = cityId;
+    }
+  }
+}
+
 /**
  * 每月俘虏结算：忠诚下降 + 逃生判定 + 释放登用冷却。
  * 在每月初（settleMonth）调用；1/4/7/10月额外下降（同原版季度波动）。
@@ -181,13 +256,25 @@ export function settleCaptives(state: GameState): void {
   }
 }
 
-/** 登用俘虏的成功概率：忠诚越低、执行者能力越高、相性越近越易成功 */
+/** 登用俘虏的成功概率：
+ * - 厌恶关系（任一方厌恶另一方）→ 必不成功（0%）；
+ * - 忠诚越低、执行者能力越高、相性越近越易成功；
+ * - 目标亲爱捕获方君主 → 更容易成功。
+ */
 export function recruitCaptiveChance(state: GameState, forceId: ForceId, executor: Officer, target: Officer): number {
+  const captorLeaderId = state.forces[forceId]?.leaderId;
+  const captorLeader = captorLeaderId ? state.officers[captorLeaderId] : undefined;
+  const crossHates = captorLeaderId !== undefined
+    && ((target.hates ?? []).includes(captorLeaderId) || (captorLeader?.hates ?? []).includes(target.id));
+  if (crossHates) return 0;
+
   const loyalty = target.loyalty ?? 92;
   const compatibilityPenalty = target.forceId ? compatDifference(state, forceId, target.forceId) / 2 : 0;
+  const likeBonus = captorLeaderId !== undefined && (target.likes ?? []).includes(captorLeaderId) ? 20 : 0;
   const raw = (executor.stats.politics + executor.stats.charisma) / 2
     + (CAPTIVE_RECRUIT_LOYALTY_THRESHOLD - loyalty) * 1.5
-    - compatibilityPenalty;
+    - compatibilityPenalty
+    + likeBonus;
   return Math.min(90, Math.max(5, Math.floor(raw)));
 }
 
@@ -209,7 +296,12 @@ export function resolveRecruitCaptive(state: GameState, forceId: ForceId, execut
     target.forceId = forceId;
     target.location = { kind: 'city', cityId: destCityId };
     target.cityId = destCityId;
-    target.loyalty = recruitmentInitialLoyalty(target);
+    // 亲爱君主：登庸后初始忠诚更高（更稳定）
+    const captorLeaderId = state.forces[forceId]?.leaderId;
+    const likeLoyalty = captorLeaderId !== undefined && (target.likes ?? []).includes(captorLeaderId);
+    target.loyalty = likeLoyalty
+      ? clampLoyalty(recruitmentInitialLoyalty(target) + 20)
+      : recruitmentInitialLoyalty(target);
     target.bannedUntilMonth = undefined;
   } else {
     target.bannedUntilMonth = state.month + 6;

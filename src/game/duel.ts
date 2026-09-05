@@ -275,6 +275,7 @@ export function executeDuel(state: GameState, communityForce: ForceId, unitId: s
   if (attacker.acted) throw new Error('该部队本旬已行动');
 
   next.battleDamageReports = [];
+  next.cityEffectReports = [];
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
   next.lastDuelReport = null;

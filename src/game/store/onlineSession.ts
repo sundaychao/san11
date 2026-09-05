@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import { createOnlineSocket, DEFAULT_ONLINE_SERVER_URL, type OnlineSocket } from '../../network/socketClient';
 import type { AuthSessionView, OnlineSnapshot } from '../network/protocol';
 import type { GameIntent } from '../network/intents';
+import type { RoomMap } from '../network/session';
 import type { ForceId, GameState } from '../types';
 import type { SaveAdapter } from '../persistence';
 import {
@@ -93,6 +94,7 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
       connected: true,
       roomId: snapshot.room.id,
       phase: snapshot.room.phase,
+      map: snapshot.room.map,
       hostPlayerId: snapshot.room.hostPlayerId,
       playerId: snapshot.playerId,
       revision: snapshot.room.revision,
@@ -301,13 +303,13 @@ export function useOnlineSession({ storage, applySnapshotState, setError }: UseO
     });
   }, [connectOnlineSocket, expireAuthSession, requireToken]);
 
-  const createOnlineRoom = useCallback(async (input: { serverUrl?: string; seed?: number }) => {
+  const createOnlineRoom = useCallback(async (input: { serverUrl?: string; seed?: number; map?: RoomMap }) => {
     const token = requireToken();
     resumeTokenRef.current += 1;
     setOnline((current) => ({ ...current, resumingRoom: false, error: null }));
     const socket = await connectOnlineSocket(input.serverUrl ?? onlineRef.current.serverUrl);
     await new Promise<void>((resolve, reject) => {
-      socket.emit('room:create', { token, seed: input.seed }, (response) => {
+      socket.emit('room:create', { token, seed: input.seed, map: input.map }, (response) => {
         if (!response.ok) {
           if (isAuthExpired(response.reason)) expireAuthSession(response.reason);
           setOnline((current) => ({ ...current, connecting: false, error: response.reason }));

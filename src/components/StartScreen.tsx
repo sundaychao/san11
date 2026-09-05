@@ -2,10 +2,16 @@ import { useEffect, useState } from 'react';
 import { Play, ScrollText } from 'lucide-react';
 import { FORCE_IDS, SCENARIO_FORCES } from '../game/scenario/jingxiang208';
 import { useGame } from '../game/store/GameProvider';
+import type { RoomMap } from '../game/network/session';
+
+function roomMapLabel(map: RoomMap | undefined) {
+  return map === 'homeland' ? '大地图' : '小地图';
+}
 
 export function StartScreen() {
   const { auth, createOnlineRoom, hasAutosave, hasManualSave, invalidSaves, joinOnlineRoom, loadGame, loadOnlineRooms, logoutAccount, online, resumeOnlineRoom, startGame, clearSave, error, clearError } = useGame();
   const [roomId, setRoomId] = useState('');
+  const [roomMap, setRoomMap] = useState<RoomMap>('small');
   const [serverUrl, setServerUrl] = useState(online.serverUrl);
   const [hasRequestedRooms, setHasRequestedRooms] = useState(false);
   const onlineBusy = online.connecting || online.resumingRoom;
@@ -20,7 +26,7 @@ export function StartScreen() {
 
   const createRoom = async () => {
     try {
-      await createOnlineRoom({ serverUrl });
+      await createOnlineRoom({ serverUrl, map: roomMap });
     } catch {
       // GameProvider exposes the server error through online.error.
     }
@@ -105,6 +111,28 @@ export function StartScreen() {
           </label>
         </div>
         <button type="button" onClick={() => void resumeRoom()} disabled={onlineBusy}>继续上次对战</button>
+        <div className="online-map-choice" role="radiogroup" aria-label="选择对战地图">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={roomMap === 'small'}
+            className={roomMap === 'small' ? 'is-selected' : undefined}
+            onClick={() => setRoomMap('small')}
+          >
+            <strong>小地图</strong>
+            <small>荆襄双人对战（2人）</small>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={roomMap === 'homeland'}
+            className={roomMap === 'homeland' ? 'is-selected' : undefined}
+            onClick={() => setRoomMap('homeland')}
+          >
+            <strong>大地图</strong>
+            <small>四人对战（不足用电脑补位）</small>
+          </button>
+        </div>
         <button className="online-create-primary" type="button" onClick={() => void createRoom()}>创建新房间</button>
         <div className="online-room-toolbar">
           <span>等待房间</span>
@@ -114,7 +142,7 @@ export function StartScreen() {
           {online.rooms.length > 0 ? online.rooms.map((room) => (
             <button key={room.id} type="button" onClick={() => void joinListedRoom(room.id)} aria-label={`进入 ${room.id}`}>
               <strong>{room.id}</strong>
-              <span>{room.hostName}</span>
+              <span>{room.hostName} · {roomMapLabel(room.map)}</span>
               <em>{room.playerCount}/{room.maxPlayers}</em>
             </button>
           )) : (

@@ -58,6 +58,8 @@ export interface Officer {
   aptitudes?: OfficerAptitudes;
   /** 装备的宝物 id（宝物归属势力，装备后获得其能力与特技加成） */
   treasureId?: string;
+  /** 相性 1~150（默认沿用势力相性，可对个别武将单独设定） */
+  xing?: number;
   /** 忠诚度 0~127（100为基准，越高越难被挖角） */
   loyalty?: number;
   /** 功绩（官职授予/晋升的依据，随行动与时间累积） */
@@ -70,6 +72,10 @@ export interface Officer {
   righteousness?: number;
   /** 人际关系：对方武将id → 关系（义兄弟/配偶，登用联动） */
   relationships?: Record<string, 'sworn' | 'spouse'>;
+  /** 亲爱武将 id 列表：对己方君主忠诚稳定、登庸容易 */
+  likes?: string[];
+  /** 厌恶武将 id 列表：相斥必降忠诚、且绝不能被对方登庸 */
+  hates?: string[];
   /** 伤病状态（轻伤/中等/重伤），按旬恢复；伤愈前能力按比例衰减 */
   health?: OfficerHealth;
   /** 禁止仕官到期月份（被释放或登用失败后，约6个月/3个月） */
@@ -83,6 +89,8 @@ export interface Officer {
   /** 死亡月份（处决或战死；在局中保留记录但不参与任何结算） */
   deathMonth?: number;
   acted: boolean;
+  /** 本旬是否已受褒奖（每旬重置；受褒奖后当旬不再出现在奖赏列表） */
+  rewarded?: boolean;
 }
 
 /** 伤病等级与剩余恢复旬数 */
@@ -104,8 +112,8 @@ export type OfficerLocation =
   | { kind: 'unit'; unitId: string }
   | { kind: 'unaffiliated'; cityId: CityId }
   | { kind: 'transfer'; fromCityId: CityId; targetCityId: CityId; remainingTenDays: number }
-  | { kind: 'task'; cityId: CityId; task: 'armament'; armamentType: ArmamentType; amount: number; remainingTenDays: number }
-  | { kind: 'task'; cityId: CityId; task: 'research'; branch: TechBranchId; remainingTenDays: number }
+  | { kind: 'task'; cityId: CityId; task: 'armament'; armamentType: ArmamentType; amount: number; remainingTenDays: number; lead?: boolean }
+  | { kind: 'task'; cityId: CityId; task: 'research'; branch: TechBranchId; remainingTenDays: number; lead?: boolean }
   | { kind: 'task'; cityId: CityId; task: 'cultivate'; nodeId: string; remainingTenDays: number }
   | { kind: 'task'; cityId: CityId; task: 'construction'; facility: string; plotIndex: number; remainingTenDays: number }
   | { kind: 'captive'; cityId: CityId; captorForceId: ForceId; capturedTenDays: number };
@@ -139,6 +147,10 @@ export interface City {
   merchantPresent?: boolean;
   /** 本旬是否已与商人完成一次粮食交易 */
   merchantTradedThisTenDay?: boolean;
+  /** 本旬是否已训练过守军（每旬每城仅一次） */
+  trainedThisTenDay?: boolean;
+  /** 本旬是否已巡查过（每旬每城仅一次） */
+  patrolledThisTenDay?: boolean;
   /** 都市地格设施（市场/农场/兵舍/工房等），编号0~5 */
   plots?: CityPlot[];
 }
@@ -189,7 +201,7 @@ export interface CityPlot {
   /** 建设中状态：存在时表示该地格正在修建设施 */
   constructing?: {
     facility: 'market' | 'farm' | 'barracks' | 'smithy' | 'forge' | 'stable' | 'shipyard' | 'mint' | 'granary' | 'blackmarket' | 'grandmarket' | 'fishmarket' | 'garrisonfarm' | 'hubu' | 'xingbu' | 'bingbu' | 'gongbu' | 'libu' | 'personnel' | 'taixue' | 'tongqueta';
-    officerId: string;
+    officerIds: string[];
     remainingTenDays: number;
   };
 }
@@ -382,14 +394,14 @@ export interface ArmyUnit {
 }
 
 export type GameCommand =
-  | { type: 'recruit'; cityId: CityId; officerId: string }
-  | { type: 'produceArmament'; cityId: CityId; officerId: string; armamentType: ArmamentType }
-  | { type: 'train'; cityId: CityId; officerId: string }
-  | { type: 'patrol'; cityId: CityId; officerId: string }
+  | { type: 'recruit'; cityId: CityId; officerIds: string[] }
+  | { type: 'produceArmament'; cityId: CityId; officerIds: string[]; armamentType: ArmamentType }
+  | { type: 'train'; cityId: CityId; officerIds: string[] }
+  | { type: 'patrol'; cityId: CityId; officerIds: string[] }
   | { type: 'talent'; cityId: CityId; officerId: string }
   | { type: 'explore'; cityId: CityId; officerIds: string[] }
   | { type: 'grantTreasure'; cityId: CityId; treasureId: string; officerId: string | null }
-  | { type: 'research'; cityId: CityId; officerId: string; branch: TechBranchId }
+  | { type: 'research'; cityId: CityId; officerIds: string[]; branch: TechBranchId }
   | { type: 'abilityResearch'; cityId: CityId; nodeId: string }
   | { type: 'cultivate'; cityId: CityId; officerId: string; nodeId: string }
   | { type: 'transfer';
@@ -397,8 +409,10 @@ export type GameCommand =
       targetCityId: CityId;
       officerIds: string[];
     }
+  | { type: 'summon'; cityId: CityId; officerIds: string[] }
+  | { type: 'sworn'; cityId: CityId; officerIds: string[] }
   | { type: 'trade'; cityId: CityId; officerId: string; mode: 'buy' | 'sell'; amount: number }
-  | { type: 'reward'; cityId: CityId; officerId: string }
+  | { type: 'reward'; cityId: CityId; officerIds: string[] }
   | { type: 'appointPosition'; cityId: CityId; officerId: string; positionId: string | null }
   | { type: 'rumor'; cityId: CityId; officerId: string; targetCityId: CityId }
   | { type: 'poach'; cityId: CityId; officerId: string; targetCityId: CityId; targetOfficerId: string }
@@ -413,7 +427,7 @@ export type GameCommand =
   | { type: 'captiveDispose'; cityId: CityId; targetOfficerId: string; action: 'release' | 'execute' | 'recruit' }
   | { type: 'marry'; cityId: CityId; officerIdA: string; officerIdB: string; relation?: 'spouse' | 'sworn' }
   | { type: 'legion'; cityId: CityId; commanderId: string | null; targetCityId: CityId | null; policy?: Legion['policy'] }
-  | { type: 'buildFacilityPlot'; cityId: CityId; officerId: string; plotIndex: number; facility: 'market' | 'farm' | 'barracks' | 'smithy' | 'forge' | 'stable' | 'shipyard' | 'mint' | 'granary' | 'blackmarket' | 'grandmarket' | 'fishmarket' | 'garrisonfarm' | 'hubu' | 'xingbu' | 'bingbu' | 'gongbu' | 'libu' | 'personnel' | 'taixue' | 'tongqueta' }
+  | { type: 'buildFacilityPlot'; cityId: CityId; officerIds: string[]; plotIndex: number; facility: 'market' | 'farm' | 'barracks' | 'smithy' | 'forge' | 'stable' | 'shipyard' | 'mint' | 'granary' | 'blackmarket' | 'grandmarket' | 'fishmarket' | 'garrisonfarm' | 'hubu' | 'xingbu' | 'bingbu' | 'gongbu' | 'libu' | 'personnel' | 'taixue' | 'tongqueta' }
   | { type: 'cancelCityPlot'; cityId: CityId; plotIndex: number }
   | { type: 'appointStrategist'; cityId: CityId; officerId: string | null };
 

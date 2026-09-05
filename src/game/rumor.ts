@@ -1,5 +1,6 @@
 import { nextRandom } from './random';
 import { forceStrategist, compatDifference } from './diplomacy';
+import { hasMasterHearts } from './techs';
 import { officerLoyalty, setOfficerLoyalty, clampLoyalty } from './loyalty';
 import type { City, ForceId, GameState, Officer } from './types';
 
@@ -118,13 +119,27 @@ export interface PoachResult {
 }
 
 export function poachChance(state: GameState, executor: Officer, target: Officer): number {
+  const executorForce = executor.forceId;
+  const targetForce = target.forceId;
+  if (!executorForce || !targetForce) return 0;
+  // 厌恶关系（任一方厌恶另一方）：绝不能被对方登用
+  const executorRulerId = state.forces[executorForce]?.leaderId;
+  const executorRuler = executorRulerId ? state.officers[executorRulerId] : undefined;
+  const crossHates = (target.hates ?? []).includes(executorRulerId)
+    || (executorRuler?.hates ?? []).includes(target.id);
+  if (crossHates) return 0;
+
   const loyalty = officerLoyalty(target);
-  const compat = compatDifference(state, executor.forceId!, target.forceId!);
+  const compat = compatDifference(state, executorForce, targetForce);
   const righteousness = target.righteousness ?? 55;
   const closeness = loyalty <= 60 ? 30 : 0;
   const base = (executor.stats.intelligence + executor.stats.charisma) / 2;
   const resistance = loyalty * 0.75 + compat * 0.6 + righteousness / 5;
-  const raw = base - resistance + 65 + closeness;
+  // 「掌握人心」反制：目标势力已研究后，挖角更困难
+  const masterHeartsResist = hasMasterHearts(state, targetForce) ? 15 : 0;
+  // 亲爱加成：目标亲爱执行方君主 → 更易被挖走
+  const likeBonus = executorRulerId !== undefined && (target.likes ?? []).includes(executorRulerId) ? 20 : 0;
+  const raw = base - resistance + 65 + closeness + likeBonus - masterHeartsResist;
   return Math.min(85, Math.max(5, Math.floor(raw)));
 }
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { armamentProductionTenDays } from './armaments';
 import { executeCommand } from './commands';
 import { cityMonthlyGoldIncome, cityMonthlyOfficerSalary, cityQuarterlyFoodIncome, cityPlots } from './innerAffairs';
 import { createGame } from './scenario/jingxiang208';
@@ -74,7 +75,7 @@ describe('monthly settlement', () => {
     // 建设中黑市：type 仍为 empty，仅 constructing.facility 标记为 blackmarket
     cityPlots(jiangling)[0] = {
       id: 'p0', type: 'empty', level: 0, value: 0, q: 1, r: 1,
-      constructing: { facility: 'blackmarket', officerId: 'liu-bei', remainingTenDays: 2 },
+      constructing: { facility: 'blackmarket', officerIds: ['liu-bei'], remainingTenDays: 2 },
     };
     state.officers['liu-bei'].location = {
       kind: 'task', cityId: 'jiangling', task: 'construction', facility: 'blackmarket', plotIndex: 0, remainingTenDays: 2,
@@ -489,6 +490,76 @@ describe('ten-day settlement', () => {
     expect(next.firePlots).toEqual([{ q: 12, r: 10, remainingTenDays: 1 }]);
   });
 
+  it('damages city durability each turn by the number of burning cells among its 7 footprint cells', () => {
+    const state = createGame('liu', 1);
+    const city = state.cities.jiangling;
+    const before = city.durability;
+    // 城池中心 + 周围一圈共 7 格，将其中 3 格点燃（中心 + 两个邻居）
+    state.firePlots = [
+      { q: city.gridQ, r: city.gridR, remainingTenDays: 2 },
+      { q: city.gridQ + 1, r: city.gridR, remainingTenDays: 2 },
+      { q: city.gridQ, r: city.gridR + 1, remainingTenDays: 2 },
+    ];
+
+    const next = settleTenDay(state);
+
+    expect(next.cities.jiangling.durability).toBe(before - 150 * 3);
+    expect(next.cities.jiangling.durability).toBeGreaterThan(0);
+  });
+
+  it('does not capture a city when on-going fire reduces durability to zero (needs a finishing strike)', () => {
+    const state = createGame('liu', 1);
+    const city = state.cities.jiangling;
+    city.durability = 150; // 一次余火灼烧恰好归零
+    state.firePlots = [{ q: city.gridQ, r: city.gridR, remainingTenDays: 2 }];
+    const owner = city.ownerId;
+
+    const next = settleTenDay(state);
+
+    expect(next.cities.jiangling.durability).toBe(0);
+    expect(next.cities.jiangling.ownerId).toBe(owner); // 持续火烧至 0 不算攻破
+  });
+
+  it('does not damage a city when there are no burning cells within its 7 footprint cells', () => {
+    const state = createGame('liu', 1);
+    const city = state.cities.jiangling;
+    const before = city.durability;
+    state.firePlots = [{ q: city.gridQ + 3, r: city.gridR + 2, remainingTenDays: 2 }];
+
+    const next = settleTenDay(state);
+
+    expect(next.cities.jiangling.durability).toBe(before);
+  });
+
+  it('damages city development plots standing on burning ground and clears the plot at zero durability', () => {
+    const state = createGame('liu', 1);
+    const city = state.cities.jiangling;
+    city.plots = [
+      { id: 'p-market', type: 'market', level: 2, value: 0, q: 12, r: 10, durability: 500 },
+      // 该地格未着火，耐久不变
+      { id: 'p-farm', type: 'farm', level: 1, value: 0, q: 13, r: 10, durability: 500 },
+    ];
+    state.firePlots = [{ q: 12, r: 10, remainingTenDays: 2 }];
+
+    const next = settleTenDay(state);
+
+    expect(next.cities.jiangling.plots![0].durability).toBe(500 - 150);
+    expect(next.cities.jiangling.plots![0].type).toBe('market');
+    expect(next.cities.jiangling.plots![1]).toMatchObject({ type: 'farm', durability: 500 });
+  });
+
+  it('destroys a city development plot when fire reduces its durability to zero', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.plots = [
+      { id: 'p-low', type: 'market', level: 3, value: 0, q: 12, r: 10, durability: 100 },
+    ];
+    state.firePlots = [{ q: 12, r: 10, remainingTenDays: 2 }];
+
+    const next = settleTenDay(state);
+
+    expect(next.cities.jiangling.plots![0]).toMatchObject({ type: 'empty', level: 0, value: 0, durability: 0 });
+  });
+
   it('fires only the current player force arrow tower when entering a new ten-day turn', () => {
     const state = createGame('liu', 1);
     state.officers['liu-bei'].skill = '乐奏';
@@ -545,7 +616,7 @@ describe('ten-day settlement', () => {
     expect((next.battleDamageReports ?? []).map((report) => report.unitId)).toEqual(['cao-target']);
   });
 
-  it('completes special armament production after one month', () => {
+  it('completes special armament production after the calculated ten-days', () => {
     const state = createGame('liu', 1);
     // 冲车生产需工房
     state.cities.jiangling.plots = [
@@ -554,18 +625,22 @@ describe('ten-day settlement', () => {
     ];
     const currentRams = state.cities.jiangling.armaments?.ram ?? 0;
     const producing = executeCommand(state, 'liu', {
-      type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'ram',
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'ram',
     });
 
-    const afterOne = settleTenDay(producing);
-    const afterTwo = settleTenDay(afterOne);
-    const afterThree = settleTenDay(afterTwo);
+    // 工期 = ⌈⌈(220 − 综合智力) ÷ 12⌉ × 10 ÷ 10⌉ 旬（刘备智力78 → 12旬）
+    const tenDays = armamentProductionTenDays([producing.officers['liu-bei']]);
+    let settled = producing;
+    for (let i = 1; i < tenDays; i += 1) {
+      settled = settleTenDay(settled);
+      expect(settled.cities.jiangling.armaments?.ram).toBe(currentRams);
+      expect(settled.officers['liu-bei'].location.kind).toBe('task');
+    }
 
-    expect(afterOne.cities.jiangling.armaments?.ram).toBe(currentRams);
-    expect(afterTwo.cities.jiangling.armaments?.ram).toBe(currentRams);
-    expect(afterThree.cities.jiangling.armaments?.ram).toBe(currentRams + 2);
-    expect(afterThree.officers['liu-bei'].location).toEqual({ kind: 'city', cityId: 'jiangling' });
-    expect(afterThree.officers['liu-bei'].acted).toBe(false);
+    const completed = settleTenDay(settled);
+    expect(completed.cities.jiangling.armaments?.ram).toBe(currentRams + 2);
+    expect(completed.officers['liu-bei'].location).toEqual({ kind: 'city', cityId: 'jiangling' });
+    expect(completed.officers['liu-bei'].acted).toBe(false);
   });
 
   it('never lets city food become negative during supply consumption', () => {
@@ -650,10 +725,14 @@ describe('ten-day settlement', () => {
   it('accumulates techP from city population each ten-day', () => {
     const state = createGame('liu', 1);
     state.forces.liu.techP = 0;
-    // techP = Σ floor(每城人口 / TECHP_POP_DIVISOR)
+    // techP = Σ (floor(城市人口 / 3000) + floor(农村人口 / 12000))（双系数按旬分摊近似血色衣冠6.0 城市系数8、农村系数2）
     const expected = Object.values(state.cities)
       .filter((c) => c.ownerId === 'liu')
-      .reduce((sum, c) => sum + Math.floor(c.population / 4000), 0);
+      .reduce((sum, c) => {
+        const urban = c.cityPopulation ?? Math.round(c.population * (c.population <= 250000 ? 0.15 : c.population < 500000 ? 0.175 : 0.2));
+        const rural = c.ruralPopulation ?? Math.max(0, c.population - urban);
+        return sum + Math.floor(urban / 3000) + Math.floor(rural / 12000);
+      }, 0);
 
     const next = settleTenDay(state);
 

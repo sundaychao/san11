@@ -1,10 +1,13 @@
 import type { ArmyUnit, GameState } from '../types';
-import { gridKey } from './grid';
+import { gridKey, sevenCellCityFootprint, type GridCoord } from './grid';
 import { fireDamageMultiplierOf } from '../skills/rules/combat';
 import { reduceUnitDamageByFortress, removeUnit } from './shared';
+import { PLOT_MAX_DURABILITY } from '../innerAffairs';
 
 export const GROUND_FIRE_DAMAGE = 500;
 export const GROUND_FIRE_FACILITY_DAMAGE = 150;
+/** 城池每回合因每个着火格损失的耐久（参考原版：火焰陷阱对城池每次耐久之火数百点；累计 7 格中着火格数） */
+export const GROUND_FIRE_CITY_DURABILITY = 150;
 
 function isBurningGround(state: GameState, unit: ArmyUnit) {
   const unitKey = gridKey(unit);
@@ -49,5 +52,56 @@ export function applyGroundFireDamageToFacilities(next: GameState) {
     if (!nextFacility) continue;
     nextFacility.durability = Math.max(0, nextFacility.durability - GROUND_FIRE_FACILITY_DAMAGE);
     if (nextFacility.durability <= 0) delete next.facilities?.[facility.id];
+  }
+}
+
+/** 着火格上的城内开发设施（市场/农场等）每回合掉耐久，耐久归零即破坏地格（与部队攻击开发设施一致，参考火焰对野外设施 150/格） */
+export function applyGroundFireDamageToPlots(next: GameState) {
+  const burningKeys = new Set((next.firePlots ?? []).map(gridKey));
+  for (const city of Object.values(next.cities)) {
+    for (const plot of city.plots ?? []) {
+      if (plot.q == null || plot.r == null) continue;
+      if (plot.type === 'empty') continue;
+      if (!burningKeys.has(gridKey({ q: plot.q, r: plot.r }))) continue;
+      plot.durability = Math.max(0, (plot.durability ?? PLOT_MAX_DURABILITY) - GROUND_FIRE_FACILITY_DAMAGE);
+      if (plot.durability > 0) continue;
+      // 耐久归零：设施拆除，地格清空
+      plot.type = 'empty';
+      plot.level = 0;
+      plot.value = 0;
+      plot.constructing = undefined;
+    }
+  }
+}
+
+/** 点火瞬间对目标格上的城内开发设施与所属城池本体造成一次即时耐久伤害（与点火对部队/野外设施的即时伤害一致，量值参考每旬烧灼）：开发设施掉 150，城池若目标格在其 7 格内则掉 150 */
+export function applyImmediateFireDamageToCityAndPlot(next: GameState, target: GridCoord) {
+  for (const city of Object.values(next.cities)) {
+    for (const plot of city.plots ?? []) {
+      if (plot.q !== target.q || plot.r !== target.r) continue;
+      if (plot.type === 'empty') continue;
+      plot.durability = Math.max(0, (plot.durability ?? PLOT_MAX_DURABILITY) - GROUND_FIRE_FACILITY_DAMAGE);
+      if (plot.durability > 0) continue;
+      plot.type = 'empty';
+      plot.level = 0;
+      plot.value = 0;
+      plot.constructing = undefined;
+    }
+    if (!city.ownerId) continue;
+    const inFootprint = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })
+      .some((coord) => coord.q === target.q && coord.r === target.r);
+    if (inFootprint) city.durability = Math.max(0, city.durability - GROUND_FIRE_CITY_DURABILITY);
+  }
+}
+
+/** 城池每回合受火焰耐久损伤：7 格（中心+周围一圈）中有几个着火格，耐久就掉 base×N */
+export function applyGroundFireDamageToCities(next: GameState) {
+  const burningKeys = new Set((next.firePlots ?? []).map(gridKey));
+  for (const city of Object.values(next.cities)) {
+    if (!city.ownerId) continue;
+    const burningCells = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })
+      .filter((coord) => burningKeys.has(gridKey(coord))).length;
+    if (burningCells === 0) continue;
+    city.durability = Math.max(0, city.durability - GROUND_FIRE_CITY_DURABILITY * burningCells);
   }
 }

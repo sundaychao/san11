@@ -18,10 +18,11 @@ import {
 import { facilityBuildPowerMultiplier } from '../skills/rules/facility';
 import { resolveStrategySkillRules } from '../skills/rules/strategy';
 import { territoryCityAt } from '../territory';
-import { captureOfficersOnDestroy } from '../captives';
+import { captureOfficersOnDestroy, captureCityOnCapture } from '../captives';
 import { treasureDefinition } from '../treasures';
 import { coordsWithinRange, gridKey, isSameCoord, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { isInAnyCityAttackRange } from '../innerAffairs';
+import { applyImmediateFireDamageToCityAndPlot } from './fire';
 import { allCityKeys, cellAt, cityCenter, deploymentCells, isLegalUnitCell, occupiedFacilityKeys, occupiedUnitKeys, reachableCosts, spawnCellFor, unitIsIncapacitated } from './movementRules';
 import { areAdjacent, attackableCities, attackableFacilities, attackableUnits, gridDistanceWithin, isCityInAttackRange, jointAttackableUnits } from './targetRules';
 import { effectiveNavyAptitude, effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance } from './officerAbilities';
@@ -807,6 +808,7 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
 
   const next = structuredClone(state);
   next.battleDamageReports = [];
+  next.cityEffectReports = [];
   next.strategyResultReports = [];
   const nextAttacker = next.units[attackerId];
   const nextTarget = next.units[targetId];
@@ -894,6 +896,7 @@ function useFireArrowFacilityTactic(state: GameState, attacker: ArmyUnit, facili
 
   const next = structuredClone(state);
   next.battleDamageReports = [];
+  next.cityEffectReports = [];
   next.strategyResultReports = [];
   const nextAttacker = next.units[attacker.id];
   const nextFacility = next.facilities?.[facilityId];
@@ -1190,6 +1193,7 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
   const succeeded = !skillRules.immune && (skillRules.guaranteed || !roll || roll.value < effectiveChance / 100);
   const next = structuredClone(state);
   next.battleDamageReports = [];
+  next.cityEffectReports = [];
   next.facilityRepairReports = [];
   if (roll) next.rngCursor = roll.cursor;
   const disturbDurationRoll = strategyId === 'disturb' && succeeded
@@ -1221,6 +1225,14 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
         igniteOrdinaryFacility(next, facility, next.units[unitId]);
       } else {
         igniteGroundFire(next, [targetCoord], next.units[unitId]);
+      }
+      // 点火瞬间对城内开发设施与所属城池本体造成一次即时伤害（与点火对部队/野外设施的即时伤害一致）
+      applyImmediateFireDamageToCityAndPlot(next, targetCoord);
+      // 点火瞬间若将某个敌方城池耐久烧至 0，则视为当场攻破（持续余火烧至 0 不算，需再补一刀攻破）
+      const fireCaster = next.units[unitId];
+      for (const city of Object.values(next.cities)) {
+        if (!fireCaster.forceId || city.ownerId === fireCaster.forceId) continue;
+        if (city.durability === 0) captureCityOnCapture(next, fireCaster, city.id);
       }
       multiplyImmediateFireDamage(next, firstFireDamageReport, skillRules.fireDamageMultiplier * (skillRules.critical ? 2 : 1), next.units[unitId]);
     } else if (strategyId === 'extinguish') {
@@ -1306,6 +1318,7 @@ export function buildFacility(state: GameState, forceId: ForceId, unitId: string
   };
   addFacilityRepairReport(next, next.facilities[id], durability, 'build');
   next.battleDamageReports = [];
+  next.cityEffectReports = [];
   next.strategyResultReports = [];
   next.units[unitId].gold = (next.units[unitId].gold ?? 0) - buildCost;
   next.units[unitId].acted = true;
@@ -1327,6 +1340,7 @@ export function repairFacility(state: GameState, forceId: ForceId, unitId: strin
   next.facilities![facilityId] = repairFacilityDurability(next.facilities![facilityId], amount);
   addFacilityRepairReport(next, next.facilities![facilityId], amount, 'repair');
   next.battleDamageReports = [];
+  next.cityEffectReports = [];
   next.strategyResultReports = [];
   next.units[unitId].acted = true;
   next.units[unitId].moved = true;

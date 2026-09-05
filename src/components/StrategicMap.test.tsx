@@ -721,7 +721,6 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     const localOfficers = Object.values(state.officers).filter((officer) =>
       officer.forceId === city.ownerId && officer.location.kind === 'city' && officer.location.cityId === city.id,
     );
-    const forceOfficers = Object.values(state.officers).filter((officer) => officer.forceId === city.ownerId);
     const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes(city.name));
     expect(jianglingMarker).toBeTruthy();
 
@@ -736,7 +735,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     expect(info).toHaveTextContent(`${city.order}/100`);
     expect(info).toHaveTextContent(city.durability.toLocaleString('en-US'));
     expect(info).toHaveTextContent(city.troops.toLocaleString('en-US'));
-    expect(info).toHaveTextContent(`${localOfficers.length}/${forceOfficers.length}`);
+    expect(info).toHaveTextContent(`${localOfficers.length}/${localOfficers.length}`);
 
     fireEvent.pointerLeave(jianglingMarker!);
 

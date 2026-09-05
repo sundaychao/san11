@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { ARMAMENT_GOLD_COST, produceArmamentYield } from './armaments';
 import { COMMAND_AP, TRADE_MAX_GRAIN, executeCommand, grainPriceOf, patrolGoldCost, quoteTrade, rollGrainPrices, rollMerchants, tradeEffectPercent, transferDuration, validateCommand } from './commands';
 import type { PlotType } from './innerAffairs';
-import { armamentYieldMultiplier, barracksYieldMultiplier } from './innerAffairs';
+import { armamentYieldMultiplier, barracksYieldMultiplier, cityAttackRangeCoords, recruitBaseYield } from './innerAffairs';
+import { POSITIONS, forceRankOf } from './ranks';
 import { createGame } from './scenario/jingxiang208';
 import type { GameState } from './types';
 
@@ -20,11 +21,11 @@ describe('command engine', () => {
   it('recruits troops with population, food, gold, and order costs', () => {
     const state = withFacilities(createGame('liu', 1));
     const next = executeCommand(state, 'liu', {
-      type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
+      type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'],
     });
 
-    // 基础 1290 × 兵舍1级加成 1.15 = 1483
-    const expected = Math.round(1290 * barracksYieldMultiplier(state.cities.jiangling));
+    // 基础 1495（1000 + 魅99×(治安80+20)×5÷100）× 兵舍1级加成 1.15 = 1719
+    const expected = Math.round(recruitBaseYield([state.officers['liu-bei']], state.cities.jiangling) * barracksYieldMultiplier(state.cities.jiangling));
     expect(next.cities.jiangling.troops).toBe(state.cities.jiangling.troops + expected);
     expect(next.cities.jiangling.population).toBe(state.cities.jiangling.population - 500);
     expect(next.cities.jiangling.food).toBe(state.cities.jiangling.food - 500);
@@ -42,9 +43,9 @@ describe('command engine', () => {
     const state = withFacilities(createGame('liu', 1));
     state.officers['liu-bei'].skill = '名声';
     const next = executeCommand(state, 'liu', {
-      type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
+      type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'],
     });
-    const base = 300 + state.officers['liu-bei'].stats.charisma * 10;
+    const base = recruitBaseYield([state.officers['liu-bei']], state.cities.jiangling);
 
     // 名声 ×1.5 与兵舍1级 ×1.15 同时生效
     expect(next.cities.jiangling.troops - state.cities.jiangling.troops)
@@ -73,7 +74,7 @@ describe('command engine', () => {
     }];
 
     const next = executeCommand(state, 'liu', {
-      type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei',
+      type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'],
     });
 
     expect(next.battleDamageReports).toEqual([]);
@@ -84,11 +85,11 @@ describe('command engine', () => {
     const state = withFacilities(createGame('liu', 1));
     const currentCrossbows = state.cities.jiangling.armaments?.crossbow ?? 0;
     const next = executeCommand(state, 'liu', {
-      type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'crossbow',
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'crossbow',
     });
 
-    // 基础 1840 × 锻冶1级加成 1.15 = 2116
-    const expected = Math.round(1840 * armamentYieldMultiplier(state.cities.jiangling, 'crossbow'));
+    // 基础 1980（1200 + 智78×10）× 锻冶1级加成 1.15 = 2277
+    const expected = Math.round(produceArmamentYield([state.officers['liu-bei']], 'crossbow') * armamentYieldMultiplier(state.cities.jiangling, 'crossbow'));
     expect(next.cities.jiangling.armaments?.crossbow).toBe(currentCrossbows + expected);
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 1000);
     expect(next.actionPoints.liu).toBe(60);
@@ -105,14 +106,14 @@ describe('command engine', () => {
   it('applies 能吏 to spear, halberd, and crossbow production only', () => {
     const state = withFacilities(createGame('liu', 1));
     state.officers['liu-bei'].skill = '能吏';
-    const base = produceArmamentYield(state.officers['liu-bei'], 'crossbow');
+    const base = produceArmamentYield([state.officers['liu-bei']], 'crossbow');
     const before = state.cities.jiangling.armaments!.crossbow;
     const next = executeCommand(state, 'liu', {
-      type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'crossbow',
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'crossbow',
     });
 
-    const expected = Math.round(produceArmamentYield(state.officers['liu-bei'], 'crossbow')
-      * 1.5 * armamentYieldMultiplier(state.cities.jiangling, 'crossbow'));
+    const expected = Math.round(produceArmamentYield([state.officers['liu-bei']], 'crossbow')
+      * 2 * armamentYieldMultiplier(state.cities.jiangling, 'crossbow'));
     expect(next.cities.jiangling.armaments!.crossbow - before).toBe(expected);
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - ARMAMENT_GOLD_COST);
     expect(next.actionPoints.liu).toBe(state.actionPoints.liu - COMMAND_AP.produceArmament);
@@ -123,25 +124,27 @@ describe('command engine', () => {
     const state = withFacilities(createGame('liu', 1));
     state.officers['liu-bei'].skill = '能吏';
     const next = executeCommand(state, 'liu', {
-      type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'ram',
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'ram',
     });
 
+    // 工期按综合智力计算：智78 → ⌈(220−78)÷12⌉×10 = 120日 = 12旬
     expect(next.officers['liu-bei'].location).toEqual({
       kind: 'task',
       cityId: 'jiangling',
       task: 'armament',
       armamentType: 'ram',
       amount: 2,
-      remainingTenDays: 3,
+      remainingTenDays: 12,
+      lead: true,
     });
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - ARMAMENT_GOLD_COST);
   });
 
-  it('starts a one-month special armament production task with two units', () => {
+  it('starts a delayed armament production task with duration from combined intelligence', () => {
     const state = withFacilities(createGame('liu', 1));
     const currentRams = state.cities.jiangling.armaments?.ram ?? 0;
     const next = executeCommand(state, 'liu', {
-      type: 'produceArmament', cityId: 'jiangling', officerId: 'liu-bei', armamentType: 'ram',
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'ram',
     });
 
     expect(next.cities.jiangling.armaments?.ram).toBe(currentRams);
@@ -152,26 +155,57 @@ describe('command engine', () => {
       task: 'armament',
       armamentType: 'ram',
       amount: 2,
-      remainingTenDays: 3,
+      remainingTenDays: 12,
+      lead: true,
     });
     expect(next.officers['liu-bei'].acted).toBe(true);
   });
 
-  it('trains troops from leadership', () => {
+  it('trains troops from war', () => {
     const state = createGame('liu', 1);
     const next = executeCommand(state, 'liu', {
-      type: 'train', cityId: 'jiangling', officerId: 'guan-yu',
+      type: 'train', cityId: 'jiangling', officerIds: ['guan-yu'],
     });
 
-    expect(next.cities.jiangling.training).toBe(81);
+    // 气力提升 = 【(武97+97) ÷ (13500÷2000+20)】+ 3 = 7 + 3 = 10
+    expect(next.cities.jiangling.training).toBe(82);
     expect(next.cities.jiangling.food).toBe(state.cities.jiangling.food - 300);
   });
 
-  it('patrols from charisma and caps public order', () => {
+  it('allows training only once per city per ten days and resets at the next ten-day', () => {
+    const state = createGame('liu', 1);
+    const once = executeCommand(state, 'liu', { type: 'train', cityId: 'jiangling', officerIds: ['guan-yu'] });
+    expect(once.cities.jiangling.trainedThisTenDay).toBe(true);
+    expect(validateCommand(once, 'liu', { type: 'train', cityId: 'jiangling', officerIds: ['zhang-fei'] })).toContain('本旬该城已训练');
+
+    // 下一旬重置后可再次训练
+    rollMerchants(once);
+    expect(once.cities.jiangling.trainedThisTenDay).toBe(false);
+  });
+
+  it('refuses to transfer an already-acted officer', () => {
+    const state = createGame('liu', 1);
+    state.officers['guan-yu'].acted = true;
+    expect(validateCommand(state, 'liu', {
+      type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['guan-yu'],
+    })).toContain('关羽本月已行动，无法移动');
+  });
+
+  it('allows patrol only once per city per ten days and resets at the next ten-day', () => {
+    const state = createGame('liu', 1);
+    const once = executeCommand(state, 'liu', { type: 'patrol', cityId: 'jiangling', officerIds: ['guan-yu'] });
+    expect(once.cities.jiangling.patrolledThisTenDay).toBe(true);
+    expect(validateCommand(once, 'liu', { type: 'patrol', cityId: 'jiangling', officerIds: ['zhang-fei'] })).toContain('本旬该城已巡查');
+
+    rollMerchants(once);
+    expect(once.cities.jiangling.patrolledThisTenDay).toBe(false);
+  });
+
+  it('patrols from leadership and caps public order', () => {
     const state = createGame('liu', 1);
     state.cities.jiangling.order = 99;
     const next = executeCommand(state, 'liu', {
-      type: 'patrol', cityId: 'jiangling', officerId: 'liu-bei',
+      type: 'patrol', cityId: 'jiangling', officerIds: ['liu-bei'],
     });
 
     expect(next.cities.jiangling.order).toBe(100);
@@ -248,15 +282,17 @@ describe('command engine', () => {
     });
 
     expect(enemy).toContain('只能调往己方城市');
-    expect(empty).toContain('至少调动一名武将');
+    expect(empty).toContain('至少移动一名武将');
   });
 
-  it('does not allow a city governor to be transferred', () => {
+  it('allows a city governor to be transferred and leaves the source city without a governor', () => {
     const state = createGame('liu', 1);
-
-    expect(validateCommand(state, 'liu', {
+    const next = executeCommand(state, 'liu', {
       type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['liu-bei'],
-    })).toContain('太守不可调离任所');
+    });
+
+    expect(next.officers['liu-bei'].location.kind).toBe('transfer');
+    expect(next.cities.jiangling.governorId).toBeNull();
   });
 
   it('does not allow officers outside the source city to transfer', () => {
@@ -265,7 +301,87 @@ describe('command engine', () => {
 
     expect(validateCommand(state, 'liu', {
       type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['guan-yu'],
-    })).toContain('只能调动出发城市内的己方武将');
+    })).toContain('只能移动出发城市内的己方武将');
+  });
+
+  it('summons an officer from another owned city to the current city with the same travel time', () => {
+    const state = createGame('liu', 1);
+    state.officers['guan-yu'].location = { kind: 'city', cityId: 'wuling' };
+    const next = executeCommand(state, 'liu', {
+      type: 'summon', cityId: 'jiangling', officerIds: ['guan-yu'],
+    });
+
+    expect(next.officers['guan-yu'].location).toEqual({
+      kind: 'transfer',
+      fromCityId: 'wuling',
+      targetCityId: 'jiangling',
+      remainingTenDays: 3,
+    });
+    expect(next.officers['guan-yu'].acted).toBe(true);
+  });
+
+  it('rejects summoning without officers or of officers already in this city', () => {
+    const state = createGame('liu', 1);
+    const empty = validateCommand(state, 'liu', {
+      type: 'summon', cityId: 'jiangling', officerIds: [],
+    });
+    const self = validateCommand(state, 'liu', {
+      type: 'summon', cityId: 'jiangling', officerIds: ['guan-yu'],
+    });
+
+    expect(empty).toContain('至少召唤一名武将');
+    expect(self.some((error) => error.includes('无需召唤'))).toBe(true);
+  });
+
+  it('swears two or three same-gender officers as sworn brothers with pairwise relationships', () => {
+    const state = createGame('liu', 1);
+    const next = executeCommand(state, 'liu', {
+      type: 'sworn', cityId: 'jiangling', officerIds: ['guan-yu', 'jian-yong', 'sun-qian'],
+    });
+
+    for (const officerId of ['guan-yu', 'jian-yong', 'sun-qian']) {
+      expect(next.officers[officerId].acted).toBe(true);
+    }
+    expect(next.officers['guan-yu'].relationships?.['jian-yong']).toBe('sworn');
+    expect(next.officers['guan-yu'].relationships?.['sun-qian']).toBe('sworn');
+    expect(next.officers['jian-yong'].relationships?.['sun-qian']).toBe('sworn');
+  });
+
+  it('rejects sworn brothers of mixed gender or fewer than two officers', () => {
+    const state = createGame('liu', 1);
+    state.officers['chen-dao'].gender = 'female';
+
+    const mixed = validateCommand(state, 'liu', {
+      type: 'sworn', cityId: 'jiangling', officerIds: ['guan-yu', 'chen-dao'],
+    });
+    const one = validateCommand(state, 'liu', {
+      type: 'sworn', cityId: 'jiangling', officerIds: ['guan-yu'],
+    });
+
+    expect(mixed.some((error) => error.includes('性别须相同'))).toBe(true);
+    expect(one).toContain('至少选择两名武将结义');
+  });
+
+  it('marries two opposite-gender officers as spouses', () => {
+    const state = createGame('liu', 1);
+    state.officers['sun-qian'].gender = 'female';
+    const next = executeCommand(state, 'liu', {
+      type: 'marry', cityId: 'jiangling', officerIdA: 'guan-yu', officerIdB: 'sun-qian', relation: 'spouse',
+    });
+
+    expect(next.officers['guan-yu'].relationships?.['sun-qian']).toBe('spouse');
+    expect(next.officers['sun-qian'].relationships?.['guan-yu']).toBe('spouse');
+    expect(next.officers['guan-yu'].acted).toBe(true);
+    expect(next.officers['sun-qian'].acted).toBe(true);
+  });
+
+  it('rejects marrying two officers of the same gender', () => {
+    const state = createGame('liu', 1);
+    state.officers['guan-yu'].gender = 'male';
+    state.officers['jian-yong'].gender = 'male';
+    expect(validateCommand(state, 'liu', {
+      type: 'marry', cityId: 'jiangling', officerIdA: 'guan-yu', officerIdB: 'jian-yong', relation: 'spouse',
+    }).some((error) => error.includes('一男一女'))).toBe(true);
   });
 
   it('rejects an officer who already acted', () => {
@@ -273,7 +389,7 @@ describe('command engine', () => {
     state.officers['liu-bei'].acted = true;
 
     expect(validateCommand(state, 'liu', {
-      type: 'patrol', cityId: 'jiangling', officerId: 'liu-bei',
+      type: 'patrol', cityId: 'jiangling', officerIds: ['liu-bei'],
     })).toContain('刘备本月已行动');
   });
 
@@ -381,6 +497,21 @@ describe('command engine', () => {
     })).toContain('本旬已完成一次粮食交易');
   });
 
+  it('rejects trading while the city is under enemy siege (blocked)', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.merchantPresent = true;
+    state.cities.jiangling.grainPrice = 5;
+    const [coord] = cityAttackRangeCoords(state.cities.jiangling);
+    state.units['liu-siege-enemy'] = {
+      id: 'liu-siege-enemy', kind: 'combat', forceId: 'cao', leaderId: 'cao-cao', officerIds: ['cao-cao'],
+      homeCityId: 'xiangyang', troopType: 'spear', q: coord.q, r: coord.r, troops: 1000,
+      food: 1000, energy: 80, movementRemaining: 20, moved: false, acted: false,
+    };
+    expect(validateCommand(state, 'liu', {
+      type: 'trade', cityId: 'jiangling', officerId: 'liu-bei', mode: 'buy', amount: 1000,
+    })).toContain('城池被敌方封锁，无法进行交易');
+  });
+
   it('computes trade effect percent from officer politics', () => {
     expect(tradeEffectPercent(50)).toBe(100);
     expect(tradeEffectPercent(80)).toBe(108);
@@ -394,12 +525,12 @@ describe('command engine', () => {
     const startGold = state.cities.jiangling.gold;
 
     const next = executeCommand(state, 'liu', {
-      type: 'research', cityId: 'jiangling', officerId: 'liu-bei', branch: 'cavalry',
+      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], branch: 'cavalry',
     });
 
-    // 刘备统率80，2级基础4旬，80/20=4省4旬 → 1旬完成
+    // 刘备统率78，2级基本70日 −【78÷7】= 59日 → 6旬完成
     expect(next.officers['liu-bei'].location).toEqual({
-      kind: 'task', cityId: 'jiangling', task: 'research', branch: 'cavalry', remainingTenDays: 1,
+      kind: 'task', cityId: 'jiangling', task: 'research', branch: 'cavalry', remainingTenDays: 6, lead: true,
     });
     expect(next.cities.jiangling.gold).toBe(startGold - 2000);
     expect(next.forces.liu.techP).toBe(3200 - 2000);
@@ -411,7 +542,7 @@ describe('command engine', () => {
     const poor = createGame('liu', 1);
     poor.forces.liu.techP = 500;
     expect(validateCommand(poor, 'liu', {
-      type: 'research', cityId: 'jiangling', officerId: 'liu-bei', branch: 'spear',
+      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], branch: 'spear',
     })).toContain('技巧P不足 1000');
 
     const busy = createGame('liu', 1);
@@ -420,14 +551,14 @@ describe('command engine', () => {
       kind: 'task', cityId: 'wuling', task: 'research', branch: 'civil', remainingTenDays: 2,
     };
     expect(validateCommand(busy, 'liu', {
-      type: 'research', cityId: 'jiangling', officerId: 'liu-bei', branch: 'spear',
+      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], branch: 'spear',
     })).toContain('已有科技正在研究中');
 
     const finished = createGame('liu', 1);
     finished.forces.liu.techP = 99999;
     finished.forces.liu.techs = { spear: 4 };
     expect(validateCommand(finished, 'liu', {
-      type: 'research', cityId: 'jiangling', officerId: 'liu-bei', branch: 'spear',
+      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], branch: 'spear',
     })).toContain('该方向科技已研究完毕');
   });
 
@@ -437,13 +568,13 @@ describe('command engine', () => {
     state.forces.liu.techs = { civil: 3 };
     plain.forces.liu.techs = {};
 
-    const boosted = executeCommand(state, 'liu', { type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei' });
-    const base = executeCommand(plain, 'liu', { type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei' });
+    const boosted = executeCommand(state, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'] });
+    const base = executeCommand(plain, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'] });
 
     const boostedGain = boosted.cities.jiangling.troops - state.cities.jiangling.troops;
     const baseGain = base.cities.jiangling.troops - plain.cities.jiangling.troops;
     // 科技徭役 ×1.3 与兵舍1级 ×1.15 均以同一基础值计算，不应对已取整的结果再乘一次
-    const rawBase = 300 + state.officers['liu-bei'].stats.charisma * 10;
+    const rawBase = recruitBaseYield([state.officers['liu-bei']], state.cities.jiangling);
     const facility = barracksYieldMultiplier(state.cities.jiangling);
     expect(baseGain).toBe(Math.round(rawBase * facility));
     expect(boostedGain).toBe(Math.round(rawBase * facility * 1.3));
@@ -553,5 +684,54 @@ describe('command engine', () => {
       kind: 'task', task: 'cultivate', nodeId: 'sk-lianji', remainingTenDays: 3,
     });
     expect(next.forces.liu.abilityResearch?.remaining).toEqual({ 'sk-lianji': 3 });
+  });
+});
+
+describe('appoint position', () => {
+  it('initializes force rank from city count at scenario creation', () => {
+    const state = createGame('liu', 1);
+    expect(state.forces.liu.rank).toBe('zhou-cishi');
+    expect(state.forces.cao.rank).toBe('zhou-cishi');
+  });
+
+  it('derives rank from city count for saves without rank', () => {
+    const state = createGame('liu', 1);
+    delete state.forces.liu.rank;
+    expect(forceRankOf(state, 'liu')).toBe('zhou-cishi');
+  });
+
+  it('grants the lowest position without any merit', () => {
+    const state = createGame('liu', 1);
+    const position = POSITIONS.find((candidate) => candidate.name === '主簿')!;
+    expect(position.merit).toBe(0);
+    state.officers['guan-yu'].merit = 0;
+    expect(validateCommand(state, 'liu', {
+      type: 'appointPosition', cityId: 'jiangling', officerId: 'guan-yu', positionId: position.id,
+    })).toEqual([]);
+    const next = executeCommand(state, 'liu', {
+      type: 'appointPosition', cityId: 'jiangling', officerId: 'guan-yu', positionId: position.id,
+    });
+    expect(next.officers['guan-yu'].positionId).toBe(position.id);
+  });
+  it('blocks appointing or dismissing officers leading troops outside a city', () => {
+    const state = createGame('liu', 1);
+    const position = POSITIONS.find((candidate) => candidate.name === '主簿')!;
+    const granted = executeCommand(state, 'liu', {
+      type: 'appointPosition', cityId: 'jiangling', officerId: 'guan-yu', positionId: position.id,
+    });
+    granted.units['field-u1'] = {
+      id: 'field-u1', forceId: 'liu', leaderId: 'guan-yu', homeCityId: 'jiangling',
+      q: 999, r: 999, troops: 3000, food: 100, energy: 100, movementRemaining: 0, moved: false, acted: false,
+    };
+    granted.officers['guan-yu'].location = { kind: 'unit', unitId: 'field-u1' };
+    expect(validateCommand(granted, 'liu', {
+      type: 'appointPosition', cityId: 'jiangling', officerId: 'guan-yu', positionId: '',
+    })).toEqual([expect.stringContaining('城外')]);
+    // 部队驻于本势力城市格视同回城，可正常免官
+    granted.units['field-u1'].q = granted.cities.jiangling.gridQ;
+    granted.units['field-u1'].r = granted.cities.jiangling.gridR;
+    expect(validateCommand(granted, 'liu', {
+      type: 'appointPosition', cityId: 'jiangling', officerId: 'guan-yu', positionId: '',
+    })).toEqual([]);
   });
 });

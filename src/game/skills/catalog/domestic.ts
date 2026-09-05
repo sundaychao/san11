@@ -17,11 +17,11 @@ function activeDomesticSkill(name: string, description: string, effects: SkillEf
 
 export const DOMESTIC_SKILLS: SkillDefinition[] = [
   activeDomesticSkill('名声', '执行征兵时增加征兵量', [{ kind: 'commandYieldMultiplier', command: 'recruit', multiplier: 1.5 }]),
-  activeDomesticSkill('能吏', '执行枪、戟、弩兵装生产时增加产量', [
-    { kind: 'commandYieldMultiplier', command: 'produceArmament', multiplier: 1.5, armamentTypes: ['spear', 'halberd', 'crossbow'] },
+  activeDomesticSkill('能吏', '执行枪、戟、弩兵装生产时产量×2', [
+    { kind: 'commandYieldMultiplier', command: 'produceArmament', multiplier: 2, armamentTypes: ['spear', 'halberd', 'crossbow'] },
   ]),
-  activeDomesticSkill('繁殖', '执行军马生产时增加产量', [
-    { kind: 'commandYieldMultiplier', command: 'produceArmament', multiplier: 1.5, armamentTypes: ['cavalry'] },
+  activeDomesticSkill('繁殖', '执行军马生产时产量×2', [
+    { kind: 'commandYieldMultiplier', command: 'produceArmament', multiplier: 2, armamentTypes: ['cavalry'] },
   ]),
   activeDomesticSkill('发明', '缩短兵器（冲车/井阑）生产周期', [
     { kind: 'armamentProductionSpeed', armamentTypes: ['ram', 'tower'], multiplier: 2 },

@@ -85,7 +85,7 @@ describe('skill sources', () => {
     state.officers['liu-bei'].skill = '名声';
     state.officers['guan-yu'].skill = '能吏';
 
-    expect(resolveCommandSkills(state, { type: 'recruit', cityId: 'jiangling', officerId: 'liu-bei' })
+    expect(resolveCommandSkills(state, { type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'] })
       .map((skill) => skill.definition.name)).toEqual(['名声']);
     expect(resolveCommandSkills(state, {
       type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['liu-bei', 'guan-yu'],

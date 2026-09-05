@@ -54,6 +54,7 @@ export function moveUnit(state: GameState, forceId: ForceId, unitId: string, des
     movingUnit.moved = true;
   }
   next.battleDamageReports = [];
+  next.cityEffectReports = [];
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
   applyGroundFireDamageToUnit(next, unitId, 'move-fire');

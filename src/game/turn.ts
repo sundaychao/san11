@@ -1,13 +1,14 @@
 import { clamp, rollGrainPrices, rollMerchants } from './commands';
 import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
-import { MAX_TECH_LEVEL, TECH_BRANCHES, TECHP_POP_DIVISOR, techLevelOf, addTechP } from './techs';
+import { MAX_TECH_LEVEL, TECH_BRANCHES, TECHP_CITY_POP_DIVISOR, TECHP_RURAL_POP_DIVISOR, techLevelOf, addTechP } from './techs';
 import { movementAllowanceForUnit, unitSupplyMultiplier } from './battle/actions';
-import { applyGroundFireDamageToFacilities, applyGroundFireDamageToUnits } from './battle/fire';
+import { applyGroundFireDamageToCities, applyGroundFireDamageToFacilities, applyGroundFireDamageToPlots, applyGroundFireDamageToUnits } from './battle/fire';
 import { cellAt } from './battle/movementRules';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
 import { movementAllowanceBonus } from './skills/rules/movement';
+import { cityPopulationOf, ruralPopulationOf } from './innerAffairs';
 import { settleLoyaltyDrift } from './loyalty';
 import { settleCaptives } from './captives';
 import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
@@ -47,6 +48,7 @@ function clearTransientBattleReports(state: GameState) {
   state.battleDamageReports = [];
   state.facilityRepairReports = [];
   state.strategyResultReports = [];
+  state.cityEffectReports = [];
 }
 
 function applyPossibleEvent(state: GameState, city: City) {
@@ -234,11 +236,13 @@ export function settleMonth(state: GameState): GameState {
         if (isBlackMarketPlot) {
           // 建设中黑市跨年被拆：立即释放建设武将回城
           if (plot.constructing) {
-            const officer = next.officers[plot.constructing.officerId];
-            if (officer && officer.location.kind === 'task' && officer.location.task === 'construction') {
-              officer.location = { kind: 'city', cityId: city.id };
-              officer.cityId = city.id;
-              officer.acted = false;
+            for (const officerId of plot.constructing.officerIds) {
+              const officer = next.officers[officerId];
+              if (officer && officer.location.kind === 'task' && officer.location.task === 'construction') {
+                officer.location = { kind: 'city', cityId: city.id };
+                officer.cityId = city.id;
+                officer.acted = false;
+              }
             }
           }
           plot.constructing = undefined;
@@ -295,7 +299,7 @@ export function settleMonth(state: GameState): GameState {
     if (city.troops > troopCap) city.troops = troopCap;
   }
   for (const forceId of FORCE_IDS) next.actionPoints[forceId] = BASE_TEN_DAY_ACTION_POINTS;
-  for (const officer of Object.values(next.officers)) officer.acted = false;
+  for (const officer of Object.values(next.officers)) { officer.acted = false; officer.rewarded = false; }
   settleAbilityResearch(next);
   settleBarbarianRaids(next);
 
@@ -355,8 +359,12 @@ function settleCitySupply(next: GameState, city: City) {
   if (city.ownerId && techLevelOf(next, city.ownerId, 'civil') >= 4) {
     city.order = clamp(city.order + 2, 0, 100);
   }
-  // 技巧P：每旬每城按人口产出
-  if (city.ownerId) addTechP(next, city.ownerId, Math.floor(city.population / TECHP_POP_DIVISOR));
+  // 技巧P：每旬每城按城市/农村人口双系数产出（对应血色6.0 城市系数8、农村系数2，按旬分摊后近似 城市÷3000 + 农村÷12000）
+  if (city.ownerId) {
+    const urbanTechP = Math.floor(cityPopulationOf(city) / TECHP_CITY_POP_DIVISOR);
+    const ruralTechP = Math.floor(ruralPopulationOf(city) / TECHP_RURAL_POP_DIVISOR);
+    addTechP(next, city.ownerId, urbanTechP + ruralTechP);
+  }
 }
 
 function settleUnitSupply(next: GameState, unit: ArmyUnit) {
@@ -454,18 +462,20 @@ function settleOfficerTasks(next: GameState) {
     const task = officer.location;
     const city = next.cities[task.cityId];
     if (task.task === 'research') {
-      // 研究完成：势力科技等级+1
-      const force = officer.forceId ? next.forces[officer.forceId] : undefined;
-      const branchDef = TECH_BRANCHES.find((candidate) => candidate.id === task.branch);
-      if (force && branchDef) {
-        const currentLevel = force.techs?.[task.branch] ?? 0;
-        force.techs = { ...force.techs, [task.branch]: Math.min(MAX_TECH_LEVEL, currentLevel + 1) };
-        next.logs.push({
-          id: `research-complete-${next.month}-${officer.id}-${next.logs.length}`,
-          month: next.month,
-          forceId: officer.forceId,
-          message: `${officer.name}完成「${branchDef.levels[currentLevel].name}」研究，${force.name}科技提升`,
-        });
+      // 研究完成：势力科技等级+1（多人研究仅主将 lead 结算一次，随从静默释放）
+      if (task.lead !== false) {
+        const force = officer.forceId ? next.forces[officer.forceId] : undefined;
+        const branchDef = TECH_BRANCHES.find((candidate) => candidate.id === task.branch);
+        if (force && branchDef) {
+          const currentLevel = force.techs?.[task.branch] ?? 0;
+          force.techs = { ...force.techs, [task.branch]: Math.min(MAX_TECH_LEVEL, currentLevel + 1) };
+          next.logs.push({
+            id: `research-complete-${next.month}-${officer.id}-${next.logs.length}`,
+            month: next.month,
+            forceId: officer.forceId,
+            message: `${officer.name}完成「${branchDef.levels[currentLevel].name}」研究，${force.name}科技提升`,
+          });
+        }
       }
       officer.location = { kind: 'city', cityId: city.id };
       officer.cityId = city.id;
@@ -500,29 +510,32 @@ function settleOfficerTasks(next: GameState) {
       officer.acted = false;
       continue;
     }
-    const current = armamentsOf(city.armaments);
-    city.armaments = {
-      ...current,
-      [task.armamentType]: current[task.armamentType] + task.amount,
-    };
-    next.cityEffectReports = [{
-      id: `city-effect-${next.month}-${next.logs.length}`,
-      cityId: city.id,
-      q: city.gridQ,
-      r: city.gridR,
-      amount: task.amount,
-      label: ARMAMENT_LABELS[task.armamentType],
-      kind: 'armament',
-    }];
+    // 兵装生产完成：入账并释放（多人生产仅主将 lead 结算一次，随从静默释放）
+    if (task.lead !== false) {
+      const current = armamentsOf(city.armaments);
+      city.armaments = {
+        ...current,
+        [task.armamentType]: current[task.armamentType] + task.amount,
+      };
+      next.cityEffectReports = [{
+        id: `city-effect-${next.month}-${next.logs.length}`,
+        cityId: city.id,
+        q: city.gridQ,
+        r: city.gridR,
+        amount: task.amount,
+        label: ARMAMENT_LABELS[task.armamentType],
+        kind: 'armament',
+      }];
+      next.logs.push({
+        id: `armament-complete-${next.month}-${officer.id}-${next.logs.length}`,
+        month: next.month,
+        forceId: officer.forceId,
+        message: `${officer.name}完成${city.name}${ARMAMENT_LABELS[task.armamentType]}生产，增加了${task.amount}`,
+      });
+    }
     officer.location = { kind: 'city', cityId: city.id };
     officer.cityId = city.id;
     officer.acted = false;
-    next.logs.push({
-      id: `armament-complete-${next.month}-${officer.id}-${next.logs.length}`,
-      month: next.month,
-      forceId: officer.forceId,
-      message: `${officer.name}完成${city.name}${ARMAMENT_LABELS[task.armamentType]}生产，增加了${task.amount}`,
-    });
   }
 }
 
@@ -542,6 +555,8 @@ export function settleTenDay(state: GameState): GameState {
   for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
   applyGroundFireDamageToUnits(next, 'ten-day-fire');
   applyGroundFireDamageToFacilities(next);
+  applyGroundFireDamageToPlots(next);
+  applyGroundFireDamageToCities(next);
   settleFirePlots(next);
   settleForceTurnStart(next, state.playerForceId);
   settleOfficerTransfers(next);
@@ -562,6 +577,8 @@ export function settleTenDay(state: GameState): GameState {
   }
 
   restoreTenDayActionPoints(next, state);
+  // 每旬推进都重置全部武将的"本旬已行动"标记，保证下一旬武将可再次执行指令
+  for (const officer of Object.values(next.officers)) { officer.acted = false; officer.rewarded = false; }
   next.turnForceId = next.playerForceId;
   return next;
 }

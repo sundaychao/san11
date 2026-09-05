@@ -7,7 +7,8 @@ import { territoryCityAt, territoryForceAt } from '../territory';
 import { settleTenDay } from '../turn';
 import type { TroopType } from '../types';
 import * as skillHandlers from '../skills/handlers';
-import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
+import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackPlot, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
+import { attackablePlots } from './targetRules';
 import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 import { damageRoll } from './shared';
@@ -799,6 +800,52 @@ describe('battle deployment and movement actions', () => {
     const dismantled = dismantleFacility(state, 'liu', 'ownWall');
     expect(dismantled.facilities?.ownWall).toBeUndefined();
     expect(() => dismantleFacility(state, 'liu', 'enemyTower')).toThrow(/撤销|己方|设施/);
+  });
+
+  it('lets units attack enemy development plots, reducing durability and clearing the plot at zero', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 4000,
+      food: 6000,
+    });
+    setUniformTerrain(state, 'plain');
+    const unit = Object.values(state.units)[0];
+    readyUnitAt(state, unit.id, { q: 10, r: 10 }, 'sword');
+
+    // 敌城地格：市场在攻击范围，农场超出范围，空地在范围
+    const caoCity = state.cities['xiangyang'];
+    if (!caoCity.plots) caoCity.plots = [];
+    caoCity.plots[0] = { id: 'p-market', type: 'market', level: 1, value: 0, q: 11, r: 10, durability: 500 };
+    caoCity.plots[1] = { id: 'p-farm', type: 'farm', level: 1, value: 0, q: 20, r: 20, durability: 500 };
+    caoCity.plots[2] = { id: 'p-empty', type: 'empty', level: 0, value: 0, q: 11, r: 11, durability: 0 };
+
+    expect(attackablePlots(state, unit.id).map((plot) => `${plot.cityId}:${plot.plotIndex}`)).toEqual(['xiangyang:0']);
+
+    // 耐久扣减
+    const attacked = attackPlot(state, 'liu', unit.id, 'xiangyang', 0);
+    expect(attacked.cities['xiangyang'].plots![0].durability).toBeLessThan(500);
+    expect(attacked.cities['xiangyang'].plots![0].type).toBe('market');
+
+    // 破坏到 0 时地格清空
+    const destState = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling', officerId: 'guan-yu', troops: 3000, food: 3000,
+    });
+    setUniformTerrain(destState, 'plain');
+    const destUnit = Object.values(destState.units)[0];
+    readyUnitAt(destState, destUnit.id, { q: 10, r: 10 }, 'sword');
+    const destCity = destState.cities['xiangyang'];
+    if (!destCity.plots) destCity.plots = [];
+    destCity.plots[0] = { id: 'p-low', type: 'market', level: 2, value: 0, q: 11, r: 10, durability: 1 };
+    const destroyed = attackPlot(destState, 'liu', destUnit.id, 'xiangyang', 0);
+    expect(destroyed.cities['xiangyang'].plots![0]).toMatchObject({ type: 'empty', level: 0, value: 0, durability: 0 });
+
+    // 不能攻击己方地格
+    const ownCity = state.cities['jiangling'];
+    if (!ownCity.plots) ownCity.plots = [];
+    ownCity.plots[0] = { id: 'own-plot', type: 'market', level: 1, value: 0, q: 11, r: 11, durability: 500 };
+    expect(() => attackPlot(state, 'liu', unit.id, 'jiangling', 0)).toThrow(/己方/);
+    expect(() => attackPlot(state, 'liu', unit.id, 'xiangyang', 1)).toThrow(/范围/);
   });
 
   it('prevents arrow towers, drums, music towers, and fortresses from being built within two cells of each other', () => {
@@ -1940,6 +1987,51 @@ describe('battle deployment and movement actions', () => {
     expect(friendlyBurned.firePlots).toContainEqual(expect.objectContaining({ q: 10, r: 9 }));
     expect(friendlyBurned.units['friendly-on-fire'].troops).toBeLessThan(3000);
     expect(friendlyBurned.battleDamageReports?.some((report) => report.unitId === 'friendly-on-fire')).toBe(true);
+  });
+
+  it('deals immediate fire damage to a city development plot and the city itself on ignition', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 3000,
+      food: 3000,
+    });
+    setUniformTerrain(state, 'plain');
+    const unit = Object.values(state.units)[0];
+    const city = state.cities.jiangling;
+    const footprint = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR });
+    // 目标格取城池 7 格中的一格，部队站其邻格（射程 1）
+    const target = footprint[0];
+    const unitCoord = neighborsOf(target.q, target.r)[0];
+    readyUnitAt(state, unit.id, { q: unitCoord.q, r: unitCoord.r });
+    city.plots = [{ id: 'p-market', type: 'market', level: 2, value: 0, q: target.q, r: target.r, durability: 500 }];
+    const cityDurabilityBefore = city.durability;
+
+    const next = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: target.q, r: target.r } });
+
+    expect(next.cities.jiangling.plots![0].durability).toBe(500 - 150);
+    expect(next.cities.jiangling.durability).toBe(cityDurabilityBefore - 150);
+  });
+
+  it('captures an enemy city immediately when ignition fire burns its durability to zero', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 3000,
+      food: 3000,
+    });
+    setUniformTerrain(state, 'plain');
+    const unit = Object.values(state.units)[0];
+    const target = state.cities.xiangyang;
+    const footprint = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR });
+    const cell = footprint[0];
+    const unitCoord = neighborsOf(cell.q, cell.r)[0];
+    readyUnitAt(state, unit.id, { q: unitCoord.q, r: unitCoord.r });
+    target.durability = 150; // 点火瞬间的 150 城伤恰好将其烧至 0
+
+    const next = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: cell.q, r: cell.r } });
+
+    expect(next.cities.xiangyang.ownerId).toBe('liu'); // 当场攻破
   });
 
   it('uses opposed intelligence for an enemy occupying the fire target cell', () => {

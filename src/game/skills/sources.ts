@@ -77,6 +77,12 @@ export function resolveCommandSkills(state: GameState, command: GameCommand): Ac
     || command.type === 'cancelCityPlot'
     || command.type === 'legion' || command.type === 'appointStrategist'
   ) return [];
-  if (command.type === 'explore') return resolveOfficerSkills(state, command.officerIds);
-  return resolveOfficerSkills(state, [command.officerId]);
+  // 多人执行指令（探索/征兵/兵装/训练/巡查/科技研究/开发）：全部执行武将的特技合并生效
+  if ('officerIds' in command && Array.isArray(command.officerIds)) {
+    return resolveOfficerSkills(state, command.officerIds);
+  }
+  if ('officerId' in command && command.officerId) {
+    return resolveOfficerSkills(state, [command.officerId]);
+  }
+  return [];
 }

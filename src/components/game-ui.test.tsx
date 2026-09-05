@@ -246,7 +246,7 @@ describe('game interface shell', () => {
     await user.click(within(menu).getByRole('button', { name: '人才' }));
     expect(within(menu).getByRole('button', { name: '探索' })).toBeVisible();
     expect(within(menu).getByRole('button', { name: '收授宝物' })).toBeVisible();
-    expect(within(menu).getByRole('button', { name: '调动' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '移动' })).toBeVisible();
   });
 
   it('plays the left mouse menu sound when clicking an owned city opens the first command menu', async () => {
@@ -621,7 +621,9 @@ describe('game interface shell', () => {
     await user.click(within(menu).getByRole('button', { name: '征兵' }));
 
     const dialog = screen.getByRole('dialog', { name: '征兵' });
-    expect(within(dialog).getByLabelText('执行武将')).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: '执行武将' })).toBeVisible();
+    // 头像占位区默认显示魅力最高的待命武将（刘备）
+    expect(within(dialog).getByRole('button', { name: /刘备/ })).toBeVisible();
     expect(within(dialog).getByRole('button', { name: '决定·征兵' })).toBeEnabled();
   });
 
@@ -646,8 +648,8 @@ describe('game interface shell', () => {
       fireEvent.click(within(screen.getByRole('dialog', { name: '征兵' })).getByRole('button', { name: '决定·征兵' }));
 
       const recruitEffect = screen.getByTestId('city-effect-number');
-      // 基础 1290 × 兵舍1级加成 1.15 = 1483
-      expect(recruitEffect).toHaveTextContent('士兵 +1,483');
+      // 魅力Top3：刘备(99)+关羽(94)+简雍(86)=279；基础(1000+279×(80+20)×5/100=2395) × 兵舍1级1.15 = 2754
+      expect(recruitEffect).toHaveTextContent('士兵 +2,754');
       expect(recruitEffect.closest('[data-testid="city-marker"]')).toBe(jianglingMarker);
 
       act(() => vi.advanceTimersByTime(2000));
@@ -658,13 +660,14 @@ describe('game interface shell', () => {
       fireEvent.click(within(screen.getByTestId('city-command-menu')).getByRole('button', { name: '生产兵装' }));
 
       const dialog = screen.getByRole('dialog', { name: '生产兵装' });
-      expect(within(dialog).getByLabelText('执行武将')).toBeVisible();
+      expect(within(dialog).getByRole('button', { name: '执行武将' })).toBeVisible();
       fireEvent.click(within(dialog).getByRole('button', { name: '弩' }));
       fireEvent.click(within(dialog).getByRole('button', { name: '决定·生产兵装' }));
 
       expect(screen.queryByRole('dialog', { name: '生产兵装' })).not.toBeInTheDocument();
       expect(screen.getByText(/生产江陵弩/)).toBeVisible();
-      expect(screen.getByTestId('city-effect-number')).toHaveTextContent('弩 +1,950');
+      // 征兵已用刘备/关羽/简雍（已行动），生产默认贪心勾选孙乾（智78·能吏）+陈到（智62）+甘氏（智18）：(1000+78×10+62×5+18×5=2180) × 锻冶1级1.15 = 2507 × 能吏2 = 5014 + 随机460 = 5474
+      expect(screen.getByTestId('city-effect-number')).toHaveTextContent('弩 +5,474');
 
       act(() => vi.advanceTimersByTime(1999));
       expect(screen.getByTestId('city-effect-number')).toBeVisible();
