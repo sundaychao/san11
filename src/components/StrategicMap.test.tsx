@@ -862,6 +862,34 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     expect(y()).toBeCloseTo(yRest);
   });
 
+  it('摇杆式移动：正上方只向上，右上角则同时向上向右移动', async () => {
+    renderGame();
+    const viewport = screen.getByTestId('map-viewport');
+    const mapContent = screen.getByTestId('map-content');
+    const x = () => Number.parseFloat(mapContent.getAttribute('data-view-x')!);
+    const y = () => Number.parseFloat(mapContent.getAttribute('data-view-y')!);
+
+    // 鼠标位于上缘正中（与画面中心同列）：只向上（view.y 增大），横向不移动
+    fireEvent.pointerMove(viewport, { clientX: 640, clientY: 10 });
+    const xPureUpStart = x();
+    const yPureUpStart = y();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(y()).toBeGreaterThan(yPureUpStart);
+    expect(x()).toBeCloseTo(xPureUpStart);
+
+    // 回到中央，等方向清零后再测斜向
+    fireEvent.pointerMove(viewport, { clientX: 640, clientY: 360 });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
+    const xDiagonalStart = x();
+    const yDiagonalStart = y();
+
+    // 鼠标进入右上角边缘带：向上（view.y 增大）与向右（view.x 减小）同时进行
+    fireEvent.pointerMove(viewport, { clientX: 1270, clientY: 20 });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(y()).toBeGreaterThan(yDiagonalStart);
+    expect(x()).toBeLessThan(xDiagonalStart);
+  });
+
   it('renders the mobile duel map with its own 16 by 33 grid dimensions', () => {
     const state = createMobileDuelGame('liu', 'cao', 1);
     renderGame(state);

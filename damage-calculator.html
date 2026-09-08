@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>三國志11 / 血色衣冠6 部队伤害计算器</title>
+<style>
+  :root{
+    --bg:#1a1410; --panel:#241c14; --panel2:#2e2418; --line:#4a3a24;
+    --gold:#e8c96a; --gold2:#c9a94a; --text:#f2e7cf; --muted:#a4926f;
+    --red:#d86a5a; --green:#7fae6a;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif; background:var(--bg); color:var(--text);
+    background-image:radial-gradient(circle at 20% 0%, #2c2115 0%, var(--bg) 60%);
+    min-height:100vh; padding:24px 16px 60px;
+  }
+  .wrap{max-width:1100px; margin:0 auto;}
+  h1{color:var(--gold); font-size:26px; letter-spacing:2px; border-bottom:2px solid var(--line); padding-bottom:10px; margin-bottom:4px;}
+  .sub{color:var(--muted); font-size:13px; margin-bottom:24px;}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  @media(max-width:920px){.grid{grid-template-columns:1fr;}}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:16px;}
+  .panel h2{color:var(--gold2); font-size:15px; margin-bottom:12px; border-left:3px solid var(--gold); padding-left:8px;}
+  .field{display:grid; grid-template-columns:120px 1fr auto; align-items:center; gap:10px; margin-bottom:10px;}
+  .field label{color:var(--text); font-size:14px;}
+  .field .hint{color:var(--muted); font-size:11px;}
+  input[type=number], select{
+    background:#1c150e; color:var(--text); border:1px solid var(--line); border-radius:6px;
+    padding:7px 10px; font-size:14px; width:100%;
+  }
+  input[type=number]:focus, select:focus{outline:none; border-color:var(--gold);}
+  input:disabled{opacity:.45;}
+  .unit{color:var(--muted); font-size:12px; white-space:nowrap;}
+  .check{display:flex; align-items:center; gap:8px; color:var(--text); font-size:13px;}
+  .check input{accent-color:var(--gold); width:16px; height:16px;}
+  .section-title{color:var(--gold2); font-size:13px; margin:14px 0 8px; letter-spacing:1px;}
+  .inline{display:flex; gap:8px; align-items:center;} .inline input,.inline select{flex:1;}
+  .tabs{display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;}
+  .tab{background:#2a2013; color:var(--muted); border:1px solid var(--line); border-radius:7px; padding:7px 14px; font-size:13px; cursor:pointer;}
+  .tab.on{background:#3a2c16; color:var(--gold); border-color:var(--gold2);}
+  .result{border:1px solid var(--gold); border-radius:12px; background:linear-gradient(180deg,#332813,#241c10); padding:18px 20px; margin-bottom:16px;}
+  .result .big-label{color:var(--muted); font-size:13px; margin-bottom:6px;}
+  .result .big{color:var(--gold); font-size:52px; font-weight:bold; line-height:1;}
+  .result .meta{color:var(--muted); font-size:12px; margin-top:8px;}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th, td{border:1px solid var(--line); padding:7px 9px; text-align:left;}
+  th{background:var(--panel2); color:var(--gold2); font-weight:normal;}
+  td.val{text-align:right; font-variant-numeric:tabular-nums; color:var(--text);}
+  .muted{color:var(--muted);}
+  .note{color:var(--muted); font-size:12px; line-height:1.7; margin-top:8px;}
+  .btnrow{display:flex; gap:10px; margin:20px 0 8px; flex-wrap:wrap;}
+  .btn{background:#3a2c16; color:var(--gold); border:1px solid var(--gold2); border-radius:7px; padding:8px 16px; font-size:13px; cursor:pointer;}
+  .btn:hover{background:#4a3820;} .btn.ghost{background:transparent; border-color:var(--line); color:var(--muted);}
+  .auto-out{color:var(--gold); font-weight:bold;}
+  .example-note{color:var(--muted); font-size:12px; line-height:1.8;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>部队伤害计算器</h1>
+  <div class="sub">本地页 · 可选「自动换算（统率/适性/兵种→攻防）」或手动 · 可选血色衣冠6（战线宽度/远程/士气）</div>
+
+  <div class="grid">
+    <!-- 左：基础 -->
+    <div class="panel">
+      <h2>① 部队与攻防</h2>
+      <div class="tabs">
+        <button class="tab on" id="tabAuto">自动换算 (统率·适性·兵种)</button>
+        <button class="tab" id="tabManual">手动攻防</button>
+      </div>
+
+      <!-- 自动区 -->
+      <div id="autoZone">
+        <div class="section-title">攻方部队 → 生成「攻击力」</div>
+        <div class="field"><label>兵种</label><select id="aType"></select></div>
+        <div class="field"><label>适性</label><select id="aApt"><option value="C">C</option><option value="B">B</option><option value="A">A</option><option value="S" selected>S</option><option value="Splus">S+</option></select></div>
+        <div class="field"><label>统率</label><input type="number" id="aLead" value="100" min="0" max="200" step="1"></div>
+        <div class="field"><label>精锐科技</label><label class="check"><input type="checkbox" id="aElite">+10 攻/防</label></div>
+        <div class="field"><label>光环加成</label><input type="number" id="aAura" value="0" min="0" max="30" step="1"><span class="unit">(统率90+ 主将光环攻防)</span></div>
+        <div class="field"><label>攻击力</label><span class="auto-out" id="aAtkOut">—</span></div>
+
+        <div class="section-title">守方部队 → 生成「防御力」</div>
+        <div class="field"><label>兵种</label><select id="dType"></select></div>
+        <div class="field"><label>适性</label><select id="dApt"><option value="C">C</option><option value="B">B</option><option value="A" selected>A</option><option value="S">S</option><option value="Splus">S+</option></select></div>
+        <div class="field"><label>统率</label><input type="number" id="dLead" value="90" min="0" max="200" step="1"></div>
+        <div class="field"><label>精锐科技</label><label class="check"><input type="checkbox" id="dElite">+10 攻/防</label></div>
+        <div class="field"><label>建筑加成</label><input type="number" id="dBuilding" value="0" min="0" max="40" step="1"><span class="unit">(阵/砦/城塞)</span></div>
+        <div class="field"><label>防御力</label><span class="auto-out" id="dDefOut">—</span></div>
+        <div class="note">面板 = floor(统率/100 × 兵种基础攻/防 × 适性) + 精锐/建筑。剑兵无适性，固定 ×0.6。适性 C/B/A/S/S+ = 0.7/0.8/0.9/1.0/1.1。</div>
+      </div>
+
+      <!-- 手动区 -->
+      <div id="manualZone" style="display:none">
+        <div class="field"><label>攻方攻击力</label><input type="number" id="atk" value="100" min="0" max="200" step="1"><span class="unit">(面板攻)</span></div>
+        <div class="field"><label>守方防御力</label><input type="number" id="def" value="80" min="0" max="200" step="1"><span class="unit">(面板防)</span></div>
+      </div>
+
+      <div class="section-title">兵力</div>
+      <div class="field"><label>攻方兵力</label><input type="number" id="atkT" value="10000" min="0" max="200000" step="100"><span class="unit">(人)</span></div>
+      <div class="field"><label>守方兵力</label><input type="number" id="defT" value="8000" min="0" max="200000" step="100"><span class="unit">(人)</span></div>
+
+      <div class="section-title">攻击方式（伤害系数）</div>
+      <div class="field">
+        <label>伤害系数</label>
+        <div class="inline">
+          <select id="coefSel">
+            <optgroup label="普攻"><option value="10">近战普攻 (10)</option><option value="0">远程普攻 (0)</option></optgroup>
+            <optgroup label="枪兵战法"><option value="25">战法1 (25)</option><option value="30">战法2 (30)</option><option value="35">战法3 (35)</option></optgroup>
+            <optgroup label="戟兵战法"><option value="25">战法1 (25)</option><option value="30">战法2 (30)</option><option value="33">战法3 (33)</option></optgroup>
+            <optgroup label="弩兵战法"><option value="10">战法1 (10)</option><option value="20">战法2 (20)</option><option value="25">战法3 (25)</option></optgroup>
+            <optgroup label="骑兵战法"><option value="30">战法1 (30)</option><option value="35">战法2 (35)</option><option value="40">战法3 (40)</option></optgroup>
+            <optgroup label="兵器/水军"><option value="20">木兽放射 (20)</option><option value="15">井阑火矢 (15)</option><option value="35">投石车 (35)</option><option value="15">水军1 (15)</option><option value="25">水军2 (25)</option><option value="35">水军3 (35)</option></optgroup>
+            <option value="custom">自定义…</option>
+          </select>
+          <input type="number" id="coefNum" value="10" min="0" max="60" step="1" style="display:none">
+        </div>
+      </div>
+      <div class="example-note">√(系数×64)：10→25.3, 25→40.0, 35→47.3, 40→50.6</div>
+    </div>
+
+    <!-- 右：乘区与6.0 -->
+    <div class="panel">
+      <h2>② 乘区</h2>
+      <div class="field"><label>暴击（会心）</label><select id="crit"><option value="1">不暴击 (×1.00)</option><option value="1.15">原版暴击 (×1.15)</option><option value="1.2">血色衣冠暴击 (×1.20)</option></select></div>
+      <div class="field"><label>兵种相克</label>
+        <div class="inline">
+          <select id="counterSel"><option value="auto">自动（按攻守兵种）</option><option value="1">无 (×1.00)</option><option value="1.15">克制 (×1.15)</option><option value="0.85">被克 (×0.85)</option><option value="0.8">特殊相克 (×0.80)</option></select>
+          <input type="number" id="counterNum" value="1" min="0" max="3" step="0.05" style="display:none">
+        </div>
+      </div>
+      <div class="field"><label>科技</label><select id="tech"><option value="1">无 (×1.00)</option><option value="1.1">熟练兵 (×1.10)</option><option value="1.15">精锐兵 (×1.15)</option></select></div>
+      <div class="field"><label>太鼓台</label><label class="check"><input type="checkbox" id="taiko">友军太鼓范围内 (×1.10)</label></div>
+      <div class="field"><label>难度</label><select id="diff"><option value="1">普通 (×1.00)</option><option value="0.75">超级 (玩家攻击 ×0.75)</option></select></div>
+      <div class="note">自动相克（血色衣冠表）：枪→戟 0.85 / 枪→骑 1.15；戟→枪 1.20 / 戟→戟 0.80 / 戟→弩 0.95 / 戟→骑 0.85；弩→戟 0.70 / 弩→骑 1.20；骑→弩 1.20 / 骑→枪戟 1.10。</div>
+
+      <div class="section-title">③ 血色衣冠 6.0 规则</div>
+      <div class="field"><label>战线宽度（兵力封顶）</label><label class="check"><input type="checkbox" id="widthOn" checked>启用</label></div>
+      <div class="field"><label>战线宽度值</label><input type="number" id="widthVal" value="4000" min="0" max="200000" step="100"><span class="unit">(人)</span></div>
+      <div class="field"><label>远程攻击距离</label><input type="number" id="range" value="0" min="0" max="9" step="1"><span class="unit">(格)</span></div>
+      <div class="field"><label>部队士气</label><input type="range" id="morale" min="0" max="120" value="100"><span class="unit muted" id="moraleVal">100</span></div>
+      <div class="note">远程每格 −20% 攻击（0.8^n）；士气 ≥80 不减攻，&lt;80 线性衰减至 80%（0 士气 = 攻击力×80%）。</div>
+    </div>
+  </div>
+
+  <div class="result">
+    <div class="big-label">最终伤害</div>
+    <div class="big" id="dmgBig">0</div>
+    <div class="meta" id="dmgMeta"></div>
+    <div class="btnrow">
+      <button class="btn" id="btnPresetA">◎游侠算例（枪105 vs 戟98）</button>
+      <button class="btn" id="btnPresetB">◎攻100防100 10000兵</button>
+      <button class="btn" id="btnPresetC">◎枪S 打 戟A</button>
+      <button class="btn ghost" id="btnReset">恢复默认</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>④ 完整演算</h2>
+    <table>
+      <thead><tr><th>参数</th><th>值</th><th>说明</th></tr></thead>
+      <tbody id="calcBody"></tbody>
+    </table>
+    <div class="note" id="calcNote"></div>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const trunc = (x) => Math.trunc(x);
+
+  const TROOP_TYPES = [
+    {id:'sword',   name:'剑兵', atk:60,  def:60},
+    {id:'spear',   name:'枪兵', atk:95,  def:95},
+    {id:'halberd', name:'戟兵', atk:90,  def:105},
+    {id:'crossbow',name:'弩兵', atk:85,  def:90},
+    {id:'cavalry', name:'骑兵', atk:105, def:90},
+    {id:'ram',     name:'冲车', atk:90,  def:85},
+    {id:'tower',   name:'井阑', atk:90,  def:85},
+    {id:'wood',    name:'木兽', atk:100, def:85},
+    {id:'catapult',name:'投石', atk:95,  def:85},
+    {id:'zouge',   name:'走舸', atk:75,  def:75},
+    {id:'louchuan',name:'楼船', atk:90,  def:85},
+    {id:'doujian', name:'斗舰', atk:100, def:85},
+  ];
+  const APT = { 'C':0.7, 'B':0.8, 'A':0.9, 'S':1.0, 'Splus':1.1 };
+
+  function fillTypeSel(sel){ TROOP_TYPES.forEach(t => sel.insertAdjacentHTML('beforeend', `<option value="${t.id}">${t.name}（攻${t.atk} 防${t.def}）</option>`)); }
+  fillTypeSel($('aType')); $('aType').value = 'spear';
+  fillTypeSel($('dType')); $('dType').value = 'halberd';
+
+  let mode = 'auto';
+
+  function panelFrom(typeId, aptId, lead, elite, extra){
+    const t = TROOP_TYPES.find(x => x.id === typeId);
+    const ap = (typeId === 'sword') ? 0.6 : (APT[aptId] ?? 1.0);
+    const atk = Math.floor(lead / 100 * t.atk * ap) + (elite ? 10 : 0) + (extra || 0);
+    const def = Math.floor(lead / 100 * t.def * ap) + (elite ? 10 : 0) + (extra || 0);
+    return { atk, def };
+  }
+
+  function autoCounter(aType, dType){
+    const table = {
+      'spear': {'halberd':0.85, 'cavalry':1.15},
+      'halberd': {'spear':1.2, 'halberd':0.8, 'crossbow':0.95, 'cavalry':0.85},
+      'crossbow': {'halberd':0.7, 'cavalry':1.2},
+      'cavalry': {'crossbow':1.2, 'spear':1.1, 'halberd':1.1},
+    };
+    return table[aType]?.[dType] ?? 1.0;
+  }
+
+  const presets = {
+    a: { mode:'manual', atk:105, def:98, atkT:10000, defT:8000, coef:10, counter:0.85, crit:1, tech:1, diff:1, taiko:false, widthOn:true, widthVal:4000, range:0, morale:100 },
+    b: { mode:'manual', atk:100, def:100, atkT:10000, defT:10000, coef:10, counter:1, crit:1, tech:1, diff:1, taiko:false, widthOn:false, widthVal:4000, range:0, morale:100 },
+    c: { mode:'auto', aType:'spear', aApt:'S', aLead:100, aElite:false, aAura:0, dType:'halberd', dApt:'A', dLead:90, dElite:false, dBuilding:0, atkT:10000, defT:8000, coef:10, counter:'auto', crit:1, tech:1, diff:1, taiko:false, widthOn:true, widthVal:4000, range:0, morale:100 },
+  };
+
+  function apply(p){
+    setMode(p.mode);
+    $('atk').value = p.atk ?? 100; $('def').value = p.def ?? 80;
+    $('atkT').value = p.atkT ?? 10000; $('defT').value = p.defT ?? 8000;
+    if (p.aType) { $('aType').value = p.aType; }
+    if (p.aApt) $('aApt').value = p.aApt;
+    if (p.aLead !== undefined) $('aLead').value = p.aLead;
+    if (p.aElite !== undefined) $('aElite').checked = p.aElite;
+    if (p.aAura !== undefined) $('aAura').value = p.aAura;
+    if (p.dType) $('dType').value = p.dType;
+    if (p.dApt) $('dApt').value = p.dApt;
+    if (p.dLead !== undefined) $('dLead').value = p.dLead;
+    if (p.dElite !== undefined) $('dElite').checked = p.dElite;
+    if (p.dBuilding !== undefined) $('dBuilding').value = p.dBuilding;
+    // coef
+    const sel = $('coefSel'); const num = $('coefNum');
+    const found = [...sel.options].some(o => o.value === String(p.coef) && o.value !== 'custom');
+    sel.value = found ? String(p.coef) : 'custom';
+    num.style.display = found ? 'none' : ''; num.value = p.coef ?? 10;
+    // counter
+    const cs = $('counterSel'); const cn = $('counterNum');
+    if (p.counter === 'auto' || String(p.counter) in { '1':1,'1.15':1,'0.85':1,'0.8':1 }) { cs.value = String(p.counter); cn.style.display='none'; }
+    else { cs.value='custom'; cn.style.display=''; cn.value=p.counter; }
+    $('crit').value = String(p.crit); $('tech').value = String(p.tech); $('diff').value = String(p.diff);
+    $('taiko').checked = !!p.taiko;
+    $('widthOn').checked = !!p.widthOn; $('widthVal').value = p.widthVal ?? 4000;
+    $('range').value = p.range ?? 0; $('morale').value = p.morale ?? 100;
+    recompute();
+  }
+
+  function setMode(m){
+    mode = m;
+    $('tabAuto').classList.toggle('on', m === 'auto');
+    $('tabManual').classList.toggle('on', m === 'manual');
+    $('autoZone').style.display = m === 'auto' ? '' : 'none';
+    $('manualZone').style.display = m === 'manual' ? '' : 'none';
+    $('atk').disabled = (m === 'auto'); $('def').disabled = (m === 'auto');
+  }
+
+  function compute(){
+    // 攻/防来源
+    let atk, def;
+    if (mode === 'auto'){
+      const a = panelFrom($('aType').value, $('aApt').value, clamp(parseFloat($('aLead').value)||0,0,200), $('aElite').checked, parseFloat($('aAura').value)||0);
+      const d = panelFrom($('dType').value, $('dApt').value, clamp(parseFloat($('dLead').value)||0,0,200), $('dElite').checked, parseFloat($('dBuilding').value)||0);
+      atk = a.atk; def = d.def;
+      $('aAtkOut').textContent = a.atk;
+      $('dDefOut').textContent = d.def;
+    } else {
+      atk = clamp(parseFloat($('atk').value)||0, 0, 200);
+      def = clamp(parseFloat($('def').value)||0, 0, 200);
+    }
+
+    let atkT = clamp(parseFloat($('atkT').value)||0, 0, 200000);
+    const defT = clamp(parseFloat($('defT').value)||0, 0, 200000);
+    const coef = $('coefSel').value === 'custom' ? (parseFloat($('coefNum').value)||0) : parseFloat($('coefSel').value);
+    let counter = $('counterSel').value === 'custom' ? (parseFloat($('counterNum').value)||1)
+                 : ($('counterSel').value === 'auto' ? autoCounter($('aType').value, $('dType').value) : parseFloat($('counterSel').value));
+    const crit = parseFloat($('crit').value);
+    const tech = parseFloat($('tech').value);
+    const diff = parseFloat($('diff').value);
+    const taiko = $('taiko').checked ? 1.1 : 1.0;
+    const widthOn = $('widthOn').checked;
+    const widthVal = clamp(parseFloat($('widthVal').value)||0, 0, 200000);
+    const range = clamp(parseInt($('range').value,10)||0, 0, 9);
+    const morale = clamp(parseFloat($('morale').value)||100, 0, 120);
+    $('moraleVal').textContent = morale;
+
+    const moraleMult = morale >= 80 ? 1.0 : (0.8 + 0.2*(morale/80));
+    const rangeMult = Math.pow(0.8, range);
+    const effAtk = atk * moraleMult * rangeMult;
+    let effAtkT = atkT;
+    if (widthOn) effAtkT = Math.min(atkT, widthVal);
+
+    const base = Math.sqrt(coef*64);
+    const pierce = Math.max(0, Math.floor((effAtk*effAtk - Math.pow(Math.max(40,def),2))/300));
+    const mob = Math.max(0, Math.floor((effAtkT-defT)/2000));
+    const X = base + pierce + mob + 50;
+
+    const A = (Math.floor(effAtkT*0.01)+300) * Math.pow(effAtk+50, 2);
+    const B = (Math.floor(defT*0.01)+300) * Math.pow(def+50, 2);
+    const f = trunc(100*A/(A+B) - 50) + 50;
+
+    const troopFactor = Math.min(Math.pow(Math.floor(effAtkT/4), 0.5), 40);
+    const dmg_int = Math.floor((X*10*f) * troopFactor * 0.000476190455 * taiko + Math.floor(effAtkT/200));
+    let dmg = Math.max(0, Math.floor(dmg_int * crit * counter * tech * diff));
+
+    return { mode, atk, def, atkT, defT, coef, counter, crit, tech, diff, taiko, widthOn, widthVal, range, morale,
+             moraleMult, rangeMult, effAtk, effAtkT, base, pierce, mob, X, A, B, f, troopFactor, dmg_int, dmg };
+  }
+
+  function recompute(){
+    const r = compute();
+    $('dmgBig').textContent = r.dmg.toLocaleString('en-US');
+    const parts = [];
+    if (r.mode==='auto') parts.push('自动换算');
+    if (r.morale < 80) parts.push(`士气×${r.moraleMult.toFixed(3)}`);
+    if (r.range > 0) parts.push(`远程×${r.rangeMult.toFixed(3)}`);
+    if (r.widthOn) parts.push(`战线宽度 ${r.widthVal.toLocaleString('en-US')} 封顶`);
+    if ($('counterSel').value==='auto') parts.push(`相克自动×${r.counter.toFixed(2)}`);
+    $('dmgMeta').textContent = parts.length ? '已应用：' + parts.join(' · ') : '基础公式（无 6.0/自动修正）';
+
+    const tb = $('calcBody'); tb.innerHTML = '';
+    const add = (k,v,d) => { const tr=document.createElement('tr'); tr.innerHTML=`<td>${k}</td><td class="val">${v}</td><td class="muted">${d||''}</td>`; tb.appendChild(tr); };
+    add('攻方攻击力', r.atk, r.mode==='auto' ? '自动由统率/适性/兵种生成' : '手动');
+    add('守方防御力', r.def, r.mode==='auto' ? '自动由统率/适性/兵种生成' : '手动');
+    add('有效攻击力', r.effAtk.toFixed(2), (r.morale<80||r.range>0) ? `原 ${r.atk} × 士气${r.moraleMult.toFixed(3)} × 远程${r.rangeMult.toFixed(3)}` : '未受 6.0 修正');
+    add('有效攻方兵力', r.effAtkT.toLocaleString('en-US'), r.widthOn ? `原 ${r.atkT.toLocaleString('en-US')} → 上限 ${r.widthVal.toLocaleString('en-US')}` : '');
+    add('守方兵力', r.defT.toLocaleString('en-US'), '');
+    add('① 招式基础 √(系数×64)', r.base.toFixed(2), `系数 ${r.coef}`);
+    add('　 破防项 (攻²−防²)/300', '+' + r.pierce, r.pierce===0 ? '未触发' : '');
+    add('　 人海项 (攻兵−守兵)/2000', '+' + r.mob, r.mob===0 ? '未触发' : '');
+    add('　 X（基础威力）', r.X.toFixed(2), 'X = 基础 + 破防 + 人海 + 50');
+    add('② A（攻方筹码）', r.A.toLocaleString('en-US'), `(${Math.floor(r.effAtkT*0.01)}+300) × (有效攻+50)²`);
+    add('　 B（守方筹码）', r.B.toLocaleString('en-US'), `(${Math.floor(r.defT*0.01)}+300) × (防+50)²`);
+    add('③ f（攻防胜负比）', r.f.toFixed(0), '50 = 五五开');
+    add('④ 兵力因子 √(兵/4)（≤40）', r.troopFactor.toFixed(2), r.troopFactor>=40 ? '已达上限 40' : '');
+    add('　 中间值 INT(…)，含 +兵/200', r.dmg_int.toLocaleString('en-US'), `太鼓台×${r.taiko.toFixed(2)}`);
+    add('乘区 暴击×相克×科技×难度', `${r.crit} × ${r.counter.toFixed(2)} × ${r.tech} × ${r.diff}`, '');
+    add('⑤ 最终伤害', r.dmg.toLocaleString('en-US'), '');
+    $('calcNote').innerHTML = '取整：内层 TRUNC（向零截断），外层 INT（向下取整）。6.0 的战线宽度、远程、士气为近似套入原版骨架。';
+  }
+
+  // 事件
+  ['atkT','defT','atk','def','range','widthVal','morale'].forEach(id => $(id).addEventListener('input', recompute));
+  ['crit','tech','diff','counterSel','aType','aApt','aLead','dType','dApt','dLead','aAura','dBuilding'].forEach(id => $(id).addEventListener('change', recompute));
+  ['aLead','dLead','aAura','dBuilding'].forEach(id => $(id).addEventListener('input', recompute));
+  $('aElite').addEventListener('change', recompute); $('dElite').addEventListener('change', recompute);
+  $('taiko').addEventListener('change', recompute); $('widthOn').addEventListener('change', recompute);
+  $('tabAuto').addEventListener('click', () => { setMode('auto'); recompute(); });
+  $('tabManual').addEventListener('click', () => { setMode('manual'); recompute(); });
+  $('coefSel').addEventListener('change', () => { const c=$('coefSel').value==='custom'; $('coefNum').style.display=c?'':'none'; if(c)$('coefNum').value='10'; recompute(); });
+  $('coefNum').addEventListener('input', recompute);
+  $('counterSel').addEventListener('change', () => { const c=$('counterSel').value==='custom'; $('counterNum').style.display=c?'':'none'; recompute(); });
+  $('counterNum').addEventListener('input', recompute);
+  $('btnPresetA').addEventListener('click', () => apply(presets.a));
+  $('btnPresetB').addEventListener('click', () => apply(presets.b));
+  $('btnPresetC').addEventListener('click', () => apply(presets.c));
+  $('btnReset').addEventListener('click', () => apply({ mode:'auto', aType:'spear', aApt:'S', aLead:100, aElite:false, aAura:0, dType:'halberd', dApt:'A', dLead:90, dElite:false, dBuilding:0, atkT:10000, defT:8000, coef:10, counter:'auto', crit:1, tech:1, diff:1, taiko:false, widthOn:true, widthVal:4000, range:0, morale:100 }));
+
+  setMode('auto');
+  recompute();
+</script>
+</body>
+</html>

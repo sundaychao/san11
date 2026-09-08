@@ -28,9 +28,9 @@ const ROW_CULL_BUFFER = 3;
 // 边缘自动滚动：鼠标越过视口边缘该像素带后锁定滚动方向并持续平移
 const EDGE_PAN_ZONE_PX = 56;
 // 以接近 60fps 的小步长连续移动（而非低频大步长跳变），避免画面抖动/模糊；
-// 每帧 24px ≈ 1500px/s
+// 每帧 36px ≈ 2250px/s
 const EDGE_PAN_INTERVAL_MS = 16;
-const EDGE_PAN_MAX_STEP_PX = 24;
+const EDGE_PAN_MAX_STEP_PX = 36;
 const TROOP_TEXTURES: Record<TroopType, { glyph: string; label: string }> = {
   sword: { glyph: '剑', label: '剑兵' },
   spear: { glyph: '枪', label: '枪兵' },
@@ -298,10 +298,12 @@ export function StrategicMap({
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
 
-  // 边缘自动滚动（方向锁定）：鼠标一旦越过视口边缘带（含移出窗口/网页外）即锁定该侧方向持续平移；
-  // 只有鼠标回到视口内部（脱离边缘带）才解除锁定停止。每 50ms 推进一次，速度见 EDGE_PAN_MAX_STEP_PX。
+  // 边缘自动滚动（摇杆式二维矢量）：以视口中心为原点，鼠标进入四边边缘带后，
+  // 镜头沿“鼠标相对中心的方向”以恒定合速移动；方向由相对中心的偏移矢量归一化得到，
+  // 因此纯上方只向上、偏右上则向上为主并叠加向右、正右上角上/右两分量并存。
+  // 鼠标移出地图/窗口后沿用最后一次方向继续滚动，回到地图内部（脱离边缘带）才停止。
   useEffect(() => {
-    // 记录当前应持续平移的方向：+1 靠左/上（view.x/y 增大），-1 靠右/下
+    // 记录当前平移的归一化速度矢量（已折算为 view.x/view.y 方向：相对中心向右→x 减小，向上→y 增大）
     const panDirection = { x: 0, y: 0 };
     const pointerMove = (event: globalThis.PointerEvent) => {
       if (drag.current) return;
@@ -325,9 +327,28 @@ export function StrategicMap({
         panDirection.y = 0;
         return;
       }
-      // 每根轴独立判定：回到该轴内部（脱离边缘带，含越过边界后的回程）即该轴停止
-      panDirection.x = relX < zone ? 1 : relX > bounds.width - zone ? -1 : 0;
-      panDirection.y = relY < zone ? 1 : relY > bounds.height - zone ? -1 : 0;
+      const centerX = bounds.width / 2;
+      const centerY = bounds.height / 2;
+      const inBand = relX < zone || relX > bounds.width - zone
+        || relY < zone || relY > bounds.height - zone;
+      // 完全脱离边缘带（回到地图内部）即停止
+      if (!inBand) {
+        panDirection.x = 0;
+        panDirection.y = 0;
+        return;
+      }
+      // 摇杆方向：鼠标相对中心的方向矢量，归一化后即为各轴向速度占比
+      const dx = relX - centerX;
+      const dy = relY - centerY;
+      const length = Math.hypot(dx, dy);
+      if (length < 1) {
+        panDirection.x = 0;
+        panDirection.y = 0;
+        return;
+      }
+      // view 偏移方向与“看到的镜头方向”相反：向右看→view.x 减小，向上看→view.y 增大
+      panDirection.x = -dx / length;
+      panDirection.y = -dy / length;
     };
     const timer = window.setInterval(() => {
       if (drag.current || (panDirection.x === 0 && panDirection.y === 0)) return;
