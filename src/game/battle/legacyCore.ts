@@ -1346,6 +1346,12 @@ export function buildFacility(state: GameState, forceId: ForceId, unitId: string
   next.units[unitId].acted = true;
   next.units[unitId].moved = true;
   next.units[unitId].movementRemaining = 0;
+  // 委任建设（或新建设施未建成）：自动转为修补委任，直到建成；一次建成则清除委任
+  if (next.facilities[id].completed) {
+    delete next.units[unitId].delegate;
+  } else {
+    next.units[unitId].delegate = { kind: 'repair', facilityId: id };
+  }
   return next;
 }
 
@@ -1367,6 +1373,17 @@ export function repairFacility(state: GameState, forceId: ForceId, unitId: strin
   next.units[unitId].acted = true;
   next.units[unitId].moved = true;
   next.units[unitId].movementRemaining = 0;
+  const delegate = next.units[unitId].delegate;
+  if (delegate) {
+    const isDelegateTarget = delegate.kind === 'repair' && delegate.facilityId === facilityId;
+    if (isDelegateTarget) {
+      // 委任目标建成：结束修补委任（未建成则保持，由委任自动继续修补）
+      if (facilityIsCompleted(next.facilities![facilityId])) delete next.units[unitId].delegate;
+    } else {
+      // 手动修补了与委任目标不同的设施 → 视为做了其他操作，取消委任
+      delete next.units[unitId].delegate;
+    }
+  }
   return next;
 }
 

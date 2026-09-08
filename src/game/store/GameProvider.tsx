@@ -22,6 +22,7 @@ import {
   writeSave,
 } from '../persistence';
 import type { GridCoord } from '../battle/grid';
+import { executeDelegations } from '../battle/delegate';
 import { createGame, FORCE_IDS } from '../scenario/jingxiang208';
 import { settleForceTurnStart } from '../skills/rules/turn';
 import { settleMonth, settleTenDay } from '../turn';
@@ -59,9 +60,12 @@ interface GameContextValue {
   loadGame(slot: SaveSlot): LoadResult;
   issueCommand(command: GameCommand): void;
   deployUnit(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }): void;
+  deployUnitDelegate(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, target: { q: number; r: number }, facility?: FacilityType): void;
   deployUnitAction(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction): void;
   deployTransportUnit(input: { cityId: CityId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }): void;
   moveUnit(unitId: string, destination: { q: number; r: number }): void;
+  setMoveDelegate(unitId: string, target: { q: number; r: number }): void;
+  setBuildDelegate(unitId: string, target: { q: number; r: number }, facility: FacilityType): void;
   attackUnit(attackerId: string, targetId: string, destination?: GridCoord): void;
   jointAttackUnit(attackerId: string, targetId: string, destination?: GridCoord): void;
   attackFacility(attackerId: string, facilityId: string, destination?: GridCoord): void;
@@ -272,6 +276,10 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     dispatchIntent({ type: 'deployUnit', input }, () => emitAudioEvent({ type: 'unit-moved' }));
   }, [dispatchIntent, emitAudioEvent]);
 
+  const deployBattleUnitDelegate = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, target: { q: number; r: number }, facility?: FacilityType) => {
+    dispatchIntent({ type: 'deployUnitDelegate', input, target, facility }, () => emitAudioEvent({ type: 'unit-moved' }));
+  }, [dispatchIntent, emitAudioEvent]);
+
   const afterDeployActionAudio = useCallback((action: DeployFollowupAction) => {
     if (action.type === 'wait') emitAudioEvent({ type: 'unit-waited' });
     if (action.type === 'attackUnit' || action.type === 'attackFacility' || action.type === 'attackPlot' || action.type === 'attackCity') emitAudioEvent({ type: 'unit-attacked' });
@@ -291,6 +299,14 @@ export function GameProvider({ children, initialState = null, storage: storagePr
 
   const moveBattleUnit = useCallback((unitId: string, destination: { q: number; r: number }) => {
     dispatchIntent({ type: 'moveUnit', unitId, destination }, () => emitAudioEvent({ type: 'unit-moved' }));
+  }, [dispatchIntent, emitAudioEvent]);
+
+  const setMoveBattleDelegate = useCallback((unitId: string, target: { q: number; r: number }) => {
+    dispatchIntent({ type: 'setMoveDelegate', unitId, target }, () => emitAudioEvent({ type: 'unit-moved' }));
+  }, [dispatchIntent, emitAudioEvent]);
+
+  const setBuildBattleDelegate = useCallback((unitId: string, target: { q: number; r: number }, facility: FacilityType) => {
+    dispatchIntent({ type: 'setBuildDelegate', unitId, target, facility }, () => emitAudioEvent({ type: 'project-started' }));
   }, [dispatchIntent, emitAudioEvent]);
 
   const attackBattleUnit = useCallback((attackerId: string, targetId: string, destination?: GridCoord) => {
@@ -393,7 +409,8 @@ export function GameProvider({ children, initialState = null, storage: storagePr
       return;
     }
     if (!state) return;
-    const next = settleTenDay(runOpponentTurns(state));
+    // 点击「进行」：先自动执行玩家势力中未手动操作部队的委任（移动/建设/修补），再推进回合
+    const next = settleTenDay(runOpponentTurns(executeDelegations(state)));
     replaceGameState(next);
     setError(null);
     persist('auto', next);
@@ -457,9 +474,12 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     loadGame,
     issueCommand,
     deployUnit: deployBattleUnit,
+    deployUnitDelegate: deployBattleUnitDelegate,
     deployUnitAction: deployBattleUnitAction,
     deployTransportUnit: deployTransport,
     moveUnit: moveBattleUnit,
+    setMoveDelegate: setMoveBattleDelegate,
+    setBuildDelegate: setBuildBattleDelegate,
     attackUnit: attackBattleUnit,
     jointAttackUnit: jointAttackBattleUnit,
     attackFacility: attackBattleFacility,
@@ -485,7 +505,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     clearSave: clearSaveSlot,
     selectCity: setSelectedCityId,
     clearError: () => setError(null),
-  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattlePlot, attackBattleUnit, jointAttackBattleUnit, auth, availability, buildBattleFacility, clearSaveSlot, createOnlineRoom, deployBattleUnit, deployBattleUnitAction, deployTransport, disconnectOnline, dismantleBattleFacility, dismissDebateView, duelBattleUnit, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, playDebateRound, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, rethinkDebate, selectedCityId, selectOnlineForce, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
+  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattlePlot, attackBattleUnit, jointAttackBattleUnit, auth, availability, buildBattleFacility, clearSaveSlot, createOnlineRoom, deployBattleUnit, deployBattleUnitAction, deployBattleUnitDelegate, deployTransport, disconnectOnline, dismantleBattleFacility, dismissDebateView, duelBattleUnit, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, playDebateRound, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, rethinkDebate, selectedCityId, selectOnlineForce, setBuildBattleDelegate, setMoveBattleDelegate, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 }

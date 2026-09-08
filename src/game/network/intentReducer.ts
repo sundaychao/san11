@@ -16,6 +16,7 @@ import {
   useUnitTactic,
   waitUnit,
 } from '../battle/actions';
+import { setBuildDelegate, setMoveDelegate } from '../battle/delegate';
 import type { GridCoord } from '../battle/grid';
 import { executeCommand } from '../commands';
 import { dismissDebate, resolveDebateAbandon, resolveDebateRethink, resolveDebateRound } from '../debate';
@@ -27,6 +28,14 @@ export type ActionGameIntent = Exclude<GameIntent, { type: 'endTenDay' }>;
 
 function assertNever(value: never): never {
   throw new Error(`未知游戏操作：${JSON.stringify(value)}`);
+}
+
+/** 手动行动指令会中断部队委任（待命 wait 除外），清除该部队 delegate */
+function cancelUnitDelegate(state: GameState, unitId: string): GameState {
+  if (!state.units[unitId]?.delegate) return state;
+  const next = structuredClone(state);
+  delete next.units[unitId].delegate;
+  return next;
 }
 
 function moveIfRequested(
@@ -54,6 +63,14 @@ export function reduceGameIntent(
       return executeCommand(state, forceId, intent.command);
     case 'deployUnit':
       return deployUnit(state, forceId, intent.input);
+    case 'deployUnitDelegate': {
+      // 出征到指定部署格后立即记录移动/建设委任（本旬 moved=true 不会自动执行，下旬开始自动行军）
+      const deployed = deployUnitWithId(state, forceId, intent.input);
+      deployed.state.units[deployed.unitId].delegate = intent.facility
+        ? { kind: 'build', target: intent.target, facility: intent.facility }
+        : { kind: 'move', target: intent.target };
+      return deployed.state;
+    }
     case 'deployUnitAction': {
       const deployed = deployUnitWithId(state, forceId, intent.input);
       switch (intent.action.type) {
@@ -84,36 +101,40 @@ export function reduceGameIntent(
     case 'deployTransportUnit':
       return deployTransportUnit(state, forceId, intent.input);
     case 'moveUnit':
-      return moveUnit(state, forceId, intent.unitId, intent.destination);
+      return cancelUnitDelegate(moveUnit(state, forceId, intent.unitId, intent.destination), intent.unitId);
+    case 'setMoveDelegate':
+      return setMoveDelegate(state, forceId, intent.unitId, intent.target);
+    case 'setBuildDelegate':
+      return setBuildDelegate(state, forceId, intent.unitId, intent.target, intent.facility);
     case 'waitUnit':
       return waitUnit(state, forceId, intent.unitId);
     case 'attackUnit': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
-      return attackUnit(moved, forceId, intent.attackerId, intent.targetId);
+      return cancelUnitDelegate(attackUnit(moved, forceId, intent.attackerId, intent.targetId), intent.attackerId);
     }
     case 'jointAttackUnit': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
-      return jointAttackUnit(moved, forceId, intent.attackerId, intent.targetId);
+      return cancelUnitDelegate(jointAttackUnit(moved, forceId, intent.attackerId, intent.targetId), intent.attackerId);
     }
     case 'attackFacility': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
-      return attackFacility(moved, forceId, intent.attackerId, intent.facilityId);
+      return cancelUnitDelegate(attackFacility(moved, forceId, intent.attackerId, intent.facilityId), intent.attackerId);
     }
     case 'attackPlot': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
-      return attackPlot(moved, forceId, intent.attackerId, intent.cityId, intent.plotIndex);
+      return cancelUnitDelegate(attackPlot(moved, forceId, intent.attackerId, intent.cityId, intent.plotIndex), intent.attackerId);
     }
     case 'useUnitTactic': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
-      return useUnitTactic(moved, forceId, intent.attackerId, intent.targetId, intent.tacticId);
+      return cancelUnitDelegate(useUnitTactic(moved, forceId, intent.attackerId, intent.targetId, intent.tacticId), intent.attackerId);
     }
     case 'useUnitStrategy': {
       const moved = moveIfRequested(state, forceId, intent.unitId, intent.destination);
-      return useUnitStrategy(moved, forceId, intent.unitId, intent.strategyId, intent.selection);
+      return cancelUnitDelegate(useUnitStrategy(moved, forceId, intent.unitId, intent.strategyId, intent.selection), intent.unitId);
     }
     case 'useFirePlot': {
       const moved = moveIfRequested(state, forceId, intent.unitId, intent.destination);
-      return useFirePlot(moved, forceId, intent.unitId, intent.target);
+      return cancelUnitDelegate(useFirePlot(moved, forceId, intent.unitId, intent.target), intent.unitId);
     }
     case 'buildFacility': {
       const moved = moveIfRequested(state, forceId, intent.unitId, intent.destination);
@@ -127,11 +148,11 @@ export function reduceGameIntent(
       return dismantleFacility(state, forceId, intent.facilityId);
     case 'attackCity': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
-      return attackCity(moved, forceId, intent.attackerId, intent.cityId);
+      return cancelUnitDelegate(attackCity(moved, forceId, intent.attackerId, intent.cityId), intent.attackerId);
     }
     case 'duelUnit': {
       const moved = moveIfRequested(state, forceId, intent.unitId, intent.destination);
-      return executeDuel(moved, forceId, intent.unitId, intent.targetUnitId, intent.stance);
+      return cancelUnitDelegate(executeDuel(moved, forceId, intent.unitId, intent.targetUnitId, intent.stance), intent.unitId);
     }
     case 'debateRound':
       return debateOwnedByForce(state, forceId) ? resolveDebateRound(state, intent.cardUid) : state;

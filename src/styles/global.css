@@ -178,7 +178,7 @@ button { color: inherit; }
 .battle-cell { fill: rgba(232, 214, 134, 0.36); stroke: rgba(255, 250, 218, 0.46); stroke-width: 0.4; vector-effect: non-scaling-stroke; }
 .battle-grid-overlay.is-editing .battle-cell { cursor: crosshair; fill: rgba(232, 214, 134, 0.36); stroke: rgba(255, 250, 218, 0.46); stroke-width: 0.4; }
 .battle-grid-overlay.is-editing .terrain-plain { fill: rgba(232, 214, 134, 0.36); stroke: rgba(255, 250, 218, 0.46); }
-.battle-grid-overlay.is-editing .terrain-road { fill: rgba(222, 163, 55, 0.43); stroke: rgba(255, 224, 128, 0.52); }
+.battle-grid-overlay.is-editing .terrain-road { fill: rgba(222, 222, 222, 0.5); stroke: rgba(246, 246, 246, 0.6); }
 .battle-grid-overlay.is-editing .terrain-forest { fill: rgba(28, 95, 42, 0.5); stroke: rgba(72, 170, 90, 0.6); }
 .battle-grid-overlay.is-editing .terrain-hill { fill: rgba(160, 103, 54, 0.42); stroke: rgba(226, 170, 91, 0.5); }
 .battle-grid-overlay.is-editing .terrain-mountain { fill: #1e2122; stroke: #1e2122; stroke-width: 1; }
@@ -187,12 +187,13 @@ button { color: inherit; }
 .battle-grid-overlay.is-deploying .battle-cell.is-deploy-target { fill: rgba(104, 186, 123, 0.28); stroke: rgba(206, 255, 190, 0.82); stroke-width: 1.6; cursor: pointer; }
 .battle-grid-overlay.is-deploying .battle-cell.is-selected-deploy-target { fill: rgba(242, 215, 120, 0.38); stroke: #f2d778; stroke-width: 2.4; }
 .battle-grid-overlay.is-moving .battle-cell.is-move-target { stroke: rgba(255, 255, 255, 0.9); stroke-width: 1.1; cursor: pointer; }
+.battle-grid-overlay.is-moving .battle-cell.is-delegate-path { fill: rgba(255, 210, 60, 0.4); stroke: rgba(255, 230, 120, 0.95); stroke-width: 1.8; pointer-events: none; }
 .battle-grid-overlay.is-strategy-targeting .battle-cell.is-strategy-target { fill: rgba(232, 88, 48, 0.34); stroke: rgba(255, 211, 88, 0.95); stroke-width: 1.8; cursor: pointer; }
 .battle-grid-overlay.is-construction-targeting .battle-cell.is-construction-target { fill: rgba(255, 200, 80, 0.38); stroke: rgba(255, 240, 140, 0.95); stroke-width: 2; stroke-dasharray: none; cursor: pointer; }
 .battle-grid-overlay.is-construction-targeting { pointer-events: auto; }
 .terrain-plain { fill: rgba(196, 170, 108, 0.42); stroke: rgba(240, 220, 160, 0.5); }
 .terrain-grass { fill: rgba(112, 178, 86, 0.42); stroke: rgba(180, 232, 140, 0.5); }
-.terrain-road { fill: rgba(222, 163, 55, 0.43); stroke: rgba(255, 224, 128, 0.52); }
+.terrain-road { fill: rgba(222, 222, 222, 0.5); stroke: rgba(246, 246, 246, 0.6); }
 .terrain-path { fill: rgba(200, 172, 120, 0.42); stroke: rgba(238, 216, 168, 0.52); }
 .terrain-plank { fill: rgba(160, 110, 60, 0.46); stroke: rgba(224, 172, 108, 0.56); }
 .terrain-sand { fill: rgba(224, 202, 138, 0.42); stroke: rgba(248, 234, 178, 0.52); }

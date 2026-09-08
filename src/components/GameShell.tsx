@@ -5,6 +5,7 @@ import { effectiveUnitAbilities, harmfulStrategySuccessChance, deployUnitPreview
 import type { CSSProperties } from 'react';
 import type { GridCoord } from '../game/battle/grid';
 import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticFacilityTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
+import { computeDelegatePath } from '../game/battle/delegate';
 import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { canBuildPlotAtCoord, hasEnemyUnitsNear, isPlotOccupiedByOtherCity, PLOT_GOLD_COST, PLOT_LABELS, startBuildCityPlot, type PlotType } from '../game/innerAffairs';
 import { ownCityAt, unoccupiedCityAt } from '../game/battle/movementRules';
@@ -95,8 +96,16 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
+/** 出征超距点击弹出的委任菜单携带的出征参数（点击菜单项后立即出征并设置委任） */
+type DeployDelegateMenuState = {
+  unitId: string;
+  target: GridCoord;
+  position: { x: number; y: number };
+  deployInput?: DeployConfirmInput & { destination?: GridCoord };
+};
+
 export function GameShell() {
-  const { applyMapEditorMap, attackCity, attackFacility, attackPlot, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, dismantleFacility, duelUnit, endTenDay, hasAutosave, hasManualSave, issueCommand, loadGame, manualSave, moveUnit, repairFacility, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
+  const { applyMapEditorMap, attackCity, attackFacility, attackPlot, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, deployUnitDelegate, dismantleFacility, duelUnit, endTenDay, hasAutosave, hasManualSave, issueCommand, loadGame, manualSave, moveUnit, repairFacility, setBuildDelegate, setMoveDelegate, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
   const { emit: emitAudioEvent } = useAudioEventAdapter();
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   const [activeCultivate, setActiveCultivate] = useState<CultivateCategory | null>(null);
@@ -117,6 +126,12 @@ export function GameShell() {
   const pendingConstructionRef = useRef(pendingConstruction);
   pendingConstructionRef.current = pendingConstruction;
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
+  /** 超距移动委任：当前展示的最优路径（黄色高亮，含目标格） */
+  const [delegatePath, setDelegatePath] = useState<GridCoord[]>([]);
+  /** 超距点击目标后弹出的选项：移动 / 设置 */
+  const [delegateMenu, setDelegateMenu] = useState<DeployDelegateMenuState | null>(null);
+  /** 超距「设置」后弹出的设施选择 */
+  const [delegateFacilityMenu, setDelegateFacilityMenu] = useState<DeployDelegateMenuState | null>(null);
   const {
     unitCommandMenu,
     unitTacticMenu,
@@ -177,6 +192,8 @@ export function GameShell() {
   const mapContextMenuRef = useRef<HTMLElement>(null);
   const cityInfoMenuRef = useRef<HTMLElement>(null);
   const unitCommandMenuRef = useRef<HTMLElement>(null);
+  const delegateMenuRef = useRef<HTMLElement>(null);
+  const delegateFacilityMenuRef = useRef<HTMLElement>(null);
   const unitTacticMenuRef = useRef<HTMLElement>(null);
   const unitStrategyMenuRef = useRef<HTMLElement>(null);
   const unitFacilityMenuRef = useRef<HTMLElement>(null);
@@ -530,20 +547,46 @@ export function GameShell() {
   const selectDeployTarget = useCallback((coord: GridCoord, position: { x: number; y: number }) => {
     if (!canOperateCurrentTurn) return;
     if (!pendingDeploy && !pendingTransport) return;
-    if (!deployTargets.some((target) => target.q === coord.q && target.r === coord.r)) return;
-    if (pendingTransport) {
-      deployTransportUnit({ ...pendingTransport, destination: coord });
-      setPendingTransport(null);
+    if (deployTargets.some((target) => target.q === coord.q && target.r === coord.r)) {
+      setDelegateMenu(null);
+      setDelegateFacilityMenu(null);
+      setDelegatePath([]);
+      if (pendingTransport) {
+        deployTransportUnit({ ...pendingTransport, destination: coord });
+        setPendingTransport(null);
+        return;
+      }
+      setPendingDeployCommand({ input: pendingDeploy!, destination: coord });
+      setUnitCommandMenu({ unitId: PENDING_DEPLOY_UNIT_ID, position, destination: coord });
+      setUnitTacticMenu(null);
+      setUnitStrategyMenu(null);
+      setUnitFacilityMenu(null);
+      setSelectedUnitId(null);
+      setPendingDeployAction(null);
       return;
     }
-    setPendingDeployCommand({ input: pendingDeploy!, destination: coord });
-    setUnitCommandMenu({ unitId: PENDING_DEPLOY_UNIT_ID, position, destination: coord });
-    setUnitTacticMenu(null);
-    setUnitStrategyMenu(null);
-    setUnitFacilityMenu(null);
-    setSelectedUnitId(null);
-    setPendingDeployAction(null);
-  }, [canOperateCurrentTurn, deployTargets, deployTransportUnit, pendingDeploy, pendingTransport]);
+    // 超距点击：按出征预演计算最优路径，可达则高亮路径并弹出「移动/设置」选项（与部队移动的超距委任一致）
+    if (!pendingDeploy || !state) return;
+    const deployInput: DeployConfirmInput & { destination?: GridCoord } = pendingDeployCommand
+      ? { ...pendingDeployCommand.input, destination: pendingDeployCommand.destination }
+      : pendingDeploy;
+    try {
+      const preview = deployUnitPreviewWithId(state, state.playerForceId, deployInput);
+      const path = computeDelegatePath(preview.state, preview.unitId, coord);
+      if (!path || path.length <= 1) return;
+      setDelegatePath(path);
+      setDelegateMenu({ unitId: PENDING_DEPLOY_UNIT_ID, target: coord, position, deployInput });
+      setDelegateFacilityMenu(null);
+      setUnitCommandMenu(null);
+      setUnitTacticMenu(null);
+      setUnitStrategyMenu(null);
+      setUnitFacilityMenu(null);
+      setSelectedUnitId(null);
+      setPendingDeployAction(null);
+    } catch {
+      return;
+    }
+  }, [canOperateCurrentTurn, deployTargets, deployTransportUnit, pendingDeploy, pendingDeployCommand, pendingTransport, state]);
 
   const selectUnit = useCallback((unitId: string, position: { x: number; y: number }) => {
     cancelUnitHoverClose();
@@ -580,6 +623,9 @@ export function GameShell() {
     setTargetingRepair(null);
     setFacilityContextMenu(null);
     setPlotContextMenu(null);
+    setDelegateMenu(null);
+    setDelegateFacilityMenu(null);
+    setDelegatePath([]);
     if (selectedUnitId === unitId) {
       setUnitCommandMenu({ unitId, position });
       return;
@@ -608,6 +654,9 @@ export function GameShell() {
     setFacilityContextMenu(null);
     setPlotContextMenu(null);
     setSelectedUnitId(null);
+    setDelegateMenu(null);
+    setDelegateFacilityMenu(null);
+    setDelegatePath([]);
     setUnitIntelMenu({ unitId, position });
   }, [state]);
 
@@ -628,26 +677,39 @@ export function GameShell() {
   const selectMoveTarget = useCallback((coord: GridCoord, position: { x: number; y: number }) => {
     if (!canOperateCurrentTurn) return;
     if (!selectedUnitId) return;
-    if (!moveTargets.some((target) => target.q === coord.q && target.r === coord.r)) return;
-    setCityMenu(null);
-    setMapContextMenu(null);
-    setUnitTacticMenu(null);
-    setUnitStrategyMenu(null);
-    setTargetingAttack(null);
-    setTargetingTactic(null);
-    setTargetingFirePlot(null);
-    setTargetingUnitStrategy(null);
-    setTargetingFacility(null);
-    setTargetingRepair(null);
-    // 目标为本方城池格 → 弹出「是/否」回城确认框；无守军无主城 → 弹出「进入/占领」确认框
-    if (state) {
-      const city = ownCityAt(state, state.playerForceId, coord) ?? unoccupiedCityAt(state, coord);
-      if (city) {
-        setReturnCityConfirm({ unitId: selectedUnitId, coord, label: city.name, position });
-        return;
+    if (moveTargets.some((target) => target.q === coord.q && target.r === coord.r)) {
+      setDelegatePath([]);
+      setDelegateMenu(null);
+      setDelegateFacilityMenu(null);
+      setCityMenu(null);
+      setMapContextMenu(null);
+      setUnitTacticMenu(null);
+      setUnitStrategyMenu(null);
+      setTargetingAttack(null);
+      setTargetingTactic(null);
+      setTargetingFirePlot(null);
+      setTargetingUnitStrategy(null);
+      setTargetingFacility(null);
+      setTargetingRepair(null);
+      // 目标为本方城池格 → 弹出「是/否」回城确认框；无守军无主城 → 弹出「进入/占领」确认框
+      if (state) {
+        const city = ownCityAt(state, state.playerForceId, coord) ?? unoccupiedCityAt(state, coord);
+        if (city) {
+          setReturnCityConfirm({ unitId: selectedUnitId, coord, label: city.name, position });
+          return;
+        }
       }
+      setUnitCommandMenu({ unitId: selectedUnitId, position, destination: coord });
+      return;
     }
-    setUnitCommandMenu({ unitId: selectedUnitId, position, destination: coord });
+    // 超距点击：计算最优路径，可达则高亮路径并弹出「移动/设置」选项
+    const unit = state?.units[selectedUnitId];
+    if (!unit || unit.acted || unit.moved || unitIsIncapacitated(unit)) return;
+    const path = computeDelegatePath(state!, selectedUnitId, coord);
+    if (!path || path.length <= 1) return;
+    setDelegatePath(path);
+    setDelegateMenu({ unitId: selectedUnitId, target: coord, position });
+    setDelegateFacilityMenu(null);
   }, [canOperateCurrentTurn, emitAudioEvent, moveUnit, moveTargets, selectedUnitId, state]);
 
   const beginPendingDeployAction = useCallback(() => {
@@ -891,6 +953,58 @@ export function GameShell() {
     setTargetingRepair(null);
     setSelectedUnitId(null);
   }, [canOperateCurrentTurn, deployUnitAction, moveUnit, pendingDeployCommand, unitCommandMenu, waitUnit]);
+
+  /** 超距选项「移动」：本回合沿最优路径移动到最远处并记录移动委任 */
+  const executeDelegateMove = useCallback(() => {
+    if (!canOperateCurrentTurn || !delegateMenu) return;
+    emitAudioEvent({ type: 'menu-click-on' });
+    if (delegateMenu.deployInput) {
+      deployUnitDelegate(delegateMenu.deployInput, delegateMenu.target);
+      setPendingDeploy(null);
+      setPendingDeployCommand(null);
+      setPendingDeployAction(null);
+    } else {
+      setMoveDelegate(delegateMenu.unitId, delegateMenu.target);
+    }
+    setDelegateMenu(null);
+    setDelegateFacilityMenu(null);
+    setDelegatePath([]);
+    setSelectedUnitId(null);
+    setUnitCommandMenu(null);
+    setUnitTacticMenu(null);
+    setUnitStrategyMenu(null);
+    setUnitFacilityMenu(null);
+  }, [canOperateCurrentTurn, delegateMenu, deployUnitDelegate, emitAudioEvent, setMoveDelegate]);
+
+  /** 超距选项「设置」：打开设施选择列表 */
+  const openDelegateFacilityMenu = useCallback(() => {
+    if (!canOperateCurrentTurn || !delegateMenu) return;
+    emitAudioEvent({ type: 'menu-click-on' });
+    setDelegateFacilityMenu({ ...delegateMenu, position: { x: delegateMenu.position.x + 108, y: delegateMenu.position.y } });
+    setDelegateMenu(null);
+  }, [canOperateCurrentTurn, delegateMenu, emitAudioEvent]);
+
+  /** 选择指定设施后：发起建设委任（自动移动到目标相接点建设） */
+  const executeDelegateFacilitySelect = useCallback((facility: FacilityType) => {
+    if (!canOperateCurrentTurn || !delegateFacilityMenu) return;
+    emitAudioEvent({ type: 'menu-click-on' });
+    if (delegateFacilityMenu.deployInput) {
+      deployUnitDelegate(delegateFacilityMenu.deployInput, delegateFacilityMenu.target, facility);
+      setPendingDeploy(null);
+      setPendingDeployCommand(null);
+      setPendingDeployAction(null);
+    } else {
+      setBuildDelegate(delegateFacilityMenu.unitId, delegateFacilityMenu.target, facility);
+    }
+    setDelegateFacilityMenu(null);
+    setDelegateMenu(null);
+    setDelegatePath([]);
+    setSelectedUnitId(null);
+    setUnitCommandMenu(null);
+    setUnitTacticMenu(null);
+    setUnitStrategyMenu(null);
+    setUnitFacilityMenu(null);
+  }, [canOperateCurrentTurn, delegateFacilityMenu, deployUnitDelegate, emitAudioEvent, setBuildDelegate]);
 
   const selectAttackTarget = useCallback((targetId: string) => {
     if (!canOperateCurrentTurn) return;
@@ -1151,6 +1265,14 @@ export function GameShell() {
   }, [emitAudioEvent]);
 
   const openMapContextMenu = useCallback((position: { x: number; y: number }) => {
+    // 委任选项菜单打开时，右键仅退出当前选项，不取消出征/选中等流程
+    if (delegateMenu || delegateFacilityMenu || delegatePath.length > 0) {
+      emitAudioEvent({ type: 'menu-right-click' });
+      setDelegateMenu(null);
+      setDelegateFacilityMenu(null);
+      setDelegatePath([]);
+      return;
+    }
     // 撤销菜单/确认弹窗打开时，右键空白处仅关闭它们，不弹地图主菜单（与城池菜单行为一致）
     if (facilityContextMenu || plotContextMenu || cancelConfirm || returnCityConfirm) {
       emitAudioEvent({ type: 'menu-right-click' });
@@ -1220,7 +1342,7 @@ export function GameShell() {
     setTargetingRepair(null);
     setShowMapIntelOptions(false);
     setMapContextMenu(position);
-  }, [cancelConfirm, cityMenu, deployCityId, editorState, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, plotContextMenu, returnCityConfirm, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
+  }, [cancelConfirm, cityMenu, delegateFacilityMenu, delegateMenu, delegatePath, deployCityId, editorState, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, plotContextMenu, returnCityConfirm, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
 
   const proceedTenDayFromMap = useCallback(() => {
     setMapContextMenu(null);
@@ -1463,6 +1585,21 @@ export function GameShell() {
   }, [unitCommandMenu]);
 
   useEffect(() => {
+    if (!delegateMenu && !delegateFacilityMenu) return undefined;
+    const closeOnPointerOutside = (event: globalThis.PointerEvent) => {
+      if (event.button !== 0) return;
+      if (delegateMenuRef.current?.contains(event.target as Node)) return;
+      if (delegateFacilityMenuRef.current?.contains(event.target as Node)) return;
+      setDelegateMenu(null);
+      setDelegateFacilityMenu(null);
+      setDelegatePath([]);
+    };
+
+    document.addEventListener('pointerdown', closeOnPointerOutside);
+    return () => document.removeEventListener('pointerdown', closeOnPointerOutside);
+  }, [delegateFacilityMenu, delegateMenu]);
+
+  useEffect(() => {
     if (!unitTacticMenu) return undefined;
     const closeOnPointerOutside = (event: globalThis.PointerEvent) => {
       if (unitTacticMenuRef.current?.contains(event.target as Node)) return;
@@ -1642,6 +1779,8 @@ export function GameShell() {
         }}
         onDeployTargetSelect={selectDeployTarget}
         moveTargets={moveTargets}
+        delegatePath={delegatePath}
+        deployDelegateMode={Boolean(pendingDeploy) && deployTargets.length > 0}
         firePlotTargets={firePlotTargets}
         firePlots={state?.firePlots}
         attackTargetCityIds={attackTargetCityIds}
@@ -2042,6 +2181,51 @@ export function GameShell() {
               </button>
             );
           })}
+        </nav>
+      )}
+      {delegateMenu && (
+        <nav
+          ref={delegateMenuRef}
+          className="unit-command-menu tool-panel"
+          data-testid="delegate-menu"
+          style={{ left: delegateMenu.position.x, top: delegateMenu.position.y }}
+          aria-label="部队委任选项"
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            emitAudioEvent({ type: 'menu-right-click' });
+            setDelegateMenu(null);
+            setDelegateFacilityMenu(null);
+            setDelegatePath([]);
+          }}
+        >
+          <button type="button" data-testid="delegate-move" onClick={executeDelegateMove}>移动</button>
+          <button type="button" data-testid="delegate-build" onClick={openDelegateFacilityMenu}>设置</button>
+        </nav>
+      )}
+      {delegateFacilityMenu && (
+        <nav
+          ref={delegateFacilityMenuRef}
+          className="unit-strategy-menu tool-panel"
+          data-testid="delegate-facility-menu"
+          style={{ left: delegateFacilityMenu.position.x, top: delegateFacilityMenu.position.y }}
+          aria-label="部队委任设置菜单"
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            emitAudioEvent({ type: 'menu-right-click' });
+            setDelegateFacilityMenu(null);
+          }}
+        >
+          {UNIT_FACILITIES.map((facility) => (
+            <button
+              key={facility.type}
+              type="button"
+              onClick={() => executeDelegateFacilitySelect(facility.type)}
+            >
+              {facility.name}（{FACILITY_BUILD_COSTS[facility.type]}）
+            </button>
+          ))}
         </nav>
       )}
       {unitStrategyMenu && unitMenuState && (

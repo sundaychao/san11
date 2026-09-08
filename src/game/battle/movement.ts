@@ -13,6 +13,7 @@ import { isLegalUnitCell, ownCityAt, reachableCosts, unoccupiedCityAt } from './
 import { assertUnitTurn } from './shared';
 import { appointSuccessorGovernor, cityTroopCap } from '../innerAffairs';
 import { TECHP_PER_CITY_CAPTURE, addTechP } from '../techs';
+import { clamp } from '../commands';
 
 export function moveUnit(state: GameState, forceId: ForceId, unitId: string, destination: GridCoord): GameState {
   const unit = assertUnitTurn(state, forceId, unitId);
@@ -36,7 +37,19 @@ export function moveUnit(state: GameState, forceId: ForceId, unitId: string, des
       addTechP(next, forceId, TECHP_PER_CITY_CAPTURE);
     }
     // 回城：兵力/军粮/金钱并入城池，武将回城，部队消失
-    city.troops = Math.min(cityTroopCap(city), city.troops + movingUnit.troops);
+    // 回城士兵按部队当前士气稀释城池士气（与征兵的分摊公式一致）：
+    // 回城后士气 = (原有士兵×原有士气 + 回城士兵×部队士气) ÷ 回城后城池总士兵
+    const prevCityTroops = city.troops;
+    const prevCityTraining = city.training;
+    const unitMorale = clamp(movingUnit.energy ?? 0, 0, 100);
+    const newCityTroops = Math.min(cityTroopCap(city), prevCityTroops + movingUnit.troops);
+    const addedTroops = newCityTroops - prevCityTroops;
+    city.troops = newCityTroops;
+    if (newCityTroops > 0) {
+      city.training = Math.round(clamp(
+        (prevCityTroops * prevCityTraining + addedTroops * unitMorale) / newCityTroops, 0, 100,
+      ));
+    }
     city.food += movingUnit.food;
     if (movingUnit.gold) city.gold += movingUnit.gold;
     const officerIds = movingUnit.officerIds ?? [movingUnit.leaderId];

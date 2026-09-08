@@ -2,10 +2,12 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { initialArmaments } from '../game/armaments';
-import { deployTransportUnit, deployUnit, movementCells } from '../game/battle/actions';
+import { deployTransportUnit, deployUnit, deployUnitPreviewWithId, movementCells } from '../game/battle/actions';
 import { movementAllowanceForProfile } from '../game/battle/definitions';
 import { deploymentCells } from '../game/battle/deployment';
+import { getDeploymentTargets } from '../game/battle/queries';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from '../game/battle/grid';
+import { computeDelegatePath } from '../game/battle/delegate';
 import { executeCommand } from '../game/commands';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
@@ -999,6 +1001,184 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(screen.queryByTestId(/move-target-/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
     expect(screen.getByTestId('battle-unit-marker')).toHaveAttribute('data-grid-position', `${q},${r}`);
+  });
+
+  it('超距点击可移动范围外的地点：弹出移动/设置委任菜单，点击移动后部队沿路径前进', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling', officerId: 'liu-bei', troops: 3000, food: 3000,
+    });
+    const ready = settleTenDay(state);
+    const unit = Object.values(ready.units)[0];
+    const moveKeys = new Set(movementCells(ready, unit.id).map(gridKey));
+    const cityKeysOf = cityKeys(ready);
+    // 在部队附近有界 BFS：找一处「可移动范围外、委任路径可达且第一步可走」的格
+    let target: { q: number; r: number } | undefined;
+    const visited = new Set<string>([gridKey(unit)]);
+    let frontier = [{ q: unit.q, r: unit.r }];
+    for (let distance = 1; distance <= 8 && !target; distance += 1) {
+      const next: { q: number; r: number }[] = [];
+      for (const cell of frontier) {
+        for (const neighbor of neighborsOf(cell.q, cell.r)) {
+          const key = gridKey(neighbor);
+          if (visited.has(key)) continue;
+          visited.add(key);
+          if (cityKeysOf.has(key)) continue;
+          if (Object.values(ready.facilities ?? {}).some((facility) => facility.q === neighbor.q && facility.r === neighbor.r)) continue;
+          next.push(neighbor);
+          if (moveKeys.has(key)) continue;
+          const path = computeDelegatePath(ready, unit.id, neighbor);
+          if (path && path.length > 2 && moveKeys.has(gridKey(path[1]))) {
+            target = neighbor;
+            break;
+          }
+        }
+        if (target) break;
+      }
+      frontier = next;
+    }
+    expect(target).toBeDefined();
+    if (!target) return;
+
+    renderState(ready);
+    panMapTo(target.q, target.r);
+    fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1 });
+    expect(screen.getAllByTestId(/move-target-/).length).toBeGreaterThan(0);
+
+    fireEvent.pointerDown(screen.getByTestId(`map-cell-${target.q}-${target.r}`), { button: 0, buttons: 1, clientX: 320, clientY: 220 });
+    const menu = screen.getByTestId('delegate-menu');
+    expect(within(menu).getByRole('button', { name: '移动' })).toBeVisible();
+    expect(within(menu).getByRole('button', { name: '设置' })).toBeVisible();
+
+    await user.click(within(menu).getByRole('button', { name: '移动' }));
+    expect(screen.queryByTestId('delegate-menu')).not.toBeInTheDocument();
+    const position = screen.getByTestId('battle-unit-marker').getAttribute('data-grid-position')!;
+    const [mq, mr] = position.split(',').map(Number);
+    expect(mq !== unit.q || mr !== unit.r).toBe(true);
+  });
+
+  it('出征时选择可移动范围外的地点：弹出移动/设置委任菜单，点击移动后部队出征并记录委任', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    const deployQuery: { cityId: 'jiangling'; troopType: 'sword'; officerIds: string[] } = { cityId: 'jiangling', troopType: 'sword', officerIds: ['liu-bei'] };
+    const deployKeys = new Set(getDeploymentTargets(state, deployQuery).map(gridKey));
+    const preview = deployUnitPreviewWithId(state, state.playerForceId, {
+      cityId: 'jiangling', officerIds: ['liu-bei'], troopType: 'sword', troops: 4000, food: 6000,
+    });
+    const spawnUnit = preview.state.units[preview.unitId];
+    const spawn = { q: spawnUnit.q, r: spawnUnit.r };
+    const cityKeysOf = cityKeys(state);
+    const facilityKeys = new Set(Object.values(state.facilities ?? {}).map((facility) => gridKey(facility)));
+    // 在出征出生点附近 BFS：找一处「出征范围外、委任路径可达」的格
+    let target: { q: number; r: number } | undefined;
+    const visited = new Set<string>([gridKey(spawn)]);
+    let frontier = [spawn];
+    for (let distance = 1; distance <= 8 && !target; distance += 1) {
+      const next: { q: number; r: number }[] = [];
+      for (const cell of frontier) {
+        for (const neighbor of neighborsOf(cell.q, cell.r)) {
+          const key = gridKey(neighbor);
+          if (visited.has(key)) continue;
+          visited.add(key);
+          if (cityKeysOf.has(key) || facilityKeys.has(key)) continue;
+          if (!passableNonCityCell(state, neighbor)) continue;
+          next.push(neighbor);
+          if (deployKeys.has(key)) continue;
+          const path = computeDelegatePath(preview.state, preview.unitId, neighbor);
+          if (path && path.length > 1) {
+            target = neighbor;
+            break;
+          }
+        }
+        if (target) break;
+      }
+      frontier = next;
+    }
+    expect(target).toBeDefined();
+    if (!target) return;
+
+    renderState(state);
+    panMapTo(target.q, target.r);
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const cityMenu = screen.getByTestId('city-command-menu');
+    await user.click(within(cityMenu).getByRole('button', { name: '军事' }));
+    await user.click(within(cityMenu).getByRole('button', { name: '出征' }));
+    const deployDialog = await chooseDeployLeader(user, '刘备');
+    await user.click(within(deployDialog).getByRole('button', { name: '确定出征' }));
+    expect(screen.getAllByTestId(/deploy-target-/).length).toBeGreaterThan(0);
+
+    fireEvent.pointerDown(screen.getByTestId(`map-cell-${target.q}-${target.r}`), { button: 0, buttons: 1, clientX: 320, clientY: 220 });
+    const delegateMenu = screen.getByTestId('delegate-menu');
+    expect(within(delegateMenu).getByRole('button', { name: '移动' })).toBeVisible();
+    expect(within(delegateMenu).getByRole('button', { name: '设置' })).toBeVisible();
+
+    await user.click(within(delegateMenu).getByRole('button', { name: '移动' }));
+    expect(screen.queryByTestId('delegate-menu')).not.toBeInTheDocument();
+    const marker = screen.getByTestId('battle-unit-marker');
+    expect(marker).toBeVisible();
+    expect(marker).toHaveAttribute('data-grid-position', `${spawn.q},${spawn.r}`);
+    expect(screen.queryByTestId(/deploy-target-/)).not.toBeInTheDocument();
+  });
+
+  it('出征委任菜单弹出后右键：仅退出菜单，不取消出征流程', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    const deployQuery: { cityId: 'jiangling'; troopType: 'sword'; officerIds: string[] } = { cityId: 'jiangling', troopType: 'sword', officerIds: ['liu-bei'] };
+    const deployKeys = new Set(getDeploymentTargets(state, deployQuery).map(gridKey));
+    const preview = deployUnitPreviewWithId(state, state.playerForceId, {
+      cityId: 'jiangling', officerIds: ['liu-bei'], troopType: 'sword', troops: 4000, food: 6000,
+    });
+    const spawnUnit = preview.state.units[preview.unitId];
+    const cityKeysOf = cityKeys(state);
+    const facilityKeys = new Set(Object.values(state.facilities ?? {}).map((facility) => gridKey(facility)));
+    let target: { q: number; r: number } | undefined;
+    const visited = new Set<string>([gridKey(spawnUnit)]);
+    let frontier = [{ q: spawnUnit.q, r: spawnUnit.r }];
+    for (let distance = 1; distance <= 8 && !target; distance += 1) {
+      const next: { q: number; r: number }[] = [];
+      for (const cell of frontier) {
+        for (const neighbor of neighborsOf(cell.q, cell.r)) {
+          const key = gridKey(neighbor);
+          if (visited.has(key)) continue;
+          visited.add(key);
+          if (cityKeysOf.has(key) || facilityKeys.has(key)) continue;
+          if (!passableNonCityCell(state, neighbor)) continue;
+          next.push(neighbor);
+          if (deployKeys.has(key)) continue;
+          const path = computeDelegatePath(preview.state, preview.unitId, neighbor);
+          if (path && path.length > 1) {
+            target = neighbor;
+            break;
+          }
+        }
+        if (target) break;
+      }
+      frontier = next;
+    }
+    expect(target).toBeDefined();
+    if (!target) return;
+
+    renderState(state);
+    panMapTo(target.q, target.r);
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const cityMenu = screen.getByTestId('city-command-menu');
+    await user.click(within(cityMenu).getByRole('button', { name: '军事' }));
+    await user.click(within(cityMenu).getByRole('button', { name: '出征' }));
+    const deployDialog = await chooseDeployLeader(user, '刘备');
+    await user.click(within(deployDialog).getByRole('button', { name: '确定出征' }));
+
+    const targetCell = screen.getByTestId(`map-cell-${target.q}-${target.r}`);
+    fireEvent.pointerDown(targetCell, { button: 0, buttons: 1, clientX: 320, clientY: 220 });
+    expect(screen.getByTestId('delegate-menu')).toBeVisible();
+
+    // 右键空白处：委任菜单关闭，出征流程保留（仍可再次点击同一超距格弹出菜单）
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 360, clientY: 260 });
+    expect(screen.queryByTestId('delegate-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId(/deploy-target-/).length).toBeGreaterThan(0);
+
+    fireEvent.pointerDown(screen.getByTestId(`map-cell-${target.q}-${target.r}`), { button: 0, buttons: 1, clientX: 320, clientY: 220 });
+    expect(screen.getByTestId('delegate-menu')).toBeVisible();
   });
 
   it('attacks an enemy city from the unit command menu when no enemy unit is in range', async () => {

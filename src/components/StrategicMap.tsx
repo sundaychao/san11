@@ -25,6 +25,12 @@ const ZOOM_FACTOR = 1.2;
 const CELL_SIZE = 43;
 // 垂直（行）方向裁剪保留的行缓冲：水平方向按用户诉求精确到 30 格，纵向仅保留少量余量，防止边缘取整缺格
 const ROW_CULL_BUFFER = 3;
+// 边缘自动滚动：鼠标越过视口边缘该像素带后锁定滚动方向并持续平移
+const EDGE_PAN_ZONE_PX = 56;
+// 以接近 60fps 的小步长连续移动（而非低频大步长跳变），避免画面抖动/模糊；
+// 每帧 24px ≈ 1500px/s
+const EDGE_PAN_INTERVAL_MS = 16;
+const EDGE_PAN_MAX_STEP_PX = 24;
 const TROOP_TEXTURES: Record<TroopType, { glyph: string; label: string }> = {
   sword: { glyph: '剑', label: '剑兵' },
   spear: { glyph: '枪', label: '枪兵' },
@@ -91,6 +97,10 @@ interface StrategicMapProps {
   selectedDeployTarget?: GridCoord | null;
   onDeployTargetSelect?(coord: GridCoord, position: { x: number; y: number }): void;
   moveTargets?: GridCoord[];
+  /** 超距移动委任的最优路径（目标格含在内），路径上非当前可移动格用黄色高亮 */
+  delegatePath?: GridCoord[];
+  /** 出征部署中：点击出征范围外的格触发超距出征委任（移动/设置） */
+  deployDelegateMode?: boolean;
   firePlotTargets?: GridCoord[];
   firePlots?: FirePlot[];
   attackTargetCityIds?: CityId[];
@@ -151,6 +161,8 @@ export function StrategicMap({
   strategyResultReports = [],
   cityEffectReports = [],
   facilityRepairReports = [],
+  delegatePath = [],
+  deployDelegateMode = false,
   onCityMenu,
   onCityInfoMenu,
   onCellHover,
@@ -286,6 +298,53 @@ export function StrategicMap({
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
 
+  // 边缘自动滚动（方向锁定）：鼠标一旦越过视口边缘带（含移出窗口/网页外）即锁定该侧方向持续平移；
+  // 只有鼠标回到视口内部（脱离边缘带）才解除锁定停止。每 50ms 推进一次，速度见 EDGE_PAN_MAX_STEP_PX。
+  useEffect(() => {
+    // 记录当前应持续平移的方向：+1 靠左/上（view.x/y 增大），-1 靠右/下
+    const panDirection = { x: 0, y: 0 };
+    const pointerMove = (event: globalThis.PointerEvent) => {
+      if (drag.current) return;
+      const region = regionRef.current;
+      if (!region) return;
+      const target = event.target as Node | null;
+      // 指针需位于地图区域内才更新滚动方向；移出地图/窗口后沿用最后一次方向继续滚动
+      if (!target || !region.contains(target)) return;
+      const rect = region.getBoundingClientRect();
+      // 布局未就绪（如测试环境）时回退到有效视口尺寸，仍以视口左上角为原点
+      const bounds = rect.width > 0 && rect.height > 0
+        ? rect
+        : { left: 0, top: 0, width: 1280, height: 720 };
+      const relX = event.clientX - bounds.left;
+      const relY = event.clientY - bounds.top;
+      const zone = EDGE_PAN_ZONE_PX;
+      // 悬停在地图工具/小地图/按钮上时不滚动
+      const hoverEl = target as HTMLElement;
+      if (hoverEl.closest?.('button, .map-tools, .mini-map')) {
+        panDirection.x = 0;
+        panDirection.y = 0;
+        return;
+      }
+      // 每根轴独立判定：回到该轴内部（脱离边缘带，含越过边界后的回程）即该轴停止
+      panDirection.x = relX < zone ? 1 : relX > bounds.width - zone ? -1 : 0;
+      panDirection.y = relY < zone ? 1 : relY > bounds.height - zone ? -1 : 0;
+    };
+    const timer = window.setInterval(() => {
+      if (drag.current || (panDirection.x === 0 && panDirection.y === 0)) return;
+      setView((current) => ({
+        ...current,
+        x: current.x + panDirection.x * EDGE_PAN_MAX_STEP_PX,
+        y: current.y + panDirection.y * EDGE_PAN_MAX_STEP_PX,
+      }));
+    }, EDGE_PAN_INTERVAL_MS);
+    document.addEventListener('pointermove', pointerMove);
+    return () => {
+      document.removeEventListener('pointermove', pointerMove);
+      window.clearInterval(timer);
+    };
+  }, []);
+
+
   const displayGrid = editorGrid ?? state.grid;
   const displayCities = editorMode
     ? (editorCities ?? []).map((city) => ({ ...city, forceColor: '#d1b943' }))
@@ -320,6 +379,7 @@ export function StrategicMap({
   const deployTargetKeys = new Set(deployTargets.map((coord) => `${coord.q},${coord.r}`));
   const deployMode = deployTargetKeys.size > 0;
   const moveTargetKeys = new Set(moveTargets.map((coord) => `${coord.q},${coord.r}`));
+  const delegatePathKeys = new Set(delegatePath.map((coord) => `${coord.q},${coord.r}`));
   const firePlotTargetKeys = new Set(firePlotTargets.map((coord) => `${coord.q},${coord.r}`));
   const constructionTargetKeys = new Set(constructionTargets.map((coord) => `${coord.q},${coord.r}`));
   const attackTargetCityIdSet = new Set(attackTargetCityIds);
@@ -334,7 +394,7 @@ export function StrategicMap({
       }
     }
   }
-  const moveMode = moveTargetKeys.size > 0;
+  const moveMode = moveTargetKeys.size > 0 || delegatePathKeys.size > 0;
   const firePlotMode = firePlotTargetKeys.size > 0;
   const constructionMode = constructionTargetKeys.size > 0;
   const renderTerrain = renderTerrainByScale;
@@ -344,7 +404,7 @@ export function StrategicMap({
         const cellByKey = new Map(displayGrid.map((cell) => [gridKey(cell), cell]));
         const seen = new Set<string>();
         const cells: GridCell[] = [];
-        for (const coord of [...deployTargets, ...moveTargets, ...firePlotTargets]) {
+        for (const coord of [...deployTargets, ...moveTargets, ...delegatePath, ...firePlotTargets]) {
           const key = gridKey(coord);
           if (seen.has(key)) continue;
           seen.add(key);
@@ -534,7 +594,7 @@ export function StrategicMap({
         </g>
         <text className="battle-unit-troops" x={centerX} y={centerY + 24}>{unit.troops.toLocaleString('en-US')}</text>
         {canActThisTurn && (
-          <text className="battle-unit-ready-badge" data-testid="battle-unit-ready-badge" x={centerX + 17} y={centerY - 15}>未</text>
+          <text className="battle-unit-ready-badge" data-testid="battle-unit-ready-badge" x={centerX + 17} y={centerY - 15}>{unit.delegate ? '委' : '未'}</text>
         )}
         {isAttackTarget && (
           <text className="attack-target-arrow" data-testid="attack-target-arrow" x={centerX} y={Math.max(12, position.y - 20)}>▼</text>
@@ -658,12 +718,14 @@ export function StrategicMap({
       onPointerMove={handlePointerMove}
       onPointerUp={stopDragging}
       onPointerCancel={stopDragging}
-      onPointerLeave={() => onCellHover?.(null)}
+      onPointerLeave={() => { onCellHover?.(null); }}
       onContextMenu={handleContextMenu}
     >
       <div
         className="map-content"
         data-testid="map-content"
+        data-view-x={view.x}
+        data-view-y={view.y}
         style={{ '--map-scale': String(view.scale), '--cell-px': `${cellPx.toFixed(2)}px` } as CSSProperties}
       >
         {backgroundImage && (
@@ -682,6 +744,7 @@ export function StrategicMap({
             const cellKey = `${cell.q},${cell.r}`;
             const isDeployTarget = deployTargetKeys.has(cellKey);
             const isMoveTarget = moveTargetKeys.has(cellKey);
+            const isDelegatePath = delegatePathKeys.has(cellKey) && !isMoveTarget;
             const isFirePlotTarget = firePlotTargetKeys.has(cellKey);
             const isConstructionTarget = constructionTargetKeys.has(cellKey);
             const isSelectedDeployTarget = selectedDeployKey === cellKey;
@@ -695,7 +758,7 @@ export function StrategicMap({
                 y={position.y}
                 width={CELL_SIZE}
                 height={CELL_SIZE}
-                className={`battle-cell terrain-${cell.terrain}${isFacilityOccupied ? ' is-facility-occupied' : ''}${isDeployTarget ? ' is-deploy-target' : ''}${isMoveTarget ? ' is-move-target' : ''}${isFirePlotTarget ? ' is-strategy-target' : ''}${isConstructionTarget ? ' is-construction-target' : ''}${isSelectedDeployTarget ? ' is-selected-deploy-target' : ''}`}
+                className={`battle-cell terrain-${cell.terrain}${isFacilityOccupied ? ' is-facility-occupied' : ''}${isDeployTarget ? ' is-deploy-target' : ''}${isMoveTarget ? ' is-move-target' : ''}${isDelegatePath ? ' is-delegate-path' : ''}${isFirePlotTarget ? ' is-strategy-target' : ''}${isConstructionTarget ? ' is-construction-target' : ''}${isSelectedDeployTarget ? ' is-selected-deploy-target' : ''}`}
                 onPointerDown={(event) => {
                   if (event.button !== 0) return;
                   if (isConstructionTarget) {
@@ -714,6 +777,18 @@ export function StrategicMap({
                     return;
                   }
                   if (isMoveTarget) {
+                    event.stopPropagation();
+                    onMoveTargetSelect?.({ q: cell.q, r: cell.r }, { x: event.clientX + 12, y: event.clientY + 4 });
+                    return;
+                  }
+                  // 出征部署中点击出征范围外的格：交给上层做超距出征委任（移动/设置）
+                  if (deployDelegateMode && !editorMode) {
+                    event.stopPropagation();
+                    onDeployTargetSelect?.({ q: cell.q, r: cell.r }, { x: event.clientX + 12, y: event.clientY + 4 });
+                    return;
+                  }
+                  // 选中部队时点击可移动范围外的格：交给上层做超距移动委任（移动/设置）
+                  if (moveMode && !editorMode) {
                     event.stopPropagation();
                     onMoveTargetSelect?.({ q: cell.q, r: cell.r }, { x: event.clientX + 12, y: event.clientY + 4 });
                     return;
@@ -841,6 +916,16 @@ export function StrategicMap({
                     // 选中部队时点击本方城池 footprint 内的可达格 → 回城，不弹城池菜单
                     if (selectedUnitId && moveTargetKeys.has(footprintKey)) {
                       onMoveTargetSelect?.({ q: coord.q, r: coord.r }, { x: event.clientX + 12, y: event.clientY + 4 });
+                      return;
+                    }
+                    // 选中部队时点击可移动范围外的城池格 → 超距移动委任（移动/设置）
+                    if (selectedUnitId && moveMode) {
+                      onMoveTargetSelect?.({ q: coord.q, r: coord.r }, { x: event.clientX + 12, y: event.clientY + 4 });
+                      return;
+                    }
+                    // 出征部署中点击出征范围外的城池格 → 超距出征委任（移动/设置）
+                    if (deployDelegateMode && !deployTargetKeys.has(footprintKey)) {
+                      onDeployTargetSelect?.({ q: coord.q, r: coord.r }, { x: event.clientX + 12, y: event.clientY + 4 });
                       return;
                     }
                     selectCityFromMap(gameCity.id, { x: event.clientX + 12, y: event.clientY });
@@ -1043,6 +1128,11 @@ export function StrategicMap({
                       onMoveTargetSelect?.(reachable, { x: event.clientX + 12, y: event.clientY + 4 });
                       return;
                     }
+                  }
+                  // 出征部署中点击城池（出征范围外）→ 超距出征委任（移动/设置）
+                  if (deployDelegateMode && !deployTargetKeys.has(`${city.gridQ},${city.gridR}`)) {
+                    onDeployTargetSelect?.({ q: city.gridQ, r: city.gridR }, { x: event.clientX + 12, y: event.clientY + 4 });
+                    return;
                   }
                   selectCityFromMap(city.id, { x: event.clientX + 12, y: event.clientY });
                 }}

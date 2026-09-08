@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
@@ -816,6 +816,50 @@ describe('StrategicMap', { timeout: 30000 }, () => {
 
     expect(Number.parseFloat(jianglingMarker!.style.left)).toBeCloseTo(expectedLeft, 4);
     expect(Number.parseFloat(jianglingMarker!.style.top)).toBeCloseTo(expectedTop, 4);
+  });
+
+  it('指针越过视口边缘后锁定方向持续平移，移出地图仍继续，回到中央即停止', async () => {
+    renderGame();
+    const viewport = screen.getByTestId('map-viewport');
+    const mapContent = screen.getByTestId('map-content');
+    const x = () => Number.parseFloat(mapContent.getAttribute('data-view-x')!);
+    const y = () => Number.parseFloat(mapContent.getAttribute('data-view-y')!);
+    expect(x()).toBe(0);
+    expect(y()).toBe(0);
+
+    // 鼠标进入左缘带：向右平移视角（看到左侧更多地图，view.x 增大），且在带内持续移动
+    fireEvent.pointerMove(viewport, { clientX: 10, clientY: 360 });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    const xAfterLeft = x();
+    expect(xAfterLeft).toBeGreaterThan(0);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    expect(x()).toBeGreaterThan(xAfterLeft);
+
+    // 即使鼠标离开地图/视口（模拟移出网页），方向锁定仍然持续平移
+    fireEvent.pointerLeave(viewport);
+    const xAfterLeave = x();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    expect(x()).toBeGreaterThan(xAfterLeave);
+
+    // 鼠标回到视野中央：平移停止，位置不再变化
+    fireEvent.pointerMove(viewport, { clientX: 640, clientY: 360 });
+    const xCenter = x();
+    const yCenter = y();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(x()).toBeCloseTo(xCenter);
+    expect(y()).toBeCloseTo(yCenter);
+
+    // 鼠标进入下缘带：向上平移视角（看到下方更多地图，view.y 减小），同样持续
+    fireEvent.pointerMove(viewport, { clientX: 640, clientY: 700 });
+    const yAfterBottom = y();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    expect(y()).toBeLessThan(yAfterBottom);
+
+    // 回到中央后停止
+    fireEvent.pointerMove(viewport, { clientX: 640, clientY: 360 });
+    const yRest = y();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    expect(y()).toBeCloseTo(yRest);
   });
 
   it('renders the mobile duel map with its own 16 by 33 grid dimensions', () => {

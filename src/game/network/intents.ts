@@ -20,6 +20,9 @@ export type GameIntent =
   | { type: 'deployUnitAction'; input: DeployInput; action: DeployFollowupAction }
   | { type: 'deployTransportUnit'; input: TransportInput }
   | { type: 'moveUnit'; unitId: string; destination: GridCoord }
+  | { type: 'setMoveDelegate'; unitId: string; target: GridCoord }
+  | { type: 'setBuildDelegate'; unitId: string; target: GridCoord; facility: FacilityType }
+  | { type: 'deployUnitDelegate'; input: DeployInput; target: GridCoord; facility?: FacilityType }
   | { type: 'waitUnit'; unitId: string }
   | { type: 'attackUnit'; attackerId: string; targetId: string; destination?: GridCoord }
   | { type: 'jointAttackUnit'; attackerId: string; targetId: string; destination?: GridCoord }
