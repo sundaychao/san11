@@ -14,7 +14,7 @@ import { CAPTIVE_RECRUIT_LOYALTY_THRESHOLD, capturableByLoyalty, executeCaptive,
 import { MARRY_TECHP_COST, RELATIONSHIP_LABELS, areRelated, enterRelationship, relationshipValidation } from './relationship';
 import { createDebate } from './debate';
 import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, COMMAND_OFFICER_MAX,
-                             hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
+                             appointSuccessorGovernor, hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
 import type { City, CityId, ForceId, GameCommand, GameState, Legion, Officer, TechBranchId } from './types';
 
 export const COMMAND_AP = {
@@ -733,11 +733,15 @@ function applyTransfer(state: GameState, command: Extract<GameCommand, { type: '
   const target = state.cities[command.targetCityId];
   const duration = transferDuration(source, target);
   const names: string[] = [];
+  let governorLeft = false;
   for (const officerId of command.officerIds) {
     const officer = state.officers[officerId];
     names.push(officer.name);
-    // 若为出发城太守，调离后该城太守空缺
-    if (source.governorId === officerId) source.governorId = null;
+    // 若为出发城太守，调离后该城自动补任太守
+    if (source.governorId === officerId) {
+      source.governorId = null;
+      governorLeft = true;
+    }
     officer.location = {
       kind: 'transfer',
       fromCityId: command.cityId,
@@ -747,6 +751,7 @@ function applyTransfer(state: GameState, command: Extract<GameCommand, { type: '
     officer.cityId = command.cityId;
     officer.acted = true;
   }
+  if (governorLeft) appointSuccessorGovernor(state, source);
   return `${source.name}向${target.name}移动${names.join('、')}，预计${duration}旬抵达`;
 }
 
@@ -758,8 +763,9 @@ function applySummon(state: GameState, command: Extract<GameCommand, { type: 'su
     const officer = state.officers[officerId];
     const source = state.cities[officer.location.kind === 'city' ? officer.location.cityId : command.cityId];
     const duration = transferDuration(source, target);
-    // 若为所在城太守，被召唤后该城太守空缺
-    if (source.governorId === officerId) source.governorId = null;
+    // 若为所在城太守，被召唤后该城自动补任太守
+    const wasGovernor = source.governorId === officerId;
+    if (wasGovernor) source.governorId = null;
     officer.location = {
       kind: 'transfer',
       fromCityId: source.id,
@@ -768,6 +774,7 @@ function applySummon(state: GameState, command: Extract<GameCommand, { type: 'su
     };
     // cityId 保留在原出发城池（与移动一致），抵达后再归属本城
     officer.acted = true;
+    if (wasGovernor) appointSuccessorGovernor(state, source);
     parts.push(`${officer.name}自${source.name}向${target.name}移动，预计${duration}旬抵达`);
   }
   return parts.join('；');

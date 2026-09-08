@@ -11,7 +11,7 @@ import { applyGroundFireDamageToUnit } from './fire';
 import { gridKey, type GridCoord } from './grid';
 import { isLegalUnitCell, ownCityAt, reachableCosts, unoccupiedCityAt } from './movementRules';
 import { assertUnitTurn } from './shared';
-import { cityTroopCap } from '../innerAffairs';
+import { appointSuccessorGovernor, cityTroopCap } from '../innerAffairs';
 import { TECHP_PER_CITY_CAPTURE, addTechP } from '../techs';
 
 export function moveUnit(state: GameState, forceId: ForceId, unitId: string, destination: GridCoord): GameState {
@@ -41,6 +41,13 @@ export function moveUnit(state: GameState, forceId: ForceId, unitId: string, des
     if (movingUnit.gold) city.gold += movingUnit.gold;
     const officerIds = movingUnit.officerIds ?? [movingUnit.leaderId];
     delete next.units[unitId];
+    // 部队进城武将若仍挂名其他城太守（如出征前未补任的旧档），原城自动补任
+    for (const officerId of officerIds) {
+      const officer = next.officers[officerId];
+      if (!officer) continue;
+      const governedCity = Object.values(next.cities).find((candidate) => candidate.governorId === officerId && candidate.id !== city.id);
+      if (governedCity) appointSuccessorGovernor(next, governedCity);
+    }
     for (const officerId of officerIds) {
       const officer = next.officers[officerId];
       if (!officer) continue;

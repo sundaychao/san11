@@ -280,6 +280,7 @@ describe('command engine', () => {
       kind: 'transfer',
       fromCityId: 'jiangling',
       targetCityId: 'wuling',
+
       remainingTenDays: 4,
     });
     expect(next.actionPoints.liu).toBe(70);
@@ -306,14 +307,27 @@ describe('command engine', () => {
     expect(empty).toContain('至少移动一名武将');
   });
 
-  it('allows a city governor to be transferred and leaves the source city without a governor', () => {
+  it('auto-appoints the highest-politics resident officer as successor governor when the governor transfers away', () => {
     const state = createGame('liu', 1);
     const next = executeCommand(state, 'liu', {
       type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['liu-bei'],
     });
 
     expect(next.officers['liu-bei'].location.kind).toBe('transfer');
-    expect(next.cities.jiangling.governorId).toBeNull();
+    // 刘备（太守）调离江陵：留守武将中孙乾政治75最高 → 自动接任太守
+    expect(next.cities.jiangling.governorId).toBe('sun-qian');
+    expect(next.officers['sun-qian'].location.kind).toBe('city');
+  });
+
+  it('auto-appoints a successor governor when the governor is summoned away', () => {
+    const state = createGame('liu', 1);
+    const next = executeCommand(state, 'liu', {
+      type: 'summon', cityId: 'wuling', officerIds: ['liu-bei'],
+    });
+
+    expect(next.officers['liu-bei'].location.kind).toBe('transfer');
+    // 太守刘备被召唤离开江陵：留守最高政治孙乾自动接任
+    expect(next.cities.jiangling.governorId).toBe('sun-qian');
   });
 
   it('does not allow officers outside the source city to transfer', () => {

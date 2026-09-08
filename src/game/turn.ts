@@ -12,6 +12,7 @@ import { hasCityTrait } from './cityTraits';
 import { territoryCityAt } from './territory';
 import { movementAllowanceBonus } from './skills/rules/movement';
 import { cityPopulationOf, ruralPopulationOf } from './innerAffairs';
+import { appointSuccessorGovernor } from './innerAffairs';
 import { settleLoyaltyDrift } from './loyalty';
 import { settleCaptives } from './captives';
 import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
@@ -469,6 +470,9 @@ function settleOfficerTransfers(next: GameState) {
 
     const targetCityId = officer.location.targetCityId;
     const target = next.cities[targetCityId];
+    // 抵达其他城池：若仍挂名原出发城太守，原城自动补任
+    const governedCity = Object.values(next.cities).find((candidate) => candidate.governorId === officer.id && candidate.id !== targetCityId);
+    if (governedCity) appointSuccessorGovernor(next, governedCity);
     officer.location = { kind: 'city', cityId: targetCityId };
     officer.cityId = targetCityId;
     officer.acted = false;

@@ -2866,6 +2866,23 @@ describe('battle deployment and movement actions', () => {
     expect(() => attackCity(deployed, 'liu', attacker.id, 'nanpi')).toThrow(/可直接进驻/);
   });
 
+  it('appoints the highest-politics resident officer as successor governor when the governor deploys', () => {
+    const base = createGame('liu', 1);
+    expect(base.cities.jiangling.governorId).toBe('liu-bei');
+
+    const next = deployUnit(base, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'liu-bei',
+      targetCityId: 'xiangyang',
+      troops: 3000,
+      food: 3000,
+    });
+
+    // 刘备（太守）出征：留守江陵武将中孙乾政治75最高 → 自动接任太守
+    expect(next.cities.jiangling.governorId).toBe('sun-qian');
+    expect(next.officers['sun-qian'].location.kind).toBe('city');
+  });
+
   it('occupies a garrison-less unowned city by moving into its footprint', () => {
     const deployed = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',

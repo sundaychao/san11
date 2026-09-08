@@ -105,6 +105,23 @@ export function plotCost(facility: PlotType): number {
   return PLOT_COSTS[facility] ?? PLOT_GOLD_COST;
 }
 
+/**
+ * 太守出城/调离后自动补任：任命在本城的最高政治值武将为太守（无人则空缺）。
+ * 候选为仍留守本城（location=city）的本势力武将。
+ */
+export function appointSuccessorGovernor(state: GameState, city: City): void {
+  if (!city.ownerId) {
+    city.governorId = null;
+    return;
+  }
+  const candidates = Object.values(state.officers).filter((officer) =>
+    officer.forceId === city.ownerId &&
+    officer.location.kind === 'city' &&
+    officer.location.cityId === city.id);
+  const best = candidates.sort((a, b) => b.stats.politics - a.stats.politics || a.id.localeCompare(b.id))[0];
+  city.governorId = best ? best.id : null;
+}
+
 export type PlotType = 'market' | 'farm' | 'barracks' | 'smithy' | 'forge' | 'stable' | 'shipyard' | 'mint' | 'granary'
   | 'blackmarket' | 'grandmarket' | 'fishmarket' | 'garrisonfarm'
   | 'hubu' | 'xingbu' | 'bingbu' | 'gongbu' | 'libu' | 'personnel' | 'taixue' | 'tongqueta';

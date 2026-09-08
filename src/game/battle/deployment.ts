@@ -1,7 +1,7 @@
 import { ARMAMENT_LABELS, armamentsOf, TROOP_ARMAMENT, TROOP_LABELS } from '../armaments';
 import { energyCapOf, techLevelOf, troopMovementBonusForTroop } from '../techs';
 import { unitTroopCapOf } from '../ranks';
-import { hasPlotFacility } from '../innerAffairs';
+import { appointSuccessorGovernor, hasPlotFacility } from '../innerAffairs';
 import { formationMovementAllowanceBonus } from '../skills/rules/movement';
 import type { ForceId, GameState } from '../types';
 import { isWaterTerrain } from './catalog';
@@ -88,6 +88,11 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
     next.officers[officerId].acted = true;
     next.officers[officerId].location = { kind: 'unit', unitId };
   }
+  // 太守出征：出发城自动补任太守（本城最高政治值武将）
+  const departCity = next.cities[input.cityId];
+  if (departCity.governorId && officerIds.includes(departCity.governorId)) {
+    appointSuccessorGovernor(next, departCity);
+  }
   // 科技：军制1级熟练兵气力上限+20；2级随军参谋初始气力+政治×20%
   const energyCap = energyCapOf(state, forceId);
   const staffOfficerBonus = techLevelOf(state, forceId, 'military') >= 2
@@ -169,6 +174,10 @@ export function deployTransportUnit(state: GameState, forceId: ForceId, input: T
   next.actionPoints[forceId] -= DEPLOY_AP_COST;
   next.officers[input.officerId].acted = true;
   next.officers[input.officerId].location = { kind: 'unit', unitId };
+  // 太守输送出城：出发城自动补任太守
+  if (next.cities[input.cityId].governorId === input.officerId) {
+    appointSuccessorGovernor(next, next.cities[input.cityId]);
+  }
   next.units[unitId] = {
     id: unitId, kind: 'transport', forceId, leaderId: input.officerId, homeCityId: input.cityId,
     gold: input.gold, q: spawn.q, r: spawn.r, troops: input.troops, food: input.food, energy: 100,
