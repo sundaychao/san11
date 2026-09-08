@@ -1,8 +1,9 @@
 import { PLOT_LABELS, PLOT_MAX_DURABILITY, type PlotType } from '../innerAffairs';
-import type { ArmyUnit, City, Facility, GameState } from '../types';
+import type { ArmyUnit, City, Facility, ForceId, GameState } from '../types';
 import { techLevelOf } from '../techs';
 import { effectsOfKind, resolveUnitSkills } from '../skills';
 import { rangedTargetBlockedByForest } from '../skills/rules/combat';
+import { isWaterTerrain } from './catalog';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { cellAt, cityCenter, unitIsIncapacitated } from './movementRules';
 
@@ -34,7 +35,7 @@ export function gridDistanceWithin(from: GridCoord, to: GridCoord, maxDistance: 
 
 export function unitAttackRange(state: GameState, unit: ArmyUnit) {
   let range = 1;
-  if (cellAt(state, unit)?.terrain === 'water') range = 2;
+  if (isWaterTerrain(cellAt(state, unit)?.terrain)) range = 2;
   else if (['crossbow', 'siege'].includes(unit.troopType ?? 'sword')) {
     // 科技：弩兵3级劲弩射程+1
     if (unit.troopType === 'crossbow' && unit.forceId && techLevelOf(state, unit.forceId, 'crossbow') >= 3) range = 3;
@@ -100,7 +101,8 @@ export function attackableCities(state: GameState, attackerId: string, origin?: 
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
   const range = unitAttackRange(state, attackerAtOrigin);
   return Object.values(state.cities)
-    .filter((city) => city.ownerId !== attacker.forceId && isCityInAttackRange(state, attackerAtOrigin, city))
+    // 有守军的无主城仍可攻击（消灭守军后占领）；无守军无主城直接进驻即可，不列为攻击目标
+    .filter((city) => city.ownerId !== attacker.forceId && (city.ownerId !== null || city.troops > 0) && isCityInAttackRange(state, attackerAtOrigin, city))
     .sort((a, b) => (
       Math.min(...sevenCellCityFootprint(cityCenter(a)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, range))) -
       Math.min(...sevenCellCityFootprint(cityCenter(b)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, range))) ||
@@ -130,7 +132,7 @@ export interface PlotAttackTarget {
   type: PlotType;
   label: string;
   durability: number;
-  forceId: ArmyUnit['forceId'];
+  forceId: ArmyUnit['forceId'] | null;
 }
 
 export function attackablePlots(state: GameState, attackerId: string, origin?: GridCoord): PlotAttackTarget[] {
@@ -140,7 +142,9 @@ export function attackablePlots(state: GameState, attackerId: string, origin?: G
   const range = unitAttackRange(state, attackerAtOrigin);
   const targets: PlotAttackTarget[] = [];
   for (const city of Object.values(state.cities)) {
-    if (city.ownerId === attacker.forceId) continue;
+    // 有守军的无主城设施可攻击；无守军无主城直接进驻即可
+    if (city.ownerId === attacker.forceId || (city.ownerId === null && city.troops === 0)) continue;
+    const ownerForceId = city.ownerId;
     city.plots?.forEach((plot, plotIndex) => {
       if (plot.q == null || plot.r == null) return;
       if (plot.type === 'empty' && !plot.constructing) return;
@@ -155,7 +159,7 @@ export function attackablePlots(state: GameState, attackerId: string, origin?: G
         type,
         label: PLOT_LABELS[type],
         durability: plot.durability ?? PLOT_MAX_DURABILITY,
-        forceId: city.ownerId,
+        forceId: ownerForceId,
       });
     });
   }

@@ -92,7 +92,7 @@ const SUB_COMMANDS: Record<MenuSection, SubItem[]> = {
   diplomacy: [
     { label: '流言', command: 'rumor' },
     { label: '挖角', command: 'poach' },
-    { label: '外交', command: 'diplomacy' },
+    { label: '亲善', command: 'diplomacy' },
   ],
   monarch: [
     { label: '官职', command: 'appointPosition' },

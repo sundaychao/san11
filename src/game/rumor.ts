@@ -29,12 +29,12 @@ export interface RumorResult {
 
 /** 读取目标势力防御方智力：军师 → 太守 → 君主（参考原版取值顺序） */
 function defenderIntelligence(state: GameState, city: City): number {
-  const strategist = forceStrategist(state, city.ownerId);
+  const strategist = city.ownerId ? forceStrategist(state, city.ownerId) : undefined;
   let guard = strategist?.stats.intelligence ?? undefined;
   const governor = city.governorId ? state.officers[city.governorId] : undefined;
   if (guard === undefined && governor) guard = governor.stats.intelligence;
   if (guard === undefined) {
-    const leaderId = state.forces[city.ownerId]?.leaderId;
+    const leaderId = city.ownerId ? state.forces[city.ownerId]?.leaderId : undefined;
     const leader = leaderId ? state.officers[leaderId] : undefined;
     guard = leader?.stats.intelligence ?? 0;
   }

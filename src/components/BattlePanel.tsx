@@ -15,7 +15,7 @@ export function BattlePanel() {
       candidate.location.cityId === city.id &&
       !candidate.acted
     ));
-    const target = Object.values(state.cities).find((candidate) => candidate.ownerId !== state.playerForceId);
+    const target = Object.values(state.cities).find((candidate) => candidate.ownerId !== null && candidate.ownerId !== state.playerForceId);
     if (!officer || !target || city.troops < 4500 || city.food < 6000) return null;
     return { city, officer, target };
   }, [selectedCityId, state]);

@@ -17,7 +17,7 @@ function formatNumber(value: number) {
 export function CityPlotInfoPanel({ city, plotIndex, state, position }: CityPlotInfoPanelProps) {
   const plot = cityPlots(city)[plotIndex];
   if (!plot) return null;
-  const force = state.forces[city.ownerId];
+  const force = city.ownerId ? state.forces[city.ownerId] : undefined;
   const leader = force ? state.officers[force.leaderId] : undefined;
   const constructing = plot.constructing;
   const name = constructing

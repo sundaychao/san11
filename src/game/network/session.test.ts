@@ -54,6 +54,7 @@ describe('online room session', () => {
       gold: 1000,
       food: 3000,
       energy: 100,
+      stamina: 100,
       movementRemaining: 5,
       moved: false,
       acted: false,
@@ -277,6 +278,7 @@ describe('online room session', () => {
       gold: 1000,
       food: 3000,
       energy: 100,
+      stamina: 100,
       movementRemaining: 5,
       moved: false,
       acted: false,
@@ -306,7 +308,7 @@ describe('online room session', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.room.state?.units['host-strategy-unit']).toMatchObject({ energy: 85, acted: true });
+    expect(result.room.state?.units['host-strategy-unit']).toMatchObject({ stamina: 85, acted: true });
     expect(result.room.state?.units['guest-strategy-target'].confusedTenDays).toBeGreaterThanOrEqual(1);
     expect(result.room.state?.units['guest-strategy-target'].confusedTenDays).toBeLessThanOrEqual(3);
     expect(playerState(result.room, 'guest')?.units['guest-strategy-target'].confusedTenDays).toBe(
@@ -317,7 +319,7 @@ describe('online room session', () => {
   it.each([
     ['disturb', 85],
     ['discord', 80],
-  ] as const)('matches the complete seeded %s outcome through local and online reducers', (strategyId, expectedEnergy) => {
+  ] as const)('matches the complete seeded %s outcome through local and online reducers', (strategyId, expectedStamina) => {
     const room = readyStrategyRoom();
     const localStart = playerState(room, 'host');
     if (!localStart) throw new Error('host state should exist');
@@ -342,8 +344,8 @@ describe('online room session', () => {
     expect(onlineOutcome.strategyResultReports).toEqual([expect.objectContaining({
       strategyId, succeeded: true, q: 9, r: 25,
     })]);
-    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ energy: expectedEnergy, acted: true });
-    expect(localOutcome.units['host-strategy-unit']).toMatchObject({ energy: expectedEnergy, acted: true });
+    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ stamina: expectedStamina, acted: true });
+    expect(localOutcome.units['host-strategy-unit']).toMatchObject({ stamina: expectedStamina, acted: true });
 
     if (strategyId === 'disturb') {
       expect(onlineOutcome.units['guest-strategy-target'].confusedTenDays).toBeGreaterThanOrEqual(1);
@@ -370,7 +372,7 @@ describe('online room session', () => {
     room.state.officers['cao-cao'].stats.intelligence = 1;
     room.state.officers['cao-ren'].stats.intelligence = 1;
     room.state.units['host-strategy-unit'].officerIds = ['liu-bei', 'zhuge-liang'];
-    room.state.units['host-strategy-unit'].energy = 1;
+    room.state.units['host-strategy-unit'].stamina = 1;
     const localStart = playerState(room, 'host');
     if (!localStart) throw new Error('host state should exist');
     const intent = {
@@ -387,7 +389,7 @@ describe('online room session', () => {
     if (!onlineResult.ok || !onlineResult.room.state) throw new Error('online strategy should succeed');
     const onlineOutcome = onlineResult.room.state;
     expect(onlineOutcome).toEqual(localOutcome);
-    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ energy: 0, acted: true });
+    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ stamina: 0, acted: true });
     expect(onlineOutcome.units['guest-strategy-target'].confusedTenDays).toBe(
       onlineOutcome.units['guest-discord-victim'].confusedTenDays,
     );
@@ -427,7 +429,7 @@ describe('online room session', () => {
     expect(onlineOutcome.battleDamageReports).toEqual([
       expect.objectContaining({ unitId: 'guest-strategy-target', amount: 1000, q: 9, r: 25 }),
     ]);
-    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ energy: 90, acted: true });
+    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ stamina: 90, acted: true });
     expect(onlineOutcome.rngCursor).toBe(localStart.rngCursor + 1);
   });
 
@@ -460,7 +462,7 @@ describe('online room session', () => {
     expect(onlineOutcome.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: 9, r: 25 }));
     expect(onlineOutcome.units['guest-strategy-target'].troops).toBe(3000);
     expect(onlineOutcome.battleDamageReports).toEqual([]);
-    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ energy: 90, acted: true });
+    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ stamina: 90, acted: true });
     expect(onlineOutcome.rngCursor).toBe(localStart.rngCursor);
   });
 
@@ -492,7 +494,7 @@ describe('online room session', () => {
     ]);
     expect(onlineOutcome.units['guest-strategy-target'].confusedTenDays).toBeUndefined();
     expect(onlineOutcome.battleDamageReports).toEqual([]);
-    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ energy: 85, acted: true });
+    expect(onlineOutcome.units['host-strategy-unit']).toMatchObject({ stamina: 85, acted: true });
     expect(onlineOutcome.rngCursor).toBe(localStart.rngCursor);
   });
 
@@ -623,7 +625,8 @@ describe('online room session', () => {
     expect(hostDone.ok).toBe(true);
     if (!hostDone.ok) return;
     expect(hostDone.room.activePlayerId).toBe('guest');
-    expect(hostDone.room.state?.units['liu-target'].troops).toBe(2700);
+    // cao 箭楼位于襄阳（要塞特性、cao 领地）境内，伤害 300×1.5=450
+    expect(hostDone.room.state?.units['liu-target'].troops).toBe(2550);
     expect(hostDone.room.state?.units['cao-target'].troops).toBe(3000);
     expect(hostDone.room.state?.units['guest-musician'].energy).toBe(85);
     expect(hostDone.room.state?.units['host-musician'].energy).toBe(80);
@@ -718,7 +721,8 @@ describe('online room session', () => {
     expect(guestDone.ok).toBe(true);
     if (!guestDone.ok) return;
     expect(guestDone.room.state?.tenDay).toBe(2);
-    expect(guestDone.room.state?.units['liu-target'].troops).toBe(2700);
+    // cao 箭楼位于襄阳（要塞特性、cao 领地）境内，伤害 300×1.5=450；liu 箭楼在敌方境内无加成，伤害 300
+    expect(guestDone.room.state?.units['liu-target'].troops).toBe(2550);
     expect(guestDone.room.state?.units['cao-target'].troops).toBe(2700);
     expect(guestDone.room.state?.units['host-musician'].energy).toBe(90);
     expect(guestDone.room.state?.units['guest-musician'].energy).toBe(90);
@@ -750,6 +754,7 @@ describe('online room session', () => {
       troops: 4000,
       food: 4000,
       energy: 60,
+      stamina: 40,
       movementRemaining: 20,
       moved: false,
       acted: false,
@@ -773,6 +778,8 @@ describe('online room session', () => {
 
     expect(guestDone.ok).toBe(true);
     if (!guestDone.ok) return;
-    expect(guestDone.room.state?.units['biao-musician'].energy).toBe(80);
+    // 气力：每旬基础 +5 + 乐奏 +5；军乐台只回战力（+6），不回气力
+    expect(guestDone.room.state?.units['biao-musician'].energy).toBe(70);
+    expect(guestDone.room.state?.units['biao-musician'].stamina).toBe(40 + (room.state?.officers['biao-musician-leader'].stats.politics ?? 0) * 0.12 + 6);
   });
 });

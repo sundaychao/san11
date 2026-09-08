@@ -1,7 +1,7 @@
 import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentProductionIntelligence, armamentProductionTenDays, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
+import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentCost, armamentProductionIntelligence, armamentProductionTenDays, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
 import { COMMAND_AP, COMMAND_LABELS, TRADE_MAX_GRAIN, grainPriceOf, patrolGoldCost, quoteTrade, researchTechPCost, tradeEffectMultiplier, tradeEffectPercent, transferDuration, validateCommand } from '../game/commands';
 import { MAX_TECH_LEVEL, TECH_BRANCHES, TECH_COSTS, recruitMultiplier, researchTenDays, techLevelOf } from '../game/techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition, treasureEffectText } from '../game/treasures';
@@ -11,6 +11,7 @@ import { POSITIONS, forceRankOf, officerIsOnCampaign, officerMerit, positionDefi
 import { capturableByLoyalty, captivesOf, recruitCaptiveChance, CAPTIVE_RECRUIT_LOYALTY_THRESHOLD } from '../game/captives';
 import { DIPLOMACY_GOLD_MAX, GOODWILL_GOLD_COST, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, areAllies, forceDiplomacy } from '../game/diplomacy';
 import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasPlotFacility, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
+import { hasCityTrait } from '../game/cityTraits';
 import { MARRY_TECHP_COST, relationCandidates } from '../game/relationship';
 import { POACH_GOLD_COST, RUMOR_GOLD_COST, canPoach, rumorTargets } from '../game/rumor';
 import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from '../game/skills/rules/city';
@@ -397,9 +398,9 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
   const productionTenDays = type === 'produceArmament' && isDelayedArmament(armamentType) && hasExecutors
     ? armamentProductionTenDays(activeExecutors, armamentProductionSpeedMultiplier(state, command as Extract<GameCommand, { type: 'produceArmament' }>))
     : 0;
-  // 训练：气力 +【(武力总和 + 武力最大值) ÷ 基数】+ 3（封顶100）
+  // 训练：气力 +【(武力总和 + 武力最大值) ÷ 基数】+ 3（封顶100），城池建有兵部时效果翻倍
   const trainEstimate = type === 'train' && hasExecutors
-    ? Math.min(trainMoraleGain(activeExecutors, city.troops), 100 - city.training)
+    ? Math.min(trainMoraleGain(activeExecutors, city.troops) * ((city.plots ?? []).some((plot) => plot.type === 'bingbu') ? 2 : 1), 100 - city.training)
     : 0;
   // 巡查：治安 +【统率总和 ÷ 28】+ 2（封顶100）
   const patrolEstimate = type === 'patrol' && hasExecutors
@@ -466,7 +467,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
       : type === 'train'
         ? `兵粮 300 · 气力 +${trainEstimate}`
         : type === 'produceArmament'
-          ? `资金 ${ARMAMENT_GOLD_COST} · ${ARMAMENT_LABELS[armamentType]} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType) ? `${productionTenDays}旬` : '即时'}`
+          ? `资金 ${armamentCost(city, armamentType)} · ${ARMAMENT_LABELS[armamentType]} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType) ? `${productionTenDays}旬` : '即时'}`
           : type === 'patrol'
             ? `资金 ${patrolGoldCost(city)} · 治安 +${patrolEstimate}`
             : type === 'trade'
@@ -726,7 +727,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
               })}
             </div>
             <dl className="produce-stock">
-              <div><dt>资金</dt><dd>{city.gold.toLocaleString('en-US')} → {Math.max(0, city.gold - ARMAMENT_GOLD_COST).toLocaleString('en-US')}</dd></div>
+              <div><dt>资金</dt><dd>{city.gold.toLocaleString('en-US')} → {Math.max(0, city.gold - armamentCost(city, armamentType)).toLocaleString('en-US')}{armamentCost(city, armamentType) < ARMAMENT_GOLD_COST ? '（特色优惠）' : ''}</dd></div>
               <div><dt>期间</dt><dd>{isDelayedArmament(armamentType) ? `${productionTenDays}旬（综合智${armamentProductionIntelligence(activeExecutors)}）` : '即时'}</dd></div>
               <div><dt>效果</dt><dd>有利于对应兵种出征</dd></div>
             </dl>
@@ -1220,12 +1221,19 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
             ALL_FACILITIES.map((f) => [f, plotCountIncludingConstructing(city, f)])
           ) as Record<PlotType, number>;
           const isUniqueBuilt = (f: PlotType) => UNIQUE_FACILITIES.includes(f) && facilityCounts[f] > 0;
+          // 城池特性限制：水港才能建造船厂，学术才能建太学
+          const traitBlockedReason = (f: PlotType): string | undefined => {
+            if (f === 'shipyard' && !hasCityTrait(city.id, 'waterPort')) return '只有水港城市可以建造船厂';
+            if (f === 'taixue' && !hasCityTrait(city.id, 'academy')) return '只有学术城市可以建造太学';
+            return undefined;
+          };
           return (
             <section className="grant-treasure-panel" aria-label="开发">
               <div className="plot-facility-grid">
                 {ALL_FACILITIES.map((f) => {
                   const selected = plotFacility === f;
-                  const disabled = isUniqueBuilt(f);
+                  const traitReason = traitBlockedReason(f);
+                  const disabled = isUniqueBuilt(f) || !!traitReason;
                   const level = facilityCounts[f];
                   return (
                     <button
@@ -1234,16 +1242,17 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
                       className={`plot-facility-card${selected ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
                       onClick={() => !disabled && setPlotFacility(f)}
                       disabled={disabled}
+                      title={traitReason}
                     >
                       <div className="plot-facility-card-title">
                         <span>{PLOT_LABELS[f]}</span>
                         {disabled ? (
-                          <span className="plot-facility-card-level">已建</span>
+                          <span className="plot-facility-card-level">{traitReason ? '特性不符' : '已建'}</span>
                         ) : level > 0 ? (
                           <span className="plot-facility-card-level">Lv.{level}</span>
                         ) : null}
                       </div>
-                      <div className="plot-facility-card-desc">{plotCost(f)} 金{UNIQUE_FACILITIES.includes(f) ? ' · 限一' : ''}</div>
+                      <div className="plot-facility-card-desc">{plotCost(f)} 金{traitReason ? ` · ${f === 'shipyard' ? '需水港' : '需学术'}` : UNIQUE_FACILITIES.includes(f) ? ' · 限一' : ''}</div>
                     </button>
                   );
                 })}

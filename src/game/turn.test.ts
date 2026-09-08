@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { armamentProductionTenDays } from './armaments';
 import { executeCommand } from './commands';
+import { hasCityTrait } from './cityTraits';
 import { cityMonthlyGoldIncome, cityMonthlyOfficerSalary, cityQuarterlyFoodIncome, cityPlots } from './innerAffairs';
 import { createGame } from './scenario/jingxiang208';
 import { resolveCitySkills } from './skills/sources';
@@ -173,12 +174,12 @@ describe('monthly settlement', () => {
 
     const next = settleMonth(state);
 
-    expect(next.rngCursor).toBe(17);
+    expect(next.rngCursor).toBe(97);
     expect(next.logs.slice(-2)).toEqual([
-      { id: 'event-1-wuling-13', month: 1, forceId: 'liu', message: '武陵发生洪水' },
+      { id: 'event-1-wu-86', month: 1, forceId: null, message: '吴发生丰收' },
       { id: 'month-2', month: 2, forceId: null, message: '进入建安十三年后的第2个月。' },
     ]);
-    // 长沙/零陵不受武陵洪水影响，order/troops 维持种子值；population 按增长公式确定性增长
+    // 长沙/零陵本月无事件影响，order/troops 维持种子值；population 按增长公式确定性增长
     const changsha = state.cities.changsha;
     const lingling = state.cities.lingling;
     const changshaGrowth = Math.floor(changsha.population * 0.005 * changsha.order / 100);
@@ -253,7 +254,8 @@ describe('ten-day settlement', () => {
       kind: 'task', cityId: 'changsha', task: 'armament', armamentType: 'ram', amount: 2, remainingTenDays: 1,
     };
     const city = state.cities.changsha;
-    const cityFoodAfterSupply = city.food - Math.ceil((city.troops * 500) / 10000);
+    // 军马与士兵同口粮消耗
+    const cityFoodAfterSupply = city.food - Math.ceil(((city.troops + (city.armaments?.cavalry ?? 0)) * 500) / 10000);
     const quarterlyFood = cityQuarterlyFoodIncome(city);
     const skillSources = (current: typeof state) => resolveCitySkills(current, 'changsha').map((skill) => ({
       name: skill.definition.name,
@@ -305,7 +307,39 @@ describe('ten-day settlement', () => {
 
     const next = settleTenDay(state);
 
-    expect(next.cities.jiangling.food).toBe(9500);
+    // 士兵 10000 + 军马 3000 同口粮：(10000+3000)×500÷10000 = 650
+    expect(next.cities.jiangling.food).toBe(9350);
+  });
+
+  it('butchers horses as food substitute when the city runs short of grain', () => {
+    const state = createGame('liu', 1);
+    state.tenDay = 1;
+    state.cities.jiangling.troops = 10000;
+    state.cities.jiangling.armaments!.cavalry = 3000;
+    // 存粮 300，缺口 350 → 宰马 ⌈350÷2⌉=175 匹抵 350 粮，士兵无损失
+    state.cities.jiangling.food = 300;
+
+    const next = settleTenDay(state);
+
+    expect(next.cities.jiangling.food).toBe(0);
+    expect(next.cities.jiangling.armaments!.cavalry).toBe(2825);
+    expect(next.cities.jiangling.troops).toBe(10000);
+    expect(next.logs.some((log) => log.message.includes('宰杀军马175匹'))).toBe(true);
+  });
+
+  it('starves 23% of current troops each ten-day when horses cannot cover the deficit', () => {
+    const state = createGame('liu', 1);
+    state.tenDay = 1;
+    state.cities.jiangling.troops = 10000;
+    state.cities.jiangling.armaments!.cavalry = 0;
+    state.cities.jiangling.food = 0;
+
+    const next = settleTenDay(state);
+
+    // 完全无粮无马：饿死当前兵力 23% = 2300
+    expect(next.cities.jiangling.troops).toBe(7700);
+    expect(next.cities.jiangling.food).toBe(0);
+    expect(next.logs.some((log) => log.message.includes('缺粮') && log.message.includes('2,300士兵'))).toBe(true);
   });
 
   it('consumes field unit food in proportion to unit size', () => {
@@ -687,12 +721,14 @@ describe('ten-day settlement', () => {
     const afterOne = settleTenDay(transferred);
     const afterTwo = settleTenDay(afterOne);
     const afterThree = settleTenDay(afterTwo);
+    const afterFour = settleTenDay(afterThree);
 
-    expect(afterOne.officers['guan-yu'].location).toMatchObject({ kind: 'transfer', remainingTenDays: 2 });
-    expect(afterTwo.officers['guan-yu'].location).toMatchObject({ kind: 'transfer', remainingTenDays: 1 });
-    expect(afterThree.officers['guan-yu'].location).toEqual({ kind: 'city', cityId: 'wuling' });
-    expect(afterThree.officers['guan-yu'].cityId).toBe('wuling');
-    expect(afterThree.logs.some((log) => log.message.includes('关羽抵达武陵'))).toBe(true);
+    expect(afterOne.officers['guan-yu'].location).toMatchObject({ kind: 'transfer', remainingTenDays: 3 });
+    expect(afterTwo.officers['guan-yu'].location).toMatchObject({ kind: 'transfer', remainingTenDays: 2 });
+    expect(afterThree.officers['guan-yu'].location).toMatchObject({ kind: 'transfer', remainingTenDays: 1 });
+    expect(afterFour.officers['guan-yu'].location).toEqual({ kind: 'city', cityId: 'wuling' });
+    expect(afterFour.officers['guan-yu'].cityId).toBe('wuling');
+    expect(afterFour.logs.some((log) => log.message.includes('关羽抵达武陵'))).toBe(true);
   });
 
   it('completes tech research and raises the force branch level', () => {
@@ -725,13 +761,14 @@ describe('ten-day settlement', () => {
   it('accumulates techP from city population each ten-day', () => {
     const state = createGame('liu', 1);
     state.forces.liu.techP = 0;
-    // techP = Σ (floor(城市人口 / 3000) + floor(农村人口 / 12000))（双系数按旬分摊近似血色衣冠6.0 城市系数8、农村系数2）
+    // techP = Σ round((floor(城市人口/3000) + floor(农村人口/12000)) × 学术系数)（学术城×1.5）
     const expected = Object.values(state.cities)
       .filter((c) => c.ownerId === 'liu')
       .reduce((sum, c) => {
         const urban = c.cityPopulation ?? Math.round(c.population * (c.population <= 250000 ? 0.15 : c.population < 500000 ? 0.175 : 0.2));
         const rural = c.ruralPopulation ?? Math.max(0, c.population - urban);
-        return sum + Math.floor(urban / 3000) + Math.floor(rural / 12000);
+        const academicMultiplier = hasCityTrait(c.id, 'academy') ? 1.5 : 1;
+        return sum + Math.round((Math.floor(urban / 3000) + Math.floor(rural / 12000)) * academicMultiplier);
       }, 0);
 
     const next = settleTenDay(state);

@@ -3,10 +3,13 @@ import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
 import { MAX_TECH_LEVEL, TECH_BRANCHES, TECHP_CITY_POP_DIVISOR, TECHP_RURAL_POP_DIVISOR, techLevelOf, addTechP } from './techs';
 import { movementAllowanceForUnit, unitSupplyMultiplier } from './battle/actions';
+import { unitMaxPolitics } from './battle/legacyCore';
 import { applyGroundFireDamageToCities, applyGroundFireDamageToFacilities, applyGroundFireDamageToPlots, applyGroundFireDamageToUnits } from './battle/fire';
 import { cellAt } from './battle/movementRules';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
+import { hasCityTrait } from './cityTraits';
+import { territoryCityAt } from './territory';
 import { movementAllowanceBonus } from './skills/rules/movement';
 import { cityPopulationOf, ruralPopulationOf } from './innerAffairs';
 import { settleLoyaltyDrift } from './loyalty';
@@ -349,27 +352,67 @@ function settleUnitBurning(next: GameState, unit: ArmyUnit) {
   if (unit.troops <= 0) removeUnit(next, unit);
 }
 
+/** 缺粮时每旬饿死的当前兵力比例 */
+const CITY_STARVATION_TROOP_LOSS_RATIO = 0.23;
+/** 军马充饥替代比例：1马=2粮 */
+const HORSE_FOOD_SUBSTITUTE = 2;
+
 function settleCitySupply(next: GameState, city: City) {
   // 度支：所属城市士兵消费的兵粮减半
   const foodMultiplier = effectsOfKind(resolveCitySkills(next, city.id), 'cityFoodConsumptionMultiplier')
     .reduce((lowest, { effect }) => Math.min(lowest, effect.multiplier), 1);
-  const foodCost = Math.max(0, Math.ceil((city.troops * CITY_FOOD_PER_TEN_THOUSAND_TROOPS * foodMultiplier) / 10000));
-  city.food = Math.max(0, city.food - foodCost);
+  // 军马与士兵按同一口粮标准消耗
+  const horses = city.armaments?.cavalry ?? 0;
+  const foodCost = Math.max(0, Math.ceil(((city.troops + horses) * CITY_FOOD_PER_TEN_THOUSAND_TROOPS * foodMultiplier) / 10000));
+  if (city.food >= foodCost) {
+    city.food -= foodCost;
+  } else {
+    // 缺粮：先耗尽存粮，再宰杀军马充饥（1马=2粮）
+    let deficit = foodCost - city.food;
+    city.food = 0;
+    const horsesEaten = Math.min(horses, Math.ceil(deficit / HORSE_FOOD_SUBSTITUTE));
+    if (horsesEaten > 0 && city.armaments) {
+      city.armaments.cavalry = horses - horsesEaten;
+      deficit = Math.max(0, deficit - horsesEaten * HORSE_FOOD_SUBSTITUTE);
+      next.logs.push({
+        id: `city-horse-food-${city.id}-${next.month}-${next.tenDay}-${next.logs.length}`,
+        month: next.month,
+        forceId: city.ownerId,
+        message: `${city.name}缺粮，宰杀军马${horsesEaten.toLocaleString('en-US')}匹充饥`,
+      });
+    }
+    // 军马仍不足以抵粮：每旬饿死当前兵力的23%
+    if (deficit > 0 && city.troops > 0) {
+      const lost = Math.ceil(city.troops * CITY_STARVATION_TROOP_LOSS_RATIO);
+      city.troops = Math.max(0, city.troops - lost);
+      next.logs.push({
+        id: `city-starve-${city.id}-${next.month}-${next.tenDay}-${next.logs.length}`,
+        month: next.month,
+        forceId: city.ownerId,
+        message: `${city.name}缺粮，${lost.toLocaleString('en-US')}士兵饿死或逃亡`,
+      });
+    }
+  }
   // 内政4级仁政：治安自然回升翻倍
   if (city.ownerId && techLevelOf(next, city.ownerId, 'civil') >= 4) {
     city.order = clamp(city.order + 2, 0, 100);
   }
   // 技巧P：每旬每城按城市/农村人口双系数产出（对应血色6.0 城市系数8、农村系数2，按旬分摊后近似 城市÷3000 + 农村÷12000）
+  // 学术城：人口产生的技巧值+50%
   if (city.ownerId) {
     const urbanTechP = Math.floor(cityPopulationOf(city) / TECHP_CITY_POP_DIVISOR);
     const ruralTechP = Math.floor(ruralPopulationOf(city) / TECHP_RURAL_POP_DIVISOR);
-    addTechP(next, city.ownerId, urbanTechP + ruralTechP);
+    addTechP(next, city.ownerId, Math.round((urbanTechP + ruralTechP) * (hasCityTrait(city.id, 'academy') ? 1.5 : 1)));
   }
 }
 
 function settleUnitSupply(next: GameState, unit: ArmyUnit) {
   const energyCap = unit.forceId ? (100 + (techLevelOf(next, unit.forceId, 'military') >= 1 ? 20 : 0)) : 100;
   const energyRegen = unit.forceId && techLevelOf(next, unit.forceId, 'military') >= 4 ? 10 : 5;
+  // 战力回复：每旬恢复 部队最高政治×12% 的战力（运输队无战力属性，跳过）
+  if (unit.stamina !== undefined) {
+    unit.stamina = Math.min(100, (unit.stamina ?? 0) + unitMaxPolitics(next, unit) * 0.12);
+  }
   const baseFoodCost = Math.max(0, Math.ceil((unit.troops * UNIT_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
   const foodCost = Math.ceil(baseFoodCost * unitSupplyMultiplier(next, unit));
   if (unit.food >= foodCost) {
@@ -379,6 +422,13 @@ function settleUnitSupply(next: GameState, unit: ArmyUnit) {
     unit.food = 0;
     unit.energy = Math.max(0, unit.energy - 20);
     unit.troops = Math.max(0, unit.troops - Math.max(100, Math.ceil(unit.troops * 0.08)));
+  }
+
+  // 蛮荒城：领土上的敌方部队每旬士气-2
+  const territoryCity = territoryCityAt(next, unit);
+  if (territoryCity.ownerId && unit.forceId && unit.forceId !== territoryCity.ownerId
+    && hasCityTrait(territoryCity.id, 'wilderness')) {
+    unit.energy = Math.max(0, unit.energy - 2);
   }
 
   if (unit.troops <= 0) {

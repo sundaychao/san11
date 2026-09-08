@@ -1,4 +1,6 @@
-import { Brush, Castle, FileImage, FileJson, FileText, Mountain, RotateCcw, RotateCw, Trash2, Waves } from 'lucide-react';
+import {
+  Brush, Castle, Droplets, FileImage, FileJson, FileText, Mountain, RotateCcw, RotateCw, Trash2, Trees, Waves,
+} from 'lucide-react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import type { MapEditorTool } from '../game/map-editor/editor';
 import type { TerrainType } from '../game/types';
@@ -27,12 +29,24 @@ interface MapEditorPanelProps {
 
 const TERRAIN_TOOLS: Array<{ tool: TerrainType; label: string; icon: typeof Brush }> = [
   { tool: 'plain', label: '平地', icon: Brush },
-  { tool: 'road', label: '道路', icon: FileText },
-  { tool: 'forest', label: '森林', icon: Brush },
+  { tool: 'grass', label: '草地', icon: Brush },
+  { tool: 'road', label: '主径', icon: FileText },
+  { tool: 'path', label: '小径', icon: FileText },
+  { tool: 'plank', label: '栈道', icon: FileText },
+  { tool: 'forest', label: '森林', icon: Trees },
   { tool: 'hill', label: '丘陵', icon: Mountain },
-  { tool: 'mountain', label: '高山', icon: Mountain },
-  { tool: 'water', label: '水域', icon: Waves },
+  { tool: 'mountain', label: '山崖', icon: Mountain },
+  { tool: 'sand', label: '沙地', icon: Brush },
+  { tool: 'wasteland', label: '荒地', icon: Brush },
+  { tool: 'wetland', label: '湿地', icon: Droplets },
+  { tool: 'poison', label: '毒泉', icon: Droplets },
+  { tool: 'shallow', label: '浅滩', icon: Waves },
   { tool: 'ferry', label: '渡口', icon: Waves },
+  { tool: 'shore', label: '岸', icon: Waves },
+  { tool: 'stream', label: '川', icon: Waves },
+  { tool: 'river', label: '河', icon: Waves },
+  { tool: 'sea', label: '海', icon: Waves },
+  { tool: 'water', label: '水域', icon: Waves },
 ];
 
 export function MapEditorPanel({

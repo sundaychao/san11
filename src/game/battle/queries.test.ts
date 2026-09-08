@@ -12,8 +12,9 @@ function combatState() {
     food: 4000,
   });
   const attacker = Object.values(state.units)[0];
-  attacker.q = 10;
-  attacker.r = 10;
+  // 血色衣冠地图下 (10,10) 附近为山地，改用西北平原区 (2,23)（偶数列，邻接关系与原坐标一致）
+  attacker.q = 2;
+  attacker.r = 23;
   attacker.moved = false;
   attacker.acted = false;
   attacker.movementRemaining = 20;
@@ -25,11 +26,12 @@ function combatState() {
     officerIds: ['cao-ren'],
     homeCityId: 'xiangyang',
     troopType: 'spear',
-    q: 11,
-    r: 10,
+    q: 3,
+    r: 23,
     troops: 3000,
     food: 3000,
     energy: 100,
+    stamina: 100,
     movementRemaining: 20,
     moved: false,
     acted: false,
@@ -42,11 +44,12 @@ function combatState() {
     officerIds: ['liu-bei'],
     homeCityId: 'jiangling',
     troopType: 'spear',
-    q: 10,
-    r: 11,
+    q: 2,
+    r: 24,
     troops: 3000,
     food: 3000,
     energy: 100,
+    stamina: 100,
     movementRemaining: 20,
     moved: false,
     acted: false,
@@ -75,14 +78,14 @@ describe('battle queries', () => {
     });
   });
 
-  it('returns tactic reasons and disables tactic command when energy is insufficient', () => {
+  it('returns tactic reasons and disables tactic command when stamina is insufficient', () => {
     const { state, attacker } = combatState();
-    attacker.energy = 0;
+    attacker.stamina = 0;
 
     const query = getUnitActionQuery(state, attacker.id);
 
     expect(query.tacticOptions).toHaveLength(3);
-    expect(query.tacticOptions.every((option) => option.unavailableReason === '气力不足')).toBe(true);
+    expect(query.tacticOptions.every((option) => option.unavailableReason === '战力不足')).toBe(true);
     expect(query.availableTactics).toHaveLength(0);
     expect(query.commandAvailability.tactic).toBe(false);
   });
@@ -91,7 +94,7 @@ describe('battle queries', () => {
     const { state, attacker } = combatState();
     state.officers['guan-yu'].aptitudes = { ...state.officers['guan-yu'].aptitudes!, spear: 'B' };
     attacker.acted = true;
-    attacker.energy = 0;
+    attacker.stamina = 0;
 
     const actedQuery = getUnitActionQuery(state, attacker.id);
 

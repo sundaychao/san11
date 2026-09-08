@@ -17,6 +17,7 @@ export type RankId =
 export type TechBranchId = 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'military' | 'civil';
 
 export type CityId =
+  // 剧本开局有主的 8 城（荆襄）
   | 'wan'
   | 'xiangyang'
   | 'jiangling'
@@ -24,7 +25,42 @@ export type CityId =
   | 'jiangxia'
   | 'changsha'
   | 'lingling'
-  | 'guiyang';
+  | 'guiyang'
+  // 华夏全图其余 34 城（开局无主，随剧本推进可争夺）
+  | 'xiangping'
+  | 'beiping'
+  | 'ji'
+  | 'nanpi'
+  | 'pingyuan'
+  | 'jinyang'
+  | 'ye'
+  | 'beihai'
+  | 'xiapi'
+  | 'xiaopei'
+  | 'shouchun'
+  | 'puyang'
+  | 'chenliu'
+  | 'xuchang'
+  | 'runan'
+  | 'luoyang'
+  | 'changan'
+  | 'shangyong'
+  | 'anding'
+  | 'tianshui'
+  | 'wuwei'
+  | 'jianye'
+  | 'wu'
+  | 'kuaiji'
+  | 'lujiang'
+  | 'chaisang'
+  | 'xinye'
+  | 'yongan'
+  | 'hanzhong'
+  | 'zitong'
+  | 'jiangzhou'
+  | 'chengdu'
+  | 'jianning'
+  | 'yunnan';
 
 export interface Stats {
   leadership: number;
@@ -121,7 +157,8 @@ export type OfficerLocation =
 export interface City {
   id: CityId;
   name: string;
-  ownerId: ForceId;
+  /** 所属势力（null = 无主/空白城市，仅显示不做内政结算） */
+  ownerId: ForceId | null;
   governorId: string | null;
   gold: number;
   food: number;
@@ -355,7 +392,36 @@ export interface GameState {
 
 export type TenDay = 1 | 2 | 3;
 
-export type TerrainType = 'road' | 'plain' | 'forest' | 'hill' | 'mountain' | 'water' | 'ferry' | 'construction';
+/**
+ * 地形词表（含三国志11原版 20 值细分地形，映射自 San11pkres.bin SHEX0008）：
+ *   草地 grass / 土 plain / 砂地 sand / 湿地 wetland / 毒泉 poison / 森林 forest
+ *   川 stream(不可走水面) / 河 river / 海 sea(可下水水面) / 荒地 wasteland
+ *   主径 road / 栈道 plank / 渡所 ferry / 浅滩 shallow(非水面可直接通行)
+ *   岸 shore(不可走) / 崖 mountain / 都市 construction / 关所 pass / 港 ferry(渡口)
+ *   小径 path；hill/water 为旧手绘地图兼容值（旧剧本/编辑器仍在用）
+ */
+export type TerrainType =
+  | 'road'
+  | 'path'
+  | 'plank'
+  | 'plain'
+  | 'grass'
+  | 'sand'
+  | 'wasteland'
+  | 'wetland'
+  | 'poison'
+  | 'forest'
+  | 'hill'
+  | 'mountain'
+  | 'shore'
+  | 'water'
+  | 'stream'
+  | 'river'
+  | 'sea'
+  | 'shallow'
+  | 'ferry'
+  | 'pass'
+  | 'construction';
 export type TroopType = 'sword' | 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'siege';
 export type VehicleType = 'boat' | 'ship';
 export type ArmamentType = 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'ram' | 'tower' | 'ship';
@@ -383,6 +449,8 @@ export interface ArmyUnit {
   troops: number;
   food: number;
   energy: number;
+  /** 战力（战术/计略的能量来源，0~100）。仅战斗部队拥有，运输队无此属性。 */
+  stamina?: number;
   movementRemaining: number;
   confusedTenDays?: number;
   burningTenDays?: number;

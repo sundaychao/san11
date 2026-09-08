@@ -13,3 +13,4 @@ server/data/*.db
 server/data/*.db-*
 server/data/users.json
 server/data/rooms/*.json
+tools/xsyg_map/

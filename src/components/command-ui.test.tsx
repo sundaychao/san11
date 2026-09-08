@@ -335,7 +335,10 @@ describe('command interface', { timeout: 30000 }, () => {
     const user = userEvent.setup();
     renderState();
 
-    await user.click(screen.getByRole('button', { name: '巡察' }));
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    await user.click(within(menu).getByTestId('city-command-command-patrol'));
     const dialog = screen.getByRole('dialog', { name: '巡察' });
     // 打开执行武将勾选弹窗：默认已按增益贪心勾选统率 Top3（关羽、陈到、刘备）。
     // 反选关羽+陈到，只留刘备 1 人执行
@@ -349,7 +352,9 @@ describe('command interface', { timeout: 30000 }, () => {
 
     expect(screen.queryByRole('dialog', { name: '巡察' })).not.toBeInTheDocument();
     expect(screen.getByText(/刘备巡察江陵/)).toBeVisible();
-    expect(screen.getByText('已行动')).toBeVisible();
+    // 本势力概览切到武将页签：刘备本旬已行动（行文本为「江陵 / 已行动」）
+    await user.click(within(screen.getByTestId('force-overview-panel')).getByRole('button', { name: '武将' }));
+    expect(screen.getByText(/已行动/)).toBeVisible();
   });
 
   it('buys grain by dragging the merchant slider right and sells by dragging it left', async () => {
@@ -358,7 +363,10 @@ describe('command interface', { timeout: 30000 }, () => {
     state.cities.jiangling.merchantPresent = true;
     renderState(state);
 
-    await user.click(screen.getByRole('button', { name: '商人' }));
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    await user.click(within(menu).getByTestId('city-command-command-trade'));
     const dialog = screen.getByRole('dialog', { name: '商人' });
     expect(within(dialog).getByText(/粮价 1金=5粮/)).toBeVisible();
     const slider = within(dialog).getByLabelText('交易数量') as HTMLInputElement;
@@ -380,7 +388,10 @@ describe('command interface', { timeout: 30000 }, () => {
     state.cities.jiangling.merchantPresent = true;
     renderState(state);
 
-    await user.click(screen.getByRole('button', { name: '商人' }));
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    await user.click(within(menu).getByTestId('city-command-command-trade'));
     const dialog = screen.getByRole('dialog', { name: '商人' });
     const slider = within(dialog).getByLabelText('交易数量') as HTMLInputElement;
 
@@ -396,21 +407,27 @@ describe('command interface', { timeout: 30000 }, () => {
   it('moves focus into the command dialog, closes on Escape, and restores focus', async () => {
     const user = userEvent.setup();
     renderState();
-    const launcher = screen.getByRole('button', { name: '巡察' });
 
-    await user.click(launcher);
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    // 命令菜单项在弹出指令窗口时随菜单收起；弹窗关闭后焦点交还给文档主体
+    await user.click(within(menu).getByTestId('city-command-command-patrol'));
     expect(screen.getByRole('button', { name: '执行武将' })).toHaveFocus();
     await user.keyboard('{Escape}');
 
     expect(screen.queryByRole('dialog', { name: '巡察' })).not.toBeInTheDocument();
-    expect(launcher).toHaveFocus();
+    expect(document.body).toHaveFocus();
   });
 
   it('closes a city command dialog on right click', async () => {
     const user = userEvent.setup();
     renderState();
 
-    await user.click(screen.getByTestId('command-patrol-button'));
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    await user.click(within(menu).getByTestId('city-command-command-patrol'));
     const dialog = screen.getAllByRole('dialog')[0];
 
     const defaultWasAllowed = fireEvent.contextMenu(dialog);
@@ -423,7 +440,10 @@ describe('command interface', { timeout: 30000 }, () => {
     const user = userEvent.setup();
     renderState();
 
-    await user.click(screen.getByRole('button', { name: '移动' }));
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-talent'));
+    await user.click(within(menu).getByTestId('city-command-command-transfer'));
     const dialog = screen.getByRole('dialog', { name: '移动' });
     expect(within(dialog).queryByLabelText('执行武将')).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText('移动资金')).not.toBeInTheDocument();
@@ -566,7 +586,7 @@ describe('command interface', { timeout: 30000 }, () => {
   it('opens the strategy menu for Ma Su during the first deployment action', async () => {
     const user = userEvent.setup();
     renderState();
-    panMapTo(86, 136);
+    panMapTo(69, 155);
 
     await user.click(screen.getByRole('button', { name: /^武陵 刘备/ }));
     const menu = screen.getByTestId('city-command-menu');
@@ -585,7 +605,7 @@ describe('command interface', { timeout: 30000 }, () => {
   it('completes Ma Su deployment after selecting 火计 and a target cell', async () => {
     const user = userEvent.setup();
     renderState();
-    panMapTo(86, 136);
+    panMapTo(69, 155);
 
     await user.click(screen.getByRole('button', { name: /^武陵 刘备/ }));
     const menu = screen.getByTestId('city-command-menu');
@@ -821,7 +841,9 @@ describe('command interface', { timeout: 30000 }, () => {
     fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1, clientX: 320, clientY: 220 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
-    expect(screen.getByLabelText('城市经营面板')).toHaveTextContent('4,100');
+    // 出征后重新点击江陵城标唤出都市信息面板：城市资金 5,000 - 900 = 4,100
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    expect(screen.getByTestId('city-status-panel')).toHaveTextContent('4,100');
     const unitMarker = screen.getByTestId('battle-unit-marker');
     fireEvent.pointerEnter(unitMarker, { clientX: 300, clientY: 180 });
     expect(screen.getByTestId('unit-info-panel')).toHaveTextContent('900');
@@ -1098,8 +1120,9 @@ describe('command interface', { timeout: 30000 }, () => {
       food: 3000,
     });
     const attacker = Object.values(state.units)[0];
-    state.units[attacker.id].q = 10;
-    state.units[attacker.id].r = 10;
+    // 血色衣冠地图下 (10,10) 附近为山地，改用西北平原区 (2,23)（偶数列，邻接与推动落点关系一致）
+    state.units[attacker.id].q = 2;
+    state.units[attacker.id].r = 23;
     state.units[attacker.id].moved = false;
     state.units[attacker.id].acted = false;
     state.units[attacker.id].energy = 100;
@@ -1109,8 +1132,8 @@ describe('command interface', { timeout: 30000 }, () => {
       forceId: 'cao',
       leaderId: 'cao-ren',
       homeCityId: 'xiangyang',
-      q: 11,
-      r: 10,
+      q: 3,
+      r: 23,
       troops: 3000,
       food: 3000,
       energy: 100,
@@ -1119,11 +1142,11 @@ describe('command interface', { timeout: 30000 }, () => {
       acted: false,
     };
     renderState(state);
-    // 等比后(10,10)部队区域在初始视野外，平移到该区域让目标/部队格渲染
-    panMapTo(10, 10);
+    // 等比后(2,23)部队区域在初始视野外，平移到该区域让目标/部队格渲染
+    panMapTo(2, 23);
 
     const playerUnit = screen.getAllByTestId('battle-unit-marker')
-      .find((marker) => marker.getAttribute('data-grid-position') === '10,10')!;
+      .find((marker) => marker.getAttribute('data-grid-position') === '2,23')!;
     fireEvent.pointerDown(playerUnit, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
     fireEvent.pointerDown(playerUnit, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
 
@@ -1138,11 +1161,11 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(screen.getByTestId('attack-target-arrow')).toBeVisible();
 
     const enemyUnit = screen.getAllByTestId('battle-unit-marker')
-      .find((marker) => marker.getAttribute('data-grid-position') === '11,10')!;
+      .find((marker) => marker.getAttribute('data-grid-position') === '3,23')!;
     fireEvent.pointerDown(enemyUnit, { button: 0, buttons: 1, clientX: 280, clientY: 180 });
 
     expect(screen.getAllByTestId('battle-unit-marker')
-      .find((marker) => marker.getAttribute('data-grid-position') === '12,11')).toBeTruthy();
+      .find((marker) => marker.getAttribute('data-grid-position') === '4,24')).toBeTruthy();
     expect(screen.getByTestId('battle-damage-number')).toBeVisible();
   });
 
@@ -1191,7 +1214,7 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(within(tacticMenu).getByRole('button', { name: '二段突刺' })).toHaveAttribute('title', '需要枪兵适性 S');
   });
 
-  it('locks tactics that cost more energy while keeping an affordable tactic usable', async () => {
+  it('locks tactics that cost more stamina while keeping an affordable tactic usable', async () => {
     const user = userEvent.setup();
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -1201,7 +1224,7 @@ describe('command interface', { timeout: 30000 }, () => {
       food: 3000,
     });
     const attacker = Object.values(state.units)[0];
-    Object.assign(attacker, { q: 10, r: 10, energy: 19, moved: false, acted: false, movementRemaining: 22 });
+    Object.assign(attacker, { q: 10, r: 10, stamina: 19, moved: false, acted: false, movementRemaining: 22 });
     state.units['enemy-energy-target'] = {
       id: 'enemy-energy-target',
       forceId: 'cao',
@@ -1230,7 +1253,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const tacticMenu = screen.getByTestId('unit-tactic-menu');
     expect(within(tacticMenu).getByRole('button', { name: '突刺' })).toBeEnabled();
     expect(within(tacticMenu).getByRole('button', { name: '螺旋突刺' })).toBeDisabled();
-    expect(within(tacticMenu).getByRole('button', { name: '螺旋突刺' })).toHaveAttribute('title', '气力不足');
+    expect(within(tacticMenu).getByRole('button', { name: '螺旋突刺' })).toHaveAttribute('title', '战力不足');
   });
 
   it('locks a tactic without a valid target while another tactic keeps the primary command enabled', async () => {
@@ -1286,7 +1309,7 @@ describe('command interface', { timeout: 30000 }, () => {
       food: 3000,
     });
     const attacker = Object.values(state.units)[0];
-    Object.assign(attacker, { q: 10, r: 10, energy: 14, moved: false, acted: false, movementRemaining: 22 });
+    Object.assign(attacker, { q: 10, r: 10, stamina: 14, moved: false, acted: false, movementRemaining: 22 });
     state.units['enemy-unavailable-target'] = {
       id: 'enemy-unavailable-target',
       forceId: 'cao',

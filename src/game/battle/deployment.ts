@@ -1,8 +1,10 @@
 import { ARMAMENT_LABELS, armamentsOf, TROOP_ARMAMENT, TROOP_LABELS } from '../armaments';
 import { energyCapOf, techLevelOf, troopMovementBonusForTroop } from '../techs';
 import { unitTroopCapOf } from '../ranks';
+import { hasPlotFacility } from '../innerAffairs';
 import { formationMovementAllowanceBonus } from '../skills/rules/movement';
 import type { ForceId, GameState } from '../types';
+import { isWaterTerrain } from './catalog';
 import {
   DEPLOY_AP_COST,
   movementAllowanceForProfile,
@@ -16,7 +18,7 @@ export type { DeployInput, TransportInput } from './legacyCore';
 
 function preferredSpawnCell(state: GameState, cityId: Parameters<typeof deploymentCells>[1], movement: number, troopType: Parameters<typeof deploymentCells>[3], vehicle?: 'boat' | 'ship') {
   const options = deploymentCells(state, cityId, movement, troopType, vehicle);
-  return options.find((coord) => cellAt(state, coord)?.terrain !== 'water') ?? options[0];
+  return options.find((coord) => !isWaterTerrain(cellAt(state, coord)?.terrain)) ?? options[0];
 }
 
 export function deployUnit(state: GameState, forceId: ForceId, input: DeployInput): GameState {
@@ -92,9 +94,13 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
     ? Math.floor((officer?.stats.politics ?? 0) * 0.2)
     : 0;
   const initialEnergy = Math.min(energyCap, 100 + staffOfficerBonus);
+  // 战力：出城战力 = 城中士气×25% + 部队最高政治×(基础20% + 科技加成0 + 兵部加成20%)
+  const maxPolitics = officers.reduce((max, candidate) => Math.max(max, candidate.stats.politics), 0);
+  const bingbuBonus = hasPlotFacility(city, 'bingbu') ? 0.2 : 0;
+  const initialStamina = Math.min(100, Math.floor(city.training * 0.25 + maxPolitics * (0.2 + bingbuBonus)));
   next.units[unitId] = {
     id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.cityId,
-    troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: initialEnergy,
+    troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: initialEnergy, stamina: initialStamina,
     movementRemaining: movementAllowance, moved: true, acted: false,
   };
   next.logs.push({ id: `deploy-${unitId}`, month: next.month, forceId, message: `${officer.name}率军从${city.name}出征` });
@@ -121,9 +127,13 @@ export function deployUnitPreviewWithId(state: GameState, forceId: ForceId, inpu
   if (!city || !leaderId || !spawn) throw new Error('无法创建出征预览');
   const next = structuredClone(state);
   const unitId = `preview-deploy-${leaderId}`;
+  const previewOfficers = officerIds.map((officerId) => state.officers[officerId]);
+  const previewMaxPolitics = previewOfficers.reduce((max, candidate) => Math.max(max, candidate?.stats.politics ?? 0), 0);
+  const previewBingbuBonus = hasPlotFacility(city, 'bingbu') ? 0.2 : 0;
+  const initialStamina = Math.min(100, Math.floor(city.training * 0.25 + previewMaxPolitics * (0.2 + previewBingbuBonus)));
   next.units[unitId] = {
     id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.cityId,
-    troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: 100,
+    troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: 100, stamina: initialStamina,
     movementRemaining: movementAllowance, moved: true, acted: false,
   };
   return { state: next, unitId };

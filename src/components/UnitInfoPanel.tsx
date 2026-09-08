@@ -50,6 +50,7 @@ export function UnitInfoPanel({ unit, state, position, strategyChance, onPointer
         <div><dt>资金</dt><dd>{(unit.gold ?? 0).toLocaleString('en-US')}</dd></div>
         <div><dt>兵粮</dt><dd>{unit.food.toLocaleString('en-US')}</dd></div>
         <div><dt>士气</dt><dd>{unit.energy}/100</dd></div>
+        <div><dt>战力</dt><dd>{unit.stamina === undefined ? '—' : `${Math.round(unit.stamina)}/100`}</dd></div>
       </dl>
     </aside>
   );

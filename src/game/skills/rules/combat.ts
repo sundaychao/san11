@@ -1,5 +1,5 @@
 import { nextRandom } from '../../random';
-import { NAVAL_TACTIC_IDS } from '../../battle/catalog';
+import { isWaterTerrain, NAVAL_TACTIC_IDS } from '../../battle/catalog';
 import { cellAt } from '../../battle/movementRules';
 import type { TacticId } from '../../battle/tactics';
 import { deployTroopCapOf, energyCapOf, techLevelOf } from '../../techs';
@@ -79,10 +79,6 @@ export function applyNonFireDamageMultiplier(state: GameState, target: ArmyUnit,
     .reduce((acc, { effect }) => acc * effect.multiplier, 1);
   if (multiplier === 1) return damage;
   return Math.max(0, Math.round(damage * multiplier));
-}
-
-function isWaterTerrain(terrain: TerrainType | undefined) {
-  return terrain === 'water';
 }
 
 export function rollNoCounterAttack(state: GameState, attacker: ArmyUnit, terrain: TerrainType) {

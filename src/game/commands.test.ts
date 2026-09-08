@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ARMAMENT_GOLD_COST, produceArmamentYield } from './armaments';
+import { ARMAMENT_GOLD_COST, armamentCost, produceArmamentYield } from './armaments';
 import { COMMAND_AP, TRADE_MAX_GRAIN, executeCommand, grainPriceOf, patrolGoldCost, quoteTrade, rollGrainPrices, rollMerchants, tradeEffectPercent, transferDuration, validateCommand } from './commands';
 import type { PlotType } from './innerAffairs';
 import { armamentYieldMultiplier, barracksYieldMultiplier, cityAttackRangeCoords, recruitBaseYield } from './innerAffairs';
+import { hasCityTrait } from './cityTraits';
 import { POSITIONS, forceRankOf } from './ranks';
 import { createGame } from './scenario/jingxiang208';
 import type { GameState } from './types';
@@ -18,6 +19,24 @@ function withFacilities(state: GameState, facilities: PlotType[] = ['barracks', 
 }
 
 describe('command engine', () => {
+  it('dilutes city training when recruiting fresh troops at morale 50', () => {
+    const state = withFacilities(createGame('liu', 1));
+    const city = state.cities.jiangling;
+    city.troops = 4000;
+    city.training = 90;
+    const next = executeCommand(state, 'liu', {
+      type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'],
+    });
+
+    const gain = next.cities.jiangling.troops - 4000;
+    // (4000×90 + gain×50) ÷ (4000+gain)（城池士气取整存储）
+    const expected = Math.round((4000 * 90 + gain * 50) / (4000 + gain));
+    expect(next.cities.jiangling.training).toBe(expected);
+    // 士气从90被稀释，必然下降但仍高于新兵50
+    expect(next.cities.jiangling.training).toBeLessThan(90);
+    expect(next.cities.jiangling.training).toBeGreaterThan(50);
+  });
+
   it('recruits troops with population, food, gold, and order costs', () => {
     const state = withFacilities(createGame('liu', 1));
     const next = executeCommand(state, 'liu', {
@@ -91,7 +110,8 @@ describe('command engine', () => {
     // 基础 1980（1200 + 智78×10）× 锻冶1级加成 1.15 = 2277
     const expected = Math.round(produceArmamentYield([state.officers['liu-bei']], 'crossbow') * armamentYieldMultiplier(state.cities.jiangling, 'crossbow'));
     expect(next.cities.jiangling.armaments?.crossbow).toBe(currentCrossbows + expected);
-    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - 1000);
+    // 江陵为箭矢特色城：弩生产价格 600（原价60%）
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - armamentCost(state.cities.jiangling, 'crossbow'));
     expect(next.actionPoints.liu).toBe(60);
     expect(next.officers['liu-bei'].acted).toBe(true);
     expect(next.logs.at(-1)?.message).toContain('弩');
@@ -115,7 +135,8 @@ describe('command engine', () => {
     const expected = Math.round(produceArmamentYield([state.officers['liu-bei']], 'crossbow')
       * 2 * armamentYieldMultiplier(state.cities.jiangling, 'crossbow'));
     expect(next.cities.jiangling.armaments!.crossbow - before).toBe(expected);
-    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - ARMAMENT_GOLD_COST);
+    // 江陵为箭矢特色城：弩生产价格 600（原价60%）
+    expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - armamentCost(state.cities.jiangling, 'crossbow'));
     expect(next.actionPoints.liu).toBe(state.actionPoints.liu - COMMAND_AP.produceArmament);
     expect(next.officers['liu-bei'].acted).toBe(true);
   });
@@ -259,10 +280,10 @@ describe('command engine', () => {
       kind: 'transfer',
       fromCityId: 'jiangling',
       targetCityId: 'wuling',
-      remainingTenDays: 3,
+      remainingTenDays: 4,
     });
     expect(next.actionPoints.liu).toBe(70);
-    expect(next.logs.at(-1)?.message).toContain('3旬');
+    expect(next.logs.at(-1)?.message).toContain('4旬');
   });
 
   it('calculates transfer duration in ten-cell bands', () => {
@@ -315,7 +336,7 @@ describe('command engine', () => {
       kind: 'transfer',
       fromCityId: 'wuling',
       targetCityId: 'jiangling',
-      remainingTenDays: 3,
+      remainingTenDays: 4,
     });
     expect(next.officers['guan-yu'].acted).toBe(true);
   });
@@ -467,13 +488,16 @@ describe('command engine', () => {
   it('rolls merchants per city each ten-day and resets the trade flag', () => {
     const state = createGame('liu', 1);
     const cityCount = Object.keys(state.cities).length;
+    const commerceCount = Object.values(state.cities).filter((c) => hasCityTrait(c.id, 'commerce')).length;
     state.cities.jiangling.merchantTradedThisTenDay = true;
 
     rollMerchants(state);
 
-    expect(state.rngCursor).toBe(cityCount);
+    // 商贸城不掷点（商人必到），仅其余城市消耗随机数
+    expect(state.rngCursor).toBe(cityCount - commerceCount);
     for (const city of Object.values(state.cities)) {
-      expect(typeof city.merchantPresent).toBe('boolean');
+      if (hasCityTrait(city.id, 'commerce')) expect(city.merchantPresent).toBe(true);
+      else expect(typeof city.merchantPresent).toBe('boolean');
       expect(city.merchantTradedThisTenDay).toBe(false);
     }
   });

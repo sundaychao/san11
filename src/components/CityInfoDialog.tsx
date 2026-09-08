@@ -13,6 +13,7 @@ import {
   CITY_FOOD_CAP,
   citySizeOf,
 } from '../game/innerAffairs';
+import { CITY_TRAIT_LABELS, CITY_TRAIT_DESCRIPTIONS, hasCityTrait, type CityTrait } from '../game/cityTraits';
 import type { CityId } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -57,7 +58,20 @@ export function CityInfoDialog({ cityId, onClose }: CityInfoDialogProps) {
         <header>
           <div>
             <p>{force ? `${force.name}军` : '无主'} · 太守 {governor?.name ?? '暂无'} · {CITY_SIZE_LABEL[citySize]}</p>
-            <h2 id="city-info-title">{city.name}</h2>
+            <div className="city-info-title-row">
+              <h2 id="city-info-title">{city.name}</h2>
+              <div className="city-traits" aria-label="城池特性">
+                {(Object.keys(CITY_TRAIT_LABELS) as CityTrait[]).map((trait) => (
+                  <span
+                    key={trait}
+                    className={hasCityTrait(city.id, trait) ? 'city-trait city-trait-active' : 'city-trait'}
+                    title={CITY_TRAIT_DESCRIPTIONS[trait]}
+                  >
+                    {CITY_TRAIT_LABELS[trait]}
+                  </span>
+                ))}
+              </div>
+            </div>
           </div>
           <button type="button" className="secondary-button" onClick={onClose}>关闭</button>
         </header>

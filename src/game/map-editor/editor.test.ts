@@ -137,7 +137,7 @@ describe('map editor core', () => {
     expect(svg).toContain('data-q="0" data-r="0" data-terrain="plain" x="0" y="-12"');
     expect(svg).toContain('data-q="1" data-r="0" data-terrain="plain" x="24" y="0"');
     expect(svg).toContain('data-terrain="forest"');
-    expect(svg).toContain('fill="#245a34"');
+    expect(svg).toContain('fill="#3a7048"');
     expect(svg).toContain('data-control-city="jiangling:34,22"');
     expect(svg).not.toContain('<text');
   });

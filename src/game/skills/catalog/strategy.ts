@@ -61,7 +61,7 @@ export const STRATEGY_SKILLS: SkillDefinition[] = [
     },
     { kind: 'strategySuccessBonus', add: 10 },
   ]),
-  activeStrategySkill('百出', '使用计略时气力消耗固定为1', [{ kind: 'strategyEnergyCost', set: 1 }]),
+  activeStrategySkill('百出', '使用计略时战力消耗固定为1', [{ kind: 'strategyEnergyCost', set: 1 }]),
   activeStrategySkill('鬼谋', '计略施放距离增加1', [{ kind: 'strategyRangeBonus', add: 1 }]),
   activeStrategySkill('连环', '敌对计略成功后波及与目标相邻的敌军', [{ kind: 'complexHandler', handler: 'chainStrategy' }]),
   activeStrategySkill('深谋', '敌对计略成功时必定暴击', [{ kind: 'strategyCritical', condition: { kind: 'always' } }]),

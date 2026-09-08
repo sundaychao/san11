@@ -4,7 +4,8 @@ import { neighborsOf } from './grid';
 export const GRID_WIDTH = 70;
 export const GRID_HEIGHT = 40;
 
-export const CITY_GRID_CENTERS: Record<CityId, { q: number; r: number }> = {
+/** 旧 70×40 手绘地图的 8 城坐标（缺省回退用；china42x 全图实际使用剧本城市 gridQ/gridR） */
+export const CITY_GRID_CENTERS: Partial<Record<CityId, { q: number; r: number }>> = {
   wan: { q: 18, r: 7 },
   xiangyang: { q: 24, r: 19 },
   jiangling: { q: 34, r: 22 },

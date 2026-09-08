@@ -142,6 +142,7 @@ function cityTravelDistance(a: City, b: City): number {
 export function captureCityOnCapture(state: GameState, attacker: ArmyUnit, cityId: CityId): void {
   const city = state.cities[cityId];
   if (!city) return;
+  // 无主城（ownerId=null）同样可占领：仅跳过己方城
   if (!attacker.forceId || city.ownerId === attacker.forceId) return;
   const oldOwner = city.ownerId;
   const attackForceId: ForceId = attacker.forceId;
@@ -158,6 +159,9 @@ export function captureCityOnCapture(state: GameState, attacker: ArmyUnit, cityI
   city.troops = transferTroops;
   attacker.troops -= transferTroops;
   city.durability = Math.ceil(city.maxDurability * 0.2);
+
+  // 无主城没有守将，跳过俘获/撤退结算
+  if (!oldOwner) return;
 
   // 退城目标：默认君主所在城；君主城被破/被俘/不在城时，取离本城最近的本方城
   const rulerId = state.forces[oldOwner]?.leaderId;

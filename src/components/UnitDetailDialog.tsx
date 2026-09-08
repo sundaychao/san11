@@ -93,6 +93,7 @@ export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps
           <div><dt>坐标</dt><dd>{unit.q},{unit.r}</dd></div>
           <div><dt>士兵</dt><dd>{unit.troops.toLocaleString('en-US')}</dd></div>
           <div><dt>士气</dt><dd>{unit.energy}</dd></div>
+          <div><dt>战力</dt><dd>{unit.stamina === undefined ? '—' : Math.round(unit.stamina)}</dd></div>
           <div><dt>资金</dt><dd>{(unit.gold ?? 0).toLocaleString('en-US')}</dd></div>
           <div><dt>兵粮</dt><dd>{unit.food.toLocaleString('en-US')}</dd></div>
           <div><dt>行动</dt><dd>{unit.movementRemaining}</dd></div>

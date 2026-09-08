@@ -81,6 +81,7 @@ function waterTacticState(grade: AptitudeGrade, seed = 1, troops = 10_000) {
   setUniformTerrain(state, 'water');
   const attacker = Object.values(state.units)[0];
   readyUnitAt(state, attacker.id, { q: 10, r: 10 }, 'spear', 'boat');
+  state.units[attacker.id].stamina = 100;
   state.officers['guan-yu'].skill = '无';
   state.officers['guan-yu'].aptitudes!.navy = grade;
   state.officers['cao-ren'].stats.leadership = state.officers['guan-yu'].stats.leadership;
@@ -442,7 +443,7 @@ describe('naval tactics for any formation on water', () => {
 
     const next = useUnitTactic(state, 'liu', attacker.id, target.id, 'ship-ram');
 
-    expect(next.units[attacker.id].energy).toBe(100 - 15);
+    expect(next.units[attacker.id].stamina).toBe(100 - 15);
     const moved = next.units['enemy-tactic'];
     expect(moved).toBeDefined();
     expect({ q: moved.q, r: moved.r }).not.toEqual(before);
@@ -454,7 +455,7 @@ describe('naval tactics for any formation on water', () => {
 
     const next = useUnitTactic(state, 'liu', attacker.id, 'enemy-arrow', 'ship-fire');
 
-    expect(next.units[attacker.id].energy).toBe(100 - 20);
+    expect(next.units[attacker.id].stamina).toBe(100 - 20);
     expect(next.units['enemy-arrow'].burningTenDays).toBe(2);
     expect(next.firePlots ?? []).toHaveLength(0);
     expect(next.units['enemy-arrow'].troops).toBeLessThan(10_000);
@@ -489,7 +490,7 @@ describe('naval tactics for any formation on water', () => {
 
     expect(next.units['enemy-tactic'].troops).toBeLessThan(10_000);
     expect(next.units['enemy-adjacent'].troops).toBeLessThan(10_000);
-    expect(next.units[attacker.id].energy).toBe(100 - 30);
+    expect(next.units[attacker.id].stamina).toBe(100 - 30);
   });
 });
 

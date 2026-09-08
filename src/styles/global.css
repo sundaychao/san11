@@ -132,7 +132,7 @@ button { color: inherit; }
 .room-lobby-forces button small { grid-column: 2; color: var(--muted); font-size: 11px; }
 .room-lobby-card footer span { color: var(--muted); font-size: 13px; }
 
-.game-shell { min-height: 100dvh; display: grid; grid-template: 64px 1fr / 1fr 320px; overflow: hidden; background: #717b6e; }
+.game-shell { min-height: 100dvh; display: grid; grid-template: 64px 1fr / 1fr; overflow: hidden; background: #717b6e; }
 .top-bar { grid-column: 1 / -1; z-index: 20; min-height: 64px; display: flex; align-items: center; gap: 22px; padding: 0 18px; background: rgba(24, 37, 33, 0.96); border-bottom: 1px solid var(--gold-line); box-shadow: 0 4px 16px rgba(10, 14, 12, 0.28); }
 .imperial-seal { width: 38px; aspect-ratio: 1; display: grid; place-items: center; background: #783f34; border: 1px solid var(--gold-line); font-family: STKaiti, KaiTi, serif; font-size: 20px; }
 .date-block, .top-metric { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
@@ -166,6 +166,11 @@ button { color: inherit; }
   0%, 100% { fill: rgba(255, 80, 80, 0.1); stroke: rgba(255, 120, 120, 0.45); }
   50% { fill: rgba(255, 100, 100, 0.28); stroke: rgba(255, 160, 160, 0.85); }
 }
+.unit-aura-cell { pointer-events: none; fill: rgba(255, 200, 60, 0.14); stroke: rgba(255, 215, 120, 0.6); stroke-width: 1.2; vector-effect: non-scaling-stroke; animation: unit-aura-breath 1.8s ease-in-out infinite; mix-blend-mode: screen; }
+@keyframes unit-aura-breath {
+  0%, 100% { fill: rgba(255, 200, 60, 0.08); stroke: rgba(255, 215, 120, 0.4); }
+  50% { fill: rgba(255, 210, 80, 0.24); stroke: rgba(255, 235, 160, 0.85); }
+}
 .battle-grid-overlay.is-editing { pointer-events: auto; }
 .battle-grid-overlay.is-deploying { pointer-events: auto; }
 .battle-grid-overlay.is-moving { pointer-events: auto; }
@@ -174,9 +179,9 @@ button { color: inherit; }
 .battle-grid-overlay.is-editing .battle-cell { cursor: crosshair; fill: rgba(232, 214, 134, 0.36); stroke: rgba(255, 250, 218, 0.46); stroke-width: 0.4; }
 .battle-grid-overlay.is-editing .terrain-plain { fill: rgba(232, 214, 134, 0.36); stroke: rgba(255, 250, 218, 0.46); }
 .battle-grid-overlay.is-editing .terrain-road { fill: rgba(222, 163, 55, 0.43); stroke: rgba(255, 224, 128, 0.52); }
-.battle-grid-overlay.is-editing .terrain-forest { fill: rgba(42, 135, 56, 0.42); stroke: rgba(129, 214, 118, 0.5); }
+.battle-grid-overlay.is-editing .terrain-forest { fill: rgba(28, 95, 42, 0.5); stroke: rgba(72, 170, 90, 0.6); }
 .battle-grid-overlay.is-editing .terrain-hill { fill: rgba(160, 103, 54, 0.42); stroke: rgba(226, 170, 91, 0.5); }
-.battle-grid-overlay.is-editing .terrain-mountain { fill: rgba(50, 54, 55, 0.48); stroke: rgba(205, 210, 202, 0.48); }
+.battle-grid-overlay.is-editing .terrain-mountain { fill: #1e2122; stroke: #1e2122; stroke-width: 1; }
 .battle-grid-overlay.is-editing .terrain-shallowWater { fill: rgba(38, 125, 168, 0.45); stroke: rgba(126, 213, 238, 0.52); }
 .battle-grid-overlay.is-editing .terrain-deepWater { fill: rgba(16, 57, 99, 0.58); stroke: rgba(86, 148, 196, 0.66); }
 .battle-grid-overlay.is-deploying .battle-cell.is-deploy-target { fill: rgba(104, 186, 123, 0.28); stroke: rgba(206, 255, 190, 0.82); stroke-width: 1.6; cursor: pointer; }
@@ -185,15 +190,29 @@ button { color: inherit; }
 .battle-grid-overlay.is-strategy-targeting .battle-cell.is-strategy-target { fill: rgba(232, 88, 48, 0.34); stroke: rgba(255, 211, 88, 0.95); stroke-width: 1.8; cursor: pointer; }
 .battle-grid-overlay.is-construction-targeting .battle-cell.is-construction-target { fill: rgba(255, 200, 80, 0.38); stroke: rgba(255, 240, 140, 0.95); stroke-width: 2; stroke-dasharray: none; cursor: pointer; }
 .battle-grid-overlay.is-construction-targeting { pointer-events: auto; }
-.terrain-plain { fill: rgba(232, 214, 134, 0.36); stroke: rgba(255, 250, 218, 0.46); }
+.terrain-plain { fill: rgba(196, 170, 108, 0.42); stroke: rgba(240, 220, 160, 0.5); }
+.terrain-grass { fill: rgba(112, 178, 86, 0.42); stroke: rgba(180, 232, 140, 0.5); }
 .terrain-road { fill: rgba(222, 163, 55, 0.43); stroke: rgba(255, 224, 128, 0.52); }
-.terrain-forest { fill: rgba(42, 135, 56, 0.42); stroke: rgba(129, 214, 118, 0.5); }
+.terrain-path { fill: rgba(200, 172, 120, 0.42); stroke: rgba(238, 216, 168, 0.52); }
+.terrain-plank { fill: rgba(160, 110, 60, 0.46); stroke: rgba(224, 172, 108, 0.56); }
+.terrain-sand { fill: rgba(224, 202, 138, 0.42); stroke: rgba(248, 234, 178, 0.52); }
+.terrain-wasteland { fill: rgba(178, 168, 122, 0.42); stroke: rgba(222, 212, 168, 0.5); }
+.terrain-wetland { fill: rgba(108, 158, 142, 0.44); stroke: rgba(168, 222, 202, 0.52); }
+.terrain-poison { fill: rgba(148, 72, 172, 0.46); stroke: rgba(214, 150, 236, 0.56); }
+.terrain-forest { fill: rgba(28, 95, 42, 0.5); stroke: rgba(72, 170, 90, 0.6); }
 .terrain-hill { fill: rgba(160, 103, 54, 0.42); stroke: rgba(226, 170, 91, 0.5); }
-.terrain-mountain { fill: rgba(50, 54, 55, 0.48); stroke: rgba(205, 210, 202, 0.48); }
+.terrain-mountain { fill: #1e2122; stroke: #1e2122; stroke-width: 1; }
+.terrain-shore { fill: #77785e; stroke: #77785e; stroke-width: 1; }
 .terrain-shallowWater, .terrain-deepWater { fill: rgba(38, 125, 168, 0.45); stroke: rgba(126, 213, 238, 0.52); }
 .terrain-water { fill: rgba(38, 125, 168, 0.48); stroke: rgba(126, 213, 238, 0.55); }
+.terrain-stream { fill: #668c99; stroke: #668c99; stroke-width: 1; }
+.terrain-river { fill: rgba(46, 108, 182, 0.5); stroke: rgba(120, 180, 236, 0.58); }
+.terrain-sea { fill: rgba(18, 58, 122, 0.56); stroke: rgba(84, 136, 204, 0.62); }
+.terrain-shallow { fill: rgba(96, 186, 196, 0.44); stroke: rgba(164, 232, 236, 0.54); }
 .terrain-ferry { fill: rgba(160, 116, 64, 0.55); stroke: rgba(214, 178, 122, 0.85); stroke-width: 1.4; }
-.terrain-construction { fill: rgba(210, 170, 90, 0.4); stroke: rgba(255, 224, 128, 0.7); stroke-width: 1.2; stroke-dasharray: 3 2; }
+/* 关隘（原版关所据点）：石砌关墙实线样式，与建设用地虚线区分 */
+.terrain-pass { fill: rgba(122, 96, 56, 0.62); stroke: rgba(236, 210, 154, 0.9); stroke-width: 1.6; stroke-dasharray: none; }
+.terrain-construction { fill: rgba(190, 193, 198, 0.45); stroke: rgba(228, 231, 236, 0.75); stroke-width: 1.2; stroke-dasharray: 3 2; }
 .construction-overlay { pointer-events: auto; cursor: pointer; }
 .construction-overlay .construction-glyph { fill: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 11px; font-weight: 900; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95); paint-order: stroke; stroke: rgba(20, 15, 8, 0.65); stroke-width: 2.4; }
 .construction-overlay.is-building .construction-glyph { fill: #ffd842; animation: construction-pulse 1.6s ease-in-out infinite; }
@@ -233,6 +252,12 @@ button { color: inherit; }
 .vehicle-ship { --troop-tone: #5d8aa8; }
 .battle-unit-troops { fill: #fff6d6; font-size: 8px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 2px; }
 .battle-unit-leader-name { fill: #fff6d6; font-size: 11px; font-weight: 800; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.9); stroke-width: 3px; vector-effect: non-scaling-stroke; }
+.battle-unit-stamina-bar { pointer-events: none; }
+.battle-unit-stamina-track { fill: rgba(9, 13, 11, 0.55); stroke: rgba(255, 246, 214, 0.85); stroke-width: 0.5; }
+.battle-unit-stamina-fill { fill: #7ed173; }
+.battle-unit-morale-bar { pointer-events: none; }
+.battle-unit-morale-track { fill: rgba(9, 13, 11, 0.55); stroke: rgba(255, 246, 214, 0.85); stroke-width: 0.5; }
+.battle-unit-morale-fill { fill: #ffd842; }
 .city-marker-layer { position: absolute; z-index: 3; pointer-events: none; }
 .city-marker-layer.is-editing { pointer-events: none; opacity: 0.8; }
 .city-marker {
@@ -258,6 +283,26 @@ button { color: inherit; }
 .city-marker-stats { display: grid; gap: 1px; }
 .city-marker-stat { display: block; color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: max(8px, calc(var(--cell-px, 5.6px) * 0.3)); font-weight: 800; text-align: right; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
 .city-marker-stat-divider { display: block; height: 1px; background: rgba(255, 244, 205, 0.76); box-shadow: 0 0 4px color-mix(in srgb, var(--force-color) 55%, transparent); }
+/* 原版关所锚点标记（单格据点，深色隘口样式，不遮挡城池） */
+.pass-marker {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  display: inline-block;
+  padding: 1px 4px;
+  border: 1px solid rgba(196, 158, 94, 0.85);
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(52, 42, 25, 0.92), rgba(30, 25, 15, 0.92));
+  color: #e8d5a8;
+  font-family: STKaiti, KaiTi, serif;
+  font-size: max(9px, calc(var(--cell-px, 5.6px) * 0.52));
+  line-height: 1.2;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  box-shadow: 0 2px 5px rgba(10, 14, 12, 0.5);
+}
+.mini-pass-dot { position: absolute; z-index: 0; width: 5px; height: 5px; border: 1px solid rgba(232, 213, 168, 0.9); background: #6b5638; transform: translate(-50%, -50%); pointer-events: none; }
 .map-tools { position: absolute; z-index: 6; top: 14px; left: 14px; display: flex; gap: 5px; padding: 5px; }
 .map-tools .icon-button { background: rgba(24, 37, 33, 0.9); }
 .hover-coordinate { position: fixed; z-index: 16; left: 50%; bottom: 16px; min-width: 118px; padding: 7px 14px; transform: translateX(-50%); color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 13px; font-weight: 700; text-align: center; pointer-events: none; }
@@ -281,11 +326,45 @@ button { color: inherit; }
 .city-info-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; padding: 0 5px; border-bottom: 1px solid var(--line); }
 .city-info-panel > header strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 17px; }
 .city-info-panel > header svg { width: 18px; height: 18px; color: #f1d66e; }
+.city-specialty-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1px solid rgba(241, 214, 110, 0.65); border-radius: 3px; color: #f1d66e; font-family: STKaiti, KaiTi, serif; font-size: 14px; line-height: 1; }
 .city-info-owner { min-height: 23px; display: grid; align-items: center; margin: 5px 0; padding: 0 6px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); color: #fff6d6; font-size: 12px; }
 .city-info-panel dl { display: grid; gap: 3px; margin: 0; }
 .city-info-panel dl > div { display: grid; grid-template-columns: 48px 1fr; align-items: center; min-height: 24px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); }
 .city-info-panel dt { padding-left: 5px; color: var(--muted); font-size: 11px; }
 .city-info-panel dd { margin: 0; padding: 2px 6px; color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+/* 左侧都市信息面板（点击我方城池显示，布局对标原版三国志11） */
+.city-status-panel {
+  position: fixed;
+  z-index: 16;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%) scale(0.65);
+  transform-origin: left center;
+  width: 268px;
+  max-height: calc(100dvh - 96px);
+  overflow-y: auto;
+  padding: 10px 12px 12px;
+  background: linear-gradient(180deg, rgba(15, 48, 45, 0.97), rgba(10, 34, 33, 0.97));
+  border: 2px solid rgba(216, 228, 221, 0.8);
+  border-radius: 5px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 8px 26px rgba(0, 0, 0, 0.55);
+  color: #f2efe4;
+  font-family: STKaiti, KaiTi, "Noto Serif SC", serif;
+}
+.csp-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.csp-heading h2 { margin: 0; color: #fff; font-size: 32px; line-height: 1; letter-spacing: 3px; text-shadow: 0 2px 5px rgba(0, 0, 0, 0.7); font-family: STKaiti, KaiTi, "Noto Serif SC", serif; }
+.csp-heading svg { width: 27px; height: 27px; padding: 3px; color: #ecc968; border: 1px solid rgba(236, 201, 104, 0.65); border-radius: 3px; background: rgba(236, 201, 104, 0.12); }
+.csp-group { display: grid; gap: 5px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(216, 228, 221, 0.32); }
+.csp-group:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+.csp-row { display: grid; grid-template-columns: 96px 1fr; gap: 5px; align-items: stretch; }
+.csp-label, .csp-value { display: flex; align-items: center; min-height: 30px; border: 1px solid rgba(190, 208, 199, 0.55); }
+.csp-label { justify-content: center; background: rgba(236, 240, 230, 0.1); color: #eef3ee; font-size: 19px; }
+.csp-value { justify-content: flex-end; padding: 0 10px; background: rgba(8, 22, 23, 0.55); color: #fff; font-family: Consolas, "Courier New", monospace; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.5px; }
+.csp-value.is-centered { justify-content: center; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 18px; font-weight: 400; }
+.csp-armaments { grid-template-columns: 52px 1fr 52px 1fr; gap: 5px; }
+.csp-armaments .csp-label { font-size: 17px; min-height: 28px; }
+.csp-armaments .csp-value { font-size: 16px; min-height: 28px; padding: 0 8px; }
+.csp-blank { border: 0; background: transparent; }
 .facility-info-panel { position: fixed; z-index: 18; width: 162px; padding: 7px; pointer-events: none; background: rgba(12, 28, 31, 0.96); color: var(--paper); }
 .facility-info-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; padding: 0 5px; border-bottom: 1px solid var(--line); }
 .facility-info-panel > header strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 16px; }
@@ -312,15 +391,30 @@ button { color: inherit; }
 .map-editor-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .map-editor-tools button { min-height: 36px; display: grid; grid-template-columns: 17px 1fr; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.07); color: var(--paper); text-align: left; cursor: pointer; }
 .map-editor-tools .terrain-tool-plain { background: rgba(229, 214, 150, 0.34); border-color: rgba(255, 250, 218, 0.7); }
+.map-editor-tools .terrain-tool-grass { background: rgba(92, 178, 74, 0.42); border-color: rgba(168, 240, 140, 0.78); }
 .map-editor-tools .terrain-tool-road { background: rgba(255, 199, 48, 0.42); border-color: rgba(255, 245, 152, 0.84); }
+.map-editor-tools .terrain-tool-path { background: rgba(214, 186, 126, 0.42); border-color: rgba(240, 222, 168, 0.8); }
+.map-editor-tools .terrain-tool-plank { background: rgba(166, 112, 54, 0.42); border-color: rgba(232, 178, 104, 0.8); }
 .map-editor-tools .terrain-tool-forest { background: rgba(15, 148, 54, 0.42); border-color: rgba(134, 255, 145, 0.78); }
 .map-editor-tools .terrain-tool-hill { background: rgba(193, 111, 37, 0.42); border-color: rgba(255, 183, 88, 0.78); }
 .map-editor-tools .terrain-tool-mountain { background: rgba(39, 41, 44, 0.68); border-color: rgba(222, 227, 221, 0.74); }
+.map-editor-tools .terrain-tool-sand { background: rgba(232, 210, 138, 0.42); border-color: rgba(250, 238, 178, 0.82); }
+.map-editor-tools .terrain-tool-wasteland { background: rgba(186, 176, 130, 0.42); border-color: rgba(226, 216, 172, 0.78); }
+.map-editor-tools .terrain-tool-wetland { background: rgba(96, 164, 146, 0.42); border-color: rgba(160, 226, 204, 0.8); }
+.map-editor-tools .terrain-tool-poison { background: rgba(148, 72, 172, 0.46); border-color: rgba(216, 152, 238, 0.82); }
+.map-editor-tools .terrain-tool-shallow { background: rgba(80, 182, 192, 0.42); border-color: rgba(158, 234, 238, 0.82); }
+.map-editor-tools .terrain-tool-ferry { background: rgba(176, 135, 76, 0.42); border-color: rgba(230, 192, 130, 0.82); }
+.map-editor-tools .terrain-tool-shore { background: rgba(164, 148, 104, 0.42); border-color: rgba(214, 198, 152, 0.78); }
+.map-editor-tools .terrain-tool-stream { background: rgba(108, 170, 210, 0.42); border-color: rgba(168, 218, 246, 0.82); }
+.map-editor-tools .terrain-tool-river { background: rgba(46, 108, 182, 0.48); border-color: rgba(122, 182, 238, 0.82); }
+.map-editor-tools .terrain-tool-sea { background: rgba(16, 57, 99, 0.62); border-color: rgba(86, 148, 196, 0.78); }
+.map-editor-tools .terrain-tool-water { background: rgba(0, 133, 190, 0.48); border-color: rgba(132, 231, 255, 0.84); }
 .map-editor-tools .terrain-tool-shallowWater { background: rgba(0, 133, 190, 0.48); border-color: rgba(132, 231, 255, 0.84); }
 .map-editor-tools .terrain-tool-deepWater { background: rgba(16, 57, 99, 0.68); border-color: rgba(86, 148, 196, 0.78); }
 .map-editor-tools button:hover, .map-editor-tools button:focus-visible, .map-editor-tools button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.2); outline: none; }
 .map-editor-tools .terrain-tool.is-active { color: #fff6d6; box-shadow: inset 0 0 0 1px rgba(255, 246, 214, 0.38); }
 .map-editor-tools .terrain-tool-plain.is-active { background: rgba(229, 214, 150, 0.62); }
+.map-editor-tools .terrain-tool-grass.is-active { background: rgba(92, 178, 74, 0.66); }
 .map-editor-tools .terrain-tool-road.is-active { background: rgba(255, 199, 48, 0.7); }
 .map-editor-tools .terrain-tool-forest.is-active { background: rgba(15, 148, 54, 0.7); }
 .map-editor-tools .terrain-tool-hill.is-active { background: rgba(193, 111, 37, 0.7); }
@@ -355,8 +449,7 @@ button { color: inherit; }
 .force-overview-row.is-ready { color: #fff6d6; }
 .force-overview-row.has-acted { color: #8f8a7c; }
 .force-overview-row.has-acted small { color: #858074; }
-.city-panel { z-index: 10; width: 320px; padding: 16px; overflow: auto; border-width: 0 0 0 1px; }
-.battle-panel { position: fixed; z-index: 14; right: 336px; top: 78px; display: grid; gap: 8px; width: 170px; padding: 10px; }
+.battle-panel { position: fixed; z-index: 14; right: 16px; top: 78px; display: grid; gap: 8px; width: 170px; padding: 10px; }
 .battle-panel header { display: flex; align-items: center; gap: 8px; }
 .battle-panel header svg { width: 18px; color: var(--gold); }
 .battle-panel header p { margin: 0; color: var(--muted); font-size: 11px; }
@@ -514,7 +607,11 @@ button { color: inherit; }
 .city-info-dialog { width: min(580px, calc(100vw - 160px)); display: grid; gap: 0; padding: 0; overflow: hidden; }
 .city-info-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px 14px; border-bottom: 1px solid var(--line); }
 .city-info-dialog > header p { margin: 0 0 4px; color: var(--muted); font-size: 12px; letter-spacing: 0.03em; }
+.city-info-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .city-info-dialog > header h2 { margin: 0; font-size: 20px; letter-spacing: 0.05em; }
+.city-traits { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.city-trait { padding: 1px 5px; border-radius: 2px; font-size: 11px; letter-spacing: 0.05em; color: rgba(178, 172, 158, 0.55); cursor: default; }
+.city-trait-active { color: #fff; background: rgba(244, 237, 217, 0.08); }
 .city-info-dialog-body { display: grid; gap: 18px; padding: 16px 20px 20px; max-height: min(620px, 72dvh); overflow: auto; }
 .city-info-dialog-body section { margin: 0; }
 .city-info-dialog-body h3 { margin: 0 0 10px; color: var(--gold); font-size: 14px; letter-spacing: 0.1em; }
@@ -610,7 +707,7 @@ button { color: inherit; }
 .officer-table tbody tr:hover { background: rgba(197, 173, 111, 0.12); }
 .officer-table tbody tr.is-clickable { cursor: pointer; }
 .officer-table tbody tr.is-clickable.is-selected { background: rgba(197, 173, 111, 0.22); }
-.city-panel h2, .event-log h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; letter-spacing: 0; }
+.event-log h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; letter-spacing: 0; }
 .city-heading { display: grid; grid-template-columns: 5px 1fr auto auto; gap: 10px; align-items: center; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
 .city-heading .force-line { align-self: stretch; min-height: 48px; }
 .city-heading p { margin: 0 0 2px; color: var(--muted); font-size: 11px; }
@@ -673,7 +770,7 @@ button { color: inherit; }
 .cultivate-picker-dialog button svg { width: 16px; height: 16px; color: var(--gold); }
 .cultivate-picker-dialog button span { font-size: 13px; white-space: nowrap; }
 .readonly-note { margin: 14px 0 0; padding: 9px; border: 1px solid var(--line); color: var(--muted); font-size: 11px; text-align: center; }
-.event-log { position: fixed; z-index: 12; left: 16px; bottom: 16px; width: min(430px, calc(100vw - 368px)); max-height: min(460px, 52dvh); display: flex; flex-direction: column; padding: 13px 15px; }
+.event-log { position: fixed; z-index: 12; left: 16px; bottom: 16px; width: min(430px, calc(100vw - 32px)); max-height: min(460px, 52dvh); display: flex; flex-direction: column; padding: 13px 15px; }
 .event-log h2 { font-size: 17px; }
 .event-log ol { margin: 9px 0 0; flex: 1 1 auto; min-height: 0; padding: 0 6px 2px 0; list-style: none; overflow-y: auto; }
 .event-log li { display: grid; grid-template-columns: 7px 1fr; gap: 8px; align-items: start; margin: 6px 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
@@ -1349,19 +1446,10 @@ button { color: inherit; }
   .next-month svg { margin: 0; }
   .next-month { font-size: 0; }
   .map-region { height: calc(100dvh - 56px); }
-  .city-panel { position: fixed; inset: auto 0 0; width: 100%; max-height: 46dvh; padding: 12px 14px 14px; border-width: 1px 0 0; }
-  .city-panel.is-collapsed { max-height: 74px; overflow: hidden; }
-  .city-panel.is-collapsed .city-resources, .city-panel.is-collapsed .city-progress, .city-panel.is-collapsed .officer-roster, .city-panel.is-collapsed .command-grid, .city-panel.is-collapsed .readonly-note { display: none; }
-  .city-heading h2 { font-size: 22px; }
-  .sheet-toggle { width: 34px; min-height: 34px; display: inline-flex; }
-  .sheet-toggle svg { width: 17px; }
-  .city-resources { grid-template-columns: repeat(4, 1fr); margin: 9px 0; }
-  .city-resources > div { padding: 6px; }
-  .city-resources dd { font-size: 13px; }
-  .city-progress, .officer-roster { display: none; }
-  .command-grid { grid-template-columns: repeat(6, 1fr); padding-top: 8px; }
-  .command-grid button { min-height: 46px; }
-  .command-grid svg { width: 16px; }
+  .city-status-panel { top: auto; bottom: 0; left: 0; transform: none; width: 100%; max-height: 44dvh; border-width: 1px 0 0; border-radius: 0; }
+  .csp-heading h2 { font-size: 24px; }
+  .csp-label { font-size: 16px; min-height: 26px; }
+  .csp-value { font-size: 15px; min-height: 26px; }
   .mini-map { display: none; }
   .map-tools { top: 8px; left: 8px; }
   .map-tools .icon-button { width: 36px; min-height: 36px; }

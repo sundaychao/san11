@@ -1024,7 +1024,7 @@ describe('game interface shell', () => {
     expect(within(editor).getByText('导出后，把 terrain-control.svg 和所有 mask-*.svg 文件交给 AI，用 san11-map-generation 生成水墨地图图片。')).toBeVisible();
     expect(within(editor).getByText('AI 生成图片后，直接选择图片文件；编辑器会自动显示底图并进入校准模式。')).toBeVisible();
 
-    await user.click(screen.getByRole('button', { name: '高山' }));
+    await user.click(screen.getByRole('button', { name: '山崖' }));
     fireEvent.pointerDown(screen.getByTestId('editor-cell-100-100'), { button: 0, buttons: 1 });
     await user.click(screen.getByRole('button', { name: '城市' }));
     fireEvent.pointerDown(screen.getByTestId('editor-cell-104-100'), { button: 0, buttons: 1 });

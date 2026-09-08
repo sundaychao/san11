@@ -37,6 +37,7 @@ describe('RoomManager room list', () => {
         hostName: 'Host',
         playerCount: 2,
         maxPlayers: 2,
+        map: 'small',
         selectedForceIds: ['liu'],
       },
     ]);
@@ -59,6 +60,7 @@ describe('RoomManager room list', () => {
         hostName: 'Host',
         playerCount: 2,
         maxPlayers: 2,
+        map: 'small',
         selectedForceIds: [],
       },
     ]);

@@ -1,8 +1,11 @@
 import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import { unitIsIncapacitated } from '../game/battle/actions';
+import { unitAuraRange } from '../game/battle/aura';
+import { isWaterTerrain } from '../game/battle/catalog';
 import { coordsWithinRange, gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
+import { china42Passes } from '../game/scenario/jingxiang208';
 import { PLOT_LABELS, CITY_ATTACK_RANGE, CITY_ATTACK_MIN } from '../game/innerAffairs';
 import type { EditableCityMarker } from '../game/map-editor/editor';
 import { useGame } from '../game/store/GameProvider';
@@ -58,6 +61,12 @@ const FACILITY_RANGE: Partial<Record<FacilityType, number>> = {
   fortress: 3,
 };
 const FORCE_COLORED_FACILITIES = new Set<FacilityType>(['drum', 'arrowTower', 'musicTower', 'fortress']);
+
+/** 无主城市的中性色（城牌/小地图圆点） */
+const NEUTRAL_CITY_COLOR = '#9aa0a6';
+
+/** 原版 10 关所锚点（china42x 全图标记） */
+const PASS_ANCHORS = china42Passes();
 
 function cellPosition(q: number, r: number) {
   return {
@@ -179,6 +188,7 @@ export function StrategicMap({
   }));
   const [hoveredFacilityId, setHoveredFacilityId] = useState<string | null>(null);
   const [hoveredCityId, setHoveredCityId] = useState<CityId | null>(null);
+  const [hoveredUnitId, setHoveredUnitId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<{ width: number; height: number } | null>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const regionRef = useRef<HTMLElement | null>(null);
@@ -284,7 +294,7 @@ export function StrategicMap({
       label: city.name,
       q: city.gridQ,
       r: city.gridR,
-      forceColor: state.forces[city.ownerId].color,
+      forceColor: (city.ownerId ? state.forces[city.ownerId]?.color : undefined) ?? NEUTRAL_CITY_COLOR,
     }));
 
   let visibleCells = displayGrid;
@@ -368,6 +378,17 @@ export function StrategicMap({
         return coords.filter((c) => keys.has(gridKey(c)));
       })()
     : [];
+  // 部队光环范围格子（鼠标悬停有光环的部队时显示，含自身格）
+  const unitAuraRangeCells = hoveredUnitId
+    ? (() => {
+        const unit = state.units[hoveredUnitId];
+        if (!unit) return [];
+        const range = unitAuraRange(state, unit);
+        if (range <= 0) return [];
+        const keys = new Set(displayGrid.map(gridKey));
+        return coordsWithinRange({ q: unit.q, r: unit.r }, range).filter((coord) => keys.has(gridKey(coord)));
+      })()
+    : [];
   const dismissUnitHover = () => onUnitLeave?.();
   const dismissCityHover = () => onCityLeave?.();
   const selectCityFromMap = (cityId: CityId, position: { x: number; y: number }) => {
@@ -390,7 +411,7 @@ export function StrategicMap({
     const unitKind = unit.kind ?? 'combat';
     const vehicle = unit.vehicle;
     const terrain = state.grid.find((cell) => cell.q === unit.q && cell.r === unit.r)?.terrain;
-    const onWater = terrain === 'water';
+    const onWater = isWaterTerrain(terrain);
     const texture = unitKind === 'transport'
       ? { glyph: '输', label: '输送队' }
       : onWater && vehicle
@@ -443,8 +464,14 @@ export function StrategicMap({
           dismissUnitHover();
           onUnitContextMenu?.(unit.id, { x: event.clientX + 10, y: event.clientY + 4 });
         }}
-        onPointerEnter={(event) => onUnitHover?.(unit.id, { x: event.clientX + 57, y: event.clientY + 47 })}
-        onPointerLeave={() => onUnitLeave?.()}
+        onPointerEnter={(event) => {
+          setHoveredUnitId(unit.id);
+          onUnitHover?.(unit.id, { x: event.clientX + 57, y: event.clientY + 47 });
+        }}
+        onPointerLeave={() => {
+          setHoveredUnitId(null);
+          onUnitLeave?.();
+        }}
       >
         <text
           className="battle-unit-leader-name"
@@ -453,6 +480,46 @@ export function StrategicMap({
         >
           {leaderName}
         </text>
+        {unitKind === 'combat' && unit.stamina !== undefined && (
+          <g className="battle-unit-stamina-bar">
+            <rect
+              className="battle-unit-stamina-track"
+              x={centerX - CELL_SIZE * 0.35}
+              y={position.y + 4}
+              width={CELL_SIZE * 0.7}
+              height={2}
+              rx={1}
+            />
+            <rect
+              className="battle-unit-stamina-fill"
+              x={centerX - CELL_SIZE * 0.35}
+              y={position.y + 4}
+              width={CELL_SIZE * 0.7 * (Math.min(100, Math.max(0, unit.stamina)) / 100)}
+              height={2}
+              rx={1}
+            />
+          </g>
+        )}
+        {unitKind === 'combat' && (
+          <g className="battle-unit-morale-bar" data-testid="battle-unit-morale-bar">
+            <rect
+              className="battle-unit-morale-track"
+              x={centerX - CELL_SIZE * 0.35}
+              y={position.y + 1}
+              width={CELL_SIZE * 0.7}
+              height={2}
+              rx={1}
+            />
+            <rect
+              className="battle-unit-morale-fill"
+              x={centerX - CELL_SIZE * 0.35}
+              y={position.y + 1}
+              width={CELL_SIZE * 0.7 * (Math.min(100, Math.max(0, unit.energy)) / 100)}
+              height={2}
+              rx={1}
+            />
+          </g>
+        )}
         <g className="battle-unit-model">
           <ellipse className="battle-unit-shadow" cx={centerX} cy={centerY + 15} rx={CELL_SIZE * 0.28} ry={CELL_SIZE * 0.08} />
           <path
@@ -830,6 +897,22 @@ export function StrategicMap({
               />
             );
           })}
+          {/* 部队光环范围呼吸闪烁覆盖层（鼠标悬停部队时显示） */}
+          {unitAuraRangeCells.map((coord) => {
+            const position = displayCellPosition(coord.q, coord.r);
+            return (
+              <rect
+                key={`unit-aura-${coord.q}-${coord.r}`}
+                data-testid="unit-aura-cell"
+                data-aura-position={`${coord.q},${coord.r}`}
+                x={position.x}
+                y={position.y}
+                width={CELL_SIZE}
+                height={CELL_SIZE}
+                className="unit-aura-cell"
+              />
+            );
+          })}
           {Object.values(state.facilities ?? {}).map((facility) => {
             const position = displayCellPosition(facility.q, facility.r);
             const isFacilityTarget = attackTargetFacilityIdSet.has(facility.id);
@@ -913,8 +996,22 @@ export function StrategicMap({
           {facilityRepairReports.map(renderFacilityRepairNumber)}
         </svg>
         <div className={`city-marker-layer${editorMode || deployMode || moveMode ? ' is-editing' : ''}`} aria-label="荆襄城市" style={zoomStyle()}>
+          {/* 原版关所锚点（china42x 200×200 全图；单格据点，暂为纯标记） */}
+          {gridWidth === 200 && gridHeight === 200 && PASS_ANCHORS.map((pass) => {
+            const position = displayCellCenterPercent(pass.q, pass.r);
+            return (
+              <span
+                key={pass.id}
+                className="pass-marker"
+                style={{ left: `${position.left}%`, top: `${position.top}%` }}
+                data-testid="pass-marker"
+              >
+                {pass.label}
+              </span>
+            );
+          })}
           {Object.values(state.cities).map((city) => {
-            const force = state.forces[city.ownerId];
+            const force = city.ownerId ? state.forces[city.ownerId] : undefined;
             const selected = selectedCityId === city.id;
             const isAttackTarget = attackTargetCityIdSet.has(city.id);
             const markerPosition = displayCellCenterPercent(city.gridQ, city.gridR);
@@ -927,9 +1024,9 @@ export function StrategicMap({
                 style={{
                   left: `${markerPosition.left}%`,
                   top: `${markerPosition.top}%`,
-                  '--force-color': force.color,
+                  '--force-color': force?.color ?? NEUTRAL_CITY_COLOR,
                 } as CSSProperties}
-                aria-label={`${city.name} ${force.name} ${city.troops.toLocaleString('en-US')}兵 ${city.population.toLocaleString('en-US')}人`}
+                aria-label={`${city.name} ${force?.name ?? '无主'} ${city.troops.toLocaleString('en-US')}兵 ${city.population.toLocaleString('en-US')}人`}
                 data-testid="city-marker"
                 onContextMenu={(event) => {
                   dismissCityHover();
@@ -987,6 +1084,17 @@ export function StrategicMap({
       </div>
 
       <div className="mini-map tool-panel" aria-label="荆襄小地图">
+        {gridWidth === 200 && gridHeight === 200 && PASS_ANCHORS.map((pass) => (
+          <span
+            key={pass.id}
+            className="mini-pass-dot"
+            style={{
+              left: `${(perspectiveRotated ? 1 - (pass.q + 0.5) / gridWidth : (pass.q + 0.5) / gridWidth) * 100}%`,
+              top: `${(pass.r + 0.5) / gridHeight * 100}%`,
+            }}
+            aria-hidden="true"
+          />
+        ))}
         {Object.values(state.cities).map((city) => (
           <button
             key={city.id}
@@ -995,7 +1103,7 @@ export function StrategicMap({
             style={{
               left: `${(perspectiveRotated ? 1 - city.mapX : city.mapX) * 100}%`,
               top: `${(perspectiveRotated ? 1 - city.mapY : city.mapY) * 100}%`,
-              backgroundColor: state.forces[city.ownerId].color,
+              backgroundColor: (city.ownerId ? state.forces[city.ownerId]?.color : undefined) ?? NEUTRAL_CITY_COLOR,
             }}
             aria-label={`在小地图选择${city.name}`}
             onClick={() => selectCity(city.id)}

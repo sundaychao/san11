@@ -1,11 +1,8 @@
 import type { ArmyUnit, GameState, TerrainType, TroopType } from '../../types';
+import { isWaterTerrain } from '../../battle/catalog';
 import { techLevelOf } from '../../techs';
 import { resolveOfficerSkills, resolveUnitSkills } from '../sources';
 import { effectsOfKind } from '../stacking';
-
-function isWaterTerrain(terrain: TerrainType | undefined) {
-  return terrain === 'water';
-}
 
 export function movementAllowanceBonus(state: GameState, unit: ArmyUnit, terrain?: TerrainType) {
   const unitKind: 'combat' | 'transport' = unit.kind === 'transport' ? 'transport' : 'combat';

@@ -5,7 +5,10 @@ describe('jingxiang 208 scenario', () => {
   it('contains the approved amount of content', () => {
     const game = createGame('liu', 20804);
 
-    expect(Object.keys(game.cities)).toHaveLength(8);
+    // 42 城：8 座荆襄有主城 + 34 座华夏全图无主城
+    expect(Object.keys(game.cities)).toHaveLength(42);
+    expect(Object.values(game.cities).filter((city) => city.ownerId)).toHaveLength(8);
+    expect(Object.values(game.cities).filter((city) => !city.ownerId)).toHaveLength(34);
     expect(Object.keys(game.officers).length).toBeGreaterThanOrEqual(48);
     expect(Object.values(game.officers).filter((officer) => officer.forceId)).toHaveLength(48);
     expect(Object.values(game.officers).filter((officer) => !officer.forceId)).toHaveLength(8);

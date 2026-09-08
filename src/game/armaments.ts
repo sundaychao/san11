@@ -1,4 +1,5 @@
-import type { ArmamentType, CityArmaments, Officer, TroopType, VehicleType } from './types';
+import { citySpecialtyOf, type CitySpecialty } from './cityTraits';
+import type { ArmamentType, CityArmaments, City, Officer, TroopType, VehicleType } from './types';
 
 export const ARMAMENT_TYPES: ArmamentType[] = ['spear', 'halberd', 'crossbow', 'cavalry', 'ram', 'tower', 'ship'];
 export const DELAYED_ARMAMENT_TYPES: ArmamentType[] = ['ram', 'tower', 'ship'];
@@ -25,6 +26,26 @@ export const ARMAMENT_BASE_YIELD: Record<ArmamentType, number> = {
 };
 
 export const ARMAMENT_GOLD_COST = 1000;
+
+/** 兵装对应的城池特色（大都市覆盖全部兵装） */
+const SPECIALTY_ARMAMENT: Partial<Record<CitySpecialty, ArmamentType[]>> = {
+  spear: ['spear'],
+  halberd: ['halberd'],
+  cavalry: ['cavalry'],
+  arrow: ['crossbow'],
+  ship: ['ship'],
+  siege: ['ram', 'tower'],
+};
+
+/** 兵装生产价格：大都市全部60%，对应特色城市该兵装60%，其余原价 */
+export function armamentCost(city: Pick<City, 'id'>, armamentType: ArmamentType): number {
+  const specialty = citySpecialtyOf(city.id);
+  if (!specialty) return ARMAMENT_GOLD_COST;
+  if (specialty === 'metropolis') return Math.round(ARMAMENT_GOLD_COST * 0.6);
+  return SPECIALTY_ARMAMENT[specialty]?.includes(armamentType)
+    ? Math.round(ARMAMENT_GOLD_COST * 0.6)
+    : ARMAMENT_GOLD_COST;
+}
 
 export const TROOP_ARMAMENT: Partial<Record<TroopType, ArmamentType>> = {
   spear: 'spear',

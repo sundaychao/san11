@@ -20,28 +20,67 @@ export const FACILITY_BUILD_DURABILITY_PER_TEN_THOUSAND = 500;
 
 export type MovementProfile = TroopType | 'transport';
 
+/**
+ * 水面地形集合（川/河/海/旧 water）：部队可经边界格入内（川不可通行）。
+ * 浅滩/渡所是可通行的水陆交界地面，不算水面（与原版一致）。
+ */
+export const WATER_TERRAINS: ReadonlySet<TerrainType> = new Set<TerrainType>(['water', 'stream', 'river', 'sea']);
+
+export function isWaterTerrain(terrain: TerrainType | undefined): boolean {
+  return terrain !== undefined && WATER_TERRAINS.has(terrain);
+}
+
+/** 不可通行地形（川/岸/崖；原版 baseCost=999） */
+export const BLOCKED_TERRAINS: ReadonlySet<TerrainType> = new Set<TerrainType>(['stream', 'shore', 'mountain']);
+
+/**
+ * 地形移动消耗（对齐原版基准：主径/土/草地 4、砂地/荒地/浅滩/小径 5、
+ * 森林/湿地/栈道 6、毒泉 8；骑兵/攻城在森林、湿地、水面加倍）。
+ */
 const INFANTRY_TERRAIN_COST: Record<TerrainType, number> = {
   road: 4,
+  path: 5,
+  plank: 6,
   plain: 4,
+  grass: 4,
+  sand: 5,
+  wasteland: 5,
+  wetland: 6,
+  poison: 8,
   forest: 6,
   hill: 6,
   mountain: Number.POSITIVE_INFINITY,
+  shore: Number.POSITIVE_INFINITY,
   water: 6,
+  stream: Number.POSITIVE_INFINITY,
+  river: 6,
+  sea: 6,
+  shallow: 5,
   ferry: 4,
+  pass: 4,
   construction: 4,
 };
 
 const CAVALRY_TERRAIN_COST: Record<TerrainType, number> = {
   ...INFANTRY_TERRAIN_COST,
   forest: 8,
+  wetland: 8,
+  poison: 10,
   water: 8,
+  river: 8,
+  sea: 8,
 };
 
 const SIEGE_TERRAIN_COST: Record<TerrainType, number> = {
   ...INFANTRY_TERRAIN_COST,
   forest: 8,
   hill: 8,
+  plank: 8,
+  wetland: 8,
+  poison: 10,
   water: 8,
+  river: 8,
+  sea: 8,
 };
 
 export const TERRAIN_COST_BY_PROFILE: Record<MovementProfile, Record<TerrainType, number>> = {
@@ -58,14 +97,28 @@ export const SHIP_WATER_COST = 4;
 export const SHIP_WATER_ATTACK_MULTIPLIER = 1.1;
 export const SHIP_WATER_DEFENSE_MULTIPLIER = 0.9;
 
+/** 地形防御系数（受伤倍率；森林/湿地/荒地有掩体减免，与原版方向一致） */
 export const TERRAIN_DEFENSE: Record<TerrainType, number> = {
   road: 1,
+  path: 1,
+  plank: 1,
   plain: 1,
+  grass: 1,
+  sand: 1,
+  wasteland: 0.95,
+  wetland: 0.9,
+  poison: 1,
   forest: 0.85,
   hill: 0.8,
   mountain: 1,
+  shore: 1,
   water: 0.95,
+  stream: 1,
+  river: 0.95,
+  sea: 0.95,
+  shallow: 0.95,
   ferry: 1,
+  pass: 1,
   construction: 1,
 };
 
@@ -209,7 +262,7 @@ export function movementAllowanceForUnit(unit: Pick<ArmyUnit, 'kind' | 'troopTyp
 
 export function movementCostForCell(cell: GridCell | undefined, profile: MovementProfile = 'sword', vehicle?: 'boat' | 'ship') {
   if (!cell) return Number.POSITIVE_INFINITY;
-  if (vehicle === 'ship' && cell.terrain === 'water') {
+  if (vehicle === 'ship' && isWaterTerrain(cell.terrain)) {
     return SHIP_WATER_COST;
   }
   return TERRAIN_COST_BY_PROFILE[profile][cell.terrain];

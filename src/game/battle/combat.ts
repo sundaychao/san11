@@ -268,6 +268,7 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   const city = state.cities[cityId];
   if (!city) throw new Error('城市不存在');
   if (city.ownerId === forceId) throw new Error('不能攻击己方城市');
+  if (!city.ownerId && city.troops === 0) throw new Error('空城无守军，可直接进驻');
   if (attacker.energy < 10) throw new Error('气力不足');
   if (!isCityInAttackRange(state, attacker, city)) throw new Error('城市不在攻击范围');
   const next = structuredClone(state);

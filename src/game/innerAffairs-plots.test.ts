@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  cityPlots, PLOT_COUNT_BY_SIZE, CITY_SIZE_SMALL_MAX_POP, CITY_SIZE_LARGE_MIN_POP,
+  cityPlots, CITY_SIZE_SMALL_MAX_POP, CITY_SIZE_LARGE_MIN_POP,
   cityPopulationOf, ruralPopulationOf, cityPopulationIncomeModifier, ruralPopulationIncomeModifier,
   marketMonthlyGoldIncome, grandMarketMonthlyGoldIncome, fishMarketMonthlyGoldIncome,
   mintEffect, granaryEffect, cityMonthlyGoldIncome, basePopulationTax, baseFoodTax,
@@ -8,7 +8,7 @@ import {
   blackMarketMonthlyGoldIncome, defaultOfficersFor, constructTenDaysForOfficers,
 } from './innerAffairs';
 import type { Officer } from './types';
-import { createGame } from './scenario/jingxiang208';
+import { createGame, china42InteriorByCityId } from './scenario/jingxiang208';
 
 /** 快速生成 N 个可插入 useMemo 推荐的伪武将（politics/intelligence/war/leadership/charisma 指定） */
 function mockOfficers(defs: Array<{ id: string; war?: number; leadership?: number; intelligence?: number; politics?: number; charisma?: number }>): Officer[] {
@@ -144,16 +144,28 @@ describe('建设用地数量在剧本创建时固定，不随人口波动', () =
     expect(plots.every((p) => p.q != null && p.r != null)).toBe(true);
   });
 
-  it('剧本创建时按城市大小分配地格数量', () => {
+  it('剧本创建时按原版格数全量分配建设用地', () => {
     const state = createGame('liu', 1);
+    const interior = china42InteriorByCityId();
     for (const city of Object.values(state.cities)) {
-      const expected = city.population >= CITY_SIZE_LARGE_MIN_POP
-        ? PLOT_COUNT_BY_SIZE.large
-        : city.population >= CITY_SIZE_SMALL_MAX_POP ? PLOT_COUNT_BY_SIZE.medium : PLOT_COUNT_BY_SIZE.small;
+      const original = interior.get(city.id)?.length;
       const plots = cityPlots(city);
-      expect(plots.length).toBe(expected);
+      // 原版 interior 数据的城：格数与原版一致（长安22/洛阳20/会稽4），不被规模档位截断
+      if (original !== undefined) expect(plots.length).toBe(original);
+      // 所有地格都应有坐标（可在地图上选中）
       expect(plots.every((p) => p.q != null && p.r != null)).toBe(true);
     }
+  });
+
+  it('大城市建设用地多于规模档位上限（原版长安22格不被截断为12格）', () => {
+    const state = createGame('liu', 1);
+    expect(cityPlots(state.cities.changan).length).toBe(22);
+    expect(cityPlots(state.cities.luoyang).length).toBe(20);
+    expect(cityPlots(state.cities.kuaiji).length).toBe(4);
+    // 全图地格总数 = 原版 42 城 interior 总和
+    const total = Object.values(state.cities).reduce((sum, city) => sum + cityPlots(city).length, 0);
+    const originalTotal = [...china42InteriorByCityId().values()].reduce((sum, cells) => sum + cells.length, 0);
+    expect(total).toBe(originalTotal);
   });
 });
 

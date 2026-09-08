@@ -1,7 +1,7 @@
 import { unitIgnoresEnemyZocTerrain } from '../skills/rules/movement';
 import type { ArmyUnit, City, CityId, Facility, ForceId, GameState, GridCell } from '../types';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
-import { movementAllowanceForProfile, movementCostForCell, movementProfileForUnit, ZOC_FACILITY_TYPES, type MovementProfile } from './catalog';
+import { isWaterTerrain, movementAllowanceForProfile, movementCostForCell, movementProfileForUnit, ZOC_FACILITY_TYPES, type MovementProfile } from './catalog';
 
 export function cellAt(state: GameState, coord: GridCoord): GridCell | undefined {
   return state.grid.find((cell) => cell.q === coord.q && cell.r === coord.r);
@@ -57,7 +57,8 @@ function controlledZoneKeysForForce(state: GameState, forceId: ForceId) {
   }
 
   for (const city of Object.values(state.cities)) {
-    if (city.ownerId === forceId) continue;
+    // 无主城不产生控制区
+    if (!city.ownerId || city.ownerId === forceId) continue;
     for (const coord of sevenCellCityFootprint(cityCenter(city))) addNeighbors(coord);
   }
 
@@ -120,7 +121,7 @@ function reachableCostsFrom(
     const current = frontier.shift()!;
     const currentKey = gridKey(current);
     const currentTerrain = cellAt(state, current)?.terrain;
-    const isWater = currentTerrain === 'water';
+    const isWater = isWaterTerrain(currentTerrain);
     const ignoresZocHere = options.ignoreEnemyZoc === 'land'
       ? !isWater
       : options.ignoreEnemyZoc === 'water'
@@ -139,9 +140,9 @@ function reachableCostsFrom(
       if (facilityKeys.has(key)) continue;
       const neighborTerrain = cellAt(state, neighbor)?.terrain;
 
-      // 横跨水域边界：陆地<->水域。
-      const currentIsWater = currentTerrain === 'water';
-      const neighborIsWater = neighborTerrain === 'water';
+      // 横跨水域边界：陆地<->水域（河/海/川；浅滩/渡所是地面不算水面）。
+      const currentIsWater = isWaterTerrain(currentTerrain);
+      const neighborIsWater = isWaterTerrain(neighborTerrain);
       const crossesWaterBoundary = currentIsWater !== neighborIsWater;
       // 经渡口横跨允许继续（渡口桥接），不受"需停留边界"限制
       const viaFerry = crossesWaterBoundary && (currentTerrain === 'ferry' || neighborTerrain === 'ferry' || ferryChain.has(currentKey));
@@ -175,11 +176,12 @@ function reachableCostsFrom(
   return costs;
 }
 
-/** 本方城池 footprint 格集合（可穿越 + 可作为移动终点/回城） */
+/** 本方城池 footprint 格集合（可穿越 + 可作为移动终点/回城）；无守军的无主城同样可穿越/进驻 */
 export function ownCityTransitKeysFor(state: GameState, forceId: ForceId): Set<string> {
   const keys = new Set<string>();
   for (const city of Object.values(state.cities)) {
-    if (city.ownerId !== forceId) continue;
+    const enterable = city.ownerId === forceId || (city.ownerId === null && city.troops === 0);
+    if (!enterable) continue;
     for (const coord of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) {
       keys.add(gridKey(coord));
     }
@@ -191,6 +193,17 @@ export function ownCityTransitKeysFor(state: GameState, forceId: ForceId): Set<s
 export function ownCityAt(state: GameState, forceId: ForceId, coord: GridCoord): City | undefined {
   for (const city of Object.values(state.cities)) {
     if (city.ownerId !== forceId) continue;
+    for (const cell of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) {
+      if (cell.q === coord.q && cell.r === coord.r) return city;
+    }
+  }
+  return undefined;
+}
+
+/** 目标格所属的无守军无主城（在 footprint 内则返回该城，部队进入即占领） */
+export function unoccupiedCityAt(state: GameState, coord: GridCoord): City | undefined {
+  for (const city of Object.values(state.cities)) {
+    if (city.ownerId !== null || city.troops > 0) continue;
     for (const cell of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) {
       if (cell.q === coord.q && cell.r === coord.r) return city;
     }
@@ -229,7 +242,7 @@ export function deploymentCells(state: GameState, cityId: CityId, movement?: num
   const cityKeys = allCityKeys(state);
   const costs = reachableCostsFrom(state, start, movementBudget, profile, {
     allowedCityTransitKeys: ownCityKeys,
-    movingForceId: city.ownerId,
+    movingForceId: city.ownerId ?? undefined,
     vehicle,
   });
 

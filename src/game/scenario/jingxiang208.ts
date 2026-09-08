@@ -1,11 +1,12 @@
 import { initialArmaments } from '../armaments';
+import { hasCityTrait } from '../cityTraits';
 import { initCityPopulation, initConstructionPlots } from '../innerAffairs';
 import { DEFAULT_OFFICER_LOYALTY, LEADER_INITIAL_LOYALTY } from '../loyalty';
 import { INITIAL_OFFICER_MERIT, rankForCityCount } from '../ranks';
 import { derivePersonality } from '../debate';
 import { TREASURES } from '../treasures';
 import type { City, CityId, Force, ForceId, GameState, GridCell, Officer, OfficerAptitudes, Stats, TreasureState } from '../types';
-import china42Data from './china42.json';
+import china42Data from './china42x.json';
 
 type CitySeed = Omit<City, 'durability' | 'gridQ' | 'gridR' | 'id' | 'maxDurability'> & { id: CityId };
 type OfficerSeed = Omit<Officer, 'acted' | 'location'>;
@@ -52,6 +53,11 @@ const forces: Record<ForceId, Force> = {
 
 export const SCENARIO_FORCES = forces;
 
+/**
+ * 剧本城市：前 8 座为荆襄有主城（曹/刘/孙/刘表），
+ * 其余 34 座为华夏全图无主城（ownerId=null，仅显示与原版建设用地，不参与内政结算）。
+ * 城市坐标/小地图定位/建设用地均以 china42x.json 的原版精确数据为准。
+ */
 const citySeeds: CitySeed[] = [
   { id: 'wan', name: '宛', ownerId: 'cao', governorId: 'cao-cao', gold: 9000, food: 30000, population: 600000, troops: 16000, commerce: 60, agriculture: 45, order: 82, training: 72, mapX: 0.37, mapY: 0.17 },
   { id: 'xiangyang', name: '襄阳', ownerId: 'cao', governorId: 'cao-ren', gold: 8200, food: 34000, population: 575000, troops: 14500, commerce: 52, agriculture: 55, order: 78, training: 68, mapX: 0.25, mapY: 0.42 },
@@ -61,6 +67,41 @@ const citySeeds: CitySeed[] = [
   { id: 'changsha', name: '长沙', ownerId: 'sun', governorId: 'lu-su', gold: 7300, food: 36000, population: 490000, troops: 13200, commerce: 50, agriculture: 60, order: 82, training: 70, mapX: 0.78, mapY: 0.38 },
   { id: 'lingling', name: '零陵', ownerId: 'biao', governorId: 'liu-biao', gold: 8500, food: 35000, population: 410000, troops: 11000, commerce: 48, agriculture: 62, order: 90, training: 65, mapX: 0.57, mapY: 0.87 },
   { id: 'guiyang', name: '桂阳', ownerId: 'biao', governorId: 'wen-pin', gold: 7100, food: 36000, population: 240000, troops: 11500, commerce: 47, agriculture: 63, order: 88, training: 67, mapX: 0.84, mapY: 0.71 },
+  // ---- 以下为无主城（人口按原版都市规模分档：大城≥50万、中城25~50万、小城<25万） ----
+  { id: 'xiangping', name: '襄平', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 280000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'beiping', name: '北平', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 320000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'ji', name: '蓟', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 340000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'nanpi', name: '南皮', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 400000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'pingyuan', name: '平原', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 380000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'jinyang', name: '晋阳', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 350000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'ye', name: '邺', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 530000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'beihai', name: '北海', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 360000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'xiapi', name: '下邳', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 420000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'xiaopei', name: '小沛', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 300000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'shouchun', name: '寿春', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 480000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'puyang', name: '濮阳', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 390000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'chenliu', name: '陈留', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 430000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'xuchang', name: '许昌', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 520000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'runan', name: '汝南', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 460000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'luoyang', name: '洛阳', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 600000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'changan', name: '长安', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 600000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'shangyong', name: '上庸', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 260000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'anding', name: '安定', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 200000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'tianshui', name: '天水', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 230000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'wuwei', name: '武威', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 180000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'jianye', name: '建业', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 540000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'wu', name: '吴', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 450000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'kuaiji', name: '会稽', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 400000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'lujiang', name: '庐江', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 330000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'chaisang', name: '柴桑', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 350000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'xinye', name: '新野', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 260000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'yongan', name: '永安', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 240000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'hanzhong', name: '汉中', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 420000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'zitong', name: '梓潼', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 300000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'jiangzhou', name: '江州', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 320000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'chengdu', name: '成都', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 560000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'jianning', name: '建宁', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 260000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
+  { id: 'yunnan', name: '云南', ownerId: null, governorId: null, gold: 2000, food: 10000, population: 200000, troops: 0, commerce: 40, agriculture: 40, order: 70, training: 50, mapX: 0.5, mapY: 0.5 },
 ];
 
 export const CITY_IDS = citySeeds.map((city) => city.id);
@@ -232,16 +273,15 @@ function toRecord<T extends { id: string }>(items: T[]): Record<string, T> {
 
 export const FORCE_IDS: ForceId[] = ['cao', 'liu', 'sun', 'biao'];
 
-const CHINA42_CITY_MAP: Record<CityId, string> = {
-  wan: '宛',
-  xiangyang: '襄阳',
-  jiangling: '江陵',
-  wuling: '武陵',
-  jiangxia: '江夏',
-  changsha: '长沙',
-  lingling: '零陵',
-  guiyang: '桂阳',
-};
+/** china42x.json 中的城市条目（原版精确坐标 + 原版建设用地坐标） */
+interface China42CityEntry {
+  id: string;
+  label: string;
+  q: number;
+  r: number;
+  /** 原版建设用地坐标（interior 平面，按距城心由近到远排序） */
+  interior?: Array<[number, number]>;
+}
 
 function getChina42Grid(): GridCell[] {
   return (china42Data.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map(
@@ -249,29 +289,62 @@ function getChina42Grid(): GridCell[] {
   );
 }
 
-function getChina42CityCenter(cityId: CityId): { q: number; r: number } {
-  const label = CHINA42_CITY_MAP[cityId];
-  const city = (china42Data.cities as { label: string; q: number; r: number }[]).find((c) => c.label === label);
-  if (!city) throw new Error(`华夏42城中找不到城市: ${cityId} (${label})`);
-  return { q: city.q, r: city.r };
+function china42CityEntry(cityId: CityId): China42CityEntry {
+  const city = (china42Data.cities as China42CityEntry[]).find((c) => c.id === cityId);
+  if (!city) throw new Error(`华夏42城中找不到城市: ${cityId}`);
+  return city;
 }
 
-export function createGame(playerForceId: ForceId, seed = Date.now()): GameState {
-  const cities = toRecord(citySeeds.map((city, index) => {
-    const center = getChina42CityCenter(city.id);
+/** 各城原版建设用地坐标（距城心由近到远），供 initConstructionPlots 与存档迁移使用 */
+export function china42InteriorByCityId(): Map<string, Array<{ q: number; r: number }>> {
+  return new Map((china42Data.cities as China42CityEntry[]).map((city) => [
+    city.id,
+    (city.interior ?? []).map(([q, r]) => ({ q, r })),
+  ]));
+}
+
+/** 原版据点锚点（关所/港口，单格，来自 Scen000.s11 建筑坐标记录） */
+export interface StrongholdAnchor {
+  id: string;
+  label: string;
+  q: number;
+  r: number;
+}
+
+/** 原版 10 关所锚点（地图标记用） */
+export function china42Passes(): StrongholdAnchor[] {
+  return (china42Data.passes ?? []) as StrongholdAnchor[];
+}
+
+/** 原版 35 港口锚点（地图标记用） */
+export function china42Ports(): StrongholdAnchor[] {
+  return (china42Data.ports ?? []) as StrongholdAnchor[];
+}
+
+/** 构建剧本 42 城实体（8 座有主 + 34 座无主），开局与旧存档城市注入共用 */
+export function createScenarioCities(): Record<CityId, City> {
+  return toRecord(citySeeds.map((city, index) => {
+    const center = china42CityEntry(city.id);
     return {
       ...city,
       gridQ: center.q,
       gridR: center.r,
+      // 小地图定位直接由原版精确坐标推导（seed 中的 mapX/mapY 仅为类型占位）
+      mapX: (center.q + 0.5) / china42Data.width,
+      mapY: (center.r + 0.5) / china42Data.height,
       maxDurability: 3000,
       durability: 3000,
       armaments: initialArmaments(),
       // 开局各城粮价在 3~7 之间错落分布
       grainPrice: 3 + (index % 5),
-      // 开局商人按 1/4 错落分布（江陵、零陵开局有商人）
-      merchantPresent: index % 4 === 2,
+      // 开局商人：商贸城必有，其余按 1/4 错落分布
+      merchantPresent: hasCityTrait(city.id, 'commerce') || index % 4 === 2,
     };
   })) as Record<CityId, City>;
+}
+
+export function createGame(playerForceId: ForceId, seed = Date.now()): GameState {
+  const cities = createScenarioCities();
   const officers = toRecord(officerSeeds.map((officer) => {
     const profile = officerProfiles[officer.id];
     const personality = officerPersonalities[officer.id];
@@ -335,8 +408,8 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
       },
     ],
   };
-  // 初始化建设用地地形与每城地格坐标
-  initConstructionPlots(state);
+  // 初始化建设用地：按原版 interior 平面位置落位（42 城全覆盖）
+  initConstructionPlots(state, china42InteriorByCityId());
   // 开局按城市规模初始化城市人口（15%~20%）与农村人口
   initCityPopulation(state);
   return state;

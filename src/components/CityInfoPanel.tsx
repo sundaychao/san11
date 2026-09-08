@@ -1,6 +1,12 @@
 import { Building2 } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import type { City, GameState } from '../game/types';
+import {
+  CITY_SPECIALTY_LABELS,
+  CITY_SPECIALTY_GLYPHS,
+  CITY_SPECIALTY_DESCRIPTIONS,
+  citySpecialtyOf,
+} from '../game/cityTraits';
 
 interface CityInfoPanelProps {
   city: City;
@@ -13,13 +19,14 @@ function formatNumber(value: number) {
 }
 
 export function CityInfoPanel({ city, state, position }: CityInfoPanelProps) {
-  const force = state.forces[city.ownerId];
+  const force = city.ownerId ? state.forces[city.ownerId] : undefined;
   const governor = city.governorId ? state.officers[city.governorId] : undefined;
   const localOfficers = Object.values(state.officers).filter((officer) =>
     officer.forceId === city.ownerId && officer.cityId === city.id,
   );
   // 现役：分子=该城当前待命武将数，分母=当前城池的武将数量（非势力）
   const idleOfficers = localOfficers.filter((officer) => officer.location.kind === 'city' && !officer.acted);
+  const specialty = citySpecialtyOf(city.id);
   const style = {
     left: Math.max(8, Math.min(position.x, window.innerWidth - 190)),
     top: Math.max(8, Math.min(position.y, window.innerHeight - 260)),
@@ -29,10 +36,21 @@ export function CityInfoPanel({ city, state, position }: CityInfoPanelProps) {
     <aside className="city-info-panel tool-panel" data-testid="city-info-panel" aria-label="城池信息" style={style}>
       <header>
         <strong>{city.name}</strong>
-        <Building2 aria-hidden="true" />
+        {specialty ? (
+          <span
+            className="city-specialty-icon"
+            data-testid="city-specialty-icon"
+            aria-label={`城池特色：${CITY_SPECIALTY_LABELS[specialty]}`}
+            title={CITY_SPECIALTY_DESCRIPTIONS[specialty]}
+          >
+            {CITY_SPECIALTY_GLYPHS[specialty]}
+          </span>
+        ) : (
+          <Building2 aria-hidden="true" />
+        )}
       </header>
       <div className="city-info-owner">
-        <span>{force.name}军</span>
+        <span>{force ? `${force.name}军` : '无主'}</span>
       </div>
       <dl>
         <div><dt>太守</dt><dd>{governor?.name ?? '-'}</dd></div>

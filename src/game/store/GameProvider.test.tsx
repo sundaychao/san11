@@ -522,8 +522,9 @@ describe('GameProvider', () => {
 
     expect(screen.getByLabelText('first-target-troops')).toHaveTextContent('2700');
     expect(screen.getByLabelText('second-target-troops')).toHaveTextContent('2700');
+    // 刘备部队：每旬+5 + 乐奏+5 = 90；曹部队：每旬+5 + 乐奏+5 = 50（军乐台只回战力不回气力）
     expect(screen.getByLabelText('first-target-energy')).toHaveTextContent('90');
-    expect(screen.getByLabelText('second-target-energy')).toHaveTextContent('70');
+    expect(screen.getByLabelText('second-target-energy')).toHaveTextContent('50');
     expect(screen.getByLabelText('damage-reports')).toHaveTextContent('cao-target');
   });
 
@@ -1174,6 +1175,15 @@ describe('GameProvider', () => {
 
     await user.click(screen.getByRole('button', { name: 'create room' }));
     await user.click(screen.getByRole('button', { name: 'start online' }));
+
+    // 在线模式下地图在 state 就绪前挂载，scale 停留在默认 2.33（视野约 86 列），
+    // 且血色衣冠地图下江陵出生格 (77,134) 在初始视野（r≤128）之外，先平移到部队处让移动目标格渲染
+    const unit = state.units[unitId];
+    const cellPx = (1280 * 2.33) / 200;
+    const viewportEl = screen.getByTestId('map-viewport');
+    fireEvent.pointerDown(viewportEl, { pointerId: 1, button: 0, buttons: 1, clientX: 640, clientY: 360 });
+    fireEvent.pointerMove(viewportEl, { pointerId: 1, clientX: 640 + (100 - unit.q) * cellPx, clientY: 360 + (100 - unit.r) * cellPx });
+    fireEvent.pointerUp(viewportEl, { pointerId: 1 });
 
     const unitMarker = screen.getByTestId('battle-unit-marker');
     fireEvent.pointerDown(unitMarker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });

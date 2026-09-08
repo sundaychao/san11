@@ -9,6 +9,9 @@ import {
   writeSave,
 } from './persistence';
 import { createGame } from './scenario/jingxiang208';
+import china42Data from './scenario/china42.json';
+import china42xData from './scenario/china42x.json';
+import type { GridCell } from './types';
 import { createMobileDuelGame } from './scenario/mobileDuel';
 
 class MemoryStorage implements SaveAdapter {
@@ -27,19 +30,99 @@ describe('persistence', () => {
     const state = createGame('liu', 9);
 
     writeSave(storage, 'auto', state);
+    const restored = loadSave(storage, 'auto');
 
-    expect(loadSave(storage, 'auto')).toEqual({ ok: true, state });
+    expect(restored).toEqual({ ok: true, state });
     expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
   });
 
-  it('migrates legacy shore terrain to water and restores missing ferries on load', () => {
+  it('normalizes legacy china42x pass cells from construction to pass on load', () => {
+    // 关所地形独立为 pass 之前的旧 china42x 存档：38 个关所格仍写作 construction
+    const passKeys = new Set(
+      (china42xData.grid as { q: number; r: number; terrain: GridCell['terrain'] }[])
+        .filter((cell) => cell.terrain === 'pass')
+        .map((cell) => `${cell.q},${cell.r}`),
+    );
+    expect(passKeys.size).toBe(38);
     const legacy = createGame('liu', 9);
     legacy.grid = legacy.grid.map((cell) => (
-      cell.terrain === 'ferry' ? { ...cell, terrain: 'plain' } : cell
+      passKeys.has(`${cell.q},${cell.r}`)
+        ? { ...cell, terrain: 'construction' as const }
+        : cell
     ));
-    writeSave(storage, 'auto', legacy);
+    writeSave(storage, 'manual', legacy);
 
-    const loaded = loadSave(storage, 'auto');
+    const loaded = loadSave(storage, 'manual');
+
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) {
+      // 关所格全部归一为 pass，且不再残留 construction
+      const passCells = loaded.state.grid.filter((cell) => cell.terrain === 'pass');
+      expect(passCells).toHaveLength(38);
+      expect(passCells.every((cell) => passKeys.has(`${cell.q},${cell.r}`))).toBe(true);
+    }
+  });
+
+  it('expands truncated legacy plots to original counts without touching built facilities', () => {
+    // 旧档建设用地曾被规模档位截断（长安22格→12格）：加载后补足至原版格数
+    const legacy = createGame('liu', 9);
+    const changan = legacy.cities.changan;
+    const originalCount = changan.plots!.length;
+    expect(originalCount).toBe(22);
+    // 模拟旧档：保留前12格（含一座已建市场），其余截断
+    const kept = changan.plots!.slice(0, 12);
+    kept[0] = { ...kept[0], type: 'market', level: 2 };
+    changan.plots = kept;
+    writeSave(storage, 'manual', legacy);
+
+    const loaded = loadSave(storage, 'manual');
+
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) {
+      const plots = loaded.state.cities.changan.plots!;
+      expect(plots).toHaveLength(originalCount);
+      // 已建设施原样保留（仍是2级市场且位置不变）
+      expect(plots[0].type).toBe('market');
+      expect(plots[0].level).toBe(2);
+      // 补足的地格均为带坐标的空地
+      const appended = plots.slice(12);
+      expect(appended).toHaveLength(originalCount - 12);
+      expect(appended.every((plot) => plot.type === 'empty' && plot.q != null && plot.r != null)).toBe(true);
+    }
+  });
+
+  it('migrates legacy shore terrain to water and restores missing ferries on load', () => {
+    // 未编辑过的旧版 china42 手绘地图存档 → 整体升级为原版精确地图 china42x
+    // （草地/渡口/浅滩等原版 20 值细分地形齐全）
+    const untouched = createGame('liu', 9);
+    untouched.grid = (china42Data.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map(
+      (cell) => ({ q: cell.q, r: cell.r, terrain: cell.terrain }),
+    );
+    writeSave(storage, 'auto', untouched);
+
+    const upgraded = loadSave(storage, 'auto');
+
+    expect(upgraded.ok).toBe(true);
+    if (upgraded.ok) {
+      expect(upgraded.state.grid.some((cell) => cell.terrain === 'grass')).toBe(true);
+      expect(upgraded.state.grid.some((cell) => cell.terrain === 'ferry')).toBe(true);
+      expect(upgraded.state.grid).toHaveLength(untouched.grid.length);
+      expect(Object.values(upgraded.state.cities).every((city, index) => (
+        city.gridQ === Object.values(untouched.cities)[index].gridQ &&
+        city.gridR === Object.values(untouched.cities)[index].gridR
+      ))).toBe(true);
+    }
+
+    // 编辑过的旧地图（残留旧 shore 值）→ shore 归一化为 water，城市位置不变
+    const legacy = createGame('liu', 9);
+    legacy.grid = (china42Data.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map((cell) => (
+      cell.terrain === 'water'
+        ? { q: cell.q, r: cell.r, terrain: 'shore' as GridCell['terrain'] }
+        : { q: cell.q, r: cell.r, terrain: cell.terrain }
+    ));
+    writeSave(storage, 'manual', legacy);
+
+    const loaded = loadSave(storage, 'manual');
 
     expect(loaded.ok).toBe(true);
     if (loaded.ok) {
@@ -248,10 +331,13 @@ describe('persistence', () => {
   });
 
   it('rejects missing city records and incomplete officer stats', () => {
+    // 城市记录缺失不再拒绝：升级逻辑按剧本注入补全（旧 8 城存档升级 42 城依赖此行为）
     const missingCity = createGame('liu', 1) as unknown as { cities: Record<string, unknown> };
     delete missingCity.cities.jiangling;
     storage.setItem(AUTO_SAVE_KEY, JSON.stringify(missingCity));
-    expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '存档无法读取' });
+    const restored = loadSave(storage, 'auto');
+    expect(restored.ok).toBe(true);
+    if (restored.ok) expect(restored.state.cities.jiangling).toBeTruthy();
 
     const missingStat = createGame('liu', 1) as unknown as { officers: Record<string, { stats: Record<string, number> }> };
     delete missingStat.officers['liu-bei'].stats.politics;

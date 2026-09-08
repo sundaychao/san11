@@ -1,4 +1,5 @@
 import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, StrategyResultReport, TerrainType, TroopType } from '../types';
+import { BLOCKED_TERRAINS, isWaterTerrain } from './catalog';
 import { nextRandom } from '../random';
 import { TECHP_PER_BREAK_UNIT, techLevelOf, troopDamageMultiplier, addTechP } from '../techs';
 import { complexHandlerById } from '../skills/handlers';
@@ -18,10 +19,13 @@ import {
 import { facilityBuildPowerMultiplier } from '../skills/rules/facility';
 import { resolveStrategySkillRules } from '../skills/rules/strategy';
 import { territoryCityAt } from '../territory';
+import { hasCityTrait } from '../cityTraits';
 import { captureOfficersOnDestroy, captureCityOnCapture } from '../captives';
 import { treasureDefinition } from '../treasures';
 import { coordsWithinRange, gridKey, isSameCoord, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { isInAnyCityAttackRange } from '../innerAffairs';
+import { AURA_ATTACK_MULTIPLIER, AURA_DEFENSE_MULTIPLIER, unitUnderAura } from './aura';
+import { committedTroops } from './frontline';
 import { applyImmediateFireDamageToCityAndPlot } from './fire';
 import { allCityKeys, cellAt, cityCenter, deploymentCells, isLegalUnitCell, occupiedFacilityKeys, occupiedUnitKeys, reachableCosts, spawnCellFor, unitIsIncapacitated } from './movementRules';
 import { areAdjacent, attackableCities, attackableFacilities, attackableUnits, gridDistanceWithin, isCityInAttackRange, jointAttackableUnits } from './targetRules';
@@ -150,7 +154,7 @@ function isInLimitedFacilitySpacing(state: GameState, coord: GridCoord, facility
 
 function isBuildableFacilityCell(state: GameState, coord: GridCoord, facilityType?: FacilityType) {
   const cell = cellAt(state, coord);
-  if (!cell || ['mountain', 'water'].includes(cell.terrain)) return false;
+  if (!cell || BLOCKED_TERRAINS.has(cell.terrain) || isWaterTerrain(cell.terrain)) return false;
   const key = gridKey(coord);
   return !allCityKeys(state).has(key) &&
     !occupiedUnitKeys(state).has(key) &&
@@ -306,16 +310,19 @@ function damageForRoll(
     0.8,
     1 + (attack.leadership.value - defenseLeadership) / 250,
   ));
-  const attackScore = attacker.troops * (
+  const attackScore = committedTroops(state, attacker, defender) * (
     0.08 + attack.leadership.value / 2000 + attack.war.value / 3000
   );
   const rawDamage = 240 + attackScore;
   const randomModifier = 0.92 + rollValue * 0.16;
-  const attackerOnWater = unitTerrain(state, attacker) === 'water';
+  const attackerOnWater = isWaterTerrain(unitTerrain(state, attacker));
   const attackerShipModifier = attacker.vehicle === 'ship' && attackerOnWater ? SHIP_WATER_ATTACK_MULTIPLIER : 1;
-  const defenderShipModifier = defender && defender.vehicle === 'ship' && unitTerrain(state, defender) === 'water'
+  const defenderShipModifier = defender && defender.vehicle === 'ship' && isWaterTerrain(unitTerrain(state, defender))
     ? SHIP_WATER_DEFENSE_MULTIPLIER
     : 1;
+  // 武将光环：统率90+/96+/100+ 的主将为周围（含自身）提供攻防加成
+  const auraAttackModifier = unitUnderAura(state, attacker) ? AURA_ATTACK_MULTIPLIER : 1;
+  const auraDefenseModifier = defender && unitUnderAura(state, defender) ? AURA_DEFENSE_MULTIPLIER : 1;
   const damage = Math.round(
     rawDamage *
     leadershipModifier *
@@ -324,6 +331,8 @@ function damageForRoll(
     facilityDamageMultiplier(state, attacker) *
     attackerShipModifier *
     defenderShipModifier *
+    auraAttackModifier *
+    auraDefenseModifier *
     (counter ? 0.6 : 1),
   );
   return Math.min(2200, Math.max(120, damage));
@@ -413,7 +422,7 @@ export function removeUnit(next: GameState, unit: ArmyUnit, looter?: ArmyUnit) {
 }
 
 function unitIsOnWater(state: GameState, unit: ArmyUnit) {
-  return unitTerrain(state, unit) === 'water';
+  return isWaterTerrain(unitTerrain(state, unit));
 }
 
 export function unitTactics(state: GameState, unitId: string): UnitTactic[] {
@@ -563,6 +572,12 @@ function friendlyAbnormal(unit: ArmyUnit) {
 
 export function unitStrategies(): UnitStrategy[] {
   return Object.values(STRATEGIES);
+}
+
+/** 部队最高政治（主将+副将中 stats.politics 的最大值），用于出城初始战力与每旬战力回复 */
+export function unitMaxPolitics(state: GameState, unit: ArmyUnit): number {
+  const officerIds = unit.officerIds?.length ? unit.officerIds : [unit.leaderId];
+  return officerIds.reduce((max, officerId) => Math.max(max, state.officers[officerId]?.stats.politics ?? 0), 0);
 }
 
 export function strategyEnergyCostForUnit(state: GameState, unitId: string, strategyId: StrategyId) {
@@ -803,7 +818,7 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
   const target = state.units[targetId];
   if (!target && (tacticId === 'crossbow-fire' || tacticId === 'ship-fire')) return useFireArrowFacilityTactic(state, attacker, targetId, tactic);
   if (!target) throw new Error('目标部队不存在');
-  if (attacker.energy < tactic.cost) throw new Error('气力不足');
+  if ((attacker.stamina ?? 0) < tactic.cost) throw new Error('战力不足');
   if (!tacticTargetUnits(state, attackerId, tacticId).some((unit) => unit.id === targetId)) throw new Error('目标不在战法范围');
 
   const next = structuredClone(state);
@@ -854,7 +869,9 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
         next.units[attackerId].food += loot;
       }
     }
-    next.units[attackerId].energy -= tactic.cost;
+    if (next.units[attackerId].stamina !== undefined) {
+      next.units[attackerId].stamina = Math.max(0, next.units[attackerId].stamina - tactic.cost);
+    }
     // 科技：骑兵3级游击——攻击后可再次行动（二动）
     if (!(tactic.troopType === 'cavalry' && techLevelOf(next, forceId, 'cavalry') >= 3)) {
       next.units[attackerId].acted = true;
@@ -904,7 +921,10 @@ function useFireArrowFacilityTactic(state: GameState, attacker: ArmyUnit, facili
     throw new Error('目标不在战法范围');
   }
   if (next.units[attacker.id]) {
-    next.units[attacker.id].energy -= tactic.cost;
+    const stamina = next.units[attacker.id].stamina;
+    if (stamina !== undefined) {
+      next.units[attacker.id].stamina = Math.max(0, stamina - tactic.cost);
+    }
     next.units[attacker.id].acted = true;
   }
   return next;
@@ -913,7 +933,9 @@ function useFireArrowFacilityTactic(state: GameState, attacker: ArmyUnit, facili
 function spendStrategyCost(next: GameState, unitId: string, strategy: UnitStrategy) {
   const unit = next.units[unitId];
   if (!unit) return;
-  unit.energy -= strategy.cost;
+  if (unit.stamina !== undefined) {
+    unit.stamina = Math.max(0, unit.stamina - strategy.cost);
+  }
   unit.acted = true;
 }
 
@@ -1141,8 +1163,8 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
   const strategy = STRATEGIES[strategyId];
   if (!strategy) throw new Error('部队不能使用该计略');
   if (unit.kind === 'transport') throw new Error('运输队不能使用计略');
-  const energyCost = strategyEnergyCostForUnit(state, unitId, strategyId);
-  if (unit.energy < energyCost) throw new Error('气力不足');
+  const staminaCost = strategyEnergyCostForUnit(state, unitId, strategyId);
+  if ((unit.stamina ?? 0) < staminaCost) throw new Error('战力不足');
 
   let targetCoord: GridCoord;
   let targetUnit: ArmyUnit | undefined;
@@ -1200,7 +1222,7 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
     ? nextRandom(next.seed, next.rngCursor)
     : undefined;
   if (disturbDurationRoll) next.rngCursor = disturbDurationRoll.cursor;
-  spendStrategyCost(next, unitId, { ...strategy, cost: energyCost });
+  spendStrategyCost(next, unitId, { ...strategy, cost: staminaCost });
   next.strategyResultReports = [strategyReport(next, unitId, strategy, targetCoord, succeeded)];
   // 反计：敌方对本部队的计略失败且敌将智力不高于本部队主将时，将计略反作用到施计方
   if (!succeeded && skillRules.reflect) {
@@ -1368,24 +1390,28 @@ export function settleBattleFacilities(next: GameState, activeForceId?: ForceId)
     if (!facilityIsCompleted(facility)) continue;
     if (facility.type === 'musicTower') {
       if (activeForceId && facility.forceId !== activeForceId) continue;
-      // 诗想：军乐台气力恢复效果加倍（由势力内任意拥有诗想者生效）
+      // 诗想：军乐台战力恢复效果加倍（由势力内任意拥有诗想者生效）
       const forceOfficerIds = Object.values(next.officers)
         .filter((officer) => officer.forceId === facility.forceId)
         .map((officer) => officer.id);
       const musicMultiplier = effectsOfKind(resolveOfficerSkills(next, forceOfficerIds), 'musicTowerEnergyMultiplier')
         .reduce((highest, { effect }) => Math.max(highest, effect.multiplier), 1);
       for (const unit of Object.values(next.units)) {
-        if (unit.forceId === facility.forceId && gridDistanceWithin(facility, unit, 2) <= 2) {
-          unit.energy = Math.min(100, unit.energy + 10 * musicMultiplier);
+        // 军乐台每旬使邻近（2格内）同势力战斗部队恢复 6 战力，运输队无战力不受影响
+        if (unit.forceId === facility.forceId && unit.stamina !== undefined && gridDistanceWithin(facility, unit, 2) <= 2) {
+          unit.stamina = Math.min(100, unit.stamina + 6 * musicMultiplier);
         }
       }
     } else if (facility.type === 'arrowTower') {
       if (activeForceId && facility.forceId !== activeForceId) continue;
+      // 要塞城：本方工事伤害+50%（箭楼所在领地为要塞特性城且归属同势力时生效）
+      const towerTerritory = territoryCityAt(next, facility);
+      const fortressMultiplier = towerTerritory.ownerId === facility.forceId && hasCityTrait(towerTerritory.id, 'fortress') ? 1.5 : 1;
       for (const unit of [...Object.values(next.units)]) {
         if (unit.forceId === facility.forceId || gridDistanceWithin(facility, unit, 2) > 2) continue;
         const target = next.units[unit.id];
         if (!target) continue;
-        const damage = reduceUnitDamageByFortress(next, target, ARROW_TOWER_DAMAGE);
+        const damage = reduceUnitDamageByFortress(next, target, ARROW_TOWER_DAMAGE * fortressMultiplier);
         target.troops -= damage;
         addDamageReport(next, target, damage, 'arrow-tower');
         if (target.troops <= 0) removeUnit(next, target);

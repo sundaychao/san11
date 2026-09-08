@@ -1,7 +1,8 @@
 import { nextRandom } from './random';
+import { cityCanBuildFacility, hasCityTrait, forceMaxTraining } from './cityTraits';
 import { REWARD_AP_COST, REWARD_GOLD_COST, REWARD_LOYALTY_GAIN, officerLoyalty, recruitmentInitialLoyalty, setOfficerLoyalty } from './loyalty';
 import { addOfficerMerit, applyPositionStatDelta, MERIT_PER_COMMAND, officerIsOnCampaign, officerMerit, positionDefinition, forceRankOf, rankDefinition, rankIndex } from './ranks';
-import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentsOf, armamentProductionTenDays, isDelayedArmament, produceArmamentYield } from './armaments';
+import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentCost, armamentsOf, armamentProductionTenDays, isDelayedArmament, produceArmamentYield } from './armaments';
 import { ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, CULTIVATE_TEN_DAYS, abilityCultivateRemaining, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
 import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from './skills/rules/city';
 import { effectsOfKind, officerSkillNames, resolveCommandSkills, resolveOfficerSkills } from './skills';
@@ -44,6 +45,9 @@ export const COMMAND_AP = {
   appointStrategist: STRATEGIST_AP_COST,
 } as const;
 
+/** 新征士兵的初始士气（征兵会按此值稀释城池士气） */
+export const RECRUIT_TROOP_MORALE = 50;
+
 export const COMMAND_LABELS: Record<GameCommand['type'], string> = {
   recruit: '征兵',
   produceArmament: '生产兵装',
@@ -63,7 +67,7 @@ export const COMMAND_LABELS: Record<GameCommand['type'], string> = {
   appointPosition: '任命官职',
   rumor: '流言',
   poach: '挖角',
-  diplomacy: '外交',
+  diplomacy: '亲善',
   captiveDispose: '处置俘虏',
   marry: '仲介',
   legion: '委任军团',
@@ -98,12 +102,16 @@ export function rollGrainPrices(state: GameState): void {
   }
 }
 
-// 每旬各城独立掷点决定商人是否到访（1/4），并重置本旬交易次数
+// 每旬各城独立掷点决定商人是否到访（商贸城100%，其余1/4），并重置本旬交易次数
 export function rollMerchants(state: GameState): void {
   for (const city of Object.values(state.cities)) {
-    const roll = nextRandom(state.seed, state.rngCursor);
-    state.rngCursor = roll.cursor;
-    city.merchantPresent = roll.value < MERCHANT_ARRIVAL_CHANCE;
+    if (hasCityTrait(city.id, 'commerce')) {
+      city.merchantPresent = true;
+    } else {
+      const roll = nextRandom(state.seed, state.rngCursor);
+      state.rngCursor = roll.cursor;
+      city.merchantPresent = roll.value < MERCHANT_ARRIVAL_CHANCE;
+    }
     city.merchantTradedThisTenDay = false;
     // 训练/巡查次数每旬重置
     city.trainedThisTenDay = false;
@@ -155,7 +163,7 @@ export function patrolGoldCost(city: City): number {
 function commandGoldCost(command: GameCommand, city?: City) {
   switch (command.type) {
     case 'recruit': return 800;
-    case 'produceArmament': return ARMAMENT_GOLD_COST;
+    case 'produceArmament': return city ? armamentCost(city, command.armamentType) : ARMAMENT_GOLD_COST;
     case 'patrol': return city ? patrolGoldCost(city) : 300;
     case 'talent': return 500;
     case 'abilityResearch': return ABILITY_RESEARCH_GOLD;
@@ -519,6 +527,10 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     else if (plot.q != null && plot.r != null && isPlotOccupiedByOtherCity(state, city.id, plot.q, plot.r)) {
       errors.push('该地块已被其他城市占用');
     }
+    // 城池特性限制：水港才能建造船厂，学术才能建太学
+    if (!cityCanBuildFacility(city.id, command.facility)) {
+      errors.push(command.facility === 'shipyard' ? '只有水港城市可以建造船厂' : '只有学术城市可以建造太学');
+    }
     // 一城限一设施（造币/谷仓/大市场/鱼市/军屯农/六部/太学/铜雀台）：建设中也占用名额
     if (UNIQUE_FACILITIES.includes(command.facility) && plotCountIncludingConstructing(city, command.facility) > 0) {
       errors.push('该设施一城只能建造一座（同类型正在建设中）');
@@ -783,7 +795,14 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       city.gold -= 800;
       city.food -= 500;
       city.population -= 500;
+      // 新征士兵士气50，稀释城池士气：(原有士兵×原有士气 + 新增士兵×50) ÷ 征兵后总士兵
+      // 劲勇城：新征士兵士气以势力最大士气值计算
+      const prevTroops = city.troops;
+      const prevTraining = hasCityTrait(city.id, 'valor')
+        ? forceMaxTraining((Object.keys(next.cities) as CityId[]).filter((id) => next.cities[id].ownerId === forceId), next.cities)
+        : city.training;
       city.troops += gain;
+      city.training = Math.round(clamp((prevTroops * prevTraining + gain * RECRUIT_TROOP_MORALE) / city.troops, 0, 100));
       city.order = clamp(city.order - 2, 0, 100);
       addTechP(next, forceId, TECHP_PER_CIVIL_ACTION);
       message = `${names}在${city.name}征募士兵${gain.toLocaleString('en-US')}`;
@@ -807,7 +826,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       const baseGain = produceArmamentYield(officers, command.armamentType);
       const gain = Math.round(baseGain * commandYieldMultiplier(next, command)
         * armamentYieldMultiplier(city, command.armamentType));
-      city.gold -= ARMAMENT_GOLD_COST;
+      city.gold -= armamentCost(city, command.armamentType);
       if (isDelayedArmament(command.armamentType)) {
         // 兵器/舰船：按综合智力计算工期，逐旬推进（发明/造船特技日数减半）
         const tenDays = armamentProductionTenDays(officers, armamentProductionSpeedMultiplier(next, command));
@@ -850,7 +869,9 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       city.food -= 300;
       city.trainedThisTenDay = true;
       // 气力提升 = 【(武力总和 + 武力最大值) ÷ 基数】+ 3，基数 = 士兵数÷2000 + 20
-      const gain = trainMoraleGain(officers, city.troops);
+      // 兵部：城池建有兵部时训练效果翻倍
+      let gain = trainMoraleGain(officers, city.troops);
+      if (hasPlotFacility(city, 'bingbu')) gain *= 2;
       city.training = clamp(city.training + gain, 0, 100);
       addTechP(next, forceId, TECHP_PER_TRAIN);
       message = `${names}训练${city.name}守军，气力+${gain}`;
@@ -1043,7 +1064,8 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         officer.location = {
           kind: 'captive',
           cityId: target.id,
-          captorForceId: target.ownerId,
+          // 散布流言仅可对敌城执行（上方校验 target.ownerId 非空）
+          captorForceId: target.ownerId!,
           capturedTenDays: 0,
         };
         officer.cityId = target.id;

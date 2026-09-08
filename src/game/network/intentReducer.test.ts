@@ -50,7 +50,7 @@ function skillRoomFixture(attackerSkill: string, defenderSkill: string, seed: nu
     'host-unit': {
       id: 'host-unit', kind: 'combat', forceId: 'liu', leaderId: 'liu-bei', officerIds: ['liu-bei'],
       homeCityId: 'jiangling', troopType: 'spear', q: 10, r: 10, troops: 10000, gold: 1000, food: 10000,
-      energy: 100, movementRemaining: 20, moved: false, acted: false,
+      energy: 100, stamina: 100, movementRemaining: 20, moved: false, acted: false,
     },
     'guest-unit': {
       id: 'guest-unit', kind: 'combat', forceId: 'cao', leaderId: 'cao-cao', officerIds: ['cao-cao'],
@@ -227,7 +227,7 @@ describe('reduceGameIntent', () => {
     } else if (name === '连击普通攻击') {
       expect(onlineState.battleDamageReports?.filter((report) => report.unitId === 'guest-unit')).toHaveLength(2);
     } else if (name === '百出扰乱') {
-      expect(onlineState.units['host-unit']).toMatchObject({ energy: 99, acted: true });
+      expect(onlineState.units['host-unit']).toMatchObject({ stamina: 99, acted: true });
       expect(onlineState.strategyResultReports?.[0]).toMatchObject({ strategyId: 'disturb', succeeded: true });
     } else if (name === '火神火计') {
       expect(onlineState.units['guest-unit'].troops).toBe(9000);

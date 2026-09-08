@@ -68,7 +68,8 @@ type SortKey =
   | keyof OfficerAptitudes
   | 'status'
   | 'task'
-  | 'time';
+  | 'time'
+  | 'gender';
 
 interface OfficerColumn {
   label: string;

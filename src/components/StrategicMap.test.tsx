@@ -12,13 +12,26 @@ import type { TerrainType } from '../game/types';
 import { GameShell } from './GameShell';
 
 const TERRAIN_LABELS: Record<TerrainType, string> = {
-  road: '道路',
+  road: '主径',
+  path: '小径',
+  plank: '栈道',
   plain: '平地',
+  grass: '草地',
+  sand: '沙地',
+  wasteland: '荒地',
+  wetland: '湿地',
+  poison: '毒泉',
   forest: '森林',
   hill: '丘陵',
-  mountain: '高山',
+  mountain: '山崖',
+  shore: '岸',
   water: '水域',
+  stream: '川',
+  river: '河',
+  sea: '海',
+  shallow: '浅滩',
   ferry: '渡口',
+  pass: '关隘',
   construction: '建设用地',
 };
 
@@ -79,8 +92,8 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     const state = createGame('liu', 1);
     renderGame(state);
     zoomToTerrain();
-    // 江陵 (q92,r120) 在地图中心下方，向上拖动视野约 20 格（每格约 42.7px）使其进入可见范围
-    panViewport(0, -880);
+    // 江陵 (q82,r137) 在地图中心左下方，向右拖 18 格、向上拖 37 格（每格约 42.7px）使其进入可见范围
+    panViewport(768, -1580);
 
     const city = state.cities.jiangling;
     const footprintMapCell = screen.getAllByTestId(/^map-cell-/).find((node) => {
@@ -110,6 +123,21 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     expect(screen.queryByTestId(`city-hit-cell-${city.id}-${city.gridQ}-${city.gridR}`)).not.toBeInTheDocument();
     const cityMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes(city.name));
     expect(cityMarker?.querySelector('.city-fort')).not.toBeInTheDocument();
+  });
+
+  it('renders the ten original passes as stronghold markers on the china42x map', () => {
+    const state = createGame('liu', 1);
+    expect(state.gridWidth).toBe(200);
+    renderGame(state);
+
+    const passMarkers = screen.getAllByTestId('pass-marker');
+    expect(passMarkers).toHaveLength(10);
+    const labels = passMarkers.map((marker) => marker.textContent);
+    for (const label of ['壶关', '虎牢关', '潼关', '函谷关', '武关', '阳平关', '剑阁', '葭萌关', '涪水关', '江油关']) {
+      expect(labels).toContain(label);
+    }
+    // 小地图同步显示关隘点
+    expect(document.querySelectorAll('.mini-pass-dot')).toHaveLength(10);
   });
 
   it('opens the city menu from every rendered city footprint square', () => {
@@ -728,7 +756,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
 
     const info = screen.getByTestId('city-info-panel');
     expect(info).toHaveTextContent(city.name);
-    expect(info).toHaveTextContent(`${state.forces[city.ownerId].name}军`);
+    expect(info).toHaveTextContent(`${state.forces[city.ownerId!].name}军`);
     expect(info).toHaveTextContent(governor.name);
     expect(info).toHaveTextContent(city.gold.toLocaleString('en-US'));
     expect(info).toHaveTextContent(city.food.toLocaleString('en-US'));

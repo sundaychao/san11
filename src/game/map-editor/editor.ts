@@ -48,34 +48,60 @@ interface EditorJsonPayload {
 export const MAX_EDITOR_GRID_SIZE = 512;
 
 const TERRAIN_COLORS: Record<TerrainType, string> = {
-  plain: '#69775f',
-  road: '#a58d57',
+  road: '#e6c84e',
+  path: '#d2b478',
+  plank: '#a06e3c',
+  plain: '#c4aa6c',
+  grass: '#70b256',
+  sand: '#e0ca8a',
+  wasteland: '#b2a87a',
+  wetland: '#6c9e8e',
+  poison: '#9448ac',
   forest: '#2f5f3a',
   hill: '#696851',
   mountain: '#303837',
+  shore: '#94845c',
   water: '#1e4c60',
+  stream: '#6caad2',
+  river: '#2e6cb6',
+  sea: '#123a7a',
+  shallow: '#60bac4',
   ferry: '#a07440',
+  pass: '#96764a',
   construction: '#8a7a50',
 };
 
 const TERRAIN_CONTROL_COLORS: Record<TerrainType, string> = {
-  plain: '#6f7f62',
-  road: '#c3a663',
-  forest: '#245a34',
+  road: '#f0d45e',
+  path: '#dcc28a',
+  plank: '#b47e48',
+  plain: '#d4ba7c',
+  grass: '#82c266',
+  sand: '#ecd898',
+  wasteland: '#c4ba8a',
+  wetland: '#7cae9e',
+  poison: '#a65abe',
+  forest: '#3a7048',
   hill: '#7b744f',
   mountain: '#2d3332',
+  shore: '#a49468',
   water: '#1f546e',
+  stream: '#7cbae0',
+  river: '#3e7cc6',
+  sea: '#1a4a8a',
+  shallow: '#70c8d2',
   ferry: '#b0874c',
+  pass: '#a68a54',
   construction: '#a08c5a',
 };
 
 const CELL_SIZE = 24;
 
-const TERRAIN_MASK_LAYERS: Array<{ layer: TerrainMaskLayer; filename: string; terrain?: TerrainType }> = [
-  { layer: 'water', filename: 'mask-water.svg', terrain: 'water' },
-  { layer: 'mountain', filename: 'mask-mountain.svg', terrain: 'mountain' },
-  { layer: 'forest', filename: 'mask-forest.svg', terrain: 'forest' },
-  { layer: 'road', filename: 'mask-road.svg', terrain: 'road' },
+const TERRAIN_MASK_LAYERS: Array<{ layer: TerrainMaskLayer; filename: string; terrains?: TerrainType[] }> = [
+  { layer: 'water', filename: 'mask-water.svg', terrains: ['water', 'stream', 'river', 'sea'] },
+  { layer: 'mountain', filename: 'mask-mountain.svg', terrains: ['mountain'] },
+  { layer: 'forest', filename: 'mask-forest.svg', terrains: ['forest'] },
+  { layer: 'road', filename: 'mask-road.svg', terrains: ['road', 'path', 'plank'] },
   { layer: 'city', filename: 'mask-city.svg' },
 ];
 
@@ -112,8 +138,14 @@ function cellPosition(q: number, r: number) {
   };
 }
 
+const TERRAIN_VALUES: readonly TerrainType[] = [
+  'road', 'path', 'plank', 'plain', 'grass', 'sand', 'wasteland', 'wetland', 'poison',
+  'forest', 'hill', 'mountain', 'shore', 'water', 'stream', 'river', 'sea', 'shallow',
+  'ferry', 'pass', 'construction',
+];
+
 function isTerrain(value: unknown): value is TerrainType {
-  return value === 'road' || value === 'plain' || value === 'forest' || value === 'hill' || value === 'mountain' || value === 'water' || value === 'ferry' || value === 'construction';
+  return typeof value === 'string' && (TERRAIN_VALUES as readonly string[]).includes(value);
 }
 
 function isGridCell(value: unknown, width: number, height: number): value is GridCell {
@@ -345,15 +377,15 @@ export function exportTerrainControlSvg(state: MapEditorState): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" data-export="terrain-control" data-grid-width="${state.width}" data-grid-height="${state.height}" data-cell-size="${CELL_SIZE}" data-cell-shape="staggered-square-even-columns-up-half">${metadata.join('')}</svg>`;
 }
 
-function exportTerrainMaskSvg(state: MapEditorState, layer: TerrainMaskLayer, terrain?: TerrainType): string {
+function exportTerrainMaskSvg(state: MapEditorState, layer: TerrainMaskLayer, terrains?: TerrainType[]): string {
   const width = state.width * CELL_SIZE;
   const height = state.height * CELL_SIZE;
-  const cells = terrain
+  const cells = terrains
     ? state.grid
-      .filter((cell) => cell.terrain === terrain)
+      .filter((cell) => terrains.includes(cell.terrain))
       .map((cell) => {
         const position = cellPosition(cell.q, cell.r);
-        return `<rect data-q="${cell.q}" data-r="${cell.r}" data-source-terrain="${terrain}" x="${position.x}" y="${position.y}" width="${CELL_SIZE}" height="${CELL_SIZE}" fill="#fff" />`;
+        return `<rect data-q="${cell.q}" data-r="${cell.r}" data-source-terrain="${cell.terrain}" x="${position.x}" y="${position.y}" width="${CELL_SIZE}" height="${CELL_SIZE}" fill="#fff" />`;
       })
     : state.cities.flatMap((city) => sevenCellCityFootprint(city).map((coord) => {
       const position = cellPosition(coord.q, coord.r);
@@ -364,11 +396,11 @@ function exportTerrainMaskSvg(state: MapEditorState, layer: TerrainMaskLayer, te
 }
 
 export function exportTerrainMaskSvgs(state: MapEditorState): Record<TerrainMaskLayer, TerrainMaskExport> {
-  return TERRAIN_MASK_LAYERS.reduce((exports, { filename, layer, terrain }) => ({
+  return TERRAIN_MASK_LAYERS.reduce((exports, { filename, layer, terrains }) => ({
     ...exports,
     [layer]: {
       filename,
-      content: exportTerrainMaskSvg(state, layer, terrain),
+      content: exportTerrainMaskSvg(state, layer, terrains),
     },
   }), {} as Record<TerrainMaskLayer, TerrainMaskExport>);
 }

@@ -55,6 +55,7 @@ function addEnemyUnit(state: ReturnType<typeof createGame>, id: string, coord: {
     r: coord.r,
     troops,
     food: 3000,
+    stamina: 100,
     energy: 100,
     movementRemaining: 20,
     moved: false,
@@ -69,7 +70,7 @@ function stateWithSkillUnit(skill: string, troopType: TroopType) {
   state.units.test = {
     id: 'test', kind: 'combat', forceId: 'liu', leaderId: 'liu-bei', officerIds: ['liu-bei'],
     homeCityId: 'jiangling', troopType, q: 0, r: 0, troops: 4000, food: 4000,
-    energy: 100, movementRemaining: 30, moved: false, acted: false,
+    stamina: 100, energy: 100, movementRemaining: 30, moved: false, acted: false,
   };
   return state;
 }
@@ -87,12 +88,12 @@ function combatSkillState(attackerSkill: string, targetSkill = '无', targetTroo
     'skill-attacker': {
       id: 'skill-attacker', kind: 'combat', forceId: 'liu', leaderId: 'guan-yu', officerIds: ['guan-yu'],
       homeCityId: 'jiangling', troopType: 'spear', q: 10, r: 10, troops: 6000, food: 6000,
-      energy: 100, movementRemaining: 20, moved: false, acted: false,
+      stamina: 100, energy: 100, movementRemaining: 20, moved: false, acted: false,
     },
     'skill-target': {
       id: 'skill-target', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
       homeCityId: 'xiangyang', troopType: 'spear', q: 11, r: 10, troops: targetTroops, food: 6000,
-      energy: 100, movementRemaining: 20, moved: false, acted: false,
+      stamina: 100, energy: 100, movementRemaining: 20, moved: false, acted: false,
     },
   };
   return { state, attacker: state.units['skill-attacker'], target: state.units['skill-target'] };
@@ -109,12 +110,12 @@ function strategySkillState(casterSkill = '无', targetSkill = '无') {
     'strategy-caster': {
       id: 'strategy-caster', kind: 'combat', forceId: 'liu', leaderId: 'zhuge-liang', officerIds: ['zhuge-liang'],
       homeCityId: 'jiangling', troopType: 'spear', q: 10, r: 10, troops: 5000, food: 5000,
-      energy: 100, movementRemaining: 20, moved: false, acted: false,
+      stamina: 100, energy: 100, movementRemaining: 20, moved: false, acted: false,
     },
     'strategy-skill-target': {
       id: 'strategy-skill-target', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
       homeCityId: 'xiangyang', troopType: 'spear', q: 11, r: 10, troops: 5000, food: 5000,
-      energy: 100, movementRemaining: 20, moved: false, acted: false,
+      stamina: 100, energy: 100, movementRemaining: 20, moved: false, acted: false,
     },
   };
   return {
@@ -149,6 +150,7 @@ function spearTacticState(grade: 'S' | 'A' | 'B' | 'C', seed = 1, troops = 10_00
   setUniformTerrain(state, 'plain');
   const attacker = Object.values(state.units)[0];
   readyUnitAt(state, attacker.id, { q: 10, r: 10 }, 'spear');
+  state.units[attacker.id].stamina = 100;
   state.officers['guan-yu'].skill = '无';
   state.officers['guan-yu'].aptitudes!.spear = grade;
   state.officers['cao-ren'].stats.leadership = state.officers['guan-yu'].stats.leadership;
@@ -166,6 +168,7 @@ function probabilisticStrategyState(strategyId: ProbabilisticStrategyId) {
   const unit = Object.values(state.units)[0];
   readyUnitAt(state, unit.id, { q: 10, r: 10 });
   state.units[unit.id].energy = 100;
+  state.units[unit.id].stamina = 100;
   state.officers['guan-yu'].stats.intelligence = 70;
   addEnemyUnit(state, 'strategy-target', { q: 11, r: 10 });
   state.officers['cao-ren'].stats.intelligence = 70;
@@ -208,7 +211,7 @@ describe('battle deployment and movement actions', () => {
     state.units.enemy = {
       id: 'enemy', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
       homeCityId: 'xiangyang', troopType: 'spear', q: 1, r: 1, troops: 4000, food: 4000,
-      energy: 100, movementRemaining: 20, moved: false, acted: false,
+      stamina: 100, energy: 100, movementRemaining: 20, moved: false, acted: false,
     };
     state.grid = [
       { q: 0, r: 0, terrain: 'road' }, { q: 1, r: 0, terrain: 'road' },
@@ -320,6 +323,7 @@ describe('battle deployment and movement actions', () => {
       gold: 900,
     });
     const unit = Object.values(state.units)[0];
+    setUniformTerrain(state, 'plain');
     readyUnitAt(state, unit.id, { q: 10, r: 10 }, 'sword');
 
     const built = buildFacility(state, 'liu', unit.id, 'arrowTower', { q: 11, r: 10 });
@@ -680,7 +684,7 @@ describe('battle deployment and movement actions', () => {
     state.units.builder = {
       id: 'builder', kind: 'combat', forceId: 'liu', leaderId: 'liu-bei', officerIds: ['liu-bei', 'guan-yu', 'zhang-fei'],
       homeCityId: 'jiangling', troopType: 'spear', q: 10, r: 10, troops: 10_000, gold: 2000,
-      food: 5000, energy: 100, movementRemaining: 20, moved: false, acted: false,
+      food: 5000, stamina: 100, energy: 100, movementRemaining: 20, moved: false, acted: false,
     };
     const target = facilityBuildTargets(state, 'builder', undefined, 'arrowTower')[0];
 
@@ -974,7 +978,7 @@ describe('battle deployment and movement actions', () => {
     expect(5000 - boosted.units['enemy-drum'].troops).toBeGreaterThan(5000 - normal.units['enemy-no-drum'].troops);
   });
 
-  it('settles music tower morale recovery and arrow tower automatic damage each ten-day', () => {
+  it('settles music tower stamina recovery and arrow tower automatic damage each ten-day', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -985,6 +989,7 @@ describe('battle deployment and movement actions', () => {
     state.units[unit.id].q = 10;
     state.units[unit.id].r = 10;
     state.units[unit.id].energy = 50;
+    state.units[unit.id].stamina = 50;
     addEnemyUnit(state, 'arrow-target', { q: 13, r: 10 }, 3000);
     state.facilities = {
       music: { id: 'music', type: 'musicTower', forceId: 'liu', q: 10, r: 11, durability: 800 },
@@ -993,7 +998,10 @@ describe('battle deployment and movement actions', () => {
 
     const next = settleTenDay(state);
 
-    expect(next.units[unit.id].energy).toBe(65);
+    // 气力仅按基础值每旬恢复 +5；军乐台只回战力不回气力
+    expect(next.units[unit.id].energy).toBe(55);
+    // 战力：每旬回复最高政治12%（关羽政 62×12%=7.44）+ 军乐台 +6
+    expect(next.units[unit.id].stamina).toBeCloseTo(50 + state.officers['guan-yu'].stats.politics * 0.12 + 6);
     expect(next.units['arrow-target'].troops).toBeLessThan(3000);
   });
 
@@ -1172,14 +1180,15 @@ describe('battle deployment and movement actions', () => {
       food: 6000,
     });
     const unit = Object.values(deployed.units)[0];
-    deployed.units[unit.id].q = 97;
-    deployed.units[unit.id].r = 132;
+    // 原版精确地图：部队自渡所下水（(73,137) 是渡所，西侧 (72,137) 是河）
+    deployed.units[unit.id].q = 73;
+    deployed.units[unit.id].r = 137;
     deployed.units[unit.id].moved = false;
     deployed.units[unit.id].movementRemaining = 20;
 
-    const water = deployed.grid.find((cell) => cell.q === 97 && cell.r === 133);
+    const water = deployed.grid.find((cell) => cell.q === 72 && cell.r === 137);
 
-    expect(water?.terrain).toBe('water');
+    expect(water?.terrain).toBe('river');
     expect(moveUnit(deployed, 'liu', unit.id, water!).units[unit.id]).toMatchObject({ q: water!.q, r: water!.r });
   });
 
@@ -1219,7 +1228,7 @@ describe('battle deployment and movement actions', () => {
 
   it('rejects an aptitude-locked tactic before energy and target validation', () => {
     const { state, attacker } = spearTacticState('B');
-    state.units[attacker.id].energy = 0;
+    state.units[attacker.id].stamina = 0;
 
     expect(() => useUnitTactic(state, 'liu', attacker.id, 'enemy-tactic', 'spear-spiral'))
       .toThrow('需要枪兵适性 A');
@@ -1287,7 +1296,8 @@ describe('battle deployment and movement actions', () => {
     });
     const { state, attacker } = spearTacticState('B', seed);
     state.rngCursor = nextRandom(seed, state.rngCursor).cursor;
-    const baseDamage = damageRoll(state, attacker, 'plain');
+    // 防守方曹仁统率被对齐为95，自身带光环（范围1、相邻）→ 伤害×0.95，需传入防守方
+    const baseDamage = damageRoll(state, attacker, 'plain', false, state.units['enemy-tactic']);
 
     expect(damages).toEqual([1, 1.1, 1.2].map((multiplier) => Math.round(baseDamage * 1.18 * multiplier)));
   });
@@ -1298,7 +1308,8 @@ describe('battle deployment and movement actions', () => {
     const { state, attacker } = spearTacticState('S', criticalSeed);
     const expectedState = structuredClone(state);
     expectedState.rngCursor = nextRandom(criticalSeed, expectedState.rngCursor).cursor;
-    const expectedBase = damageRoll(expectedState, expectedState.units[attacker.id], 'plain');
+    // 同上：防守方曹仁带光环，期望值需传入防守方
+    const expectedBase = damageRoll(expectedState, expectedState.units[attacker.id], 'plain', false, expectedState.units['enemy-tactic']);
 
     const next = useUnitTactic(state, 'liu', attacker.id, 'enemy-tactic', 'spear-thrust');
 
@@ -1449,7 +1460,7 @@ describe('battle deployment and movement actions', () => {
     expect(next.battleDamageReports?.some((report) => report.kind === 'counter' && report.unitId === attacker.id)).toBe(true);
   });
 
-  it('uses spear tactics to push or confuse a target and spend energy', () => {
+  it('uses spear tactics to push or confuse a target and spend stamina', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -1460,22 +1471,23 @@ describe('battle deployment and movement actions', () => {
     setUniformTerrain(state, 'plain');
     const attacker = Object.values(state.units)[0];
     readyUnitAt(state, attacker.id, { q: 10, r: 10 }, 'spear');
+    state.units[attacker.id].stamina = 100;
     addEnemyUnit(state, 'enemy-thrust', { q: 11, r: 10 });
 
     expect(tacticTargetUnits(state, attacker.id, 'spear-thrust').map((unit) => unit.id)).toContain('enemy-thrust');
 
     const pushed = useUnitTactic(state, 'liu', attacker.id, 'enemy-thrust', 'spear-thrust');
 
-    expect(pushed.units[attacker.id].energy).toBe(85);
+    expect(pushed.units[attacker.id].stamina).toBe(85);
     expect(pushed.units[attacker.id].acted).toBe(true);
     expect(pushed.units['enemy-thrust']).toMatchObject({ q: 12, r: 11 });
     expect(pushed.units['enemy-thrust'].troops).toBeLessThan(3000);
 
     const spiralState = structuredClone(state);
-    spiralState.units[attacker.id].energy = 100;
+    spiralState.units[attacker.id].stamina = 100;
     const confused = useUnitTactic(spiralState, 'liu', attacker.id, 'enemy-thrust', 'spear-spiral');
 
-    expect(confused.units[attacker.id].energy).toBe(80);
+    expect(confused.units[attacker.id].stamina).toBe(80);
     expect(confused.units['enemy-thrust']).toMatchObject({ q: 11, r: 10, confusedTenDays: 1 });
   });
 
@@ -1583,7 +1595,7 @@ describe('battle deployment and movement actions', () => {
     expect(open.units['enemy-double-open']).toMatchObject({ q: 13, r: 11 });
 
     const firstBlocked = structuredClone(state);
-    firstBlocked.units[attacker.id].energy = 100;
+    firstBlocked.units[attacker.id].stamina = 100;
     addEnemyUnit(firstBlocked, 'first-blocker', { q: 12, r: 11 }, 2800);
     const stopped = useUnitTactic(firstBlocked, 'liu', attacker.id, 'enemy-double-open', 'spear-double');
     expect(stopped.units['enemy-double-open']).toMatchObject({ q: 11, r: 10 });
@@ -1594,7 +1606,7 @@ describe('battle deployment and movement actions', () => {
     ]));
 
     const secondBlocked = structuredClone(state);
-    secondBlocked.units[attacker.id].energy = 100;
+    secondBlocked.units[attacker.id].stamina = 100;
     addEnemyUnit(secondBlocked, 'second-blocker', { q: 13, r: 11 });
     const retreatedOne = useUnitTactic(secondBlocked, 'liu', attacker.id, 'enemy-double-open', 'spear-double');
     expect(retreatedOne.units['enemy-double-open']).toMatchObject({ q: 12, r: 11 });
@@ -1611,12 +1623,13 @@ describe('battle deployment and movement actions', () => {
     setUniformTerrain(state, 'plain');
     const attacker = Object.values(state.units)[0];
     readyUnitAt(state, attacker.id, { q: 10, r: 10 }, 'halberd');
+    state.units[attacker.id].stamina = 100;
     addEnemyUnit(state, 'enemy-front', { q: 11, r: 10 });
     addEnemyUnit(state, 'enemy-side', { q: 10, r: 9 });
 
     const whirlwind = useUnitTactic(state, 'liu', attacker.id, 'enemy-front', 'halberd-whirlwind');
 
-    expect(whirlwind.units[attacker.id].energy).toBe(70);
+    expect(whirlwind.units[attacker.id].stamina).toBe(70);
     expect(whirlwind.battleDamageReports?.filter((report) => report.kind !== 'counter').map((report) => report.unitId).sort()).toEqual(['enemy-front', 'enemy-side']);
 
     const crossbowState = deployUnit(createGame('liu', 1), 'liu', {
@@ -1630,6 +1643,7 @@ describe('battle deployment and movement actions', () => {
     const crossbow = Object.values(crossbowState.units)[0];
     readyUnitAt(crossbowState, crossbow.id, { q: 10, r: 10 }, 'crossbow');
     crossbowState.officers['guan-yu'].aptitudes!.crossbow = 'A';
+    crossbowState.units[crossbow.id].stamina = 100;
     crossbowState.units['friendly-middle'] = {
       id: 'friendly-middle',
       kind: 'combat',
@@ -1652,7 +1666,7 @@ describe('battle deployment and movement actions', () => {
 
     const pierced = useUnitTactic(crossbowState, 'liu', crossbow.id, 'enemy-arrow', 'crossbow-pierce');
 
-    expect(pierced.units[crossbow.id].energy).toBe(85);
+    expect(pierced.units[crossbow.id].stamina).toBe(85);
     expect(pierced.battleDamageReports?.map((report) => report.unitId).sort()).toEqual(['enemy-arrow', 'friendly-middle']);
     expect(pierced.units['friendly-middle'].troops).toBeLessThan(crossbowState.units['friendly-middle'].troops);
     expect(pierced.units['enemy-behind'].troops).toBe(crossbowState.units['enemy-behind'].troops);
@@ -1669,6 +1683,7 @@ describe('battle deployment and movement actions', () => {
     setUniformTerrain(state, 'plain');
     const attacker = Object.values(state.units)[0];
     readyUnitAt(state, attacker.id, { q: 10, r: 10 }, 'halberd');
+    state.units[attacker.id].stamina = 100;
     addEnemyUnit(state, 'sweep-target', { q: 11, r: 10 });
     addEnemyUnit(state, 'sweep-linked-a', { q: 10, r: 11 });
     addEnemyUnit(state, 'sweep-target-only', { q: 12, r: 10 });
@@ -1676,7 +1691,7 @@ describe('battle deployment and movement actions', () => {
 
     const swept = useUnitTactic(state, 'liu', attacker.id, 'sweep-target', 'halberd-sweep');
 
-    expect(swept.units[attacker.id].energy).toBe(80);
+    expect(swept.units[attacker.id].stamina).toBe(80);
     expect(swept.battleDamageReports?.filter((report) => report.kind !== 'counter').map((report) => report.unitId).sort()).toEqual([
       'sweep-linked-a',
       'sweep-linked-b',
@@ -1696,12 +1711,13 @@ describe('battle deployment and movement actions', () => {
     setUniformTerrain(crossbowState, 'plain');
     const crossbow = Object.values(crossbowState.units)[0];
     readyUnitAt(crossbowState, crossbow.id, { q: 10, r: 10 }, 'crossbow');
+    crossbowState.units[crossbow.id].stamina = 100;
     addEnemyUnit(crossbowState, 'enemy-fire', { q: 12, r: 10 });
 
     const targetCell = { q: crossbowState.units['enemy-fire'].q, r: crossbowState.units['enemy-fire'].r };
     const burning = useUnitTactic(crossbowState, 'liu', crossbow.id, 'enemy-fire', 'crossbow-fire');
 
-    expect(burning.units[crossbow.id].energy).toBe(90);
+    expect(burning.units[crossbow.id].stamina).toBe(90);
     expect(burning.firePlots).toContainEqual(expect.objectContaining(targetCell));
     expect(burning.units['enemy-fire'].burningTenDays).toBeUndefined();
 
@@ -1720,11 +1736,12 @@ describe('battle deployment and movement actions', () => {
     setUniformTerrain(cavalryState, 'plain');
     const cavalry = Object.values(cavalryState.units)[0];
     readyUnitAt(cavalryState, cavalry.id, { q: 10, r: 10 }, 'cavalry');
+    cavalryState.units[cavalry.id].stamina = 100;
     addEnemyUnit(cavalryState, 'enemy-breakthrough', { q: 11, r: 10 });
 
     const breakthrough = useUnitTactic(cavalryState, 'liu', cavalry.id, 'enemy-breakthrough', 'cavalry-breakthrough');
 
-    expect(breakthrough.units[cavalry.id]).toMatchObject({ q: 12, r: 11, energy: 80, acted: true });
+    expect(breakthrough.units[cavalry.id]).toMatchObject({ q: 12, r: 11, stamina: 80, acted: true });
     expect(breakthrough.units['enemy-breakthrough']).toMatchObject({ q: 11, r: 10 });
   });
 
@@ -1739,6 +1756,7 @@ describe('battle deployment and movement actions', () => {
     setUniformTerrain(state, 'plain');
     const crossbow = Object.values(state.units)[0];
     readyUnitAt(state, crossbow.id, { q: 10, r: 10 }, 'crossbow');
+    state.units[crossbow.id].stamina = 100;
     state.facilities = {
       ball: { id: 'ball', type: 'fireBall', forceId: 'liu', q: 12, r: 11, durability: 200, completed: true },
       adjacentBall: { id: 'adjacentBall', type: 'fireBall', forceId: 'liu', q: 11, r: 10, durability: 200, completed: true },
@@ -1752,7 +1770,7 @@ describe('battle deployment and movement actions', () => {
 
     expect(ignited.facilities?.ball).toBeUndefined();
     expect(ignited.facilities?.adjacentBall).toBeDefined();
-    expect(ignited.units[crossbow.id]).toMatchObject({ energy: 90, acted: true });
+    expect(ignited.units[crossbow.id]).toMatchObject({ stamina: 90, acted: true });
     expect(ignited.firePlots).toEqual(expect.arrayContaining([
       expect.objectContaining({ q: 12, r: 11 }),
     ]));
@@ -1776,6 +1794,7 @@ describe('battle deployment and movement actions', () => {
     const unit = Object.values(state.units)[0];
     readyUnitAt(state, unit.id, { q: 10, r: 10 });
     state.units[unit.id].energy = 50;
+    state.units[unit.id].stamina = 50;
     state.firePlots = [{ q: 11, r: 10 }];
     addEnemyUnit(state, 'enemy-plot', { q: 12, r: 10 });
     state.units['enemy-plot'].confusedTenDays = 1;
@@ -1809,30 +1828,31 @@ describe('battle deployment and movement actions', () => {
 
     const burned = useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 10, r: 9 } });
     expect(burned.firePlots).toContainEqual(expect.objectContaining({ q: 10, r: 9 }));
-    expect(burned.units[unit.id]).toMatchObject({ energy: 40, acted: true });
+    expect(burned.units[unit.id]).toMatchObject({ stamina: 40, acted: true });
 
     const extinguished = useUnitStrategy(state, 'liu', unit.id, 'extinguish', { coord: { q: 11, r: 10 } });
     expect(extinguished.firePlots).toEqual([]);
-    expect(extinguished.units[unit.id]).toMatchObject({ energy: 40, acted: true });
+    expect(extinguished.units[unit.id]).toMatchObject({ stamina: 40, acted: true });
 
     const falseReported = useUnitStrategy(state, 'liu', unit.id, 'false-report', { targetUnitId: 'enemy-plot' });
     expect(falseReported.units['enemy-plot'].falseReportedTenDays).toBe(1);
-    expect(falseReported.units[unit.id]).toMatchObject({ energy: 35, acted: true });
+    expect(falseReported.units[unit.id]).toMatchObject({ stamina: 35, acted: true });
     expect(() => waitUnit(falseReported, 'cao', 'enemy-plot')).toThrow(/伪报|混乱/);
 
     const disturbed = useUnitStrategy(state, 'liu', unit.id, 'disturb', { targetUnitId: 'enemy-plot' });
     expect(disturbed.units['enemy-plot'].confusedTenDays).toBeGreaterThanOrEqual(1);
     expect(disturbed.units['enemy-plot'].confusedTenDays).toBeLessThanOrEqual(3);
-    expect(disturbed.units[unit.id]).toMatchObject({ energy: 35, acted: true });
+    expect(disturbed.units[unit.id]).toMatchObject({ stamina: 35, acted: true });
     expect(() => waitUnit(disturbed, 'cao', 'enemy-plot')).toThrow(/伪报|混乱/);
 
     expect(() => useUnitStrategy(state, 'liu', unit.id, 'calm', { targetUnitId: 'enemy-plot' })).toThrow(/范围|目标/);
     const calmed = useUnitStrategy(calmState, 'liu', unit.id, 'calm', { targetUnitId: 'ally-calm-target' });
     expect(calmed.units['ally-calm-target'].confusedTenDays).toBeUndefined();
-    expect(calmed.units[unit.id]).toMatchObject({ energy: 40, acted: true });
+    expect(calmed.units[unit.id]).toMatchObject({ stamina: 40, acted: true });
 
     const inspired = useUnitStrategy(state, 'liu', unit.id, 'inspire', { targetUnitId: unit.id });
-    expect(inspired.units[unit.id]).toMatchObject({ energy: 60, acted: true });
+    // 鼓舞消耗 10 战力，并额外为自身部队恢复 20 士气
+    expect(inspired.units[unit.id]).toMatchObject({ stamina: 40, energy: 70, acted: true });
   });
 
   it.each([
@@ -1849,7 +1869,7 @@ describe('battle deployment and movement actions', () => {
     const next = useUnitStrategy(state, 'liu', unit.id, strategyId, selection);
 
     expect(next.rngCursor).toBe(state.rngCursor + (strategyId === 'disturb' || strategyId === 'fire' ? 2 : 1));
-    expect(next.units[unit.id]).toMatchObject({ energy: 100 - cost, acted: true });
+    expect(next.units[unit.id]).toMatchObject({ stamina: 100 - cost, acted: true });
     expect(next.strategyResultReports).toEqual([expect.objectContaining({
       strategyId, label, succeeded: true, q: target.q, r: target.r,
     })]);
@@ -1897,7 +1917,7 @@ describe('battle deployment and movement actions', () => {
     const next = useUnitStrategy(state, 'liu', unit.id, strategyId, selection);
 
     expect(next.rngCursor).toBe(state.rngCursor + 1);
-    expect(next.units[unit.id]).toMatchObject({ energy: 100 - cost, acted: true });
+    expect(next.units[unit.id]).toMatchObject({ stamina: 100 - cost, acted: true });
     expect(next.firePlots ?? []).toEqual(beforeFirePlots);
     expect(next.units['strategy-target']).toEqual(beforeTarget);
     expect(next.units['discord-victim']).toEqual(beforeVictim);
@@ -2100,7 +2120,7 @@ describe('battle deployment and movement actions', () => {
     setUniformTerrain(state, 'plain');
     const unit = Object.values(state.units)[0];
     readyUnitAt(state, unit.id, { q: 10, r: 10 });
-    state.units[unit.id].energy = 50;
+    state.units[unit.id].stamina = 50;
     addEnemyUnit(state, 'discord-target', { q: 11, r: 10 });
     addEnemyUnit(state, 'discord-victim', { q: 12, r: 11 });
 
@@ -2108,7 +2128,7 @@ describe('battle deployment and movement actions', () => {
 
     const next = useUnitStrategy(state, 'liu', unit.id, 'discord', { targetUnitId: 'discord-target' });
 
-    expect(next.units[unit.id]).toMatchObject({ energy: 30, acted: true });
+    expect(next.units[unit.id]).toMatchObject({ stamina: 30, acted: true });
     expect(next.units['discord-victim'].troops).toBeLessThan(state.units['discord-victim'].troops);
     expect(next.battleDamageReports?.map((report) => report.unitId)).toEqual(['discord-victim']);
   });
@@ -2820,6 +2840,92 @@ describe('battle deployment and movement actions', () => {
     expect(siegeDurabilityLoss).toBeGreaterThan(swordDurabilityLoss * 3);
   });
 
+  it('excludes unowned garrison-less cities from attack targets but allows entering by movement', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troops: 6000,
+      food: 6000,
+    });
+    const attacker = Object.values(deployed.units)[0];
+    // 新剧本无主城无守军：不可攻击，只能进驻
+    const target = deployed.cities.nanpi;
+    expect(target.ownerId).toBeNull();
+    expect(target.troops).toBe(0);
+    const blockedKeys = cityKeys(deployed);
+    const attackCell = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR })
+      .flatMap((coord) => neighborsOf(coord.q, coord.r))
+      .find((coord) => !blockedKeys.has(gridKey(coord)))!;
+    readyUnitAt(deployed, attacker.id, attackCell, 'sword');
+
+    expect(attackableCities(deployed, attacker.id).map((city) => city.id)).not.toContain('nanpi');
+    // 空城可直达进驻：城池格在可移动范围内
+    const cityCell = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR })[0];
+    expect(movementCells(deployed, attacker.id).some((coord) => coord.q === cityCell.q && coord.r === cityCell.r)).toBe(true);
+    expect(() => attackCity(deployed, 'liu', attacker.id, 'nanpi')).toThrow(/可直接进驻/);
+  });
+
+  it('occupies a garrison-less unowned city by moving into its footprint', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troops: 6000,
+      food: 6000,
+    });
+    const attacker = Object.values(deployed.units)[0];
+    const target = deployed.cities.nanpi;
+    const blockedKeys = cityKeys(deployed);
+    const attackCell = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR })
+      .flatMap((coord) => neighborsOf(coord.q, coord.r))
+      .find((coord) => !blockedKeys.has(gridKey(coord)))!;
+    readyUnitAt(deployed, attacker.id, attackCell, 'sword');
+    const cityCell = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR })[0];
+    const prevGold = target.gold;
+    const prevFood = target.food;
+
+    const next = moveUnit(deployed, 'liu', attacker.id, cityCell);
+
+    // 部队进入无主空城：兵不血刃占领，资源保留，兵力/武将并入，部队消失
+    expect(next.cities.nanpi.ownerId).toBe('liu');
+    expect(next.cities.nanpi.troops).toBe(6000);
+    expect(next.cities.nanpi.gold).toBe(prevGold);
+    expect(next.cities.nanpi.food).toBe(prevFood + 6000);
+    expect(next.units[attacker.id]).toBeUndefined();
+    expect(next.officers['guan-yu'].location.kind).toBe('city');
+    expect(next.officers['guan-yu'].cityId).toBe('nanpi');
+    expect(next.logs.some((log) => log.message.includes('进驻无主的南皮'))).toBe(true);
+  });
+
+  it('occupies an unowned city once its garrison is depleted', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troops: 6000,
+      food: 6000,
+    });
+    const attacker = Object.values(deployed.units)[0];
+    const target = deployed.cities.nanpi;
+    const blockedKeys = cityKeys(deployed);
+    const attackCell = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR })
+      .flatMap((coord) => neighborsOf(coord.q, coord.r))
+      .find((coord) => !blockedKeys.has(gridKey(coord)))!;
+    readyUnitAt(deployed, attacker.id, attackCell, 'sword');
+    deployed.cities.nanpi.troops = 100;
+
+    const next = attackCity(deployed, 'liu', attacker.id, 'nanpi');
+
+    // 守军清零 → 无主城被刘备占领
+    expect(next.cities.nanpi.ownerId).toBe('liu');
+    expect(next.cities.nanpi.governorId).toBeNull();
+    // 留守军来自攻击部队，耐久重置为满值20%
+    expect(next.cities.nanpi.troops).toBeGreaterThan(0);
+    expect(next.units[attacker.id].troops).toBeLessThan(6000);
+    expect(next.cities.nanpi.durability).toBe(Math.ceil(next.cities.nanpi.maxDurability * 0.2));
+  });
+
   it('settles supply and advances ten-day turns', () => {
     const deployed = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -2848,11 +2954,11 @@ describe('battle deployment and movement actions', () => {
 describe('strategy officer skills', () => {
   it('uses the same 百出 cost helper for validation and actual spending', () => {
     const { state, caster } = strategySkillState('百出');
-    caster.energy = 1;
+    caster.stamina = 1;
 
     expect(strategyEnergyCostForUnit(state, caster.id, 'disturb')).toBe(1);
     const next = useUnitStrategy(state, 'liu', caster.id, 'disturb', { targetUnitId: 'strategy-skill-target' });
-    expect(next.units[caster.id]).toMatchObject({ energy: 0, acted: true });
+    expect(next.units[caster.id]).toMatchObject({ stamina: 0, acted: true });
   });
 
   it('does not guarantee 火神 fire on an empty cell', () => {
@@ -2882,7 +2988,7 @@ describe('strategy officer skills', () => {
     expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
     expect(next.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: target.q, r: target.r }));
     expect(next.units[target.id].troops).toBe(5000);
-    expect(next.units[caster.id]).toMatchObject({ energy: 90, acted: true });
+    expect(next.units[caster.id]).toMatchObject({ stamina: 90, acted: true });
     expect(next.rngCursor).toBe(state.rngCursor + 1);
   });
 
@@ -2951,7 +3057,7 @@ describe('strategy officer skills', () => {
 
     const next = useUnitStrategy(state, 'liu', caster.id, strategyId, selection);
 
-    expect(next.units[caster.id]).toMatchObject({ energy: 100 - cost, acted: true });
+    expect(next.units[caster.id]).toMatchObject({ stamina: 100 - cost, acted: true });
     expect(next.rngCursor).toBe(state.rngCursor);
     expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: false })]);
     expect(next.firePlots ?? []).not.toContainEqual(expect.objectContaining({ q: target.q, r: target.r }));
@@ -2968,7 +3074,7 @@ describe('strategy officer skills', () => {
 
     const next = useUnitStrategy(state, 'liu', caster.id, 'inspire', { targetUnitId: target.id });
 
-    expect(next.units[caster.id]).toMatchObject({ energy: 90, acted: true });
+    expect(next.units[caster.id]).toMatchObject({ stamina: 90, acted: true });
     expect(next.units[target.id].energy).toBe(60);
     expect(next.strategyResultReports).toEqual([expect.objectContaining({ succeeded: true })]);
     expect(next.rngCursor).toBe(state.rngCursor);
@@ -3000,7 +3106,7 @@ describe('strategy officer skills', () => {
     expect(sharedDuration).toBeGreaterThanOrEqual(1);
     expect(next.units['a-adjacent'][statusKey]).toBe(sharedDuration);
     expect(next.units['z-adjacent'][statusKey]).toBe(sharedDuration);
-    expect(next.units[caster.id]).toMatchObject({ energy: 85, acted: true });
+    expect(next.units[caster.id]).toMatchObject({ stamina: 85, acted: true });
     expect(next.rngCursor).toBe(state.rngCursor + expectedCursor);
     expect(next.strategyResultReports).toHaveLength(1);
   });

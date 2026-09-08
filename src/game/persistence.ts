@@ -1,8 +1,10 @@
-import { CITY_IDS, FORCE_IDS, OFFICER_IDS } from './scenario/jingxiang208';
+import { CITY_IDS, FORCE_IDS, OFFICER_IDS, china42InteriorByCityId, createScenarioCities } from './scenario/jingxiang208';
 import { createMobileDuelGrid } from './scenario/mobileDuel';
 import { ARMAMENT_TYPES } from './armaments';
 import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Stats, StrategyResultReport } from './types';
 import china42Data from './scenario/china42.json';
+import china42xData from './scenario/china42x.json';
+import { initConstructionPlots } from './innerAffairs';
 
 export const AUTO_SAVE_KEY = 'jingxiang-208-autosave-v1';
 export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
@@ -14,6 +16,12 @@ const FACILITY_TYPES = ['drum', 'arrowTower', 'musicTower', 'fortress', 'earthwo
 const APTITUDE_GRADES = ['S', 'A', 'B', 'C'];
 const STRATEGY_IDS = ['fire', 'extinguish', 'false-report', 'disturb', 'calm', 'inspire', 'discord'];
 const MOBILE_DUEL_CITY_IDS = ['xiangyang', 'jiangling'];
+/** 全部合法地形值（含原版 20 值细分地形 + 旧手绘地图兼容值） */
+const TERRAIN_VALUES = [
+  'road', 'path', 'plank', 'plain', 'grass', 'sand', 'wasteland', 'wetland', 'poison',
+  'forest', 'hill', 'mountain', 'shore', 'water', 'stream', 'river', 'sea', 'shallow',
+  'ferry', 'pass', 'construction',
+];
 
 export interface SaveAdapter {
   getItem(key: string): string | null;
@@ -53,7 +61,7 @@ function validCity(value: unknown): value is City {
   return (
     typeof city.id === 'string' &&
     typeof city.name === 'string' &&
-    FORCE_IDS.includes(city.ownerId!) &&
+    (city.ownerId === null || FORCE_IDS.includes(city.ownerId!)) &&
     (city.governorId === null || typeof city.governorId === 'string') &&
     validResource(city.gold) &&
     validResource(city.food) &&
@@ -145,7 +153,7 @@ function validGridCell(value: unknown): value is GridCell {
   const cell = value as Partial<GridCell>;
   return Number.isInteger(cell.q) && cell.q! >= 0 &&
     Number.isInteger(cell.r) && cell.r! >= 0 &&
-    ['road', 'plain', 'forest', 'hill', 'mountain', 'water', 'ferry', 'construction'].includes(cell.terrain!);
+    TERRAIN_VALUES.includes(cell.terrain!);
 }
 
 function validUnit(value: unknown): value is ArmyUnit {
@@ -363,15 +371,49 @@ export function loadSave(storage: SaveAdapter, slot: SaveSlot): LoadResult {
   try {
     const parsed = JSON.parse(raw) as { schemaVersion?: unknown };
     if (parsed?.schemaVersion !== 2) return { ok: false, reason: '存档版本不兼容' };
-    if (!isGameState(parsed)) return { ok: false, reason: '存档无法读取' };
-    return { ok: true, state: migrateTerrainGrid(parsed) };
+    const injected = injectMissingCities(parsed);
+    if (!isGameState(injected)) return { ok: false, reason: '存档无法读取' };
+    const migrated = migrateTerrainGrid(injected);
+    // 荆襄剧本：注入的无主新城按原版 interior 位置补建建设用地；
+    // 旧档中被规模档位截断的城（如长安12格）也在此补足至原版格数，已有地格不受影响
+    if (migrated.scenarioId === 'jingxiang-208') initConstructionPlots(migrated, china42InteriorByCityId());
+    return { ok: true, state: migrated };
   } catch {
     return { ok: false, reason: '存档无法读取' };
   }
 }
 
+/**
+ * 旧版存档（仅 8 座荆襄城）升级：补入华夏全图其余 34 座无主城，
+ * 使其与当前剧本的 42 城结构一致；已存在的城市保持存档原样。
+ */
+function injectMissingCities(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const state = value as Partial<GameState>;
+  if (state.scenarioId !== 'jingxiang-208' || !state.cities || typeof state.cities !== 'object') return value;
+  const defaults = createScenarioCities();
+  const cities = { ...state.cities } as Record<string, City>;
+  let injected = false;
+  for (const id of CITY_IDS) {
+    if (cities[id]) continue;
+    cities[id] = defaults[id];
+    injected = true;
+  }
+  return injected ? { ...state, cities } : value;
+}
+
 function migrateTerrainGrid(state: GameState): GameState {
-  // 旧存档中可能仍含 shore 地形，统一转换为 water
+  // 已是细分地形新地图（china42x，含草地等原版 20 值地形）：
+  // 仅归一旧档关所格（曾与建设用地混同为 construction），其余保持原样
+  if (state.grid.some((cell) => cell.terrain === 'grass')) return normalizePassCells(state);
+  // 未编辑过的旧版 china42 地图 → 整体升级为原版精确地图 china42x（关所已是 pass）
+  if (gridMatchesLegacyChina42(state.grid)) {
+    const upgraded: GridCell[] = (china42xData.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map(
+      (cell) => ({ q: cell.q, r: cell.r, terrain: cell.terrain }),
+    );
+    return { ...state, grid: upgraded };
+  }
+  // 玩家编辑过或更早版本的地图：保留原样（含旧 shore→water 归一化）
   let changed = false;
   const normalized = state.grid.map((cell) => {
     if ((cell.terrain as string) === 'shore') {
@@ -383,13 +425,42 @@ function migrateTerrainGrid(state: GameState): GameState {
   if (changed) return { ...state, grid: normalized };
   const hasFerry = state.grid.some((cell) => cell.terrain === 'ferry');
   if (hasFerry) return state;
-  const fallbackGrid: GridCell[] = (china42Data.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map(
+  const fallbackGrid: GridCell[] = (china42xData.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map(
     (cell) => ({ q: cell.q, r: cell.r, terrain: cell.terrain }),
   );
   return {
     ...state,
     grid: state.scenarioId === 'mobile-duel' ? createMobileDuelGrid() : fallbackGrid,
   };
+}
+
+/** china42x 旧档关所格归一：关所地形独立为 pass 前曾与建设用地同映射为 construction */
+function normalizePassCells(state: GameState): GameState {
+  if (state.scenarioId !== 'jingxiang-208' || state.grid.length !== (china42xData.grid as unknown[]).length) return state;
+  const passKeys = new Set(
+    (china42xData.grid as { q: number; r: number; terrain: GridCell['terrain'] }[])
+      .filter((cell) => cell.terrain === 'pass')
+      .map((cell) => `${cell.q},${cell.r}`),
+  );
+  let changed = false;
+  const grid = state.grid.map((cell) => {
+    if (cell.terrain === 'construction' && passKeys.has(`${cell.q},${cell.r}`)) {
+      changed = true;
+      return { ...cell, terrain: 'pass' as const };
+    }
+    return cell;
+  });
+  return changed ? { ...state, grid } : state;
+}
+
+/** 存档 grid 是否与旧版 china42.json 地形完全一致（即未被地图编辑器改动） */
+function gridMatchesLegacyChina42(grid: GridCell[]): boolean {
+  const legacy = china42Data.grid as { q: number; r: number; terrain: GridCell['terrain'] }[];
+  if (grid.length !== legacy.length) return false;
+  for (let i = 0; i < legacy.length; i += 1) {
+    if (grid[i].q !== legacy[i].q || grid[i].r !== legacy[i].r || grid[i].terrain !== legacy[i].terrain) return false;
+  }
+  return true;
 }
 
 export function clearSaves(storage: SaveAdapter) {

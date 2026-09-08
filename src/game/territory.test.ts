@@ -6,7 +6,7 @@ describe('territory ownership', () => {
   it('assigns each grid cell to the nearest city owner', () => {
     const state = createGame('liu', 1);
     const jianglingCell = state.grid.find((cell) => cell.q === state.cities.jiangling.gridQ && cell.r === state.cities.jiangling.gridR)!;
-    const wanCell = state.grid.find((cell) => cell.q === 0 && cell.r === 0)!;
+    const wanCell = state.grid.find((cell) => cell.q === state.cities.wan.gridQ && cell.r === state.cities.wan.gridR)!;
 
     expect(territoryForceAt(state, jianglingCell)).toBe('liu');
     expect(territoryForceAt(state, wanCell)).toBe('cao');

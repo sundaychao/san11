@@ -37,13 +37,16 @@ export function GlobalIntelDialog({ state, onClose }: GlobalIntelDialogProps) {
           </section>
           <section aria-label="城市情报">
             <h3>城市</h3>
-            {Object.values(state.cities).map((city) => (
-              <div key={city.id} className="intel-row">
-                <span style={{ '--force-color': state.forces[city.ownerId].color } as CSSProperties} />
-                <strong>{city.name}</strong>
-                <small>{state.forces[city.ownerId].name} / {city.troops.toLocaleString('en-US')} 兵</small>
-              </div>
-            ))}
+            {Object.values(state.cities).map((city) => {
+              const force = city.ownerId ? state.forces[city.ownerId] : undefined;
+              return (
+                <div key={city.id} className="intel-row">
+                  <span style={{ '--force-color': force?.color ?? '#9aa0a6' } as CSSProperties} />
+                  <strong>{city.name}</strong>
+                  <small>{force?.name ?? '无主'} / {city.troops.toLocaleString('en-US')} 兵</small>
+                </div>
+              );
+            })}
           </section>
         </div>
       </section>

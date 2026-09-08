@@ -90,7 +90,7 @@ function unavailableTacticReason(state: GameState, unitId: string, tactic: UnitT
   }
   if (unit.acted) return '部队已行动';
   if (unitIsIncapacitated(unit)) return '部队无法行动';
-  if (unit.energy < tactic.cost) return '气力不足';
+  if ((unit.stamina ?? 0) < tactic.cost) return '战力不足';
   if (
     tacticTargetUnits(state, unitId, tactic.id, origin).length === 0 &&
     tacticTargetFacilities(state, unitId, tactic.id, origin).length === 0

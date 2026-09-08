@@ -75,7 +75,6 @@ describe('captureCityOnCapture', () => {
     const state = createGame('liu', 1);
     const attacker = looterFixture(state, 'liu');
     attacker.homeCityId = 'jiangling';
-    attacker.skill = undefined;
     const defender = state.officers['cao-ren'];
     defender.forceId = 'cao';
     defender.location = { kind: 'city', cityId: 'xiangyang' };

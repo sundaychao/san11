@@ -7,7 +7,7 @@ import type { GridCoord } from '../game/battle/grid';
 import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticFacilityTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
 import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { canBuildPlotAtCoord, hasEnemyUnitsNear, isPlotOccupiedByOtherCity, PLOT_GOLD_COST, PLOT_LABELS, startBuildCityPlot, type PlotType } from '../game/innerAffairs';
-import { ownCityAt } from '../game/battle/movementRules';
+import { ownCityAt, unoccupiedCityAt } from '../game/battle/movementRules';
 import {
   clearEditor,
   createEditorState,
@@ -30,7 +30,7 @@ import { BattlePanel } from './BattlePanel';
 import { CityInfoPanel } from './CityInfoPanel';
 import { CityInfoDialog } from './CityInfoDialog';
 import { CityCommandMenu } from './CityCommandMenu';
-import { CityPanel } from './CityPanel';
+import { CityStatusPanel } from './CityStatusPanel';
 import { CommandDialog } from './CommandDialog';
 import { PositionPanel } from './PositionPanel';
 import { CultivateDialog, type CultivateCategory } from './CultivateDialog';
@@ -60,13 +60,26 @@ const PENDING_DEPLOY_UNIT_ID = '__pending-deploy__';
 const HARMFUL_UNIT_STRATEGIES = new Set<StrategyId>(['false-report', 'disturb', 'discord']);
 
 const TERRAIN_LABELS: Record<TerrainType, string> = {
-  road: '道路',
+  road: '主径',
+  path: '小径',
+  plank: '栈道',
   plain: '平地',
+  grass: '草地',
+  sand: '沙地',
+  wasteland: '荒地',
+  wetland: '湿地',
+  poison: '毒泉',
   forest: '森林',
   hill: '丘陵',
-  mountain: '高山',
+  mountain: '山崖',
+  shore: '岸',
   water: '水域',
+  stream: '川',
+  river: '河',
+  sea: '海',
+  shallow: '浅滩',
   ferry: '渡口',
+  pass: '关隘',
   construction: '建设用地',
 };
 
@@ -134,6 +147,8 @@ export function GameShell() {
   const [hoveredFacility, setHoveredFacility] = useState<{ facilityId: string; position: { x: number; y: number } } | null>(null);
   const [hoveredPlot, setHoveredPlot] = useState<{ cityId: NonNullable<typeof selectedCityId>; plotIndex: number; position: { x: number; y: number } } | null>(null);
   const [cityMenu, setCityMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
+  /** 左侧都市信息面板：默认不显示，点击我方城池后显示 */
+  const [cityStatusId, setCityStatusId] = useState<CityId | null>(null);
   const [cityInfoMenu, setCityInfoMenu] = useState<{ cityId: NonNullable<typeof selectedCityId>; position: { x: number; y: number } } | null>(null);
   const [cityInfoDialogId, setCityInfoDialogId] = useState<NonNullable<typeof selectedCityId> | null>(null);
   const [cityOfficerListCityId, setCityOfficerListCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
@@ -624,11 +639,13 @@ export function GameShell() {
     setTargetingUnitStrategy(null);
     setTargetingFacility(null);
     setTargetingRepair(null);
-    // 目标为本方城池格 → 弹出「是/否」回城确认框
-    if (state && ownCityAt(state, state.playerForceId, coord)) {
-      const city = ownCityAt(state, state.playerForceId, coord)!;
-      setReturnCityConfirm({ unitId: selectedUnitId, coord, label: city.name, position });
-      return;
+    // 目标为本方城池格 → 弹出「是/否」回城确认框；无守军无主城 → 弹出「进入/占领」确认框
+    if (state) {
+      const city = ownCityAt(state, state.playerForceId, coord) ?? unoccupiedCityAt(state, coord);
+      if (city) {
+        setReturnCityConfirm({ unitId: selectedUnitId, coord, label: city.name, position });
+        return;
+      }
     }
     setUnitCommandMenu({ unitId: selectedUnitId, position, destination: coord });
   }, [canOperateCurrentTurn, emitAudioEvent, moveUnit, moveTargets, selectedUnitId, state]);
@@ -1472,6 +1489,24 @@ export function GameShell() {
     return () => document.removeEventListener('pointerdown', closeOnPointerOutside);
   }, [unitStrategyMenu]);
 
+  // 左侧都市信息面板：点击面板/城池格/城池菜单以外区域时隐藏（与城池菜单点击外部关闭的行为一致）
+  useEffect(() => {
+    if (!cityStatusId) return undefined;
+    const closeOnPointerOutside = (event: globalThis.PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target as Element | null;
+      if (!target?.closest) return;
+      if (target.closest('.city-status-panel')) return;
+      if (target.closest('.city-command-menu')) return;
+      // 城池格点击由选中逻辑处理：我方城池刷新面板，他势力城池因选中城变更自动隐藏
+      if (target.closest('[data-city-id]')) return;
+      setCityStatusId(null);
+    };
+
+    document.addEventListener('pointerdown', closeOnPointerOutside);
+    return () => document.removeEventListener('pointerdown', closeOnPointerOutside);
+  }, [cityStatusId]);
+
   useEffect(() => {
     if (!unitFacilityMenu) return undefined;
     const closeOnPointerOutside = (event: globalThis.PointerEvent) => {
@@ -1558,6 +1593,7 @@ export function GameShell() {
           emitAudioEvent({ type: 'menu-left-click' });
           setMapContextMenu(null);
           setCityMenu({ cityId, position });
+          setCityStatusId(cityId);
         }}
         onCityInfoMenu={(cityId, position) => {
           openCityInfoMenu(cityId, position);
@@ -1648,7 +1684,7 @@ export function GameShell() {
       />
       {state && hoveredCell && (
         <div className="hover-coordinate tool-panel" data-testid="hover-coordinate">
-          坐标：{hoveredCell.q},{hoveredCell.r} 地形：{TERRAIN_LABELS[hoveredCell.terrain]} 疆域：{state.forces[territoryForceAt(state, hoveredCell)].name}
+          坐标：{hoveredCell.q},{hoveredCell.r} 地形：{TERRAIN_LABELS[hoveredCell.terrain]} 疆域：{(() => { const owner = territoryForceAt(state, hoveredCell); return owner ? state.forces[owner].name : '无主'; })()}
         </div>
       )}
       {state && hoveredUnit && state.units[hoveredUnit.unitId] && (
@@ -1672,7 +1708,10 @@ export function GameShell() {
         <CityPlotInfoPanel city={state.cities[hoveredPlot.cityId]} plotIndex={hoveredPlot.plotIndex} state={state} position={hoveredPlot.position} />
       )}
       <ForceOverviewPanel />
-      <CityPanel onCommand={launchCommand} onOpenCultivatePicker={openCultivatePicker} />
+      {state && cityStatusId && selectedCityId === cityStatusId
+        && state.cities[cityStatusId]?.ownerId === state.playerForceId && (
+          <CityStatusPanel city={state.cities[cityStatusId]} state={state} />
+      )}
       <BattlePanel />
       <EventLog />
       {positionPanelOpen && state && (
@@ -1841,8 +1880,8 @@ export function GameShell() {
           : plot.type !== 'empty'
             ? PLOT_LABELS[plot.type]
             : '设施';
-        const plotEnemyNear = plot.q != null && plot.r != null
-          ? hasEnemyUnitsNear(state!, plotCity.ownerId ?? '', plot.q, plot.r, 2)
+        const plotEnemyNear = plot.q != null && plot.r != null && plotCity.ownerId != null
+          ? hasEnemyUnitsNear(state!, plotCity.ownerId, plot.q, plot.r, 2)
           : false;
         return (
           <nav

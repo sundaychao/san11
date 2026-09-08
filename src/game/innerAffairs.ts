@@ -1,6 +1,8 @@
 import { coordsWithinRange, gridKey, neighborsOf, ringCoordsWithinRange, sevenCellCityFootprint, type GridCoord } from './battle/grid';
+import { BLOCKED_TERRAINS, isWaterTerrain } from './battle/catalog';
 import { positionDefinition } from './ranks';
 import { armamentProductionTenDays, isDelayedArmament, produceArmamentYield } from './armaments';
+import { cityCanBuildFacility, hasCityTrait } from './cityTraits';
 import type { TechBranchId } from './types';
 import { TECH_COSTS, TECH_BRANCHES, researchTenDays } from './techs';
 import type { ArmamentType, City, CityId, ForceId, GameState, GridCell, Legion, Officer, TerrainType } from './types';
@@ -123,7 +125,7 @@ export const CITY_SIZE_SMALL_MAX_POP = 250_000;
 /** 大都市人口阈值 */
 export const CITY_SIZE_LARGE_MIN_POP = 500_000;
 
-/** 城市大小对应的建设用地数量（距城8圈外：小城6、中城9、大城12） */
+/** 城市大小对应的建设用地数量（从原版 interior 建设用地中取用：小城6、中城9、大城12） */
 export const PLOT_COUNT_BY_SIZE: Record<CitySize, number> = {
   small: 6,
   medium: 9,
@@ -203,8 +205,9 @@ export function settleCityRangedAttack(state: GameState): string[] {
     });
 
     for (const unit of enemyUnitsInRange) {
-      // 箭矢伤害：城池兵力 × 5%，最低100
-      const damage = Math.max(100, Math.round(city.troops * CITY_RANGED_BASE_DAMAGE_RATIO));
+      // 箭矢伤害：城池兵力 × 5%，最低100；要塞城伤害+50%
+      const fortressMultiplier = hasCityTrait(city.id, 'fortress') ? 1.5 : 1;
+      const damage = Math.max(100, Math.round(city.troops * CITY_RANGED_BASE_DAMAGE_RATIO * fortressMultiplier));
       unit.troops = Math.max(0, unit.troops - damage);
       state.battleDamageReports ??= [];
       state.battleDamageReports.push({
@@ -470,6 +473,16 @@ export function patrolOrderGain(officers: Officer[]): number {
   return Math.floor(leadershipSum / 28) + 2;
 }
 
+/** 城市地格（市场/农场等）可落位地形：排除水面、崖/岸、渡口与毒泉 */
+function isCityPlotEligible(terrain: TerrainType | undefined): boolean {
+  return terrain !== undefined &&
+    !isWaterTerrain(terrain) &&
+    !BLOCKED_TERRAINS.has(terrain) &&
+    terrain !== 'ferry' &&
+    terrain !== 'poison' &&
+    terrain !== 'pass'; // 关所据点不可作建设用地
+}
+
 /** 从起始格 BFS 扩展，在候选集内选取互相邻接的最多 maxSize 个格子。 */
 function growCluster(
   start: GridCoord,
@@ -490,7 +503,7 @@ function growCluster(
       if (!candidateKeys.has(key)) continue;
       const cell = cellByKey.get(key);
       if (!cell) continue;
-      if (cell.terrain === 'water' || cell.terrain === 'mountain' || cell.terrain === 'ferry') continue;
+      if (!isCityPlotEligible(cell.terrain)) continue;
       visited.add(key);
       queue.push(neighbor);
     }
@@ -499,10 +512,15 @@ function growCluster(
 }
 
 /** 初始化场景中的建设用地地形和各城地格坐标。
- *  在每城 7 格城址外圈寻找可用的空地（非水/山/他城址），标记为 construction。
- *  为每城按大小分配 4/6/8 个 construction 格，并写入 CityPlot.q/r 坐标。
- *  建设用地距离城池至少 2 圈（不邻接城址），并形成一片互相邻接的区域。 */
-export function initConstructionPlots(state: GameState): void {
+ *  优先使用原版地图数据（china42x.json 提取的 interior 平面坐标，距城心由近到远）：
+ *  按原版格数全量落位（长安22格/洛阳20格/会稽4格等，城市规格即原版空地数），
+ *  标记为 construction 并写入 CityPlot.q/r，与原版游戏的建设用地数量和位置完全一致。
+ *  无原版数据的城市（编辑器地图等）回退为在城址外围自动搜索可用空地（按规模档位取数）。
+ *  已有地格的城市跳过，避免覆盖存档中已建设的设施。 */
+export function initConstructionPlots(
+  state: GameState,
+  interiorByCityId?: ReadonlyMap<string, GridCoord[]>,
+): void {
   const grid = state.grid ?? [];
   const cellByKey = new Map<string, GridCell>();
   for (const cell of grid) cellByKey.set(gridKey(cell), cell);
@@ -513,11 +531,6 @@ export function initConstructionPlots(state: GameState): void {
     for (const coord of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) {
       allCityFootprintKeys.add(gridKey(coord));
     }
-  }
-
-  // 先恢复已有的 construction terrain（避免重复标记）
-  for (const cell of grid) {
-    if (cell.terrain === 'construction') cell.terrain = 'plain';
   }
 
   // 偏移坐标转轴向坐标的工具函数（用于计算六角格距离）
@@ -531,8 +544,57 @@ export function initConstructionPlots(state: GameState): void {
     return (Math.abs(aq) + Math.abs(ar) + Math.abs(aq + ar)) / 2;
   };
 
+  // 标记 construction 地形并写入城市地格坐标
+  const applyCityPlots = (city: City, picked: GridCoord[]) => {
+    for (const coord of picked) {
+      const cell = cellByKey.get(gridKey(coord));
+      if (cell) cell.terrain = 'construction';
+    }
+    city.plots = picked.map((coord, i) => ({
+      id: `${city.id}-plot-${i}`,
+      type: 'empty' as const,
+      level: 0,
+      value: 0,
+      q: coord.q,
+      r: coord.r,
+    }));
+  };
+
   // 为每城分配 construction 地格
   for (const city of cityList) {
+    const interior = interiorByCityId?.get(city.id);
+
+    // 已有地格数据（本函数已生成过或存档带来的）：补足被旧规模档位截断的空地格，
+    // 不改动任何已有地格（避免覆盖已建设施）；坐标来源与原版不符的（编辑器/小地图剧本）不动
+    if (city.plots && city.plots.length > 0) {
+      if (interior && interior.length > city.plots.length) {
+        const interiorKeys = new Set(interior.map((coord) => gridKey(coord)));
+        const located: GridCoord[] = city.plots
+          .filter((plot) => plot.q != null && plot.r != null)
+          .map((plot) => ({ q: plot.q!, r: plot.r! }));
+        if (located.length === city.plots.length && located.every((coord) => interiorKeys.has(gridKey(coord)))) {
+          const existing = new Set(located.map((coord) => gridKey(coord)));
+          for (const coord of interior) {
+            const key = gridKey(coord);
+            if (existing.has(key)) continue;
+            city.plots.push({ id: `${city.id}-plot-${city.plots.length}`, type: 'empty', level: 0, value: 0, q: coord.q, r: coord.r });
+            const cell = cellByKey.get(key);
+            if (cell) cell.terrain = 'construction';
+            existing.add(key);
+          }
+        }
+      }
+      continue;
+    }
+
+    // 原版建设用地：全量采用原版格数（长安22格~会稽4格），位置与数量均与原版一致
+    if (interior && interior.length > 0) {
+      applyCityPlots(city, interior);
+      continue;
+    }
+
+    const needed = cityPlotCount(city);
+
     const footprint = new Set(sevenCellCityFootprint({ q: city.gridQ, r: city.gridR }).map(gridKey));
 
     // 判断候选格是否以本市为最近城市（避免建设用地落入他城领地）
@@ -554,15 +616,13 @@ export function initConstructionPlots(state: GameState): void {
         if (allCityFootprintKeys.has(key)) continue;
         const cell = cellByKey.get(key);
         if (!cell) continue;
-        if (cell.terrain === 'water' || cell.terrain === 'mountain') continue;
-        if (cell.terrain === 'ferry') continue;
+        if (!isCityPlotEligible(cell.terrain)) continue;
         if (cell.terrain === 'construction') continue; // 已被其他城市选中
         if (!isNearestToThisCity(coord)) continue; // 不分配到其他城市的领地
         candidates.push(coord);
       }
     }
 
-    const needed = cityPlotCount(city);
     if (candidates.length < needed) {
       // 候选格不足，向外延伸 3~4 圈补充（同样是恰好某圈的圆环）
       const fallbackStart = PLOT_MIN_DISTANCE_FROM_CITY + 3;
@@ -576,7 +636,7 @@ export function initConstructionPlots(state: GameState): void {
           if (allCityFootprintKeys.has(key)) continue;
           const cell = cellByKey.get(key);
           if (!cell) continue;
-          if (cell.terrain === 'water' || cell.terrain === 'mountain') continue;
+          if (!isCityPlotEligible(cell.terrain)) continue;
           if (cell.terrain === 'construction') continue; // 已被其他城市选中
           if (!isNearestToThisCity(coord)) continue; // 不分配到其他城市的领地
           candidates.push(coord);
@@ -586,7 +646,8 @@ export function initConstructionPlots(state: GameState): void {
 
     // 优先选靠近城心、地形好的候选格作为"起始中心"
     const terrainPriority: Partial<Record<TerrainType, number>> = {
-      road: 0, plain: 1, ferry: 2, forest: 3, hill: 4,
+      road: 0, plain: 1, grass: 2, path: 3, sand: 4, wasteland: 5,
+      forest: 6, hill: 7, wetland: 8, plank: 9, shallow: 10,
     };
     candidates.sort((a, b) => {
       const da = Math.abs(a.q - city.gridQ) + Math.abs(a.r - city.gridR);
@@ -613,33 +674,7 @@ export function initConstructionPlots(state: GameState): void {
       picked = candidates.slice(0, needed);
     }
 
-    // 标记 grid cell 为 construction
-    for (const coord of picked) {
-      const cell = cellByKey.get(gridKey(coord));
-      if (cell) cell.terrain = 'construction';
-    }
-
-    // 初始化 city.plots 并写入坐标
-    const plots = city.plots ?? [];
-    // 先把旧 plot 上的坐标保存到新 picked 位置
-    const newPlots: City['plots'] = [];
-    for (let i = 0; i < needed; i += 1) {
-      const coord = picked[i];
-      const existing = plots[i];
-      if (existing) {
-        newPlots.push({ ...existing, q: coord?.q, r: coord?.r });
-      } else {
-        newPlots.push({
-          id: `${city.id}-plot-${i}`,
-          type: 'empty',
-          level: 0,
-          value: 0,
-          q: coord?.q,
-          r: coord?.r,
-        });
-      }
-    }
-    city.plots = newPlots;
+    applyCityPlots(city, picked);
   }
 }
 
@@ -686,9 +721,14 @@ export function barracksYieldMultiplier(city: City): number {
  * 兵装加成系数：按该兵装**所需设施**的等级计算，每级 +15%。
  * 枪/戟/弩取锻冶等级，冲车/井阑取工房等级，军马取厩舍等级，楼船取造船等级。
  * 早先的 smithyYieldMultiplier 固定取工房等级，对枪/戟/弩（实际需要锻冶）无效，故改为按兵装取对应设施。
+ * 城池特性产量系数：匠造城锻造系(枪/戟/弩)产量×1.5；畜牧城军马产量×0.6、非畜牧城×0.2。
  */
 export function armamentYieldMultiplier(city: City, armamentType: ArmamentType): number {
-  return 1 + (plotTotalLevel(city, ARMAMENT_FACILITY[armamentType]) * 15) / 100;
+  const facility = ARMAMENT_FACILITY[armamentType];
+  const base = 1 + (plotTotalLevel(city, facility) * 15) / 100;
+  if (facility === 'forge') return base * (hasCityTrait(city.id, 'craftsman') ? 1.5 : 1);
+  if (facility === 'stable') return base * (hasCityTrait(city.id, 'ranch') ? 0.6 : 0.2);
+  return base;
 }
 
 /** 据等级计算设施产出（1级=base，每级×系数） */
@@ -730,6 +770,7 @@ export function startBuildCityPlot(city: City, plotIndex: number, facility: Plot
   const plot = plots[plotIndex];
   if (!plot || !canBuildPlot(city, plotIndex)) throw new Error('该地格无法建设');
   if (officers.length === 0) throw new Error('至少指派一名武将');
+  if (!cityCanBuildFacility(city.id, facility)) throw new Error('该城池特性无法建设此设施');
   city.gold = Math.max(0, city.gold - plotCost(facility));
   const tenDays = constructTenDaysForOfficers(officers);
   plot.constructing = {
@@ -1052,7 +1093,9 @@ function runLegionAction(state: GameState, city: City, officers: Officer[], acti
     case 'train': {
       if (city.food < 300) return null;
       city.food -= 300;
-      city.training = clamp(city.training + trainMoraleGain(officers, city.troops), 0, 100);
+      // 兵部：城池建有兵部时训练效果翻倍
+      const gain = trainMoraleGain(officers, city.troops) * (hasPlotFacility(city, 'bingbu') ? 2 : 1);
+      city.training = clamp(city.training + gain, 0, 100);
       for (const officer of officers) officer.acted = true;
       return `${names}训练守军`;
     }
@@ -1062,7 +1105,11 @@ function runLegionAction(state: GameState, city: City, officers: Officer[], acti
       city.food -= 500;
       city.population -= 500;
       const gained = gain(recruitBaseYield(officers, city) * barracksYieldMultiplier(city));
+      // 新征士兵士气50，稀释城池士气（与 executeCommand 征兵一致）
+      const prevTroops = city.troops;
+      const prevTraining = city.training;
       city.troops += gained;
+      city.training = Math.round(clamp((prevTroops * prevTraining + gained * 50) / city.troops, 0, 100));
       city.order = clamp(city.order - 2, 0, 100);
       for (const officer of officers) officer.acted = true;
       return `${names}征募士兵${gained}`;
