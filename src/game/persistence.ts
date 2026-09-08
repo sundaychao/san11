@@ -304,10 +304,10 @@ export function isGameState(value: unknown): value is GameState {
     if (!cityById[officer.cityId]) return false;
     if (officer.location.kind === 'unit') return Boolean(state.units![officer.location.unitId]);
     if (officer.location.kind === 'transfer') {
+      // fromCityId 允许已易主的城（攻城撤退武将从被占城出发）；targetCityId 必须仍属本方
       return officer.forceId !== null &&
         Boolean(cityById[officer.location.fromCityId]) &&
         Boolean(cityById[officer.location.targetCityId]) &&
-        cityById[officer.location.fromCityId].ownerId === officer.forceId &&
         cityById[officer.location.targetCityId].ownerId === officer.forceId;
     }
     return Boolean(cityById[officer.location.cityId]);
@@ -322,7 +322,8 @@ export function isGameState(value: unknown): value is GameState {
       ))) &&
     officers.every((officer) => validOfficer(officer) && officerById[officer.id] === officer &&
       Boolean(cityById[officer.cityId]) &&
-      (officer.forceId === null || cityById[officer.cityId].ownerId === officer.forceId) &&
+      // 俘虏关押在敌方城，cityId 不要求属本方
+      (officer.location.kind === 'captive' || officer.forceId === null || cityById[officer.cityId].ownerId === officer.forceId) &&
       validOfficerReferences(officer)) &&
     state.grid.every(validGridCell) &&
     Object.values(state.units).every((unit) => validUnit(unit) && state.units![unit.id] === unit &&

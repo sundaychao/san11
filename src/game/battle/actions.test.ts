@@ -13,6 +13,8 @@ import { movementAllowanceForProfile, movementAllowanceForUnit } from './definit
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 import { damageRoll } from './shared';
 import { strategyEnergyCostForUnit } from './strategies';
+import { executeCommand } from '../commands';
+import { isGameState } from '../persistence';
 
 function cityKeys(state: ReturnType<typeof createGame>) {
   return new Set(Object.values(state.cities).flatMap((city) => (
@@ -2913,6 +2915,70 @@ describe('battle deployment and movement actions', () => {
     expect(next.officers['guan-yu'].location.kind).toBe('city');
     expect(next.officers['guan-yu'].cityId).toBe('nanpi');
     expect(next.logs.some((log) => log.message.includes('进驻无主的南皮'))).toBe(true);
+  });
+
+  it('keeps the save valid after occupying an unowned city then summoning officers', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'liu-bei',
+      targetCityId: 'xiangyang',
+      troops: 6000,
+      food: 6000,
+    });
+    const attacker = Object.values(deployed.units)[0];
+    const target = deployed.cities.nanpi;
+    const blockedKeys = cityKeys(deployed);
+    const attackCell = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR })
+      .flatMap((coord) => neighborsOf(coord.q, coord.r))
+      .find((coord) => !blockedKeys.has(gridKey(coord)))!;
+    readyUnitAt(deployed, attacker.id, attackCell, 'sword');
+    const cityCell = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR })[0];
+    const occupied = moveUnit(deployed, 'liu', attacker.id, cityCell);
+    expect(occupied.cities.nanpi.ownerId).toBe('liu');
+
+    // 占领南皮后，从江陵召唤关羽与太守孙乾到南皮
+    const next = executeCommand(occupied, 'liu', {
+      type: 'summon', cityId: 'nanpi', officerIds: ['guan-yu', 'sun-qian'],
+    });
+
+    expect(isGameState(next)).toBe(true);
+
+    // 再从武陵召唤张飞（武陵太守）与诸葛亮
+    const next2 = executeCommand(next, 'liu', {
+      type: 'summon', cityId: 'nanpi', officerIds: ['zhang-fei', 'zhuge-liang'],
+    });
+    expect(isGameState(next2)).toBe(true);
+  });
+
+  it('keeps the save valid after capturing an enemy city with defending officers', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'lingling',
+      troops: 7000,
+      food: 7000,
+    });
+    const attacker = Object.values(deployed.units)[0];
+    // 攻打刘表的零陵（城内有守将刘表），一击破城
+    deployed.cities.lingling.troops = 1;
+    const blockedKeys = cityKeys(deployed);
+    const attackCell = sevenCellCityFootprint({ q: deployed.cities.lingling.gridQ, r: deployed.cities.lingling.gridR })
+      .flatMap((coord) => neighborsOf(coord.q, coord.r))
+      .find((coord) => !blockedKeys.has(gridKey(coord)))!;
+    readyUnitAt(deployed, attacker.id, attackCell, 'siege');
+
+    const next = attackCity(deployed, 'liu', attacker.id, 'lingling');
+
+    expect(next.cities.lingling.ownerId).toBe('liu');
+    // 守将刘表撤退：transfer 出发城为已易主的零陵（合法），cityId 归属撤退目的地桂阳
+    const biao = next.officers['liu-biao'];
+    if (biao.location.kind === 'transfer') {
+      expect(biao.location.fromCityId).toBe('lingling');
+      expect(biao.location.targetCityId).toBe('guiyang');
+      expect(biao.cityId).toBe('guiyang');
+    }
+    // 存档校验必须通过（曾因撤退 transfer 出发城易主而拒绝写入存档）
+    expect(isGameState(next)).toBe(true);
   });
 
   it('occupies an unowned city once its garrison is depleted', () => {

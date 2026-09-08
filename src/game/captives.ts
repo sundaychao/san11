@@ -195,11 +195,14 @@ export function captureCityOnCapture(state: GameState, attacker: ArmyUnit, cityI
       const target = state.cities[retreatTarget];
       const duration = Math.max(1, Math.ceil(cityTravelDistance(city, target) / 10));
       officer.location = { kind: 'transfer', fromCityId: cityId, targetCityId: retreatTarget, remainingTenDays: duration };
-      officer.cityId = cityId;
+      // 原城已失守，cityId 归属撤退目的地
+      officer.cityId = retreatTarget;
       officer.acted = true;
     } else {
+      // 无路可逃：转为原城在野武将
       officer.location = { kind: 'unaffiliated', cityId };
       officer.cityId = cityId;
+      officer.forceId = null;
     }
   }
 }
