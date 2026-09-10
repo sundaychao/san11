@@ -36,10 +36,10 @@ test('plays, restores, and completes the Jingxiang scenario', async ({ page }, t
   await page.getByRole('button', { name: '继续游戏' }).click();
   await expect(page.getByTestId('action-points')).toHaveText('65');
 
-  for (let month = 1; month <= 24; month += 1) {
-    await page.getByRole('button', { name: '进行到下月' }).click();
-    const confirm = page.getByRole('button', { name: '确认进行' });
-    if (await confirm.isVisible()) await confirm.click();
+  // 顶栏的「进行·下月」已移除：改走地图右键菜单的「进行」，一旬一旬推进（下旬后自动进入下月）
+  for (let tenDay = 1; tenDay <= 72; tenDay += 1) {
+    await page.getByTestId('map-viewport').click({ button: 'right', position: { x: 40, y: 40 } });
+    await page.getByTestId('map-context-proceed-button').click();
   }
 
   await expect(page.getByRole('heading', { name: '荆襄国力结算' })).toBeVisible();

@@ -1,5 +1,5 @@
 import type { ForceId } from './types';
-import type { EditorMapPayload } from './map-editor/editor';
+import type { EditorCityPlot, EditorMapPayload } from './map-editor/editor';
 import { createScenarioCities } from './scenario/jingxiang208';
 import china42Data from './scenario/maps/china42x.json';
 
@@ -59,6 +59,44 @@ interface ImportMetaPayload {
   id?: string; // 由 glob 调用方注入，用于中文名称映射
 }
 
+/** 原版内置图（schemaVersion 1）把建设用地坐标挂在每座城的 `interior` 上，形如 [q, r][]。
+ * 编辑器只认顶层 `plots`，因此载入时把它平移过来；已有显式 plots 的图不受影响。 */
+interface RawCityWithInterior {
+  id: string;
+  q: number;
+  r: number;
+  type?: 'city' | 'pass';
+  interior?: unknown;
+}
+
+function plotsFromCityInterior(cities: RawCityWithInterior[], width: number, height: number): EditorCityPlot[] {
+  const centers = new Set(cities.map((city) => `${city.q},${city.r}`));
+  const seen = new Set<string>();
+  const plots: EditorCityPlot[] = [];
+  for (const city of cities) {
+    if ((city.type ?? 'city') !== 'city' || !Array.isArray(city.interior)) continue;
+    for (const entry of city.interior as unknown[]) {
+      if (!Array.isArray(entry) || entry.length < 2) continue;
+      const [q, r] = entry as [unknown, unknown];
+      if (typeof q !== 'number' || typeof r !== 'number' || !Number.isInteger(q) || !Number.isInteger(r)) continue;
+      const key = `${q},${r}`;
+      // 越界、重复（一格一主）、压在城心上的坐标一律丢弃
+      if (q < 0 || q >= width || r < 0 || r >= height || seen.has(key) || centers.has(key)) continue;
+      seen.add(key);
+      plots.push({ cityId: city.id, q, r });
+    }
+  }
+  return plots;
+}
+
+/** 去掉内置图遗留的 interior 字段，避免它被原样写回用户保存的地图 JSON */
+function withoutInterior<T extends object>(markers: T[]): T[] {
+  return markers.map((marker) => {
+    const { interior: _interior, ...rest } = marker as T & { interior?: unknown };
+    return rest as T;
+  });
+}
+
 const BUILTIN_NAME_MAP: Record<string, string> = {
   china42x: '荆襄地图',
 };
@@ -80,10 +118,15 @@ function normalizeBuiltinPayload(raw: ImportMetaPayload): EditorMapPayload {
   if (raw.schemaVersion === 2 && Array.isArray(raw.cities) && raw.cities.length > 0 && first && 'type' in first) {
     const typed = raw as unknown as EditorMapPayload;
     if (!typed.name && raw.id) typed.name = BUILTIN_NAME_MAP[raw.id] ?? raw.id;
+    if (!typed.plots?.length) {
+      const plots = plotsFromCityInterior(typed.cities as RawCityWithInterior[], typed.width, typed.height);
+      if (plots.length) typed.plots = plots;
+    }
+    typed.cities = withoutInterior(typed.cities);
     return typed;
   }
-  // 原始 china42x 格式：cities + passes 分开数组，无 type
-  const rawCities = (raw.cities ?? []) as Array<{ id: string; label: string; q: number; r: number }>;
+  // 原始 china42x 格式：cities + passes 分开数组，无 type；建设用地挂在各城 interior 上
+  const rawCities = (raw.cities ?? []) as Array<RawCityWithInterior & { label: string; forceId?: ForceId | null }>;
   const rawPasses = (raw.passes ?? []) as Array<{ id: string; label: string; q: number; r: number }>;
   // 城池归属：优先用 JSON 自带 forceId 字段；否则查荆襄归属表
   const id = raw.id ?? '';
@@ -95,10 +138,11 @@ function normalizeBuiltinPayload(raw: ImportMetaPayload): EditorMapPayload {
       q: c.q,
       r: c.r,
       type: 'city' as const,
-      forceId: (((c as Record<string, unknown>).forceId as ForceId | null | undefined) ?? (isJingxiang ? (JINGXIANG_CITY_OWNERS[c.id] as ForceId | null) ?? null : null)),
+      forceId: ((c.forceId as ForceId | null | undefined) ?? (isJingxiang ? (JINGXIANG_CITY_OWNERS[c.id] as ForceId | null) ?? null : null)),
     })),
     ...rawPasses.map((p) => ({ id: p.id, label: p.label, q: p.q, r: p.r, type: 'pass' as const, forceId: null })),
   ];
+  const plots = plotsFromCityInterior(rawCities.map((c) => ({ ...c, type: 'city' as const })), raw.width, raw.height);
   return {
     schemaVersion: 2,
     width: raw.width,
@@ -106,6 +150,7 @@ function normalizeBuiltinPayload(raw: ImportMetaPayload): EditorMapPayload {
     backgroundImage: '',
     grid: (raw.grid ?? []) as EditorMapPayload['grid'],
     cities,
+    ...(plots.length ? { plots } : {}),
     name: raw.name ?? BUILTIN_NAME_MAP[id] ?? id,
   };
 }

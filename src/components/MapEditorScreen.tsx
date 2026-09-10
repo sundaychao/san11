@@ -77,12 +77,16 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
       ? createEditorState(payload.grid, payload.cities, payload.width, payload.height, payload.plots ?? [])
       : createBlankMap(200, 200);
   });
+  // 既有地图的原名：进入编辑时预填地图名输入框，保存时用于判断「是否改名另存」
+  const [originalName] = useState(() => (mapId === 'new' ? '' : getMap(mapId)?.name ?? ''));
   // 新建地图时先确认尺寸（宽×高格数）；已有地图编辑时为哨兵值，跳过尺寸输入页
   const [requestedDims, setRequestedDims] = useState<{ w: number; h: number } | null>(() =>
     mapId === 'new' ? null : { w: 0, h: 0 },
   );
   const [activeTool, setActiveTool] = useState<MapEditorTool>('plain');
   const [pendingPlacement, setPendingPlacement] = useState<PendingPlacement | null>(null);
+  // 新建据点选完归属后：待命名的势主（确认名字才真正落地）
+  const [pendingName, setPendingName] = useState<{ forceId: ForceId | null } | null>(null);
   // 「建设用地」模式下当前圈地归属的城
   const [plotCityId, setPlotCityId] = useState<string | null>(null);
   // 「建设用地」草稿：确定前不落库，取消即整体丢弃
@@ -181,31 +185,55 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
     setEditor((current) => (current ? paintTerrain(current, coord, activeTool as TerrainType) : current));
   };
 
-  const placeWithForce = (forceId: ForceId | null) => {
+  /** 落地据点（已确定名字） */
+  const commitPlacement = (label: string, forceId: ForceId | null) => {
     if (!pendingPlacement) return;
     const coord = { q: pendingPlacement.q, r: pendingPlacement.r };
     const id = `${pendingPlacement.tool}-${coord.q}-${coord.r}`;
-    const label = pendingPlacement.tool === 'city' ? '新城' : '关隘';
+    const isCity = pendingPlacement.tool === 'city';
     setEditor((current) => {
       if (!current) return current;
-      if (pendingPlacement.tool === 'city') return placeCity(current, { id, label, q: coord.q, r: coord.r, forceId });
-      return placePass(current, { id, label, q: coord.q, r: coord.r, forceId });
+      const marker = { id, label, q: coord.q, r: coord.r, forceId };
+      return isCity ? placeCity(current, marker) : placePass(current, marker);
     });
     setPendingPlacement(null);
+    setPendingName(null);
+  };
+
+  /** 选择归属：新建据点先弹命名框；已存在的据点仅改归属、保留原名 */
+  const chooseForce = (forceId: ForceId | null) => {
+    if (!pendingPlacement) return;
+    const existing = markerAt(pendingPlacement.q, pendingPlacement.r);
+    if (existing) {
+      commitPlacement(existing.label, forceId);
+      return;
+    }
+    setPendingName({ forceId });
+  };
+
+  const closePlacement = () => {
+    setPendingPlacement(null);
+    setPendingName(null);
   };
 
   const deletePlacementMarker = () => {
     if (!pendingPlacement) return;
     const marker = markerAt(pendingPlacement.q, pendingPlacement.r);
     if (marker) setEditor((current) => (current ? eraseStronghold(current, marker.id) : current));
-    setPendingPlacement(null);
+    closePlacement();
   };
 
-  const handleSave = (name: string) => {
+  /**
+   * 保存：cache＝仅浏览器缓存；local＝缓存 + 下载 JSON。
+   * 改名即「另存为新地图」（生成新的自定义图，原图保留）；原名则原地更新。
+   * 内置图无法覆盖写回，改名后同样会落到一张新的自定义图上，否则刷新即丢。
+   */
+  const handleSave = (name: string, mode: 'cache' | 'local') => {
     const payload = JSON.parse(exportEditorJson(editor, name)) as EditorMapPayload;
-    if (mapId === 'new') addSessionMap(payload, name);
+    const renamed = name !== originalName;
+    if (mapId === 'new' || renamed) addSessionMap(payload, name);
     else updateSessionMap(mapId, payload);
-    downloadTextFile(`${name}.json`, JSON.stringify(payload, null, 2));
+    if (mode === 'local') downloadTextFile(`${name}.json`, JSON.stringify(payload, null, 2));
     onSave(payload, name);
   };
 
@@ -252,6 +280,7 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
         </div>
         <MapEditorPanel
           activeTool={activeTool}
+          defaultName={originalName}
           canUndo={editor.history.length > 0}
           canRedo={editor.future.length > 0}
           plotCity={plotCity ? { id: plotCity.id, label: plotCity.label } : null}
@@ -269,7 +298,7 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
           onUndo={() => setEditor((current) => (current ? undoEditor(current) : current))}
         />
 
-        {pendingPlacement && (
+        {pendingPlacement && !pendingName && (
           <nav
             className="city-command-menu tool-panel"
             data-testid="editor-placement-menu"
@@ -277,7 +306,7 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
             aria-label={placementTitle}
             onContextMenu={(event) => {
               event.preventDefault();
-              setPendingPlacement(null);
+              closePlacement();
             }}
           >
             <div className="city-command-secondary">
@@ -286,7 +315,7 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
                 <>
                   <div className="city-command-menu-title">当前归属：{forceName(placementMarker.forceId)}</div>
                   {FORCE_CHOICES.map(({ forceId, label }) => (
-                    <button key={label} type="button" data-testid={`placement-force-${label}`} onClick={() => { emitAudioEvent({ type: 'menu-click-on' }); placeWithForce(forceId); }}>
+                    <button key={label} type="button" data-testid={`placement-force-${label}`} onClick={() => { emitAudioEvent({ type: 'menu-click-on' }); chooseForce(forceId); }}>
                       {forceId === placementMarker.forceId ? '✓ ' : ''}{label}
                     </button>
                   ))}
@@ -294,14 +323,23 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
                 </>
               ) : (
                 FORCE_CHOICES.map(({ forceId, label }) => (
-                  <button key={label} type="button" data-testid={`placement-force-${label}`} onClick={() => placeWithForce(forceId)}>
+                  <button key={label} type="button" data-testid={`placement-force-${label}`} onClick={() => { emitAudioEvent({ type: 'menu-click-on' }); chooseForce(forceId); }}>
                     {label}
                   </button>
                 ))
               )}
-              <button type="button" data-testid="placement-cancel" onClick={() => setPendingPlacement(null)}>取消</button>
+              <button type="button" data-testid="placement-cancel" onClick={closePlacement}>取消</button>
             </div>
           </nav>
+        )}
+
+        {pendingPlacement && pendingName && (
+          <StrongholdNameDialog
+            kind={pendingPlacement.tool}
+            forceLabel={forceName(pendingName.forceId)}
+            onCancel={() => setPendingName(null)}
+            onSubmit={(name) => commitPlacement(name, pendingName.forceId)}
+          />
         )}
       </div>
     </GameProvider>
@@ -312,6 +350,49 @@ function eraseStrongholdCurrentMap(state: MapEditorState): MapEditorState {
   let next = state;
   for (const marker of state.cities) next = eraseStronghold(next, marker.id);
   return next;
+}
+
+/** 据点命名：选完归属后输入名字，确认才落地 */
+function StrongholdNameDialog({ kind, forceLabel, onCancel, onSubmit }: {
+  kind: 'city' | 'pass';
+  forceLabel: string;
+  onCancel(): void;
+  onSubmit(name: string): void;
+}) {
+  const isCity = kind === 'city';
+  const [name, setName] = useState('');
+  const trimmed = name.trim();
+  const submit = () => {
+    if (trimmed) onSubmit(trimmed);
+  };
+
+  return (
+    <div className="map-editor-size-dialog tool-panel editor-name-dialog" data-testid="editor-name-dialog">
+      <header>
+        <h2>{isCity ? '命名城池' : '命名关隘'}</h2>
+        <p>归属：{forceLabel}</p>
+      </header>
+      <label className="editor-size-field">
+        <span>{isCity ? '城池名' : '关隘名'}</span>
+        <input
+          autoFocus
+          data-testid="editor-name-input"
+          value={name}
+          maxLength={12}
+          placeholder={isCity ? '请输入城池名字' : '请输入关隘名字'}
+          onChange={(event) => setName(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') submit();
+            if (event.key === 'Escape') onCancel();
+          }}
+        />
+      </label>
+      <div className="editor-name-actions">
+        <button type="button" className="secondary-button" data-testid="editor-name-cancel" onClick={onCancel}>取消</button>
+        <button type="button" className="primary-button" data-testid="editor-name-confirm" disabled={!trimmed} onClick={submit}>确定</button>
+      </div>
+    </div>
+  );
 }
 
 /** 新建地图尺寸输入：宽×高（左右宽 × 上下高）格数 */

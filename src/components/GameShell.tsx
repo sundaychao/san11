@@ -12,6 +12,7 @@ import { canBuildPlotAtCoord, hasEnemyUnitsNear, isPlotOccupiedByOtherCity, PLOT
 import { cityCenter, ownCityAt, unoccupiedCityAt } from '../game/battle/movementRules';
 import { useGame } from '../game/store/GameProvider';
 import { territoryForceAt } from '../game/territory';
+import type { MapCamera } from '../game/saveSlots';
 import type { BattleDamageReport, CityEffectReport, CityId, ForceId, FacilityRepairReport, FacilityType, GameCommand, GameState, GridCell, PassId, StrategyResultReport, TerrainType } from '../game/types';
 import { BattlePanel } from './BattlePanel';
 import { CityInfoPanel } from './CityInfoPanel';
@@ -36,6 +37,7 @@ import { ForceOverviewPanel } from './ForceOverviewPanel';
 import { GlobalIntelDialog } from './GlobalIntelDialog';
 import { OfficerListDialog } from './OfficerListDialog';
 import { ResultOverlay } from './ResultOverlay';
+import { SaveLoadDialog, type SaveLoadDialogMode } from './SaveLoadDialog';
 import { StrategicMap } from './StrategicMap';
 import { TopBar } from './TopBar';
 import { TransportDialog, type TransportConfirmInput } from './TransportDialog';
@@ -82,8 +84,14 @@ type DeployDelegateMenuState = {
 };
 
 export function GameShell() {
-  const { attackCity, attackFacility, attackPlot, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, deployUnitDelegate, dismantleFacility, duelUnit, endTenDay, hasAutosave, hasManualSave, issueCommand, loadGame, manualSave, moveUnit, repairFacility, setBuildDelegate, setMoveDelegate, setRepairDelegate, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
+  const { attackCity, attackFacility, attackPlot, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, deployUnitDelegate, dismantleFacility, duelUnit, endTenDay, clearPendingCamera, issueCommand, moveUnit, pendingCamera, repairFacility, setBuildDelegate, setMoveDelegate, setRepairDelegate, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
   const { emit: emitAudioEvent } = useAudioEventAdapter();
+  /** 储存 / 载入对话框：null 表示关闭 */
+  const [saveDialogMode, setSaveDialogMode] = useState<SaveLoadDialogMode | null>(null);
+  /** 主地图实时镜头：存档时随档记录，读档时原样还原 */
+  const cameraRef = useRef<MapCamera | null>(null);
+  const [cameraRestore, setCameraRestore] = useState<{ camera: MapCamera; token: number } | null>(null);
+  const cameraTokenRef = useRef(0);
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   /** 当前命令/培育对话框的关隘宿主：非空时以关隘为据点宿主执行命令（cityId 仅作归辖城） */
   const [activeCommandPassId, setActiveCommandPassId] = useState<PassId | null>(null);
@@ -1429,8 +1437,8 @@ export function GameShell() {
     setShowGlobalIntel(true);
   }, []);
 
-  const saveFromMap = useCallback(() => {
-    manualSave();
+  /** 关闭右键菜单及其衍生的所有浮层，再打开存档界面 */
+  const openSaveDialog = useCallback((mode: SaveLoadDialogMode) => {
     setMapContextMenu(null);
     setShowMapIntelOptions(false);
     setUnitCommandMenu(null);
@@ -1440,21 +1448,27 @@ export function GameShell() {
     setTargetingTactic(null);
     setTargetingFirePlot(null);
     setTargetingUnitStrategy(null);
-  }, [manualSave]);
+    setSaveDialogMode(mode);
+  }, []);
+
+  const saveFromMap = useCallback(() => {
+    openSaveDialog('save');
+  }, [openSaveDialog]);
 
   const loadFromMap = useCallback(() => {
-    if (hasManualSave) loadGame('manual');
-    else if (hasAutosave) loadGame('auto');
-    setMapContextMenu(null);
-    setShowMapIntelOptions(false);
-    setUnitCommandMenu(null);
-    setUnitTacticMenu(null);
-    setUnitStrategyMenu(null);
-    setTargetingAttack(null);
-    setTargetingTactic(null);
-    setTargetingFirePlot(null);
-    setTargetingUnitStrategy(null);
-  }, [hasAutosave, hasManualSave, loadGame]);
+    openSaveDialog('load');
+  }, [openSaveDialog]);
+
+  /** 读取实时镜头：存档时随档落盘 */
+  const readCamera = useCallback(() => cameraRef.current, []);
+
+  // 读档（含从首页读档）后把存档镜头写回主地图，保证画面与存档时完全一致
+  useEffect(() => {
+    if (!pendingCamera) return;
+    cameraTokenRef.current += 1;
+    setCameraRestore({ camera: pendingCamera, token: cameraTokenRef.current });
+    clearPendingCamera();
+  }, [pendingCamera, clearPendingCamera]);
 
   const closeMapContextMenuFromRightClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     event.preventDefault();
@@ -1914,9 +1928,12 @@ export function GameShell() {
         }}
         onMapContextMenu={openMapContextMenu}
         previewUnits={deployPreviewUnits}
+        onViewChange={(camera) => { cameraRef.current = camera; }}
+        restoreCamera={cameraRestore?.camera ?? null}
+        restoreCameraToken={cameraRestore?.token ?? 0}
         freezeView={Boolean(
           mapContextMenu || unitIntelMenu || cityInfoMenu || facilityContextMenu
-          || plotContextMenu || cancelConfirm,
+          || plotContextMenu || cancelConfirm || saveDialogMode,
         )}
       />
       {state && hoveredCell && (
@@ -2560,6 +2577,13 @@ export function GameShell() {
           cityId={transportCityId}
           onConfirm={confirmTransportSetup}
           onClose={closeTransportDialog}
+        />
+      )}
+      {saveDialogMode && (
+        <SaveLoadDialog
+          mode={saveDialogMode}
+          getCamera={readCamera}
+          onClose={() => setSaveDialogMode(null)}
         />
       )}
       {state?.phase === 'finished' && !viewFinalMap && <ResultOverlay onViewMap={() => setViewFinalMap(true)} />}

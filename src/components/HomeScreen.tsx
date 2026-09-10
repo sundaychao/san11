@@ -1,5 +1,7 @@
 import { Globe, MapPlus, Play, ScrollText } from 'lucide-react';
+import { useState } from 'react';
 import { useGame } from '../game/store/GameProvider';
+import { SaveLoadDialog } from './SaveLoadDialog';
 
 interface HomeScreenProps {
   onEditMap(): void;
@@ -8,10 +10,13 @@ interface HomeScreenProps {
 }
 
 /**
- * 首页四选项：载入进度（暂不做）/ 重新开始新游戏 / 联网对战 / 编辑地图。
+ * 首页四选项：载入进度（32 槽存档） / 重新开始新游戏 / 联网对战 / 编辑地图。
  */
 export function HomeScreen({ onEditMap, onOnline, onStartNew }: HomeScreenProps) {
-  const { auth, hasAutosave, hasManualSave, invalidSaves, loadGame, logoutAccount, clearSave, error, clearError } = useGame();
+  const { auth, saveSlots, hasAutosave, hasManualSave, invalidSaves, loadGame, logoutAccount, clearSave, error, clearError } = useGame();
+  const [showLoad, setShowLoad] = useState(false);
+  const hasSlotSave = saveSlots.some(Boolean);
+  const canLoad = hasSlotSave || hasAutosave || hasManualSave;
 
   return (
     <main className="start-screen home-screen" data-testid="home-screen">
@@ -25,11 +30,18 @@ export function HomeScreen({ onEditMap, onOnline, onStartNew }: HomeScreenProps)
       </section>
 
       <section className="home-menu" aria-label="主菜单">
-        <button type="button" className="home-option is-disabled" data-testid="load-save" disabled title="载入进度暂未开放">
+        <button
+          type="button"
+          className={canLoad ? 'home-option' : 'home-option is-disabled'}
+          data-testid="load-save"
+          disabled={!canLoad}
+          title={canLoad ? '打开存档列表读取进度' : '暂无可读取的存档'}
+          onClick={() => setShowLoad(true)}
+        >
           <ScrollText aria-hidden="true" />
           <span>
             <strong>载入进度</strong>
-            <small>暂未开放</small>
+            <small>{canLoad ? '32 个存档位置，任选其一继续征程' : '暂无可读取的存档'}</small>
           </span>
         </button>
         <button type="button" className="home-option" data-testid="start-new" onClick={onStartNew}>
@@ -72,6 +84,8 @@ export function HomeScreen({ onEditMap, onOnline, onStartNew }: HomeScreenProps)
         )}
         {error && <button className="start-error" type="button" onClick={clearError}>{error}</button>}
       </section>
+
+      {showLoad && <SaveLoadDialog mode="load" onClose={() => setShowLoad(false)} />}
     </main>
   );
 }

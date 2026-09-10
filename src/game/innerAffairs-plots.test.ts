@@ -9,6 +9,7 @@ import {
 } from './innerAffairs';
 import type { Officer } from './types';
 import { createGame, china42InteriorByCityId } from './scenario/jingxiang208';
+import china42Data from './scenario/maps/china42x.json';
 
 /** 快速生成 N 个可插入 useMemo 推荐的伪武将（politics/intelligence/war/leadership/charisma 指定） */
 function mockOfficers(defs: Array<{ id: string; war?: number; leadership?: number; intelligence?: number; politics?: number; charisma?: number }>): Officer[] {
@@ -159,13 +160,37 @@ describe('建设用地数量在剧本创建时固定，不随人口波动', () =
 
   it('大城市建设用地多于规模档位上限（原版长安22格不被截断为12格）', () => {
     const state = createGame('liu', 1);
-    expect(cityPlots(state.cities.changan).length).toBe(22);
-    expect(cityPlots(state.cities.luoyang).length).toBe(20);
-    expect(cityPlots(state.cities.kuaiji).length).toBe(4);
-    // 全图地格总数 = 原版 42 城 interior 总和
+    const interior = china42InteriorByCityId();
+    // 逐城与数据源对齐（原版 interior 或编辑器导出的 plots）
+    expect(cityPlots(state.cities.changan).length).toBe(interior.get('changan')!.length);
+    expect(cityPlots(state.cities.changan).length).toBeGreaterThan(12);
+    expect(cityPlots(state.cities.kuaiji).length).toBe(interior.get('kuaiji')!.length);
+    // 全图地格总数 = 数据源 42 城总和
     const total = Object.values(state.cities).reduce((sum, city) => sum + cityPlots(city).length, 0);
-    const originalTotal = [...china42InteriorByCityId().values()].reduce((sum, cells) => sum + cells.length, 0);
-    expect(total).toBe(originalTotal);
+    const sourceTotal = [...interior.values()].reduce((sum, cells) => sum + cells.length, 0);
+    expect(total).toBe(sourceTotal);
+  });
+
+  it('开局建设用地逐格落在内置图给定的坐标上（位置不能乱）', () => {
+    const state = createGame('liu', 1);
+    // 直接对照 china42x.json 原始数据：有顶层 plots 用 plots，原版格式用各城 interior
+    const source = china42Data as unknown as {
+      plots?: Array<{ cityId: string; q: number; r: number }>;
+      cities?: Array<{ id: string; interior?: Array<[number, number]> }>;
+    };
+    const expectedFor = (cityId: string) => {
+      const fromPlots = (source.plots ?? [])
+        .filter((plot) => plot.cityId === cityId)
+        .map((plot) => `${plot.q},${plot.r}`);
+      if (fromPlots.length > 0) return fromPlots.sort();
+      const city = (source.cities ?? []).find((c) => c.id === cityId);
+      return (city?.interior ?? []).map(([q, r]) => `${q},${r}`).sort();
+    };
+
+    for (const cityId of ['changan', 'luoyang', 'kuaiji'] as const) {
+      const actual = cityPlots(state.cities[cityId]).map((plot) => `${plot.q},${plot.r}`).sort();
+      expect(actual).toEqual(expectedFor(cityId));
+    }
   });
 });
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EditorMapPayload } from './map-editor/editor';
+import china42Data from './scenario/maps/china42x.json';
+import { china42Passes } from './scenario/jingxiang208';
 import {
   addSessionMap,
   BUILTIN_MAP_CHINA42_ID,
@@ -23,6 +25,41 @@ describe('map registry', () => {
     expect(builtin?.payload.grid.length).toBe(200 * 200);
     expect(builtin?.payload.cities.some((c) => c.type === 'city')).toBe(true);
     expect(builtin?.payload.cities.some((c) => c.type === 'pass')).toBe(true);
+  });
+
+  it('内置图建设用地统一暴露为顶层 plots（原版 interior 会被平移，编辑器导出格式直接沿用）', () => {
+    registerBuiltinMaps();
+    const builtin = getMap(BUILTIN_MAP_CHINA42_ID);
+    const source = china42Data as unknown as {
+      plots?: Array<{ cityId: string; q: number; r: number }>;
+      cities?: Array<{ interior?: Array<[number, number]> }>;
+    };
+    // 兼容两种内置图格式：有顶层 plots 就用它，否则按各城 interior 求和
+    const expectedCount = source.plots?.length
+      ?? (source.cities ?? []).reduce((sum, city) => sum + (city.interior?.length ?? 0), 0);
+
+    expect(expectedCount).toBeGreaterThan(0);
+    expect(builtin?.payload.plots).toHaveLength(expectedCount);
+    // 一格一主：坐标不重复
+    const keys = new Set(builtin?.payload.plots?.map((plot) => `${plot.q},${plot.r}`));
+    expect(keys.size).toBe(expectedCount);
+    // 归属必须落在已存在的城池上（关隘不算建设用地）
+    const cityIds = new Set(builtin?.payload.cities.filter((c) => c.type === 'city').map((c) => c.id));
+    expect(builtin?.payload.plots?.every((plot) => cityIds.has(plot.cityId))).toBe(true);
+    // 遗留的 interior 字段不再挂在城池对象上
+    expect(builtin?.payload.cities.every((c) => !('interior' in c))).toBe(true);
+    // 抽样：襄平首格可用
+    expect(builtin?.payload.plots?.some((plot) => plot.cityId === 'xiangping' && plot.q === 176 && plot.r === 21)).toBe(true);
+  });
+
+  it('关隘锚点兼容两种格式（原版 passes 数组 / 编辑器导出的 cities type=pass）', () => {
+    registerBuiltinMaps();
+    const builtin = getMap(BUILTIN_MAP_CHINA42_ID)!;
+    const passMarkers = builtin.payload.cities.filter((c) => c.type === 'pass');
+    // 无论哪种格式，编辑器侧看到的关隘标记都在（原版 10 座）
+    expect(passMarkers).toHaveLength(10);
+    expect(china42Passes()).toHaveLength(10);
+    expect(china42Passes().map((anchor) => anchor.id)).toContain('tongguan');
   });
 
   it('adds and reads a custom session map', () => {

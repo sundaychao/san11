@@ -1,5 +1,5 @@
 import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import { unitIsIncapacitated } from '../game/battle/actions';
 import { unitAuraRange } from '../game/battle/aura';
 import { isWaterTerrain } from '../game/battle/catalog';
@@ -10,8 +10,9 @@ import { passAt, passAttackRangeCoords, passBlockedKeys } from '../game/passes';
 import { PLOT_LABELS, CITY_ATTACK_RANGE, CITY_ATTACK_MIN } from '../game/innerAffairs';
 import { rulerCityOf } from '../game/territory';
 import type { EditableCityMarker, EditorCityPlot } from '../game/map-editor/editor';
+import type { MapCamera } from '../game/saveSlots';
 import { useGame } from '../game/store/GameProvider';
-import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GridCell, PassId, StrategyResultReport, TroopType } from '../game/types';
+import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GridCell, PassId, StrategyResultReport, TerrainType, TroopType } from '../game/types';
 
 interface MapView {
   x: number;
@@ -81,6 +82,78 @@ const FORCE_COLORED_FACILITIES = new Set<FacilityType>(['drum', 'arrowTower', 'm
 
 /** 无主城市的中性色（城牌/小地图圆点） */
 const NEUTRAL_CITY_COLOR = '#ffffff';
+
+/** 小地图缩略图：每个地图格烘焙成 N×N 像素（取 2 避免高 DPI 屏放大发糊） */
+const MINIMAP_PIXELS_PER_CELL = 2;
+/** 小地图合成底色：与 .map-region 背景一致，半透明地形色叠加在它上面 */
+const MINIMAP_BASE_RGB = [0x5f, 0x6d, 0x5f] as const;
+/** 地形填充色（RGB + alpha），数值与 global.css 的 .terrain-* 规则保持同源 */
+const MINIMAP_TERRAIN_FILL: Record<TerrainType, readonly [number, number, number, number]> = {
+  road: [222, 222, 222, 0.5],
+  path: [200, 172, 120, 0.42],
+  plank: [160, 110, 60, 0.46],
+  plain: [196, 170, 108, 0.42],
+  grass: [112, 178, 86, 0.42],
+  sand: [224, 202, 138, 0.42],
+  wasteland: [178, 168, 122, 0.42],
+  wetland: [108, 158, 142, 0.44],
+  poison: [148, 72, 172, 0.46],
+  forest: [28, 95, 42, 0.5],
+  hill: [160, 103, 54, 0.42],
+  mountain: [30, 33, 34, 1],
+  shore: [119, 120, 94, 1],
+  water: [38, 125, 168, 0.48],
+  stream: [102, 140, 153, 1],
+  river: [46, 108, 182, 0.5],
+  sea: [18, 58, 122, 0.56],
+  shallow: [96, 186, 196, 0.44],
+  ferry: [160, 116, 64, 0.55],
+  pass: [122, 96, 56, 0.62],
+  construction: [190, 193, 198, 0.45],
+};
+
+/**
+ * 把全量地图格烘焙成一张位图：逐格写像素数组后一次 putImageData，只有一次绘制调用。
+ * 生成后即为静态图片，与镜头/部队无关；地图数据不变则结果不变。
+ * 无 2D 上下文（例如 jsdom 测试环境）时返回 null，调用方退回纯色底图。
+ */
+function bakeMiniMapThumb(cells: GridCell[], gridWidth: number, gridHeight: number): string | null {
+  if (typeof document === 'undefined') return null;
+  const step = MINIMAP_PIXELS_PER_CELL;
+  const canvas = document.createElement('canvas');
+  canvas.width = gridWidth * step;
+  canvas.height = gridHeight * step;
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+  const image = context.createImageData(canvas.width, canvas.height);
+  const data = image.data;
+  const [baseR, baseG, baseB] = MINIMAP_BASE_RGB;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = baseR;
+    data[i + 1] = baseG;
+    data[i + 2] = baseB;
+    data[i + 3] = 255;
+  }
+  for (const cell of cells) {
+    if (cell.q < 0 || cell.r < 0 || cell.q >= gridWidth || cell.r >= gridHeight) continue;
+    const fill = MINIMAP_TERRAIN_FILL[cell.terrain];
+    if (!fill) continue;
+    const [r, g, b, alpha] = fill;
+    const keep = 1 - alpha;
+    const originX = cell.q * step;
+    const originY = cell.r * step;
+    for (let dy = 0; dy < step; dy += 1) {
+      for (let dx = 0; dx < step; dx += 1) {
+        const index = ((originY + dy) * canvas.width + originX + dx) * 4;
+        data[index] = r * alpha + data[index] * keep;
+        data[index + 1] = g * alpha + data[index + 1] * keep;
+        data[index + 2] = b * alpha + data[index + 2] * keep;
+      }
+    }
+  }
+  context.putImageData(image, 0, 0);
+  return canvas.toDataURL('image/png');
+}
 
 /** 原版 10 关所锚点（china42x 全图标记） */
 const PASS_ANCHORS = china42Passes();
@@ -169,6 +242,11 @@ interface StrategicMapProps {
   previewUnits?: ArmyUnit[];
   /** 右键菜单/浮层已打开时冻结镜头：禁止拖拽平移与边缘自动滚动 */
   freezeView?: boolean;
+  /** 镜头变化时回报归一化描述，供存档记录（拖拽/缩放/边缘滚动都会触发） */
+  onViewChange?(camera: MapCamera): void;
+  /** 读档后要还原的镜头；与 restoreCameraToken 配合，token 变化即重新应用一次 */
+  restoreCamera?: MapCamera | null;
+  restoreCameraToken?: number;
 }
 
 export function StrategicMap({
@@ -230,6 +308,9 @@ export function StrategicMap({
   selectedUnitId,
   previewUnits = [],
   freezeView = false,
+  onViewChange,
+  restoreCamera = null,
+  restoreCameraToken = 0,
 }: StrategicMapProps) {
   const { state, selectedCityId, selectCity, online } = useGame();
   const [view, setView] = useState<MapView>(() => {
@@ -504,12 +585,79 @@ export function StrategicMap({
   const initialFocusAppliedRef = useRef(false);
   useEffect(() => {
     if (initialFocusAppliedRef.current || !initialFocusCity) return;
+    // 读档进入时以存档镜头为准，不再把镜头拉回君主城池
+    if (restoreCameraToken > 0) {
+      initialFocusAppliedRef.current = true;
+      return;
+    }
     // 浏览器里等 ResizeObserver 首次回报真实视口尺寸后再居中，避免先按回退尺寸居中、布局就绪后再跳一次；
     // 无 ResizeObserver 的环境（如测试）直接用回退视口，行为确定可断言。
     if (!viewport && typeof ResizeObserver !== 'undefined') return;
     initialFocusAppliedRef.current = true;
     setView((current) => centerViewOnCell(current, initialFocusCity.gridQ, initialFocusCity.gridR));
-  }, [viewport, initialFocusCity]);
+  }, [viewport, initialFocusCity, restoreCameraToken]);
+
+  /** 世界坐标内容尺寸（CSS 像素）——镜头描述与还原都以此为基准 */
+  const contentSizeOf = (scale: number) => {
+    const vw = viewportRef.current?.width ?? 1280;
+    const contentWidth = Math.max(1, vw * scale);
+    return { contentWidth, contentHeight: Math.max(1, contentWidth * (worldHeight / worldWidth)) };
+  };
+
+  /** 当前镜头 → 与视口尺寸无关的归一化描述 */
+  const describeView = (current: MapView): MapCamera => {
+    const { contentWidth, contentHeight } = contentSizeOf(current.scale);
+    return {
+      cx: 0.5 - current.x / contentWidth,
+      cy: 0.5 - current.y / contentHeight,
+      scale: current.scale,
+    };
+  };
+
+  /** 归一化描述 → 当前视口下的镜头偏移（存档时的视口尺寸下与原样一致） */
+  const applyCamera = (camera: MapCamera): MapView => {
+    const scale = clampScale(camera.scale);
+    const { contentWidth, contentHeight } = contentSizeOf(scale);
+    return clampViewToMap({
+      scale,
+      x: (0.5 - camera.cx) * contentWidth,
+      y: (0.5 - camera.cy) * contentHeight,
+    });
+  };
+
+  // 读档请求：等真实视口回报后再落地，保证还原位置与原存档一致
+  const pendingCameraRef = useRef<MapCamera | null>(null);
+  const consumedCameraTokenRef = useRef(0);
+  useEffect(() => {
+    if (restoreCameraToken <= 0 || consumedCameraTokenRef.current === restoreCameraToken) return;
+    pendingCameraRef.current = restoreCamera;
+    if (!restoreCamera) consumedCameraTokenRef.current = restoreCameraToken;
+  }, [restoreCamera, restoreCameraToken]);
+  useEffect(() => {
+    const pending = pendingCameraRef.current;
+    if (!pending) return;
+    // 有 ResizeObserver 的环境等真实视口回报后再落地；无该 API 的环境（如测试）直接用回退视口
+    if (!viewportRef.current && typeof ResizeObserver !== 'undefined') return;
+    pendingCameraRef.current = null;
+    consumedCameraTokenRef.current = restoreCameraToken;
+    setView(applyCamera(pending));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoreCameraToken, viewport]);
+
+  // 回报镜头变化（仅写入调用方 ref，不触发重渲染）
+  const onViewChangeRef = useRef(onViewChange);
+  onViewChangeRef.current = onViewChange;
+  useEffect(() => {
+    onViewChangeRef.current?.(describeView(view));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, viewport, worldWidth, worldHeight]);
+
+  /** 小地图底图：只依赖地图数据，镜头移动/部队变化不会触发重烘焙 */
+  const miniMapThumb = useMemo(() => {
+    const grid = editorGrid ?? state?.grid;
+    if (!grid || grid.length === 0) return null;
+    return bakeMiniMapThumb(grid, state?.gridWidth ?? DEFAULT_GRID_WIDTH, state?.gridHeight ?? DEFAULT_GRID_HEIGHT);
+  }, [editorGrid, state?.grid, state?.gridWidth, state?.gridHeight]);
 
   if (!state) return null;
 
@@ -1539,6 +1687,7 @@ export function StrategicMap({
         className="mini-map tool-panel"
         aria-label="荆襄小地图"
         data-testid="mini-map"
+        style={{ aspectRatio: `${gridWidth} / ${gridHeight}` }}
         onPointerDown={(event) => {
           // 小地图上的按压只用于镜头跳转，不触发主地图拖拽/其他地图操作
           event.stopPropagation();
@@ -1551,6 +1700,16 @@ export function StrategicMap({
           moveCameraToMapFraction(fx, fy);
         }}
       >
+        {miniMapThumb && (
+          <img
+            src={miniMapThumb}
+            alt=""
+            className={`mini-map-thumb${perspectiveRotated ? ' is-rotated' : ''}`}
+            data-testid="mini-map-thumb"
+            draggable={false}
+            aria-hidden="true"
+          />
+        )}
         {gridWidth === 200 && gridHeight === 200 && PASS_ANCHORS.map((pass) => {
           const runtimePass = state.passes?.[pass.id as PassId];
           const force = runtimePass?.ownerId ? state.forces[runtimePass.ownerId] : undefined;

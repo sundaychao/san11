@@ -1,7 +1,7 @@
 import { emptyArmaments } from './armaments';
 import { gridKey, neighborsOf, ringCoordsWithinRange, type GridCoord } from './battle/grid';
+import { builtinPassAnchors } from './scenario/builtinMapData';
 import type { CityArmaments, CityId, ForceId, GameState, Pass, PassId } from './types';
-import china42Data from './scenario/maps/china42x.json';
 
 /** 原版关隘锚点（单格，来自 Scen000.s11 建筑坐标，与 jingxiang208.china42Passes 同源） */
 interface PassAnchor {
@@ -11,7 +11,8 @@ interface PassAnchor {
   r: number;
 }
 
-const PASS_ANCHORS = (china42Data.passes ?? []) as PassAnchor[];
+/** 兼容两种内置图格式：原版 passes 数组，或编辑器导出的 cities 里 type==='pass' */
+const PASS_ANCHORS = builtinPassAnchors() as PassAnchor[];
 
 /** 关隘所属城池：默认取最近城池，个别按原版设定/战役安排调整 */
 export const PASS_HOME_CITY: Record<PassId, CityId> = {

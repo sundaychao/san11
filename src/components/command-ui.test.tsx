@@ -14,11 +14,21 @@ import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
 import { settleTenDay } from '../game/turn';
 import { GameShell } from './GameShell';
+import { OfficerListDialog } from './OfficerListDialog';
 
 function renderState(state = createGame('liu', 3)) {
   return render(
     <GameProvider initialState={state}>
       <GameShell />
+    </GameProvider>,
+  );
+}
+
+/** 顶栏不再放「武将」按钮：武将一览直接挂载组件测试，功能本身的覆盖不变 */
+function renderOfficerList(state = createGame('liu', 3)) {
+  return render(
+    <GameProvider initialState={state}>
+      <OfficerListDialog onClose={() => {}} />
     </GameProvider>,
   );
 }
@@ -121,36 +131,13 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
   });
 
-  it('confirms before ending a month with legal actions remaining', async () => {
-    const user = userEvent.setup();
-    renderState();
-
-    await user.click(screen.getByRole('button', { name: '进行到下月' }));
-
-    expect(screen.getByRole('dialog', { name: '结束本月' })).toBeVisible();
-    await user.click(screen.getByRole('button', { name: '确认进行' }));
-    expect(screen.queryByRole('dialog', { name: '结束本月' })).not.toBeInTheDocument();
-    expect(screen.getByText('五月')).toBeVisible();
-  });
-
-  it('closes the end-month confirmation popup on right click', async () => {
-    const user = userEvent.setup();
-    renderState();
-
-    await user.click(screen.getByTestId('end-month-button'));
-    const dialog = screen.getAllByRole('dialog')[0];
-
-    const defaultWasAllowed = fireEvent.contextMenu(dialog);
-
-    expect(defaultWasAllowed).toBe(false);
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
+  // 顶栏精简后，「进行·下月」按钮及其"仍有行动力"确认弹窗已移除，
+  // 原「结束本月确认弹窗」「右键关闭该弹窗」两条用例随之删除。
+  // 回合推进改由地图右键菜单的「进行」承载，一旬一旬推进（下旬后自动进入下月）。
 
   it('opens a categorized force officer list with ownership, stats, skills, aptitudes, and status', async () => {
     const user = userEvent.setup();
-    renderState();
-
-    await user.click(screen.getByTestId('open-officer-list-button'));
+    renderOfficerList();
 
     const dialog = screen.getByRole('dialog', { name: '武将一览' });
     expect(within(dialog).getByRole('button', { name: '所属' })).toHaveClass('is-active');
@@ -197,9 +184,8 @@ describe('command interface', { timeout: 30000 }, () => {
   it('sorts every officer-list column from its header and toggles direction', async () => {
     const user = userEvent.setup();
     const state = createGame('liu', 3);
-    renderState(state);
+    renderOfficerList(state);
 
-    await user.click(screen.getByTestId('open-officer-list-button'));
     const dialog = screen.getByRole('dialog', { name: '武将一览' });
     const playerOfficers = Object.values(state.officers).filter((officer) => officer.forceId === state.playerForceId);
 
@@ -252,9 +238,8 @@ describe('command interface', { timeout: 30000 }, () => {
 
   it('closes the officer list popup on right click', async () => {
     const user = userEvent.setup();
-    renderState();
+    renderOfficerList();
 
-    await user.click(screen.getByTestId('open-officer-list-button'));
     const dialog = screen.getAllByRole('dialog')[0];
 
     const defaultWasAllowed = fireEvent.contextMenu(dialog);
@@ -268,9 +253,8 @@ describe('command interface', { timeout: 30000 }, () => {
     const state = createGame('liu', 3);
     // 刘备 161 年生：把出生年改早 16 年 → 208 年时 63 岁（每月 10% 寿终风险）
     state.officers['liu-bei'].birthYear = 145;
-    renderState(state);
+    renderOfficerList(state);
 
-    await user.click(screen.getByTestId('open-officer-list-button'));
     const dialog = screen.getByRole('dialog', { name: '武将一览' });
     const officerRow = (name: string) => within(dialog).getByRole('rowheader', { name }).closest('tr')!;
 
@@ -292,9 +276,8 @@ describe('command interface', { timeout: 30000 }, () => {
     state.officers['zhang-fei'].location = { kind: 'city', cityId: 'jiangling' };
     state.officers['zhang-fei'].cityId = 'jiangling';
     state.officers['zhang-fei'].acted = false;
-    renderState(state);
+    renderOfficerList(state);
 
-    await user.click(screen.getByTestId('open-officer-list-button'));
     const dialog = screen.getByRole('dialog', { name: '武将一览' });
     const guanYuRow = within(dialog).getByRole('rowheader', { name: /关羽/ }).closest('tr')!;
     const severeBadge = within(guanYuRow).getByText('重伤');
@@ -320,9 +303,7 @@ describe('command interface', { timeout: 30000 }, () => {
       targetCityId: 'wuling',
       officerIds: ['guan-yu'],
     });
-    renderState(state);
-
-    await user.click(screen.getByTestId('open-officer-list-button'));
+    renderOfficerList(state);
 
     const dialog = screen.getByRole('dialog', { name: '武将一览' });
     await user.click(within(dialog).getByRole('button', { name: '状态' }));
@@ -925,7 +906,8 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(screen.getByTestId('unit-info-panel')).toHaveTextContent('900');
     fireEvent.pointerLeave(unitMarker);
 
-    await user.click(screen.getByTestId('end-ten-day-button'));
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
+    await user.click(screen.getByTestId('map-context-proceed-button'));
     fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1, clientX: 300, clientY: 180 });
     fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1, clientX: 300, clientY: 180 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '设置' }));
@@ -1030,7 +1012,8 @@ describe('command interface', { timeout: 30000 }, () => {
     fireEvent.pointerDown(screen.getAllByTestId(/move-target-/)[0], { button: 0, buttons: 1 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
-    await user.click(screen.getByTestId('end-ten-day-button'));
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
+    await user.click(screen.getByTestId('map-context-proceed-button'));
     const unitMarker = screen.getByTestId('battle-unit-marker');
     fireEvent.pointerDown(unitMarker, { button: 0, buttons: 1 });
     expect(screen.getAllByTestId(/move-target-/).length).toBeGreaterThan(0);
@@ -1943,7 +1926,8 @@ describe('command interface', { timeout: 30000 }, () => {
       act(() => vi.advanceTimersByTime(2000));
       expect(screen.queryByTestId('battle-damage-number')).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByTestId('end-ten-day-button'));
+      fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
+      fireEvent.click(screen.getByTestId('map-context-proceed-button'));
       expect(screen.queryByTestId('battle-damage-number')).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();

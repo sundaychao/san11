@@ -312,7 +312,8 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     expect(dragged.x).not.toBe(0);
 
     // 推进一旬（整个游戏状态被替换）后，镜头保持在玩家拖动后的位置
-    await user.click(screen.getByTestId('end-ten-day-button'));
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
+    await user.click(screen.getByTestId('map-context-proceed-button'));
 
     expect(viewOf().x).toBeCloseTo(dragged.x, 1);
     expect(viewOf().y).toBeCloseTo(dragged.y, 1);
@@ -343,6 +344,42 @@ describe('StrategicMap', { timeout: 30000 }, () => {
 
     // 点击后拖拽不应启动（小地图上按压不产生主地图平移拖拽）
     expect(screen.getByTestId('map-content').getAttribute('data-view-x')).not.toBeNull();
+  });
+
+  it('小地图底图：全量地图格烘焙成一张位图铺在容器里', () => {
+    const context = {
+      createImageData: vi.fn((width: number, height: number) => ({
+        width,
+        height,
+        data: new Uint8ClampedArray(width * height * 4),
+      })),
+      putImageData: vi.fn(),
+    };
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as never);
+    const toDataURL = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,mini');
+
+    try {
+      const state = createGame('liu', 1);
+      renderGame(state);
+
+      const thumb = screen.getByTestId('mini-map-thumb');
+      expect(thumb).toHaveAttribute('src', 'data:image/png;base64,mini');
+      // 每格烘焙成 2×2 像素，画布尺寸取网格的两倍（200×200 格 → 400×400 位图）
+      expect(context.createImageData).toHaveBeenCalledWith(state.gridWidth! * 2, state.gridHeight! * 2);
+      // 逐格写像素后只做一次绘制调用（而非每格一次 fillRect）
+      expect(context.putImageData).toHaveBeenCalledTimes(1);
+    } finally {
+      getContext.mockRestore();
+      toDataURL.mockRestore();
+    }
+  });
+
+  it('小地图按地图网格比例成形，缩略图不会被拉伸', () => {
+    const state = createGame('liu', 1);
+    renderGame(state);
+
+    const miniMap = screen.getByTestId('mini-map');
+    expect(miniMap.getAttribute('style')).toContain(`aspect-ratio: ${state.gridWidth} / ${state.gridHeight}`);
   });
 
   it('keeps zoom within the supported range', async () => {

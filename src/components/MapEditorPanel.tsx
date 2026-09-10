@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Brush, Castle, Droplets, Eraser, FileText, Grid3x3, Mountain, RotateCcw, RotateCw, Save, TreePine, Waves,
+  Brush, Castle, Download, Droplets, Eraser, FileText, Grid3x3, Mountain, RotateCcw, RotateCw, Save, TreePine, Waves,
 } from 'lucide-react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import type { MapEditorTool } from '../game/map-editor/editor';
@@ -8,6 +8,8 @@ import type { TerrainType } from '../game/types';
 
 export interface MapEditorPanelProps {
   activeTool: MapEditorTool;
+  /** 既有地图的原名，进入编辑时预填地图名输入框；新建地图为空串 */
+  defaultName: string;
   canRedo: boolean;
   canUndo: boolean;
   plotCity?: { id: string; label: string } | null;
@@ -17,7 +19,8 @@ export interface MapEditorPanelProps {
   onClearPlotCity(): void;
   onConfirmPlots(): void;
   onRedo(): void;
-  onSave(name: string): void;
+  /** cache＝仅写入浏览器缓存；local＝写入缓存并下载 JSON 文件 */
+  onSave(name: string, mode: 'cache' | 'local'): void;
   onSelectTool(tool: MapEditorTool): void;
   onUndo(): void;
 }
@@ -46,6 +49,7 @@ export const TERRAIN_TOOLS: Array<{ tool: TerrainType; label: string; icon: type
 
 export function MapEditorPanel({
   activeTool,
+  defaultName,
   canRedo,
   canUndo,
   plotCity,
@@ -60,7 +64,7 @@ export function MapEditorPanel({
   onUndo,
 }: MapEditorPanelProps) {
   const audio = useAudioEventAdapter();
-  const [saveName, setSaveName] = useState('');
+  const [saveName, setSaveName] = useState(defaultName);
 
   return (
     <section className="map-editor-panel tool-panel" data-testid="map-editor-panel" aria-label="地图编辑器">
@@ -161,7 +165,7 @@ export function MapEditorPanel({
 
       <section className="map-editor-step">
         <h3>保存</h3>
-        <p>输入地图名字后保存，返回地图列表可再次进入编辑。</p>
+        <p>改名保存会另存为新地图，沿用原名则覆盖原图。缓存保存仅写入浏览器；本地保存同时下载 JSON 文件。</p>
         <label className="map-editor-background-field">
           <span>地图名</span>
           <input
@@ -171,16 +175,32 @@ export function MapEditorPanel({
             placeholder="输入地图名字"
           />
         </label>
-        <button
-          type="button"
-          className="primary-button map-editor-full-button"
-          onClick={() => {
-            if (saveName.trim()) onSave(saveName.trim());
-          }}
-          disabled={!saveName.trim()}
-        >
-          <Save />保存地图
-        </button>
+        <div className="map-editor-save-actions">
+          <button
+            type="button"
+            className="secondary-button map-editor-full-button"
+            data-testid="editor-save-cache"
+            title="仅保存在浏览器缓存中，不下载文件"
+            onClick={() => {
+              if (saveName.trim()) onSave(saveName.trim(), 'cache');
+            }}
+            disabled={!saveName.trim()}
+          >
+            <Save />缓存保存
+          </button>
+          <button
+            type="button"
+            className="primary-button map-editor-full-button"
+            data-testid="editor-save-local"
+            title="保存在浏览器缓存中，并下载地图文件"
+            onClick={() => {
+              if (saveName.trim()) onSave(saveName.trim(), 'local');
+            }}
+            disabled={!saveName.trim()}
+          >
+            <Download />本地保存
+          </button>
+        </div>
       </section>
     </section>
   );

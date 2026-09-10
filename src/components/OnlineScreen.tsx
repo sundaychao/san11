@@ -75,7 +75,8 @@ export function OnlineScreen({ onBack }: OnlineScreenProps) {
         <p>选择一张地图，与好友同图争夺天下。</p>
       </header>
 
-      <section className="online-entry tool-panel" aria-label="联网对战">
+      <div className="online-panels" aria-label="联网对战">
+      <section className="online-entry tool-panel" aria-label="创建房间">
         <header>
           <h2>创建房间</h2>
           <p>{online.connecting ? '连接中' : online.roomId ? `房间 ${online.roomId}` : 'Socket.IO'}</p>
@@ -110,11 +111,13 @@ export function OnlineScreen({ onBack }: OnlineScreenProps) {
         <button className="online-create-primary" type="button" onClick={() => void createRoom()} disabled={selectedMap === ''}>
           创建新房间（{selectedMap ? mapLabel(selectedMap) : '未选地图'}）
         </button>
+      </section>
 
-        <div className="online-room-toolbar">
-          <span>等待房间</span>
+      <section className="online-entry online-entry-join tool-panel" aria-label="加入房间">
+        <header>
+          <h2>等待房间</h2>
           <button type="button" onClick={() => void refreshRooms()} disabled={onlineBusy}>刷新房间</button>
-        </div>
+        </header>
         <div className="online-room-list" aria-label="房间列表">
           {online.rooms.length > 0 ? online.rooms.map((room) => (
             <button key={room.id} type="button" onClick={() => void joinOnlineRoom({ roomId: room.id, serverUrl })} aria-label={`进入 ${room.id}`}>
@@ -140,10 +143,11 @@ export function OnlineScreen({ onBack }: OnlineScreenProps) {
           </button>
         </div>
 
-        <button type="button" onClick={() => void resumeOnlineRoom({ serverUrl })} disabled={onlineBusy}>继续上次对战</button>
-
-        {online.error && <button className="start-error" type="button" onClick={clearError}>{online.error}</button>}
+        <button className="online-resume" type="button" onClick={() => void resumeOnlineRoom({ serverUrl })} disabled={onlineBusy}>继续上次对战</button>
       </section>
+      </div>
+
+      {online.error && <button className="start-error" type="button" onClick={clearError}>{online.error}</button>}
     </main>
   );
 }

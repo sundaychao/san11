@@ -7,7 +7,17 @@ import { INITIAL_OFFICER_MERIT, rankForCityCount } from '../ranks';
 import { derivePersonality } from '../debate';
 import { TREASURES } from '../treasures';
 import type { City, CityId, Force, ForceId, GameState, GridCell, Officer, OfficerAptitudes, Stats, TreasureState } from '../types';
-import china42Data from './maps/china42x.json';
+import {
+  BUILTIN_MAP_HEIGHT,
+  BUILTIN_MAP_WIDTH,
+  builtinGrid,
+  builtinInteriorByCityId,
+  builtinPassAnchors,
+  builtinPortAnchors,
+  builtinRawCities,
+  type China42Anchor,
+  type China42CityEntry,
+} from './builtinMapData';
 
 type CitySeed = Omit<City, 'durability' | 'gridQ' | 'gridR' | 'id' | 'maxDurability'> & { id: CityId };
 type OfficerSeed = Omit<Officer, 'acted' | 'location'>;
@@ -287,52 +297,38 @@ function toRecord<T extends { id: string }>(items: T[]): Record<string, T> {
 
 export const FORCE_IDS: ForceId[] = ['cao', 'liu', 'sun', 'biao'];
 
-/** china42x.json 中的城市条目（原版精确坐标 + 原版建设用地坐标） */
-export interface China42CityEntry {
-  id: string;
-  label: string;
-  q: number;
-  r: number;
-  /** 原版建设用地坐标（interior 平面，按距城心由近到远排序） */
-  interior?: Array<[number, number]>;
-}
+/** china42x.json 中的城市条目（原版精确坐标 + 原版建设用地坐标）；类型定义见 builtinMapData */
+export type { China42CityEntry };
 
 export function getChina42Grid(): GridCell[] {
-  return (china42Data.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map(
-    (cell) => ({ q: cell.q, r: cell.r, terrain: cell.terrain }),
-  );
+  return builtinGrid();
 }
 
 export function china42CityEntry(cityId: CityId): China42CityEntry {
-  const city = (china42Data.cities as China42CityEntry[]).find((c) => c.id === cityId);
+  const city = builtinRawCities().find((c) => c.id === cityId);
   if (!city) throw new Error(`华夏42城中找不到城市: ${cityId}`);
   return city;
 }
 
-/** 各城原版建设用地坐标（距城心由近到远），供 initConstructionPlots 与存档迁移使用 */
+/**
+ * 各城建设用地坐标（距城心由近到远），供 initConstructionPlots 与存档迁移使用。
+ * 原版格式取各城 `interior`；编辑器导出格式（无 interior）回退到顶层 `plots`。
+ */
 export function china42InteriorByCityId(): Map<string, Array<{ q: number; r: number }>> {
-  return new Map((china42Data.cities as China42CityEntry[]).map((city) => [
-    city.id,
-    (city.interior ?? []).map(([q, r]) => ({ q, r })),
-  ]));
+  return builtinInteriorByCityId();
 }
 
 /** 原版据点锚点（关所/港口，单格，来自 Scen000.s11 建筑坐标记录） */
-export interface StrongholdAnchor {
-  id: string;
-  label: string;
-  q: number;
-  r: number;
-}
+export type StrongholdAnchor = China42Anchor;
 
-/** 原版 10 关所锚点（地图标记用） */
+/** 原版 10 关所锚点（地图标记用）；编辑器导出格式下从 cities 的 type==='pass' 还原 */
 export function china42Passes(): StrongholdAnchor[] {
-  return (china42Data.passes ?? []) as StrongholdAnchor[];
+  return builtinPassAnchors();
 }
 
-/** 原版 35 港口锚点（地图标记用） */
+/** 原版 35 港口锚点（地图标记用；编辑器不编辑港口，导出格式下为空） */
 export function china42Ports(): StrongholdAnchor[] {
-  return (china42Data.ports ?? []) as StrongholdAnchor[];
+  return builtinPortAnchors();
 }
 
 /** 构建剧本 42 城实体（8 座有主 + 34 座无主），开局与旧存档城市注入共用 */
@@ -344,8 +340,8 @@ export function createScenarioCities(): Record<CityId, City> {
       gridQ: center.q,
       gridR: center.r,
       // 小地图定位直接由原版精确坐标推导（seed 中的 mapX/mapY 仅为类型占位）
-      mapX: (center.q + 0.5) / china42Data.width,
-      mapY: (center.r + 0.5) / china42Data.height,
+      mapX: (center.q + 0.5) / BUILTIN_MAP_WIDTH,
+      mapY: (center.r + 0.5) / BUILTIN_MAP_HEIGHT,
       maxDurability: 3000,
       durability: 3000,
       armaments: initialArmaments(),
@@ -402,8 +398,8 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
     cities,
     officers,
     grid,
-    gridWidth: china42Data.width,
-    gridHeight: china42Data.height,
+    gridWidth: BUILTIN_MAP_WIDTH,
+    gridHeight: BUILTIN_MAP_HEIGHT,
     units: {},
     // 关隘据点：归属=最近/设定城池的所有者，有主关隘初始 2000 兵/1000 金/10000 粮/枪戟箭马各500
     passes: createScenarioPasses({ cities, grid }),

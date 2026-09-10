@@ -21,6 +21,17 @@ import {
   type SaveSlot,
   writeSave,
 } from '../persistence';
+import {
+  buildSlotMeta,
+  latestSlotNumber,
+  listSlotMetas,
+  readSlotMeta,
+  readSlotState,
+  removeSlot,
+  writeSlot,
+  type MapCamera,
+  type SaveSlotMeta,
+} from '../saveSlots';
 import type { GridCoord } from '../battle/grid';
 import { advanceTenDay, settleMonth, settleTenDay } from '../turn';
 import { createGame } from '../scenario/jingxiang208';
@@ -45,6 +56,12 @@ interface GameContextValue {
   hasAutosave: boolean;
   hasManualSave: boolean;
   invalidSaves: Array<{ slot: SaveSlot; reason: string }>;
+  /** 32 个单机存档槽摘要（下标 0 = 1 号槽，空槽为 null） */
+  saveSlots: Array<SaveSlotMeta | null>;
+  /** 最近一次保存的槽位号 */
+  latestSaveSlot: number | null;
+  /** 读档后待主地图消费的镜头（与存档时完全一致） */
+  pendingCamera: MapCamera | null;
   online: OnlineClientState;
   auth: AuthClientState;
   startGame(forceId: ForceId, seed?: number, mapId?: string): void;
@@ -59,6 +76,12 @@ interface GameContextValue {
   startOnlineGame(): Promise<void>;
   disconnectOnline(): void;
   loadGame(slot: SaveSlot): LoadResult;
+  /** 将当前进度写入指定槽位（1~32），可覆盖 */
+  saveToSlot(slot: number, options?: { note?: string; camera?: MapCamera | null }): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** 读取指定槽位并整局替换，返回存档摘要以便恢复镜头 */
+  loadFromSlot(slot: number): Promise<{ ok: true; meta: SaveSlotMeta | null } | { ok: false; reason: string }>;
+  deleteSaveSlot(slot: number): void;
+  clearPendingCamera(): void;
   issueCommand(command: GameCommand): void;
   deployUnit(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }): void;
   deployUnitDelegate(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, target: { q: number; r: number }, facility?: FacilityType): void;
@@ -153,7 +176,20 @@ export function GameProvider({ children, initialState = null, storage: storagePr
   ));
   const [error, setError] = useState<string | null>(null);
   const [saveRevision, setSaveRevision] = useState(0);
+  const [pendingCamera, setPendingCamera] = useState<MapCamera | null>(null);
+  /** 本局累计游玩秒数 = playSecondsRef + 本次读档/开局至此刻的时长 */
+  const playSecondsRef = useRef(0);
+  const playStartedAtRef = useRef(Date.now());
   const { emit: emitAudioEvent } = useAudioEventAdapter();
+
+  const readPlaySeconds = useCallback(
+    () => playSecondsRef.current + Math.max(0, (Date.now() - playStartedAtRef.current) / 1000),
+    [],
+  );
+  const resetPlayClock = useCallback((seconds = 0) => {
+    playSecondsRef.current = Math.max(0, Math.floor(seconds));
+    playStartedAtRef.current = Date.now();
+  }, []);
 
   const replaceGameState = useCallback((nextState: GameState | null) => {
     if (!nextState) {
@@ -220,8 +256,9 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     replaceGameState(next);
     setSelectedCityId(Object.values(next.cities).find((city) => city.ownerId === forceId)?.id ?? null);
     setError(null);
+    resetPlayClock(0);
     persist('auto', next);
-  }, [disconnectOnline, persist, replaceGameState]);
+  }, [disconnectOnline, persist, replaceGameState, resetPlayClock]);
 
   const loadGame = useCallback((slot: SaveSlot): LoadResult => {
     const result = loadSave(storage, slot);
@@ -242,8 +279,65 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     return result;
   }, [replaceGameState, storage]);
 
-  const issueCommand = useCallback((command: GameCommand) => {
+  /** 把当前进度写入指定槽位（1~32），已有存档直接覆盖 */
+  const saveToSlot = useCallback(async (slot: number, options?: { note?: string; camera?: MapCamera | null }) => {
     if (isOnline()) {
+      const reason = '联网模式由服务器自动保存';
+      setError(reason);
+      setOnlineError(reason);
+      return { ok: false as const, reason };
+    }
+    if (!state) return { ok: false as const, reason: '尚未开始游戏' };
+    try {
+      const meta = buildSlotMeta(state, {
+        slot,
+        playSeconds: readPlaySeconds(),
+        note: options?.note,
+        camera: options?.camera ?? null,
+      });
+      await writeSlot(storage, slot, state, meta);
+      setSaveRevision((value) => value + 1);
+      setError(null);
+      return { ok: true as const };
+    } catch (saveError) {
+      const reason = saveError instanceof Error ? saveError.message : '存档失败';
+      setError(reason);
+      return { ok: false as const, reason };
+    }
+  }, [isOnline, readPlaySeconds, setOnlineError, state, storage]);
+
+  /** 读取指定槽位：整局状态与镜头一并还原 */
+  const loadFromSlot = useCallback(async (slot: number) => {
+    const meta = readSlotMeta(storage, slot);
+    const result = await readSlotState(storage, slot);
+    if (!result.ok) {
+      setError(result.reason);
+      return { ok: false as const, reason: result.reason };
+    }
+    let loaded = result.state;
+    // 旧存档兼容：遗留的AI舌战会话（招募者非玩家势力）立即自动演算结算，不弹给玩家
+    const staleSession = loaded.debateSession;
+    if (staleSession?.status === 'ongoing'
+      && loaded.officers[staleSession.recruiterId]?.forceId !== loaded.playerForceId) {
+      loaded = autoResolveDebate(loaded);
+    }
+    replaceGameState(loaded);
+    setSelectedCityId(Object.values(loaded.cities).find((city) => city.ownerId === loaded.playerForceId)?.id ?? null);
+    resetPlayClock(meta?.playSeconds ?? 0);
+    // 镜头交给主地图消费：GameShell 挂载后（含从首页读档）会把它写回 StrategicMap
+    setPendingCamera(meta?.camera ?? null);
+    setError(null);
+    return { ok: true as const, meta };
+  }, [replaceGameState, resetPlayClock, storage]);
+
+  const deleteSaveSlot = useCallback((slot: number) => {
+    removeSlot(storage, slot);
+    setSaveRevision((value) => value + 1);
+  }, [storage]);
+
+  const clearPendingCamera = useCallback(() => setPendingCamera(null), []);
+
+  const issueCommand = useCallback((command: GameCommand) => {    if (isOnline()) {
       sendOnlineIntent({ type: 'issueCommand', command });
       return;
     }
@@ -449,8 +543,10 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     replaceGameState(null);
     setSelectedCityId(null);
     setError(null);
+    setPendingCamera(null);
+    resetPlayClock(0);
     setSaveRevision((value) => value + 1);
-  }, [replaceGameState, storage]);
+  }, [replaceGameState, resetPlayClock, storage]);
 
   const clearSaveSlot = useCallback((slot: SaveSlot) => {
     clearSave(storage, slot);
@@ -470,11 +566,17 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     };
   }, [saveRevision, storage]);
 
+  const saveSlots = useMemo(() => listSlotMetas(storage), [saveRevision, storage]);
+  const latestSaveSlot = useMemo(() => latestSlotNumber(saveSlots), [saveSlots]);
+
   const value = useMemo<GameContextValue>(() => ({
     state,
     selectedCityId,
     error,
     ...availability,
+    saveSlots,
+    latestSaveSlot,
+    pendingCamera,
     online,
     auth,
     startGame,
@@ -489,6 +591,10 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     startOnlineGame,
     disconnectOnline,
     loadGame,
+    saveToSlot,
+    loadFromSlot,
+    deleteSaveSlot,
+    clearPendingCamera,
     issueCommand,
     deployUnit: deployBattleUnit,
     deployUnitDelegate: deployBattleUnitDelegate,
@@ -524,7 +630,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     clearSave: clearSaveSlot,
     selectCity: setSelectedCityId,
     clearError: () => setError(null),
-  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattlePass, attackBattlePlot, attackBattleUnit, jointAttackBattleUnit, auth, availability, buildBattleFacility, clearSaveSlot, createOnlineRoom, deployBattleUnit, deployBattleUnitAction, deployBattleUnitDelegate, deployTransport, disconnectOnline, dismantleBattleFacility, dismissDebateView, duelBattleUnit, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, playDebateRound, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, rethinkDebate, selectedCityId, selectOnlineForce, setBuildBattleDelegate, setMoveBattleDelegate, setRepairBattleDelegate, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
+  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattlePass, attackBattlePlot, attackBattleUnit, jointAttackBattleUnit, auth, availability, buildBattleFacility, clearPendingCamera, clearSaveSlot, createOnlineRoom, deleteSaveSlot, deployBattleUnit, deployBattleUnitAction, deployBattleUnitDelegate, deployTransport, disconnectOnline, dismantleBattleFacility, dismissDebateView, duelBattleUnit, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, latestSaveSlot, loadFromSlot, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, pendingCamera, playDebateRound, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, rethinkDebate, saveSlots, saveToSlot, selectedCityId, selectOnlineForce, setBuildBattleDelegate, setMoveBattleDelegate, setRepairBattleDelegate, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 }

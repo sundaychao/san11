@@ -44,22 +44,18 @@ describe('TopBar online turn prompts', () => {
       state: createGame('liu', 1),
       online: onlineState('host'),
       disconnectOnline: vi.fn(),
-      endMonth: vi.fn(),
-      endTenDay: vi.fn(),
-      manualSave: vi.fn(),
     };
   });
 
-  it('shows the active player prompt and keeps proceed enabled on the local online turn', () => {
+  it('shows the active player prompt on the local online turn', () => {
     render(<TopBar />);
 
     expect(screen.getByRole('status')).toHaveTextContent('请你操作行动');
     expect(screen.getByRole('status')).toHaveClass('is-active');
     expect(screen.getByTestId('online-active-player')).toHaveTextContent('Host');
-    expect(screen.getByTestId('end-ten-day-button')).toBeEnabled();
   });
 
-  it('shows the waiting prompt and disables proceed outside the local online turn', () => {
+  it('shows the waiting prompt outside the local online turn', () => {
     gameValue.current!.state.turnForceId = 'cao';
     gameValue.current!.online = onlineState('guest');
 
@@ -68,6 +64,14 @@ describe('TopBar online turn prompts', () => {
     expect(screen.getByRole('status')).toHaveTextContent('等其他玩家操作中');
     expect(screen.getByRole('status')).toHaveClass('is-waiting');
     expect(screen.getByTestId('online-active-player')).toHaveTextContent('Guest');
-    expect(screen.getByTestId('end-ten-day-button')).toBeDisabled();
+  });
+
+  it('不再渲染武将/存档/结束本旬/进行下月按钮（改由地图右键菜单承载）', () => {
+    render(<TopBar />);
+
+    for (const testId of ['open-officer-list-button', 'end-ten-day-button', 'end-month-button']) {
+      expect(screen.queryByTestId(testId)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole('button', { name: '存档' })).not.toBeInTheDocument();
   });
 });

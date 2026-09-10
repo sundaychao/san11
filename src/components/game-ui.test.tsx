@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../app/App';
 import { deployUnit } from '../game/battle/actions';
@@ -7,7 +7,8 @@ import { cityPlots, PLOT_BASE_VALUE } from '../game/innerAffairs';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
 import type { CityId } from '../game/types';
-import { MANUAL_SAVE_KEY, writeSave } from '../game/persistence';
+import { writeSave } from '../game/persistence';
+import { buildSlotMeta, slotMetaKey, slotStateKey, writeSlot } from '../game/saveSlots';
 import { settleTenDay } from '../game/turn';
 import { GameShell } from './GameShell';
 import { OfficerListDialog } from './OfficerListDialog';
@@ -81,7 +82,7 @@ describe('game interface shell', () => {
     await user.click(screen.getByRole('button', { name: '选择孙权' }));
 
     expect(screen.getByText('孙权', { selector: '.top-force-name' })).toBeVisible();
-    expect(screen.getByRole('button', { name: '进行到下月' })).toBeEnabled();
+    expect(screen.getByTestId('action-points')).toBeVisible();
     expect(screen.getByRole('region', { name: '军情与政务' })).toBeVisible();
   });
 
@@ -108,20 +109,27 @@ describe('game interface shell', () => {
     expect(window.localStorage.getItem('jingxiang-208-manual-v1')).not.toBeNull();
   });
 
-  it('deploys a visible battle unit and advances the ten-day turn from the shell', async () => {
+  it('renders a deployed battle unit and advances the ten-day turn from the map menu', async () => {
     const user = userEvent.setup();
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
     render(
-      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+      <GameProvider initialState={deployed} storage={window.localStorage}>
         <GameShell />
       </GameProvider>,
     );
 
-    await user.click(screen.getByTestId('quick-deploy-button'));
-
     expect(screen.getByTestId('battle-unit-marker')).toBeVisible();
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
 
-    await user.click(screen.getByTestId('end-ten-day-button'));
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
+    await user.click(screen.getByTestId('map-context-proceed-button'));
 
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
   });
@@ -929,7 +937,7 @@ describe('game interface shell', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('saves and loads from the map context menu', async () => {
+  it('saves into a chosen slot and loads it back from the map context menu', async () => {
     const user = userEvent.setup();
     render(
       <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
@@ -939,15 +947,178 @@ describe('game interface shell', () => {
 
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
     await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '储存' }));
-    expect(window.localStorage.getItem(MANUAL_SAVE_KEY)).not.toBeNull();
 
-    await user.click(screen.getByTestId('end-ten-day-button'));
+    const dialog = await screen.findByTestId('save-load-dialog');
+    // 默认停在第一页
+    expect(within(dialog).getByTestId('save-slot-1')).toBeVisible();
+    await user.click(within(dialog).getByTestId('save-page-3'));
+    await user.click(within(dialog).getByTestId('save-slot-19'));
+    await user.click(within(dialog).getByTestId('save-confirm-submit'));
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(slotStateKey(19))).not.toBeNull();
+      expect(window.localStorage.getItem(slotMetaKey(19))).not.toBeNull();
+    });
+
+    await user.click(screen.getByTestId('save-dialog-back'));
+    expect(screen.queryByTestId('save-load-dialog')).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
+    await user.click(screen.getByTestId('map-context-proceed-button'));
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
 
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
     await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '载入' }));
 
+    // 载入沿用同一套界面，并自动停在最近一次保存所在页
+    const loadDialog = await screen.findByTestId('save-load-dialog');
+    await user.click(await within(loadDialog).findByTestId('save-slot-19'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('save-load-dialog')).not.toBeInTheDocument();
+    });
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+  });
+
+  it('warns before overwriting an occupied save slot', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    state.month = 4;
+    await writeSlot(window.localStorage, 2, state, buildSlotMeta(state, { slot: 2, note: '旧档' }));
+
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+    await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '储存' }));
+
+    const dialog = await screen.findByTestId('save-load-dialog');
+    await user.click(within(dialog).getByTestId('save-slot-2'));
+    expect(within(dialog).getByTestId('save-confirm')).toHaveTextContent('覆盖');
+
+    await user.click(within(dialog).getByRole('button', { name: '取消' }));
+    expect(within(dialog).queryByTestId('save-confirm')).not.toBeInTheDocument();
+  });
+
+  it('restores the exact camera position that was saved with the slot', async () => {
+    const user = userEvent.setup();
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const readView = () => {
+      const content = screen.getByTestId('map-content');
+      return {
+        x: Number.parseFloat(content.getAttribute('data-view-x') ?? '0'),
+        y: Number.parseFloat(content.getAttribute('data-view-y') ?? '0'),
+        scale: Number.parseFloat(content.style.getPropertyValue('--map-scale')),
+      };
+    };
+
+    // 缩放到最低角度并向右上平移，得到与开局默认镜头不同的视角
+    const viewport = screen.getByTestId('map-viewport');
+    fireEvent.wheel(viewport, { deltaY: -240 });
+    fireEvent.pointerDown(viewport, { pointerId: 1, button: 0, buttons: 1, clientX: 640, clientY: 360 });
+    fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 480, clientY: 280 });
+    fireEvent.pointerUp(viewport, { pointerId: 1 });
+    const savedView = readView();
+    const defaultView = { x: 0, y: 0, scale: savedView.scale };
+    expect(savedView.x).not.toBeCloseTo(defaultView.x, 0);
+
+    fireEvent.contextMenu(viewport, { clientX: 320, clientY: 240 });
+    await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '储存' }));
+    const dialog = await screen.findByTestId('save-load-dialog');
+    await user.click(within(dialog).getByTestId('save-slot-7'));
+    await user.click(within(dialog).getByTestId('save-confirm-submit'));
+    await waitFor(() => expect(window.localStorage.getItem(slotStateKey(7))).not.toBeNull());
+    await user.click(screen.getByTestId('save-dialog-back'));
+
+    // 把镜头复位到地图中心，确保接下来的还原真的来自存档而不是残留状态
+    await user.click(screen.getByRole('button', { name: '复位地图' }));
+    expect(readView().x).toBeCloseTo(0, 0);
+
+    fireEvent.contextMenu(viewport, { clientX: 320, clientY: 240 });
+    await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '载入' }));
+    const loadDialog = await screen.findByTestId('save-load-dialog');
+    await user.click(await within(loadDialog).findByTestId('save-slot-7'));
+    await waitFor(() => expect(screen.queryByTestId('save-load-dialog')).not.toBeInTheDocument());
+
+    await waitFor(() => {
+      const restored = readView();
+      expect(restored.x).toBeCloseTo(savedView.x, 4);
+      expect(restored.y).toBeCloseTo(savedView.y, 4);
+      expect(restored.scale).toBeCloseTo(savedView.scale, 4);
+    });
+  });
+
+  it('shows the selected save detail with force info and a force map', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    await writeSlot(window.localStorage, 5, state, buildSlotMeta(state, { slot: 5, playSeconds: 125 }));
+
+    render(
+      <GameProvider initialState={createGame('cao', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+    await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '储存' }));
+
+    const dialog = await screen.findByTestId('save-load-dialog');
+    // 未选中槽位时右侧回落到「当前进度」
+    expect(within(dialog).getByTestId('save-detail-slot')).toHaveTextContent('--');
+
+    await user.click(within(dialog).getByTestId('save-slot-5'));
+    expect(within(dialog).getByTestId('save-detail-slot')).toHaveTextContent('05');
+    // 势力图打点覆盖全部城池，并按存档里的势力着色
+    expect(within(dialog).getByTestId('save-force-map').querySelectorAll('.save-force-dot').length)
+      .toBe(Object.keys(state.cities).length);
+    expect(within(dialog).getAllByText(state.forces[state.playerForceId].name).length).toBeGreaterThan(0);
+    expect(within(dialog).getByText('1人游玩')).toBeVisible();
+    expect(within(dialog).getByText('0:02:05')).toBeVisible();
+  });
+
+  it('右侧信息跟随鼠标悬停的存档，而不是固定显示最新存档', async () => {
+    const user = userEvent.setup();
+    const state5 = createGame('liu', 1);
+    const state9 = createGame('cao', 1);
+    await writeSlot(window.localStorage, 5, state5, buildSlotMeta(state5, { slot: 5, playSeconds: 125 }));
+    await writeSlot(window.localStorage, 9, state9, buildSlotMeta(state9, { slot: 9, playSeconds: 7200 }));
+
+    render(
+      <GameProvider initialState={createGame('sun', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+    await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '载入' }));
+
+    const dialog = await screen.findByTestId('save-load-dialog');
+    // 载入模式默认选中最近存档（9 号在第 2 页）
+    expect(within(dialog).getByTestId('save-detail-slot')).toHaveTextContent('09');
+    expect(within(dialog).getByText('2:00:00')).toBeVisible();
+
+    await user.click(within(dialog).getByTestId('save-page-1'));
+    const slot5 = within(dialog).getByTestId('save-slot-5');
+
+    // 鼠标扫过 5 号 → 右侧立即切换到 5 号存档，且出现悬停高亮
+    fireEvent.mouseOver(slot5, { relatedTarget: document.body });
+    expect(slot5.className).toContain('is-previewed');
+    expect(within(dialog).getByTestId('save-detail-slot')).toHaveTextContent('05');
+    expect(within(dialog).getByText('0:02:05')).toBeVisible();
+
+    // 移开后回落到「已选中」的 9 号，而不是停在 5 号
+    fireEvent.mouseOut(slot5, { relatedTarget: document.body });
+    expect(slot5.className).not.toContain('is-previewed');
+    expect(within(dialog).getByTestId('save-detail-slot')).toHaveTextContent('09');
+    expect(within(dialog).getByText('2:00:00')).toBeVisible();
   });
 });
 

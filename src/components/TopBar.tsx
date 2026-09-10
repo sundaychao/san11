@@ -1,40 +1,15 @@
-import { LogOut, Save, SkipForward, Users } from 'lucide-react';
-import { useState } from 'react';
-import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { validateCommand } from '../game/commands';
+import { LogOut } from 'lucide-react';
 import { useGame } from '../game/store/GameProvider';
-import type { GameCommand, GameState } from '../game/types';
-import { OfficerListDialog } from './OfficerListDialog';
-import { closePopupOnContextMenu } from './popupEvents';
 
 const MONTH_NAMES = ['四月', '五月', '六月', '七月', '八月', '九月', '十月', '冬月', '腊月', '正月', '二月', '三月'];
 const TEN_DAY_LABELS = { 1: '上旬', 2: '中旬', 3: '下旬' } as const;
 
-function hasLegalActions(state: GameState) {
-  const forceId = state.playerForceId;
-  const targetCity = Object.values(state.cities).find((city) => city.ownerId === forceId);
-  return Object.values(state.officers)
-    .filter((officer) => officer.forceId === forceId && officer.location.kind === 'city' && !officer.acted)
-    .some((officer) => {
-      const cityId = officer.location.kind === 'city' ? officer.location.cityId : officer.cityId;
-      const commands: GameCommand[] = [
-        { type: 'recruit', cityId, officerIds: [officer.id] },
-        { type: 'train', cityId, officerIds: [officer.id] },
-        { type: 'patrol', cityId, officerIds: [officer.id] },
-        { type: 'talent', cityId, officerId: officer.id },
-      ];
-      if (targetCity && targetCity.id !== cityId) {
-        commands.push({ type: 'transfer', cityId, targetCityId: targetCity.id, officerIds: [officer.id] });
-      }
-      return commands.some((command) => validateCommand(state, forceId, command).length === 0);
-    });
-}
-
+/**
+ * 顶部信息条：只保留日期/旬/势力/行动力/技巧P 等信息展示。
+ * 武将一览、存档、结束本旬、进行下月等操作改由地图右键菜单承载，这里不再重复放置按钮。
+ */
 export function TopBar() {
-  const { state, disconnectOnline, endMonth, endTenDay, manualSave, online } = useGame();
-  const audio = useAudioEventAdapter();
-  const [confirmEnd, setConfirmEnd] = useState(false);
-  const [showOfficers, setShowOfficers] = useState(false);
+  const { state, disconnectOnline, online } = useGame();
   if (!state) return null;
   const force = state.forces[state.playerForceId];
   const year = 13 + Math.floor((state.month + 2) / 12);
@@ -43,58 +18,30 @@ export function TopBar() {
   const activePlayer = isOnline ? online.players.find((player) => player.id === online.activePlayerId) : undefined;
   const isMyOnlineTurn = !isOnline || !online.activePlayerId || online.activePlayerId === online.playerId;
 
-  const requestEndMonth = () => {
-    if (hasLegalActions(state)) setConfirmEnd(true);
-    else endMonth();
-  };
-
-  const confirm = () => {
-    setConfirmEnd(false);
-    endMonth();
-  };
-
   return (
-    <>
-      <header className="top-bar">
-        <div className="imperial-seal" aria-hidden="true">汉</div>
-        <div className="date-block"><span>建安{year}年</span><strong>{monthName}</strong></div>
-        <div className="top-metric"><span>旬</span><strong data-testid="ten-day-label">{TEN_DAY_LABELS[state.tenDay]}</strong></div>
-        <div className="top-metric"><span>势力</span><strong className="top-force-name" style={{ color: force.color }}>{force.name}</strong></div>
-        <div className="top-metric"><span>行动力</span><strong data-testid="action-points">{state.actionPoints[state.playerForceId]}</strong></div>
-        <div className="top-metric"><span>技巧P</span><strong data-testid="tech-points">{(force.techP ?? 0).toLocaleString('en-US')}</strong></div>
-        {isOnline && (
-          <div className="top-metric online-top-status">
-            <span>{online.connected ? '联网' : '断线'}</span>
-            <strong>{online.roomId} · <span data-testid="online-active-player">{activePlayer?.name ?? '等待'}</span></strong>
-          </div>
-        )}
-        {isOnline && (
-          <div className={`turn-prompt ${isMyOnlineTurn ? 'is-active' : 'is-waiting'}`} role="status">
-            {isMyOnlineTurn ? '请你操作行动' : '等其他玩家操作中'}
-          </div>
-        )}
-        <div className="top-actions">
-          <button className="next-month" data-testid="open-officer-list-button" type="button" onClick={() => setShowOfficers(true)}><Users aria-hidden="true" />武将</button>
-          <button className="icon-button" type="button" onClick={manualSave} title="手动存档" aria-label="手动存档"><Save aria-hidden="true" /></button>
-          <button className="next-month" data-testid="end-ten-day-button" type="button" onClick={endTenDay} disabled={state.phase === 'finished' || (isOnline && !isMyOnlineTurn)}><SkipForward aria-hidden="true" />{isOnline ? '进行' : '结束本旬'}</button>
-          <button className="next-month" data-testid="end-month-button" type="button" onClick={requestEndMonth} aria-label="进行到下月" disabled={state.phase === 'finished'}><SkipForward aria-hidden="true" />进行·下月</button>
-          {isOnline && <button className="next-month" type="button" onClick={disconnectOnline}><LogOut aria-hidden="true" />退出房间</button>}
-        </div>
-      </header>
-      {showOfficers && <OfficerListDialog onClose={() => setShowOfficers(false)} />}
-      {confirmEnd && (
-        <div className="modal-backdrop" onContextMenu={(event) => closePopupOnContextMenu(event, () => setConfirmEnd(false), audio)}>
-          <section className="confirm-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="end-month-title">
-            <p>仍有武将和行动力可用</p>
-            <h2 id="end-month-title">结束本月</h2>
-            <p>未使用行动力的一半会结转到下一旬。确定交由其他势力行动并进入下月吗？</p>
-            <footer>
-              <button type="button" className="secondary-button" onClick={() => setConfirmEnd(false)}>取消</button>
-              <button type="button" className="primary-button" onClick={confirm}>确认进行</button>
-            </footer>
-          </section>
+    <header className="top-bar">
+      <div className="imperial-seal" aria-hidden="true">汉</div>
+      <div className="date-block"><span>建安{year}年</span><strong>{monthName}</strong></div>
+      <div className="top-metric"><span>旬</span><strong data-testid="ten-day-label">{TEN_DAY_LABELS[state.tenDay]}</strong></div>
+      <div className="top-metric"><span>势力</span><strong className="top-force-name" style={{ color: force.color }}>{force.name}</strong></div>
+      <div className="top-metric"><span>行动力</span><strong data-testid="action-points">{state.actionPoints[state.playerForceId]}</strong></div>
+      <div className="top-metric"><span>技巧P</span><strong data-testid="tech-points">{(force.techP ?? 0).toLocaleString('en-US')}</strong></div>
+      {isOnline && (
+        <div className="top-metric online-top-status">
+          <span>{online.connected ? '联网' : '断线'}</span>
+          <strong>{online.roomId} · <span data-testid="online-active-player">{activePlayer?.name ?? '等待'}</span></strong>
         </div>
       )}
-    </>
+      {isOnline && (
+        <div className={`turn-prompt ${isMyOnlineTurn ? 'is-active' : 'is-waiting'}`} role="status">
+          {isMyOnlineTurn ? '请你操作行动' : '等其他玩家操作中'}
+        </div>
+      )}
+      {isOnline && (
+        <div className="top-actions">
+          <button className="next-month" type="button" onClick={disconnectOnline}><LogOut aria-hidden="true" />退出房间</button>
+        </div>
+      )}
+    </header>
   );
 }
