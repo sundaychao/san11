@@ -152,6 +152,8 @@ export function resolvePoach(state: GameState, executor: Officer, target: Office
     target.forceId = executor.forceId;
     target.location = { kind: 'city', cityId: target.cityId };
     target.loyalty = 80;
+    // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
+    target.acted = true;
   } else {
     target.bannedUntilMonth = state.month + POACH_BAN_MONTHS;
   }

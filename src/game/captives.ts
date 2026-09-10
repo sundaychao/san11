@@ -5,7 +5,7 @@ import { compatDifference } from './diplomacy';
 import { treasureDefinition } from './treasures';
 import { applyDefeatInjuries, applyDeathConsequences, DEFEAT_DEATH_CHANCE, rollDeath } from './health';
 import { addTechP, TECHP_PER_CITY_CAPTURE } from './techs';
-import type { ArmyUnit, City, CityId, ForceId, GameState, Officer } from './types';
+import type { ArmyUnit, City, CityId, ForceId, GameState, Officer, Pass, PassId } from './types';
 
 /**
  * 俘虏系统（参考《三国志11》原版）：
@@ -208,6 +208,69 @@ export function captureCityOnCapture(state: GameState, attacker: ArmyUnit, cityI
 }
 
 /**
+ * 攻破关隘（耐久或守军清零）后的关隘易主与守将处置：
+ * - 破关方占领关隘（获得技巧P、守军并入、耐久重置为满值 20%）。
+ * - 关隘内敌方武将按捕获率独立判定被俘（进入破关方归所城）；其余退往离本关隘最近的本方城池。
+ */
+export function capturePassOnCapture(state: GameState, attacker: ArmyUnit, passId: PassId): void {
+  const pass = state.passes?.[passId];
+  if (!pass) return;
+  if (!attacker.forceId || pass.ownerId === attacker.forceId) return;
+  const oldOwner = pass.ownerId;
+  const attackForceId: ForceId = attacker.forceId;
+
+  pass.ownerId = attackForceId;
+  addTechP(state, attackForceId, TECHP_PER_CITY_CAPTURE);
+  pass.gold = Math.floor(pass.gold / 2);
+  pass.food = Math.floor(pass.food / 2);
+  pass.governorId = null;
+  const garrison = Math.min(1000, Math.floor(attacker.troops * 0.2));
+  const transferTroops = Math.min(garrison, Math.max(0, attacker.troops - 1));
+  pass.troops = transferTroops;
+  attacker.troops -= transferTroops;
+  pass.durability = Math.ceil(pass.maxDurability * 0.2);
+
+  if (!oldOwner) return;
+
+  // 退路：离本关隘最近的本方城池
+  const ownCities = Object.values(state.cities).filter((candidate) => candidate.ownerId === oldOwner);
+  const retreatTarget: CityId | undefined = ownCities.length > 0
+    ? ownCities.slice().sort((a, b) => passTravelDistance(pass, a) - passTravelDistance(pass, b))[0].id
+    : undefined;
+  const home = state.cities[attacker.homeCityId];
+
+  for (const officer of Object.values(state.officers)) {
+    if (officer.forceId !== oldOwner) continue;
+    if (officer.location.kind !== 'pass' || officer.location.passId !== passId) continue;
+
+    const chance = captureChance(state, officer, attacker, 0);
+    const roll = nextRandom(state.seed, state.rngCursor);
+    state.rngCursor = roll.cursor;
+    if (home && roll.value * 100 < chance) {
+      officer.location = { kind: 'captive', cityId: home.id, captorForceId: attackForceId, capturedTenDays: 0 };
+      officer.cityId = home.id;
+      continue;
+    }
+
+    if (retreatTarget) {
+      officer.location = { kind: 'city', cityId: retreatTarget };
+      officer.cityId = retreatTarget;
+      officer.acted = true;
+    } else {
+      // 无路可逃：转为关隘所属城在野武将
+      officer.location = { kind: 'unaffiliated', cityId: pass.homeCityId };
+      officer.cityId = pass.homeCityId;
+      officer.forceId = null;
+    }
+  }
+}
+
+/** 关隘到城池的网格曼哈顿距离（守将撤退目的地排序用） */
+function passTravelDistance(pass: Pass, city: City): number {
+  return Math.abs(pass.q - city.gridQ) + Math.abs(pass.r - city.gridR);
+}
+
+/**
  * 每月俘虏结算：忠诚下降 + 逃生判定 + 释放登用冷却。
  * 在每月初（settleMonth）调用；1/4/7/10月额外下降（同原版季度波动）。
  */
@@ -310,6 +373,8 @@ export function resolveRecruitCaptive(state: GameState, forceId: ForceId, execut
       ? clampLoyalty(recruitmentInitialLoyalty(target) + 20)
       : recruitmentInitialLoyalty(target);
     target.bannedUntilMonth = undefined;
+    // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
+    target.acted = true;
   } else {
     target.bannedUntilMonth = state.month + 6;
   }

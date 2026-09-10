@@ -2,6 +2,7 @@ import { unitIgnoresEnemyZocTerrain } from '../skills/rules/movement';
 import type { ArmyUnit, City, CityId, Facility, ForceId, GameState, GridCell } from '../types';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { isWaterTerrain, movementAllowanceForProfile, movementCostForCell, movementProfileForUnit, ZOC_FACILITY_TYPES, type MovementProfile } from './catalog';
+import { passBlockedKeys, passCenterBlockedFor } from '../passes';
 
 export function cellAt(state: GameState, coord: GridCoord): GridCell | undefined {
   return state.grid.find((cell) => cell.q === coord.q && cell.r === coord.r);
@@ -74,10 +75,13 @@ function movementCost(state: GameState, coord: GridCoord, profile: MovementProfi
   return movementCostForCell(cellAt(state, coord), profile, vehicle);
 }
 
-export function isLegalUnitCell(state: GameState, coord: GridCoord, ignoredUnitId?: string, profile: MovementProfile = 'sword') {
+export function isLegalUnitCell(state: GameState, coord: GridCoord, ignoredUnitId?: string, profile: MovementProfile = 'sword', forceId?: ForceId) {
   const key = gridKey(coord);
   return Number.isFinite(movementCost(state, coord, profile)) &&
     !allCityKeys(state).has(key) &&
+    !passBlockedKeys(state).has(key) &&
+    // 敌方关隘中心格不可通行（己方/无主关隘可通行）
+    !passCenterBlockedFor(state, coord, forceId) &&
     !occupiedUnitKeys(state, ignoredUnitId).has(key) &&
     !occupiedFacilityKeys(state).has(key);
 }
@@ -115,6 +119,7 @@ function reachableCostsFrom(
   const cityKeys = allCityKeys(state);
   const unitKeys = occupiedUnitKeys(state, options.ignoredUnitId);
   const facilityKeys = occupiedFacilityKeys(state);
+  const blockedPassKeys = passBlockedKeys(state);
   const zocKeys = options.movingForceId ? controlledZoneKeysForForce(state, options.movingForceId) : new Set<string>();
 
   while (frontier.length > 0) {
@@ -138,6 +143,9 @@ function reachableCostsFrom(
       if (!canTransitCity && cityKeys.has(key)) continue;
       if (unitKeys.has(key)) continue;
       if (facilityKeys.has(key)) continue;
+      if (blockedPassKeys.has(key)) continue;
+      // 敌方关隘中心格不可通行（己方/无主关隘可通行）
+      if (passCenterBlockedFor(state, neighbor, options.movingForceId)) continue;
       const neighborTerrain = cellAt(state, neighbor)?.terrain;
 
       // 横跨水域边界：陆地<->水域（河/海/川；浅滩/渡所是地面不算水面）。

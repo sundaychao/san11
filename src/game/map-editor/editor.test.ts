@@ -3,7 +3,9 @@ import { createBattleGrid, GRID_HEIGHT, GRID_WIDTH } from '../battle/scenario';
 import type { GridCell } from '../types';
 import {
   clearEditor,
+  createBlankMap,
   createEditorState,
+  eraseStronghold,
   exportEditorJson,
   exportEditorSvg,
   exportTerrainMaskSvgs,
@@ -11,6 +13,7 @@ import {
   importEditorJson,
   paintTerrain,
   placeCity,
+  placePass,
   redoEditor,
   undoEditor,
 } from './editor';
@@ -47,7 +50,7 @@ describe('map editor core', () => {
     const json = JSON.parse(exportEditorJson(edited));
     const svg = exportEditorSvg(edited);
 
-    expect(json.cities).toEqual([{ id: 'city-1', label: '新城', q: 6, r: 6 }]);
+    expect(json.cities).toEqual([{ id: 'city-1', label: '新城', q: 6, r: 6, type: 'city', forceId: null }]);
     expect(svg).toContain('data-city-id="city-1"');
     expect(svg.match(/data-city-cell="city-1/g)).toHaveLength(7);
   });
@@ -56,7 +59,7 @@ describe('map editor core', () => {
     const edited = clearEditor(createEditorState(createBattleGrid()), 'plain');
     const json = JSON.parse(exportEditorJson(edited));
 
-    expect(json.schemaVersion).toBe(1);
+    expect(json.schemaVersion).toBe(2);
     expect(json.width).toBe(GRID_WIDTH);
     expect(json.height).toBe(GRID_HEIGHT);
     expect(json.grid).toHaveLength(GRID_WIDTH * GRID_HEIGHT);
@@ -76,7 +79,7 @@ describe('map editor core', () => {
 
     expect(imported.backgroundImage).toBe('exports/generated-map.png');
     expect(imported.grid.find((cell) => cell.q === 0 && cell.r === 0)?.terrain).toBe('forest');
-    expect(imported.cities).toEqual([{ id: 'jiangling', label: '江陵', q: 10, r: 12 }]);
+    expect(imported.cities).toEqual([{ id: 'jiangling', label: '江陵', q: 10, r: 12, type: 'city', forceId: null }]);
     expect(imported.history).toHaveLength(1);
   });
 
@@ -158,5 +161,54 @@ describe('map editor core', () => {
     expect(masks.city.content).toContain('data-mask-layer="city"');
     expect(masks.city.content).toContain('data-control-city="jiangling:34,22"');
     expect(masks.water.content).not.toContain('<text');
+  });
+
+  it('creates a blank 200x200 all-plain map with no markers', () => {
+    const blank = createBlankMap();
+
+    expect(blank.width).toBe(200);
+    expect(blank.height).toBe(200);
+    expect(blank.grid).toHaveLength(200 * 200);
+    expect(blank.grid.every((cell) => cell.terrain === 'plain')).toBe(true);
+    expect(blank.cities).toEqual([]);
+  });
+
+  it('places and serializes a pass marker with force assignment', () => {
+    const state = createEditorState(createBattleGrid());
+    const edited = placePass(state, { id: 'pass-1', label: '关隘', q: 5, r: 5, type: 'pass', forceId: 'cao' });
+
+    const json = JSON.parse(exportEditorJson(edited));
+    expect(json.cities).toEqual([{ id: 'pass-1', label: '关隘', q: 5, r: 5, type: 'pass', forceId: 'cao' }]);
+  });
+
+  it('erases a stronghold and resets its footprint to plain', () => {
+    const source = createEditorState(createBattleGrid());
+    const painted = paintTerrain(source, { q: 5, r: 5 }, 'mountain');
+    const placed = placeCity(painted, { id: 'city-x', label: 'X', q: 5, r: 5 });
+
+    const erased = eraseStronghold(placed, 'city-x');
+
+    expect(erased.cities).toEqual([]);
+    expect(erased.grid.find((cell) => cell.q === 5 && cell.r === 5)?.terrain).toBe('plain');
+  });
+
+  it('upgrades a v1 payload with an embedded passes array', () => {
+    const source = createEditorState(createBattleGrid());
+    const v1 = {
+      schemaVersion: 1,
+      width: GRID_WIDTH,
+      height: GRID_HEIGHT,
+      backgroundImage: '',
+      grid: source.grid.map((cell) => ({ ...cell })),
+      cities: [{ id: 'c', label: '城', q: 2, r: 2 }],
+      passes: [{ id: 'p', label: '关', q: 9, r: 9 }],
+    };
+
+    const imported = importEditorJson(source, JSON.stringify(v1));
+
+    expect(imported.cities).toEqual([
+      { id: 'c', label: '城', q: 2, r: 2, type: 'city', forceId: null },
+      { id: 'p', label: '关', q: 9, r: 9, type: 'pass', forceId: null },
+    ]);
   });
 });

@@ -1,6 +1,6 @@
 import type { DeployInput, StrategyId, StrategySelection, TransportInput, TacticId } from '../battle/actions';
 import type { GridCoord } from '../battle/grid';
-import type { CityId, FacilityType, GameCommand } from '../types';
+import type { CityId, FacilityType, GameCommand, PassId } from '../types';
 
 export type DeployFollowupAction =
   | { type: 'wait' }
@@ -9,6 +9,7 @@ export type DeployFollowupAction =
   | { type: 'attackFacility'; facilityId: string }
   | { type: 'attackPlot'; cityId: CityId; plotIndex: number }
   | { type: 'attackCity'; cityId: CityId }
+  | { type: 'attackPass'; passId: PassId }
   | { type: 'useUnitTactic'; targetId: string; tacticId: TacticId }
   | { type: 'useUnitStrategy'; strategyId: StrategyId; selection: StrategySelection }
   | { type: 'buildFacility'; facilityType: FacilityType; target: GridCoord }
@@ -22,6 +23,7 @@ export type GameIntent =
   | { type: 'moveUnit'; unitId: string; destination: GridCoord }
   | { type: 'setMoveDelegate'; unitId: string; target: GridCoord }
   | { type: 'setBuildDelegate'; unitId: string; target: GridCoord; facility: FacilityType }
+  | { type: 'setRepairDelegate'; unitId: string; facilityId: string }
   | { type: 'deployUnitDelegate'; input: DeployInput; target: GridCoord; facility?: FacilityType }
   | { type: 'waitUnit'; unitId: string }
   | { type: 'attackUnit'; attackerId: string; targetId: string; destination?: GridCoord }
@@ -35,6 +37,7 @@ export type GameIntent =
   | { type: 'repairFacility'; unitId: string; facilityId: string; destination?: GridCoord }
   | { type: 'dismantleFacility'; facilityId: string }
   | { type: 'attackCity'; attackerId: string; cityId: CityId; destination?: GridCoord }
+  | { type: 'attackPass'; attackerId: string; passId: PassId; destination?: GridCoord }
   | { type: 'duelUnit'; unitId: string; targetUnitId: string; stance: 'attack' | 'defense' | 'spirit' | 'finisher'; destination?: GridCoord }
   | { type: 'debateRound'; cardUid: string }
   | { type: 'debateRethink' }

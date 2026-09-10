@@ -13,7 +13,9 @@ import { isLegalUnitCell, ownCityAt, reachableCosts, unoccupiedCityAt } from './
 import { assertUnitTurn } from './shared';
 import { appointSuccessorGovernor, cityTroopCap } from '../innerAffairs';
 import { TECHP_PER_CITY_CAPTURE, addTechP } from '../techs';
-import { clamp } from '../commands';
+
+/** 本地 clamp，避免引入与 commands.ts 的循环依赖（commands → skills → battle/actions → movement） */
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 export function moveUnit(state: GameState, forceId: ForceId, unitId: string, destination: GridCoord): GameState {
   const unit = assertUnitTurn(state, forceId, unitId);
@@ -21,7 +23,7 @@ export function moveUnit(state: GameState, forceId: ForceId, unitId: string, des
   // 目标格为本方城池格 → 回城；为无守军无主城格 → 进驻占领（isLegalUnitCell 会拒绝一切城池格，此处放行）
   const returnCity = ownCityAt(state, forceId, destination);
   const occupyCity = returnCity ? undefined : unoccupiedCityAt(state, destination);
-  if (!returnCity && !occupyCity && !isLegalUnitCell(state, destination, unitId)) throw new Error('目标格被占用或不可通行');
+  if (!returnCity && !occupyCity && !isLegalUnitCell(state, destination, unitId, undefined, forceId)) throw new Error('目标格被占用或不可通行');
   const cost = reachableCosts(state, unit).get(gridKey(destination));
   if (cost === undefined) throw new Error('目标超过移动力');
 

@@ -6,6 +6,7 @@ type OverviewTab = 'city' | 'officer';
 
 function officerLocationText(officer: Officer, state: GameState) {
   if (officer.location.kind === 'city') return state.cities[officer.location.cityId].name;
+  if (officer.location.kind === 'pass') return state.passes?.[officer.location.passId]?.name ?? '关隘';
   if (officer.location.kind === 'unit') return '部队';
   if (officer.location.kind === 'transfer') return '在途';
   return state.cities[officer.location.cityId].name;

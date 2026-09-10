@@ -2,7 +2,7 @@ import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentCost, armamentProductionIntelligence, armamentProductionTenDays, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
-import { COMMAND_AP, COMMAND_LABELS, TRADE_MAX_GRAIN, grainPriceOf, patrolGoldCost, quoteTrade, researchTechPCost, tradeEffectMultiplier, tradeEffectPercent, transferDuration, validateCommand } from '../game/commands';
+import { COMMAND_AP, COMMAND_LABELS, TRADE_MAX_GRAIN, grainPriceOf, patrolGoldCost, passAvailableOfficers, quoteTrade, researchTechPCost, strongholdTransferDuration, tradeEffectMultiplier, tradeEffectPercent, validateCommand } from '../game/commands';
 import { MAX_TECH_LEVEL, TECH_BRANCHES, TECH_COSTS, recruitMultiplier, researchTenDays, techLevelOf } from '../game/techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition, treasureEffectText } from '../game/treasures';
 import { REWARD_GOLD_COST, officerLoyalty, rewardLoyaltyGain } from '../game/loyalty';
@@ -16,13 +16,15 @@ import { MARRY_TECHP_COST, relationCandidates } from '../game/relationship';
 import { POACH_GOLD_COST, RUMOR_GOLD_COST, canPoach, rumorTargets } from '../game/rumor';
 import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from '../game/skills/rules/city';
 import { useGame } from '../game/store/GameProvider';
-import type { ArmamentType, CityId, ForceId, GameCommand, Officer, TechBranchId } from '../game/types';
+import type { ArmamentType, CityId, ForceId, GameCommand, Officer, PassId, TechBranchId } from '../game/types';
 import { OfficerPickerDialog } from './OfficerPickerDialog';
 import { closePopupOnContextMenu } from './popupEvents';
 
 interface CommandDialogProps {
   type: GameCommand['type'];
   cityId: CityId;
+  /** 可选：关隘据点（存在时指令以关隘为资源与武将宿主，视为无都市选项的城池） */
+  passId?: PassId;
   onClose(): void;
   /** 可选：覆盖默认的提交行为（用于需要后续地图点击的指令，如建设） */
   onSubmitOverride?(data: { command: GameCommand; close: () => void }): void;
@@ -39,7 +41,7 @@ const EXECUTOR_STAT_LABELS: Record<ExecutorStatKey, string> = {
   charisma: '魅力',
 };
 
-export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: CommandDialogProps) {
+export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride }: CommandDialogProps) {
   const { state, issueCommand } = useGame();
   const audio = useAudioEventAdapter();
   const [officerId, setOfficerId] = useState('');
@@ -115,9 +117,20 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
   }, []);
 
   if (!state) return null;
+  const pass = passId ? state.passes?.[passId] : undefined;
   const city = state.cities[cityId];
+  const garrison = pass ?? city;
+  const garrisonName = pass ? pass.name : city.name;
+  const garrisonGold = pass ? pass.gold : city.gold;
+  const garrisonFood = pass ? pass.food : city.food;
+  const garrisonTroops = pass ? pass.troops : city.troops;
+  const garrisonTraining = pass ? pass.training : city.training;
+  const garrisonOrder = pass ? pass.order : city.order;
   const officers = Object.values(state.officers).filter((officer) =>
-    officer.forceId === state.playerForceId && officer.location.kind === 'city' && officer.location.cityId === cityId,
+    officer.forceId === state.playerForceId &&
+    (pass
+      ? officer.location.kind === 'pass' && officer.location.passId === passId
+      : officer.location.kind === 'city' && officer.location.cityId === cityId),
   );
   const availableOfficers = officers.filter((officer) => !officer.acted);
   const tradeOfficers = [...availableOfficers].sort((a, b) => b.stats.politics - a.stats.politics);
@@ -166,28 +179,28 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
     if (!isMultiOfficer) return [];
     switch (type) {
       case 'buildFacilityPlot':
-        return defaultOfficersFor(city, availableOfficers, { type: 'buildFacilityPlot' });
+        return defaultOfficersFor(garrison, availableOfficers, { type: 'buildFacilityPlot' });
       case 'produceArmament': {
         const speedMul = type === 'produceArmament' && armamentType
           ? armamentProductionSpeedMultiplier(state, {
-            type: 'produceArmament', cityId, officerIds: [], armamentType,
+            type: 'produceArmament', cityId, passId, officerIds: [], armamentType,
           })
           : 1;
-        return defaultOfficersFor(city, availableOfficers, { type: 'produceArmament', armamentType: armamentType!, speedMultiplier: speedMul });
+        return defaultOfficersFor(garrison, availableOfficers, { type: 'produceArmament', armamentType: armamentType!, speedMultiplier: speedMul });
       }
       case 'recruit':
-        return defaultOfficersFor(city, availableOfficers, { type: 'recruit' });
+        return defaultOfficersFor(garrison, availableOfficers, { type: 'recruit' });
       case 'train':
-        return defaultOfficersFor(city, availableOfficers, { type: 'train' });
+        return defaultOfficersFor(garrison, availableOfficers, { type: 'train' });
       case 'patrol':
-        return defaultOfficersFor(city, availableOfficers, { type: 'patrol' });
+        return defaultOfficersFor(garrison, availableOfficers, { type: 'patrol' });
       case 'research':
-        return defaultOfficersFor(city, availableOfficers, { type: 'research', branch: researchBranch });
+        return defaultOfficersFor(garrison, availableOfficers, { type: 'research', branch: researchBranch });
       default:
         return executorCandidates[0] ? [executorCandidates[0].id] : [];
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMultiOfficer, type, city.id, availableOfficers.length, armamentType, researchBranch, state.actionPoints[state.playerForceId] // actionPoints 作校验标识，避免无限重算
+  }, [isMultiOfficer, type, garrison.id, availableOfficers.length, armamentType, researchBranch, state.actionPoints[state.playerForceId] // actionPoints 作校验标识，避免无限重算
   ]);
   const validExecutorIds = executorIds.filter((id) => executorCandidates.some((officer) => officer.id === id));
   const activeExecutorIds = validExecutorIds.length > 0
@@ -199,17 +212,29 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
   const activeOfficerId = officerId
     || (type === 'trade' ? tradeOfficers[0]?.id : availableOfficers[0]?.id)
     || '';
+  // 委任军团直辖城市（军团只辖城池）
   const targetCities = Object.values(state.cities).filter((item) => item.ownerId === state.playerForceId && item.id !== cityId);
-  const activeTargetId = targetCityId || targetCities[0]?.id || '';
-  const activeTargetCity = activeTargetId ? state.cities[activeTargetId] : undefined;
-  const activeTransferDuration = activeTargetCity ? transferDuration(city, activeTargetCity) : null;
-  // 召唤：本方势力其他城池的待命武将（排除已行动/本城武将；太守也可召唤）
-  const summonOfficers = targetCities.length > 0
-    ? Object.values(state.officers).filter((officer): officer is Officer & { location: { kind: 'city'; cityId: CityId } } =>
-        officer.forceId === state.playerForceId && !officer.deathMonth && officer.location.kind === 'city',
-      ).filter((officer) =>
-        targetCities.some((c) => c.id === officer.location.cityId)
-        && !officer.acted,
+  // 移动/召唤目标：己方城池 + 己方关隘（城池模式排除自身城池；关隘模式排除自身关隘，可移回所属城池）
+  const transferTargets = [
+    ...Object.values(state.cities)
+      .filter((item) => item.ownerId === state.playerForceId && (pass || item.id !== cityId))
+      .map((item) => ({ id: item.id as string, name: item.name })),
+    ...Object.values(state.passes ?? {})
+      .filter((item) => item.ownerId === state.playerForceId && item.id !== passId)
+      .map((item) => ({ id: item.id as string, name: item.name })),
+  ];
+  const activeTargetId = targetCityId || transferTargets[0]?.id || '';
+  const activeTarget = activeTargetId
+    ? state.passes?.[activeTargetId as PassId] ?? state.cities[activeTargetId as CityId]
+    : undefined;
+  const activeTransferDuration = activeTarget ? strongholdTransferDuration(garrison, activeTarget) : null;
+  // 召唤：目标据点（城池/关隘）内的待命武将（排除已行动/死亡武将；太守也可召唤）
+  const summonOfficers = transferTargets.length > 0
+    ? Object.values(state.officers).filter((officer) =>
+        officer.forceId === state.playerForceId && !officer.deathMonth && !officer.acted
+        && transferTargets.some((target) =>
+          (officer.location.kind === 'city' && officer.location.cityId === target.id)
+          || (officer.location.kind === 'pass' && officer.location.passId === target.id)),
       )
     : [];
   const activeOfficer = activeOfficerId ? state.officers[activeOfficerId] : undefined;
@@ -230,8 +255,8 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
   const activeDiplomacyForceId = diplomacyForceId || diplomacyForces[0]?.id || '';
   const activeDiplomacyForce = activeDiplomacyForceId ? state.forces[activeDiplomacyForceId] : undefined;
   const diplomacyForced = activeDiplomacyForceId ? forceDiplomacy(state, state.playerForceId, activeDiplomacyForceId) : 0;
-  const diplomacyGoldClamped = Math.min(Math.max(0, diplomacyGold), Math.min(city.gold, DIPLOMACY_GOLD_MAX));
-  // 处置俘虏：关押在本城的俘虏
+  const diplomacyGoldClamped = Math.min(Math.max(0, diplomacyGold), Math.min(garrisonGold, DIPLOMACY_GOLD_MAX));
+  // 处置俘虏：关押在本据点的俘虏
   const captiveOfficers = captivesOf(state, state.playerForceId);
   const activeCaptiveId = captiveOfficerId || captiveOfficers[0]?.id || '';
   const activeCaptive = activeCaptiveId ? state.officers[activeCaptiveId] : undefined;
@@ -243,7 +268,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
   const marryCandidates = availableOfficers.filter((o) => o.id !== state.forces[state.playerForceId]?.leaderId && !o.deathMonth);
   const activeMarryOfficerA = marryOfficerA || marryCandidates[0]?.id || '';
   const marrySelf = activeMarryOfficerA ? state.officers[activeMarryOfficerA] : undefined;
-  const marryPartners = marrySelf ? relationCandidates(state, state.playerForceId, cityId, marrySelf, marryRelation) : [];
+  const marryPartners = marrySelf ? relationCandidates(state, state.playerForceId, pass ? { kind: 'pass', passId: passId! } : { kind: 'city', cityId }, marrySelf, marryRelation) : [];
   const activeMarryOfficerB = marryOfficerB || marryPartners[0]?.id || '';
   // 义兄弟：同城待命武将（非君主、非故）供勾选，选 2~3 名同性
   const swornCandidates = availableOfficers.filter((o) => o.id !== state.forces[state.playerForceId]?.leaderId && !o.deathMonth);
@@ -257,21 +282,21 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
   const activeLegionCityId = legionCityId || legionCities[0]?.id || '';
   const activeLegion = activeLegionCityId ? legionContaining(state, state.playerForceId, activeLegionCityId) : undefined;
   const legionCityConnected = Boolean(activeLegion);
-  const cityArmaments = armamentsOf(city.armaments);
-  const grainPrice = grainPriceOf(city);
+  const cityArmaments = armamentsOf(garrison.armaments);
+  const grainPrice = grainPriceOf(garrison);
   const tradeEffect = activeOfficer ? tradeEffectMultiplier(activeOfficer.stats.politics) : 1;
   const tradePercent = activeOfficer ? tradeEffectPercent(activeOfficer.stats.politics) : 100;
   // 滑块左卖右买、居中为0：右侧可买上限受资金限制，左侧可卖上限受兵粮限制，均不超过单次30000
   const tradeBuyMax = activeOfficer
-    ? Math.min(TRADE_MAX_GRAIN, Math.floor(city.gold * grainPrice * tradeEffect))
+    ? Math.min(TRADE_MAX_GRAIN, Math.floor(garrisonGold * grainPrice * tradeEffect))
     : 0;
-  const tradeSellMax = Math.min(TRADE_MAX_GRAIN, city.food);
+  const tradeSellMax = Math.min(TRADE_MAX_GRAIN, garrisonFood);
   const tradeValueClamped = Math.max(-tradeSellMax, Math.min(tradeValue, tradeBuyMax));
   const tradeIdle = tradeValueClamped === 0;
   const tradeMode: 'buy' | 'sell' = tradeValueClamped >= 0 ? 'buy' : 'sell';
   const tradeAmount = Math.abs(tradeValueClamped);
   const tradeQuote = activeOfficer && !tradeIdle
-    ? quoteTrade(city, activeOfficer.stats.politics, tradeMode, tradeAmount)
+    ? quoteTrade(garrison, activeOfficer.stats.politics, tradeMode, tradeAmount)
     : { goldDelta: 0, foodDelta: 0 };
 
   // —— 能力研究 ——
@@ -287,43 +312,53 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
 
   const command = useMemo<GameCommand>(() => {
     if (type === 'transfer') {
-      return { type, cityId, targetCityId: activeTargetId as CityId, officerIds };
+      // 目标为关隘时：targetPassId 携带真实目标，targetCityId 仅作类型占位（校验层优先读取 targetPassId）
+      const isTargetPass = Boolean(state.passes?.[activeTargetId as PassId]);
+      return {
+        type,
+        cityId,
+        passId,
+        targetCityId: (isTargetPass ? cityId : activeTargetId) as CityId,
+        targetPassId: isTargetPass ? (activeTargetId as PassId) : undefined,
+        officerIds,
+      };
     }
     if (type === 'summon') {
-      return { type, cityId, officerIds };
+      return { type, cityId, passId, officerIds };
     }
     if (type === 'sworn') {
-      return { type, cityId, officerIds: swornOfficerIds };
+      return { type, cityId, passId, officerIds: swornOfficerIds };
     }
     if (type === 'abilityResearch') {
       if (abilityNode && abilityStatus === 'done') {
         // 已研究完成：仅允许培育（次数用尽时返回 cultivate 命令，由验证拦截报错）
-        return { type: 'cultivate', cityId, officerId: cultivateOfficerChosen, nodeId: abilityNode.id };
+        return { type: 'cultivate', cityId, passId, officerId: cultivateOfficerChosen, nodeId: abilityNode.id };
       }
-      return { type: 'abilityResearch', cityId, nodeId: abilityNodeId };
+      return { type: 'abilityResearch', cityId, passId, nodeId: abilityNodeId };
     }
     if (type === 'reward') {
-      return { type, cityId, officerIds: rewardOfficerIds };
+      return { type, cityId, passId, officerIds: rewardOfficerIds };
     }
     if (type === 'explore') {
-      return { type, cityId, officerIds: exploreOfficerIds };
+      return { type, cityId, passId, officerIds: exploreOfficerIds };
     }
     if (type === 'grantTreasure') {
-      return { type, cityId, treasureId: activeTreasureId, officerId: grantOfficerId };
+      return { type, cityId, passId, treasureId: activeTreasureId, officerId: grantOfficerId };
     }
     if (type === 'appointPosition') {
-      return { type, cityId, officerId: activePositionOfficer?.id ?? '', positionId: activePositionId || null };
+      return { type, cityId, passId, officerId: activePositionOfficer?.id ?? '', positionId: activePositionId || null };
     }
     if (type === 'rumor') {
-      return { type, cityId, officerId: activeOfficerId, targetCityId: activeRumorTargetId as CityId };
+      return { type, cityId, passId, officerId: activeOfficerId, targetCityId: activeRumorTargetId as CityId };
     }
     if (type === 'poach') {
-      return { type, cityId, officerId: activeOfficerId, targetCityId: activePoachTargetCityId as CityId, targetOfficerId: activePoachOfficerId };
+      return { type, cityId, passId, officerId: activeOfficerId, targetCityId: activePoachTargetCityId as CityId, targetOfficerId: activePoachOfficerId };
     }
     if (type === 'diplomacy') {
       return {
         type,
         cityId,
+        passId,
         officerId: activeOfficerId,
         targetForceId: activeDiplomacyForceId as ForceId,
         action: diplomacyAction,
@@ -332,15 +367,16 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
       };
     }
     if (type === 'captiveDispose') {
-      return { type, cityId, targetOfficerId: activeCaptiveId, action: captiveAction };
+      return { type, cityId, passId, targetOfficerId: activeCaptiveId, action: captiveAction };
     }
     if (type === 'marry') {
-      return { type, cityId, officerIdA: activeMarryOfficerA, officerIdB: activeMarryOfficerB, relation: marryRelation };
+      return { type, cityId, passId, officerIdA: activeMarryOfficerA, officerIdB: activeMarryOfficerB, relation: marryRelation };
     }
     if (type === 'legion') {
       return {
         type,
         cityId,
+        passId,
         commanderId: legionCommanderId === 'none' ? null : legionCommanderId || null,
         targetCityId: (legionCityId || null) as CityId | null,
         policy: legionPolicy,
@@ -348,29 +384,29 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
     }
     if (type === 'buildFacilityPlot') {
       // 地格在弹窗确认后由地图点击决定，此处占位 0，不参与地格校验
-      return { type, cityId, officerIds: activeExecutorIds, plotIndex: 0, facility: plotFacility };
+      return { type, cityId, passId, officerIds: activeExecutorIds, plotIndex: 0, facility: plotFacility };
     }
     if (type === 'appointStrategist') {
       // '' = 未改动（沿用现任军师），'__clear__' = 解除任命
       const effective = strategistOfficerId === '__clear__'
         ? null
         : strategistOfficerId || state.forces[state.playerForceId]?.strategistId || null;
-      return { type, cityId, officerId: effective };
+      return { type, cityId, passId, officerId: effective };
     }
-    if (type === 'produceArmament') return { type, cityId, officerIds: activeExecutorIds, armamentType };
-    if (type === 'research') return { type, cityId, officerIds: activeExecutorIds, branch: researchBranch };
-    if (isMultiOfficer) return { type, cityId, officerIds: activeExecutorIds } as GameCommand;
-    const base = { cityId, officerId: activeOfficerId };
+    if (type === 'produceArmament') return { type, cityId, passId, officerIds: activeExecutorIds, armamentType };
+    if (type === 'research') return { type, cityId, passId, officerIds: activeExecutorIds, branch: researchBranch };
+    if (isMultiOfficer) return { type, cityId, passId, officerIds: activeExecutorIds } as GameCommand;
+    const base = { cityId, passId, officerId: activeOfficerId };
     if (type === 'trade') return { ...base, type, mode: tradeValue >= 0 ? 'buy' : 'sell', amount: Math.min(Math.abs(tradeValue), TRADE_MAX_GRAIN) };
     return { ...base, type } as GameCommand;
-  }, [abilityNode, abilityNodeId, activeCaptiveId, activeDiplomacyForceId, activeExecutorIds, activeMarryOfficerA, activeMarryOfficerB, activeOfficerId, activePoachOfficerId, activePoachTargetCityId, activePositionId, activePositionOfficer, activeRumorTargetId, activeTargetId, activeTreasureId, armamentType, captiveAction, cityId, cultivateMode, cultivateOfficerChosen, diplomacyAction, diplomacyGold, diplomacyMonths, exploreOfficerIds, grantOfficerId, isMultiOfficer, legionCityId, legionCommanderId, legionPolicy, marryRelation, officerIds, plotFacility, poachTargetCityId, poachTargetOfficerId, researchBranch, strategistOfficerId, swornOfficerIds, tradeValue, type, rewardOfficerIds]);
+  }, [abilityNode, abilityNodeId, activeCaptiveId, activeDiplomacyForceId, activeExecutorIds, activeMarryOfficerA, activeMarryOfficerB, activeOfficerId, activePoachOfficerId, activePoachTargetCityId, activePositionId, activePositionOfficer, activeRumorTargetId, activeTargetId, activeTreasureId, armamentType, captiveAction, cityId, cultivateMode, cultivateOfficerChosen, diplomacyAction, diplomacyGold, diplomacyMonths, exploreOfficerIds, grantOfficerId, isMultiOfficer, legionCityId, legionCommanderId, legionPolicy, marryRelation, officerIds, passId, plotFacility, poachTargetCityId, poachTargetOfficerId, researchBranch, strategistOfficerId, swornOfficerIds, tradeValue, type, rewardOfficerIds]);
 
   const errors = validateCommand(state, state.playerForceId, command);
   const label = COMMAND_LABELS[type];
   // 开发：地格在地图上选择，弹窗阶段跳过地格类校验（资金/封锁等仍校验）；
-  // 若本城已无空闲建设用地，直接提示无法开发
+  // 若本据点已无空闲建设用地，直接提示无法开发
   const noEmptyPlot = type === 'buildFacilityPlot'
-    && !(city.plots ?? []).some((plot) => plot && plot.type === 'empty' && !plot.constructing);
+    && (Boolean(pass) || !(city.plots ?? []).some((plot) => plot && plot.type === 'empty' && !plot.constructing));
   const actionableErrors = type === 'buildFacilityPlot'
     ? [...errors.filter((error) => !error.includes('地格')), ...(noEmptyPlot ? ['本城没有空闲的建设用地，无法开发'] : [])]
     : errors;
@@ -383,28 +419,28 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
   const hasExecutors = activeExecutors.length > 0;
   // 征兵：1000 + 魅力总和 × (治安+20) × 5 ÷ 100，再乘特技/科技/兵舍修正
   const recruitEstimate = type === 'recruit' && hasExecutors
-    ? Math.round(recruitBaseYield(activeExecutors, city)
+    ? Math.round(recruitBaseYield(activeExecutors, garrison)
       * commandYieldMultiplier(state, command)
       * recruitMultiplier(state, state.playerForceId)
-      * barracksYieldMultiplier(city))
+      * barracksYieldMultiplier(garrison))
     : 0;
   // 兵装生产数量：1000 + 最高智力×10 + 其余2人智力各×5，再乘特技/设施修正
   const productionGain = type === 'produceArmament' && hasExecutors
     ? Math.round(produceArmamentYield(activeExecutors, armamentType)
       * commandYieldMultiplier(state, command)
-      * armamentYieldMultiplier(city, armamentType))
+      * armamentYieldMultiplier(garrison, armamentType))
     : 0;
   // 兵器/舰船工期：⌈(220 − 综合智力) ÷ 12⌉ × 10 日（发明/造船日数减半），换算为旬
   const productionTenDays = type === 'produceArmament' && isDelayedArmament(armamentType) && hasExecutors
     ? armamentProductionTenDays(activeExecutors, armamentProductionSpeedMultiplier(state, command as Extract<GameCommand, { type: 'produceArmament' }>))
     : 0;
-  // 训练：气力 +【(武力总和 + 武力最大值) ÷ 基数】+ 3（封顶100），城池建有兵部时效果翻倍
+  // 训练：气力 +【(武力总和 + 武力最大值) ÷ 基数】+ 3（封顶100），据点建有兵部时效果翻倍
   const trainEstimate = type === 'train' && hasExecutors
-    ? Math.min(trainMoraleGain(activeExecutors, city.troops) * ((city.plots ?? []).some((plot) => plot.type === 'bingbu') ? 2 : 1), 100 - city.training)
+    ? Math.min(trainMoraleGain(activeExecutors, garrisonTroops) * (hasPlotFacility(garrison, 'bingbu') ? 2 : 1), 100 - garrisonTraining)
     : 0;
   // 巡查：治安 +【统率总和 ÷ 28】+ 2（封顶100）
   const patrolEstimate = type === 'patrol' && hasExecutors
-    ? Math.min(patrolOrderGain(activeExecutors), 100 - city.order)
+    ? Math.min(patrolOrderGain(activeExecutors), 100 - garrisonOrder)
     : 0;
   // 建设：综合政治 = 最高政治 + 其余政治之和 ÷ 3
   const constructionPoliticsValue = hasExecutors ? constructionPolitics(activeExecutors) : 0;
@@ -467,9 +503,9 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
       : type === 'train'
         ? `兵粮 300 · 气力 +${trainEstimate}`
         : type === 'produceArmament'
-          ? `资金 ${armamentCost(city, armamentType)} · ${ARMAMENT_LABELS[armamentType]} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType) ? `${productionTenDays}旬` : '即时'}`
+          ? `资金 ${armamentCost(garrison, armamentType)} · ${ARMAMENT_LABELS[armamentType]} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType) ? `${productionTenDays}旬` : '即时'}`
           : type === 'patrol'
-            ? `资金 ${patrolGoldCost(city)} · 治安 +${patrolEstimate}`
+            ? `资金 ${patrolGoldCost(garrison)} · 治安 +${patrolEstimate}`
             : type === 'trade'
               ? `粮价 1金=${grainPrice}粮 · 交易效果 ${tradePercent}%`
               : type === 'reward'
@@ -525,7 +561,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
       <form ref={dialogRef} className="command-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="command-title" onSubmit={submit} onKeyDown={handleDialogKeyDown}>
         <header>
-          <div><p>{city.name}政务 · 行动力 {type === 'explore' ? `${EXPLORE_AP_PER_OFFICER}/人` : COMMAND_AP[type]}</p><h2 id="command-title">{label}</h2></div>
+          <div><p>{garrisonName}政务 · 行动力 {type === 'explore' ? `${EXPLORE_AP_PER_OFFICER}/人` : COMMAND_AP[type]}</p><h2 id="command-title">{label}</h2></div>
           <button type="button" className="icon-button" aria-label="关闭指令" title="关闭" onClick={onClose}><X /></button>
         </header>
 
@@ -709,7 +745,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
                 const selected = armamentType === item;
                 const stock = cityArmaments[item];
                 const nextStock = selected ? stock + productionGain : stock;
-                const facilityMissing = !hasPlotFacility(city, ARMAMENT_FACILITY[item]);
+                const facilityMissing = !hasPlotFacility(garrison, ARMAMENT_FACILITY[item]);
                 return (
                   <button
                     key={item}
@@ -727,7 +763,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
               })}
             </div>
             <dl className="produce-stock">
-              <div><dt>资金</dt><dd>{city.gold.toLocaleString('en-US')} → {Math.max(0, city.gold - armamentCost(city, armamentType)).toLocaleString('en-US')}{armamentCost(city, armamentType) < ARMAMENT_GOLD_COST ? '（特色优惠）' : ''}</dd></div>
+              <div><dt>资金</dt><dd>{garrisonGold.toLocaleString('en-US')} → {Math.max(0, garrisonGold - armamentCost(garrison, armamentType)).toLocaleString('en-US')}{armamentCost(garrison, armamentType) < ARMAMENT_GOLD_COST ? '（特色优惠）' : ''}</dd></div>
               <div><dt>期间</dt><dd>{isDelayedArmament(armamentType) ? `${productionTenDays}旬（综合智${armamentProductionIntelligence(activeExecutors)}）` : '即时'}</dd></div>
               <div><dt>效果</dt><dd>有利于对应兵种出征</dd></div>
             </dl>
@@ -752,8 +788,8 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
               />
             </div>
             <dl className="trade-quote">
-              <div><dt>资金</dt><dd>{city.gold.toLocaleString('en-US')} → {Math.max(0, city.gold + tradeQuote.goldDelta).toLocaleString('en-US')}</dd></div>
-              <div><dt>兵粮</dt><dd>{city.food.toLocaleString('en-US')} → {Math.max(0, city.food + tradeQuote.foodDelta).toLocaleString('en-US')}</dd></div>
+              <div><dt>资金</dt><dd>{garrisonGold.toLocaleString('en-US')} → {Math.max(0, garrisonGold + tradeQuote.goldDelta).toLocaleString('en-US')}</dd></div>
+              <div><dt>兵粮</dt><dd>{garrisonFood.toLocaleString('en-US')} → {Math.max(0, garrisonFood + tradeQuote.foodDelta).toLocaleString('en-US')}</dd></div>
             </dl>
             <div className="command-note">向左拖动卖出兵粮（八成折价），向右拖动买入兵粮；单次最多交易{TRADE_MAX_GRAIN.toLocaleString('en-US')}兵粮</div>
           </section>
@@ -817,7 +853,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
               return (
                 <dl className="tech-info">
                   <div><dt>技巧P</dt><dd>{level < MAX_TECH_LEVEL ? `${researchTechCost.toLocaleString('en-US')}／${forceTechP.toLocaleString('en-US')}` : forceTechP.toLocaleString('en-US')}</dd></div>
-                  <div><dt>资金</dt><dd>{level < MAX_TECH_LEVEL ? `${cost.gold.toLocaleString('en-US')}／${city.gold.toLocaleString('en-US')}` : city.gold.toLocaleString('en-US')}</dd></div>
+                  <div><dt>资金</dt><dd>{level < MAX_TECH_LEVEL ? `${cost.gold.toLocaleString('en-US')}／${garrisonGold.toLocaleString('en-US')}` : garrisonGold.toLocaleString('en-US')}</dd></div>
                   <div><dt>相关能力</dt><dd>{EXECUTOR_STAT_LABELS[researchStatKey]}总和 {researchStatSum}</dd></div>
                   <div className="tech-effect"><dt>效果</dt><dd>{level < MAX_TECH_LEVEL ? tech.description : `${researchBranchDef.name}系科技已研究完毕`}</dd></div>
                   <div><dt>期间</dt><dd>{level < MAX_TECH_LEVEL ? `${researchTenDays(cost.baseDays, researchStatSum)}旬` : '已研究完毕'}</dd></div>
@@ -944,7 +980,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
                   </select>
                 </label>
               ) : (
-                <div className="command-note">本城没有符合「{abilityNode?.label}」培育条件的在城武将</div>
+                <div className="command-note">本据点没有符合「{abilityNode?.label}」培育条件的待命武将</div>
               )
             )}
           </section>
@@ -953,13 +989,13 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
         {type === 'transfer' && (
           <div className="transfer-fields">
             <label className="field-row">
-              <span>目标城市</span>
-              <select aria-label="目标城市" value={activeTargetId} onChange={(event) => setTargetCityId(event.target.value as CityId)}>
-                {targetCities.map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}
+              <span>目标据点</span>
+              <select aria-label="目标据点" value={activeTargetId} onChange={(event) => setTargetCityId(event.target.value as CityId)}>
+                {transferTargets.map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}
               </select>
             </label>
             <div className="command-note">
-              {activeTargetCity ? `${city.name} → ${activeTargetCity.name}，预计${activeTransferDuration}旬抵达` : '没有可移动的己方城市'}
+              {activeTarget ? `${garrisonName} → ${activeTarget.name}，预计${activeTransferDuration}旬抵达` : '没有可移动的己方据点'}
             </div>
             <label className="field-row">
               <span>移动人员</span>
@@ -973,7 +1009,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
         {type === 'summon' && (
           <div className="transfer-fields">
             <div className="command-note">
-              {summonOfficers.length > 0 ? '选择其他城池的待命武将，将召唤至本城，耗时与移动相同' : '当前没有其他己方城市可召唤的待命武将'}
+              {summonOfficers.length > 0 ? '选择其他据点（城池/关隘）的待命武将，将召唤至本据点，耗时与移动相同' : '当前没有其他己方据点可召唤的待命武将'}
             </div>
             <label className="field-row">
               <span>召唤武将</span>
@@ -1070,7 +1106,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
                 <input
                   type="number"
                   min={0}
-                  max={Math.min(city.gold, DIPLOMACY_GOLD_MAX)}
+                  max={Math.min(garrisonGold, DIPLOMACY_GOLD_MAX)}
                   step={500}
                   value={diplomacyGoldClamped}
                   onChange={(event) => setDiplomacyGold(Math.max(0, Number(event.target.value)))}
@@ -1258,7 +1294,7 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
                 })}
               </div>
               <dl className="produce-stock plot-produce-inline">
-                <div><dt>资金</dt><dd>{city.gold.toLocaleString('en-US')} → {Math.max(0, city.gold - plotCost(plotFacility)).toLocaleString('en-US')}</dd></div>
+                <div><dt>资金</dt><dd>{garrisonGold.toLocaleString('en-US')} → {Math.max(0, garrisonGold - plotCost(plotFacility)).toLocaleString('en-US')}</dd></div>
                 <div><dt>期间</dt><dd>约 {constructionTenDays} 旬（综合政{constructionPoliticsValue}）</dd></div>
               </dl>
             </section>
@@ -1330,7 +1366,10 @@ export function CommandDialog({ type, cityId, onClose, onSubmitOverride }: Comma
             selectedIds={officerIds}
             max={type === 'summon' ? summonOfficers.length : availableOfficers.length}
             selectAllable
-            hint={type === 'summon' ? '选择其他城池的待命武将，召唤至本城' : '选择本城待命武将，移动至目标城市'}
+            tabs={type === 'summon' ? ['召唤', '所属', '能力', '特技', '适性', '状态'] : undefined}
+            initialTab={type === 'summon' ? '召唤' : undefined}
+            summonTarget={type === 'summon' ? garrison : undefined}
+            hint={type === 'summon' ? '选择其他据点（城池/关隘）的待命武将，召唤至本据点' : '选择本据点待命武将，移动至目标据点'}
           onConfirm={(ids) => {
             setOfficerIds(ids);
             setTransferPickerOpen(false);

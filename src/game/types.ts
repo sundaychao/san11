@@ -86,6 +86,8 @@ export interface Officer {
   name: string;
   forceId: ForceId | null;
   cityId: CityId;
+  /** 驻扎的关隘 id（当 location.kind === 'pass' 时有效），与城池武将互不共享 */
+  passId?: PassId;
   location: OfficerLocation;
   stats: Stats;
   skill?: string;
@@ -145,13 +147,14 @@ export interface TreasureState {
 
 export type OfficerLocation =
   | { kind: 'city'; cityId: CityId }
+  | { kind: 'pass'; passId: PassId }
   | { kind: 'unit'; unitId: string }
   | { kind: 'unaffiliated'; cityId: CityId }
-  | { kind: 'transfer'; fromCityId: CityId; targetCityId: CityId; remainingTenDays: number }
-  | { kind: 'task'; cityId: CityId; task: 'armament'; armamentType: ArmamentType; amount: number; remainingTenDays: number; lead?: boolean }
-  | { kind: 'task'; cityId: CityId; task: 'research'; branch: TechBranchId; remainingTenDays: number; lead?: boolean }
-  | { kind: 'task'; cityId: CityId; task: 'cultivate'; nodeId: string; remainingTenDays: number }
-  | { kind: 'task'; cityId: CityId; task: 'construction'; facility: string; plotIndex: number; remainingTenDays: number }
+  | { kind: 'transfer'; fromCityId: CityId; fromPassId?: PassId; targetCityId: CityId; targetPassId?: PassId; remainingTenDays: number }
+  | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'armament'; armamentType: ArmamentType; amount: number; remainingTenDays: number; lead?: boolean }
+  | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'research'; branch: TechBranchId; remainingTenDays: number; lead?: boolean }
+  | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'cultivate'; nodeId: string; remainingTenDays: number }
+  | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'construction'; facility: string; plotIndex: number; remainingTenDays: number }
   | { kind: 'captive'; cityId: CityId; captorForceId: ForceId; capturedTenDays: number };
 
 export interface City {
@@ -190,6 +193,54 @@ export interface City {
   patrolledThisTenDay?: boolean;
   /** 都市地格设施（市场/农场/兵舍/工房等），编号0~5 */
   plots?: CityPlot[];
+}
+
+/** 原版 10 座关隘 id（对应 Scen000.s11 关所坐标） */
+export type PassId =
+  | 'huguan'      // 壶关
+  | 'hulaoguan'   // 虎牢关
+  | 'tongguan'    // 潼关
+  | 'hanguguan'   // 函谷关
+  | 'wuguan'      // 武关
+  | 'yangpingguan'// 阳平关
+  | 'jiange'      // 剑阁
+  | 'jiamengguan' // 葭萌关
+  | 'fushuiguan'  // 涪水关
+  | 'jiangyouguan'; // 江油关
+
+/** 关隘据点：功能与城池一致（钱粮产出），但无都市内政操作、无需治安值 */
+export interface Pass {
+  id: PassId;
+  name: string;
+  /** 归属城池（关隘所属势力 = 归属城池的所有者） */
+  homeCityId: CityId;
+  ownerId: ForceId | null;
+  /** 关隘太守（驻扎武将的领帅；开局为空，由玩家自派） */
+  governorId: string | null;
+  gold: number;
+  food: number;
+  /** 关隘人口（开局 4万~8万 随机） */
+  population: number;
+  troops: number;
+  /** 关隘守军气力（0~100，训练指令提升；无治安值故巡查不作用于城市治安） */
+  training: number;
+  /** 关隘治安（供巡查指令等机制复用；因无需治安值，开局按 100 无特殊修正） */
+  order: number;
+  /** 关隘耐久（与城池同款属性；当前关隘不可被攻击，仅作据点基础属性展示） */
+  durability: number;
+  maxDurability: number;
+  armaments?: CityArmaments;
+  /** 本旬是否已训练过守军（每旬每据点仅一次） */
+  trainedThisTenDay?: boolean;
+  /** 本旬是否已巡查过（每旬每据点仅一次） */
+  patrolledThisTenDay?: boolean;
+  /** 地格设施（与城池同构；关隘当前不开放建设，供兵舍/锻冶等加成逻辑复用） */
+  plots?: CityPlot[];
+  /** 唯一可通行的中心锚点格 */
+  q: number;
+  r: number;
+  /** 两侧翼格（不可通行、渲染隐藏） */
+  flankKeys: string[];
 }
 
 export interface Force {
@@ -369,7 +420,7 @@ export interface Facility {
 
 export interface GameState {
   schemaVersion: 2;
-  scenarioId: 'jingxiang-208' | 'mobile-duel';
+  scenarioId: 'jingxiang-208' | 'mobile-duel' | 'custom-map';
   gridWidth?: number;
   gridHeight?: number;
   seed: number;
@@ -395,6 +446,8 @@ export interface GameState {
   lastDuelReport?: DuelReport | null;
   firePlots?: FirePlot[];
   facilities?: Record<string, Facility>;
+  /** 关隘据点（10 座原版关隘，独立于城池结算） */
+  passes?: Record<PassId, Pass>;
   /** 宝物实例状态（未出土时散落在城市，出土后归势力所有） */
   treasures?: Record<string, TreasureState>;
   logs: GameLog[];
@@ -474,42 +527,45 @@ export interface ArmyUnit {
 }
 
 export type GameCommand =
-  | { type: 'recruit'; cityId: CityId; officerIds: string[] }
-  | { type: 'produceArmament'; cityId: CityId; officerIds: string[]; armamentType: ArmamentType }
-  | { type: 'train'; cityId: CityId; officerIds: string[] }
-  | { type: 'patrol'; cityId: CityId; officerIds: string[] }
-  | { type: 'talent'; cityId: CityId; officerId: string }
-  | { type: 'explore'; cityId: CityId; officerIds: string[] }
-  | { type: 'grantTreasure'; cityId: CityId; treasureId: string; officerId: string | null }
-  | { type: 'research'; cityId: CityId; officerIds: string[]; branch: TechBranchId }
-  | { type: 'abilityResearch'; cityId: CityId; nodeId: string }
-  | { type: 'cultivate'; cityId: CityId; officerId: string; nodeId: string }
+  | { type: 'recruit'; cityId: CityId; passId?: PassId; officerIds: string[] }
+  | { type: 'produceArmament'; cityId: CityId; passId?: PassId; officerIds: string[]; armamentType: ArmamentType }
+  | { type: 'train'; cityId: CityId; passId?: PassId; officerIds: string[] }
+  | { type: 'patrol'; cityId: CityId; passId?: PassId; officerIds: string[] }
+  | { type: 'talent'; cityId: CityId; passId?: PassId; officerId: string }
+  | { type: 'explore'; cityId: CityId; passId?: PassId; officerIds: string[] }
+  | { type: 'grantTreasure'; cityId: CityId; passId?: PassId; treasureId: string; officerId: string | null }
+  | { type: 'research'; cityId: CityId; passId?: PassId; officerIds: string[]; branch: TechBranchId }
+  | { type: 'abilityResearch'; cityId: CityId; passId?: PassId; nodeId: string }
+  | { type: 'cultivate'; cityId: CityId; passId?: PassId; officerId: string; nodeId: string }
   | { type: 'transfer';
       cityId: CityId;
+      passId?: PassId;
       targetCityId: CityId;
+      targetPassId?: PassId;
       officerIds: string[];
     }
-  | { type: 'summon'; cityId: CityId; officerIds: string[] }
-  | { type: 'sworn'; cityId: CityId; officerIds: string[] }
-  | { type: 'trade'; cityId: CityId; officerId: string; mode: 'buy' | 'sell'; amount: number }
-  | { type: 'reward'; cityId: CityId; officerIds: string[] }
-  | { type: 'appointPosition'; cityId: CityId; officerId: string; positionId: string | null }
-  | { type: 'rumor'; cityId: CityId; officerId: string; targetCityId: CityId }
-  | { type: 'poach'; cityId: CityId; officerId: string; targetCityId: CityId; targetOfficerId: string }
+  | { type: 'summon'; cityId: CityId; passId?: PassId; officerIds: string[] }
+  | { type: 'sworn'; cityId: CityId; passId?: PassId; officerIds: string[] }
+  | { type: 'trade'; cityId: CityId; passId?: PassId; officerId: string; mode: 'buy' | 'sell'; amount: number }
+  | { type: 'reward'; cityId: CityId; passId?: PassId; officerIds: string[] }
+  | { type: 'appointPosition'; cityId: CityId; passId?: PassId; officerId: string; positionId: string | null }
+  | { type: 'rumor'; cityId: CityId; passId?: PassId; officerId: string; targetCityId: CityId }
+  | { type: 'poach'; cityId: CityId; passId?: PassId; officerId: string; targetCityId: CityId; targetOfficerId: string }
   | { type: 'diplomacy';
       cityId: CityId;
+      passId?: PassId;
       officerId: string;
       targetForceId: ForceId;
       action: 'goodwill' | 'alliance' | 'truce' | 'requestTroops' | 'break';
       months?: number;
       gold?: number;
     }
-  | { type: 'captiveDispose'; cityId: CityId; targetOfficerId: string; action: 'release' | 'execute' | 'recruit' }
-  | { type: 'marry'; cityId: CityId; officerIdA: string; officerIdB: string; relation?: 'spouse' | 'sworn' }
-  | { type: 'legion'; cityId: CityId; commanderId: string | null; targetCityId: CityId | null; policy?: Legion['policy'] }
-  | { type: 'buildFacilityPlot'; cityId: CityId; officerIds: string[]; plotIndex: number; facility: 'market' | 'farm' | 'barracks' | 'smithy' | 'forge' | 'stable' | 'shipyard' | 'mint' | 'granary' | 'blackmarket' | 'grandmarket' | 'fishmarket' | 'garrisonfarm' | 'hubu' | 'xingbu' | 'bingbu' | 'gongbu' | 'libu' | 'personnel' | 'taixue' | 'tongqueta' }
-  | { type: 'cancelCityPlot'; cityId: CityId; plotIndex: number }
-  | { type: 'appointStrategist'; cityId: CityId; officerId: string | null };
+  | { type: 'captiveDispose'; cityId: CityId; passId?: PassId; targetOfficerId: string; action: 'release' | 'execute' | 'recruit' }
+  | { type: 'marry'; cityId: CityId; passId?: PassId; officerIdA: string; officerIdB: string; relation?: 'spouse' | 'sworn' }
+  | { type: 'legion'; cityId: CityId; passId?: PassId; commanderId: string | null; targetCityId: CityId | null; policy?: Legion['policy'] }
+  | { type: 'buildFacilityPlot'; cityId: CityId; passId?: PassId; officerIds: string[]; plotIndex: number; facility: 'market' | 'farm' | 'barracks' | 'smithy' | 'forge' | 'stable' | 'shipyard' | 'mint' | 'granary' | 'blackmarket' | 'grandmarket' | 'fishmarket' | 'garrisonfarm' | 'hubu' | 'xingbu' | 'bingbu' | 'gongbu' | 'libu' | 'personnel' | 'taixue' | 'tongqueta' }
+  | { type: 'cancelCityPlot'; cityId: CityId; passId?: PassId; plotIndex: number }
+  | { type: 'appointStrategist'; cityId: CityId; passId?: PassId; officerId: string | null };
 
 export interface ForceRanking {
   forceId: ForceId;

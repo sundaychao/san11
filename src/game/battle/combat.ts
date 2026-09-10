@@ -6,9 +6,9 @@ export {
   jointAttackableUnits,
 } from './legacyCore';
 
-import type { ArmyUnit, CityId, ForceId, GameState } from '../types';
+import type { ArmyUnit, CityId, ForceId, GameState, PassId } from '../types';
 import { techLevelOf, troopDamageMultiplier } from '../techs';
-import { captureCityOnCapture } from '../captives';
+import { captureCityOnCapture, capturePassOnCapture } from '../captives';
 import {
   absorbTroopsOnCritical,
   drainTargetEnergyBySkills,
@@ -27,6 +27,7 @@ import {
   assertUnitTurn,
   damageRoll,
   isCityInAttackRange,
+  isPassInAttackRange,
   reduceUnitDamageByFortress,
   removeUnit,
   unitTerrain,
@@ -284,6 +285,32 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   next.strategyResultReports = [];
   if (nextCity.troops === 0 || nextCity.durability === 0) {
     captureCityOnCapture(next, nextAttacker, cityId);
+  }
+  return next;
+}
+
+export function attackPass(state: GameState, forceId: ForceId, attackerId: string, passId: PassId): GameState {
+  const attacker = assertUnitTurn(state, forceId, attackerId);
+  const pass = state.passes?.[passId];
+  if (!pass) throw new Error('关隘不存在');
+  if (pass.ownerId === forceId) throw new Error('不能攻击己方关隘');
+  if (!pass.ownerId && pass.troops === 0) throw new Error('空关隘无守军，可直接进驻');
+  if (attacker.energy < 10) throw new Error('气力不足');
+  if (!isPassInAttackRange(state, attacker, pass)) throw new Error('关隘不在攻击范围');
+  const next = structuredClone(state);
+  const nextAttacker = next.units[attackerId];
+  const nextPass = next.passes?.[passId];
+  if (!nextPass) throw new Error('关隘不存在');
+  const damage = damageRoll(next, nextAttacker, 'plain');
+  const multiplier = ((nextAttacker.troopType ?? 'sword') === 'siege' ? 1.4 : 0.2) * siegeDamageMultiplier(next, nextAttacker);
+  nextPass.troops = Math.max(0, nextPass.troops - Math.round(damage * 0.65));
+  nextPass.durability = Math.max(0, nextPass.durability - Math.round(damage * multiplier));
+  nextAttacker.energy -= 10;
+  nextAttacker.acted = true;
+  next.facilityRepairReports = [];
+  next.strategyResultReports = [];
+  if (nextPass.troops === 0 || nextPass.durability === 0) {
+    capturePassOnCapture(next, nextAttacker, passId);
   }
   return next;
 }

@@ -666,7 +666,7 @@ function crossbowPierceMiddleUnit(state: GameState, attacker: ArmyUnit, target: 
 }
 
 function tryMoveUnit(next: GameState, unitId: string, destination: GridCoord) {
-  if (!isLegalUnitCell(next, destination, unitId)) return false;
+  if (!isLegalUnitCell(next, destination, unitId, undefined, next.units[unitId]?.forceId)) return false;
   next.units[unitId].q = destination.q;
   next.units[unitId].r = destination.r;
   applyGroundFireDamageAfterForcedMove(next, unitId);

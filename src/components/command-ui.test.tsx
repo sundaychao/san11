@@ -4,10 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { initialArmaments } from '../game/armaments';
 import { deployTransportUnit, deployUnit, deployUnitPreviewWithId, movementCells } from '../game/battle/actions';
 import { movementAllowanceForProfile } from '../game/battle/definitions';
-import { deploymentCells } from '../game/battle/deployment';
+import { deploymentCells, chooseDelegateSpawnCell } from '../game/battle/deployment';
 import { getDeploymentTargets } from '../game/battle/queries';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from '../game/battle/grid';
-import { computeDelegatePath } from '../game/battle/delegate';
+import { computeDelegatePath, setMoveDelegate } from '../game/battle/delegate';
+import { deployUnitWithId } from '../game/battle/deployment';
 import { executeCommand } from '../game/commands';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
@@ -25,6 +26,8 @@ function renderState(state = createGame('liu', 3)) {
 // 默认最高角度视野约 30 格且中心在地图中心 (100,100)；测试视口 fallback 1280×720。
 // 地图层等比（方格不变形）渲染：横向 1 格约 42.7px，纵向每格与横向相同。
 function panMapTo(q: number, r: number) {
+  // 单机开局镜头会自动居中到君主城池；先复位到地图中心，保证下面的平移量计算成立
+  fireEvent.click(screen.getByRole('button', { name: '复位地图' }));
   const cellPxX = (1280 * 6.67) / 200;
   const cellPxY = cellPxX; // 等比后纵向每格像素 = 横向每格像素
   const viewport = screen.getByTestId('map-viewport');
@@ -463,6 +466,50 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(screen.getByText(/移动关羽/)).toBeVisible();
   });
 
+  it('defaults the summon picker to the 召唤 tab with days sorted ascending', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    // 江夏归刘备并贴近江陵（10 格 = 1 旬），制造一个 1 旬的召唤来源
+    state.cities['jiangxia'].ownerId = 'liu';
+    state.cities['jiangxia'].governorId = null;
+    state.cities['jiangxia'].gridQ = state.cities['jiangling'].gridQ + 10;
+    state.cities['jiangxia'].gridR = state.cities['jiangling'].gridR;
+    for (const id of ['zhuge-liang', 'zhang-fei']) {
+      state.officers[id].location = { kind: 'city', cityId: 'jiangxia' };
+      state.officers[id].cityId = 'jiangxia';
+      state.officers[id].acted = false;
+    }
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-talent'));
+    await user.click(within(menu).getByTestId('city-command-command-summon'));
+    const dialog = screen.getByRole('dialog', { name: '召唤' });
+    await user.click(within(dialog).getByRole('button', { name: '召唤武将' }));
+
+    const picker = screen.getByRole('dialog', { name: '选择执行武将' });
+    // 默认显示「召唤」分类
+    expect(within(picker).getByRole('button', { name: '召唤' })).toHaveClass('is-active');
+    // 十列：武将/军团/所在/日数/身份/统帅/武力/智力/政治/魅力
+    for (const header of ['武将', '军团', '所在', '日数', '身份', '统帅', '武力', '智力', '政治', '魅力']) {
+      expect(within(picker).getByRole('button', { name: `按${header}排序` })).toBeVisible();
+    }
+
+    const rowOf = (name: string) => within(picker).getByRole('rowheader', { name }).closest('tr')!;
+    // 军团=所属势力名，所在=据点，1 旬显示 10 天
+    expect(rowOf('诸葛亮')).toHaveTextContent('刘备军');
+    expect(rowOf('诸葛亮')).toHaveTextContent('江夏');
+    expect(rowOf('诸葛亮')).toHaveTextContent('10天');
+    expect(rowOf('廖化')).toHaveTextContent('武陵');
+    expect(rowOf('廖化')).toHaveTextContent('40天');
+
+    // 按召唤所需旬数从低到高：1 旬（诸葛亮/张飞）排在 4 旬（武陵诸将）之前
+    const names = officerNamesIn(picker);
+    expect(names.slice(0, 2).sort()).toEqual(['张飞', '诸葛亮']);
+    expect(names.indexOf('廖化')).toBeGreaterThan(names.indexOf('诸葛亮'));
+  });
+
   it('closes the deployment setup popup on right click', async () => {
     const user = userEvent.setup();
     renderState();
@@ -536,7 +583,7 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(screen.queryByRole('dialog', { name: '出征编制' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('battle-unit-marker')).not.toBeInTheDocument();
     panMapTo(92, 120); // 等比后江陵(120)在初始视野外，平移让部署格渲染
-    const deploymentCell = screen.getAllByTestId(/deploy-target-/)[0];
+    const deploymentCell = screen.getAllByTestId(/move-target-/)[0];
     fireEvent.pointerDown(deploymentCell, { button: 0, buttons: 1 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
@@ -546,6 +593,33 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(within(unitMarker).getByText('枪')).toBeVisible();
     expect(within(unitMarker).getByText('刘备')).toBeVisible();
     expect(within(unitMarker).getByText('4,000')).toBeVisible();
+  });
+
+  it('确定出征后城中心显示待出发部队预览，取消出征后预览消失', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    const jianglingMarker = screen.getAllByTestId('city-marker').find((marker) => marker.textContent?.includes('江陵'));
+    expect(jianglingMarker).toBeTruthy();
+    await user.click(jianglingMarker!);
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByRole('button', { name: '军事' }));
+    await user.click(within(menu).getByRole('button', { name: '出征' }));
+
+    const dialog = screen.getByRole('dialog', { name: '出征编制' });
+    await user.click(within(dialog).getByRole('button', { name: '枪兵' }));
+    const confirmedDialog = await chooseDeployLeader(user, '刘备');
+    await user.click(within(confirmedDialog).getByRole('button', { name: '确定出征' }));
+
+    // 城中心应显示待出发部队预览（主将名 + 兵种字）
+    const preview = screen.getByTestId('deploy-preview-marker');
+    expect(preview).toBeVisible();
+    expect(preview).toHaveTextContent('刘备');
+
+    // 右键空白取消出征：预览消失，未真正出兵
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 300, clientY: 200 });
+    expect(screen.queryByTestId('deploy-preview-marker')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('battle-unit-marker')).not.toBeInTheDocument();
   });
 
   it('enables the ship vehicle button and shows its stock when the city has ships', async () => {
@@ -597,7 +671,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const deployDialog = await chooseDeployLeader(user, '马谡');
     await user.click(within(deployDialog).getByRole('button', { name: '确定出征' }));
 
-    fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
+    fireEvent.pointerDown(screen.getAllByTestId(/move-target-/)[0], { button: 0, buttons: 1 });
     const unitMenu = screen.getByTestId('unit-command-menu');
     await user.click(within(unitMenu).getByRole('button', { name: '计略' }));
 
@@ -616,7 +690,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const deployDialog = await chooseDeployLeader(user, '马谡');
     await user.click(within(deployDialog).getByRole('button', { name: '确定出征' }));
 
-    fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
+    fireEvent.pointerDown(screen.getAllByTestId(/move-target-/)[0], { button: 0, buttons: 1 });
     const unitMenu = screen.getByTestId('unit-command-menu');
     await user.click(within(unitMenu).getByRole('button', { name: '计略' }));
     await user.click(within(screen.getByTestId('unit-strategy-menu')).getByRole('button', { name: /火计/ }));
@@ -646,7 +720,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const dialog = await chooseDeployLeader(user, '刘备');
     await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
 
-    expect(screen.getByTestId(`deploy-target-${destination!.q}-${destination!.r}`)).toBeVisible();
+    expect(screen.getByTestId(`move-target-${destination!.q}-${destination!.r}`)).toBeVisible();
   });
 
   it('opens a separate officer picker and assigns one leader with two deputies', async () => {
@@ -818,7 +892,7 @@ describe('command interface', { timeout: 30000 }, () => {
 
     await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
     panMapTo(92, 120); // 等比后江陵(120)在初始视野外，平移让部署格渲染
-    fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
+    fireEvent.pointerDown(screen.getAllByTestId(/move-target-/)[0], { button: 0, buttons: 1 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
     expect(screen.getByTestId('battle-unit-marker')).toBeVisible();
@@ -840,7 +914,7 @@ describe('command interface', { timeout: 30000 }, () => {
     await user.click(within(dialog).getByRole('button', { name: '确定出征' }));
     panMapTo(92, 120); // 等比后江陵(120)在初始视野外，平移让部署格渲染
 
-    fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1, clientX: 320, clientY: 220 });
+    fireEvent.pointerDown(screen.getAllByTestId(/move-target-/)[0], { button: 0, buttons: 1, clientX: 320, clientY: 220 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
     // 出征后重新点击江陵城标唤出都市信息面板：城市资金 5,000 - 900 = 4,100
@@ -953,7 +1027,7 @@ describe('command interface', { timeout: 30000 }, () => {
     const confirmedDialog = await chooseDeployLeader(user, '刘备');
     await user.click(within(confirmedDialog).getByRole('button', { name: '确定出征' }));
     panMapTo(92, 120); // 等比后江陵(120)在初始视野外，平移让部署/移动格渲染
-    fireEvent.pointerDown(screen.getAllByTestId(/deploy-target-/)[0], { button: 0, buttons: 1 });
+    fireEvent.pointerDown(screen.getAllByTestId(/move-target-/)[0], { button: 0, buttons: 1 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
     await user.click(screen.getByTestId('end-ten-day-button'));
@@ -1105,7 +1179,7 @@ describe('command interface', { timeout: 30000 }, () => {
     await user.click(within(cityMenu).getByRole('button', { name: '出征' }));
     const deployDialog = await chooseDeployLeader(user, '刘备');
     await user.click(within(deployDialog).getByRole('button', { name: '确定出征' }));
-    expect(screen.getAllByTestId(/deploy-target-/).length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId(/move-target-/).length).toBeGreaterThan(0);
 
     fireEvent.pointerDown(screen.getByTestId(`map-cell-${target.q}-${target.r}`), { button: 0, buttons: 1, clientX: 320, clientY: 220 });
     const delegateMenu = screen.getByTestId('delegate-menu');
@@ -1116,8 +1190,19 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(screen.queryByTestId('delegate-menu')).not.toBeInTheDocument();
     const marker = screen.getByTestId('battle-unit-marker');
     expect(marker).toBeVisible();
-    expect(marker).toHaveAttribute('data-grid-position', `${spawn.q},${spawn.r}`);
-    expect(screen.queryByTestId(/deploy-target-/)).not.toBeInTheDocument();
+    // 出征委任：部队本旬即沿最优路径行军到最远处（出生格为朝目标最近的部署格），
+    // 与 intentReducer.deployUnitDelegate 的行为一致：部署→放开 moved→setMoveDelegate。
+    const fallbackSpawn = chooseDelegateSpawnCell(getDeploymentTargets(state, deployQuery), target);
+    const sim = deployUnitWithId(state, 'liu', {
+      cityId: 'jiangling', officerIds: ['liu-bei'], troopType: 'sword',
+      troops: 4000, food: 6000, destination: fallbackSpawn,
+    });
+    sim.state.units[sim.unitId].moved = false;
+    const simNext = setMoveDelegate(sim.state, 'liu', sim.unitId, target);
+    const simUnit = simNext.units[sim.unitId];
+    expect(simUnit).toBeDefined();
+    expect(marker).toHaveAttribute('data-grid-position', `${simUnit.q},${simUnit.r}`);
+    expect(screen.queryByTestId(/move-target-/)).not.toBeInTheDocument();
   });
 
   it('出征委任菜单弹出后右键：仅退出菜单，不取消出征流程', async () => {
@@ -1175,7 +1260,7 @@ describe('command interface', { timeout: 30000 }, () => {
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 360, clientY: 260 });
     expect(screen.queryByTestId('delegate-menu')).not.toBeInTheDocument();
     expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
-    expect(screen.getAllByTestId(/deploy-target-/).length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId(/move-target-/).length).toBeGreaterThan(0);
 
     fireEvent.pointerDown(screen.getByTestId(`map-cell-${target.q}-${target.r}`), { button: 0, buttons: 1, clientX: 320, clientY: 220 });
     expect(screen.getByTestId('delegate-menu')).toBeVisible();
@@ -2053,5 +2138,45 @@ describe('final settlement', () => {
 
     expect(screen.getAllByText('并列 1')).toHaveLength(4);
     expect(screen.getByText(/最终并列第/)).toBeVisible();
+  });
+});
+
+describe('占领空城后武将状态', () => {
+  it('进驻空城后，随军武将状态显示为已行动', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['liu-bei', 'guan-yu'],
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units)[0];
+    const city = state.cities.nanpi;
+    const footprint = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR });
+    const footprintKeys = new Set(footprint.map(gridKey));
+    const spawn = footprint
+      .flatMap((coord) => neighborsOf(coord.q, coord.r))
+      .find((coord) => !footprintKeys.has(gridKey(coord)) && passableNonCityCell(state, coord))!;
+    Object.assign(unit, { q: spawn.q, r: spawn.r, moved: false, acted: false, movementRemaining: 22 });
+    state.officers['liu-bei'].acted = false;
+    state.officers['guan-yu'].acted = false;
+
+    renderState(state);
+    panMapTo(unit.q, unit.r);
+    fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1 });
+
+    const cityMarker = screen.getAllByTestId('city-marker')
+      .find((marker) => marker.getAttribute('aria-label')?.startsWith('南皮'))!;
+    fireEvent.click(cityMarker);
+    await user.click(screen.getByTestId('return-city-confirm-yes'));
+
+    // 进驻后城池易主，随军武将进城且本旬已行动
+    expect(state.cities.nanpi.ownerId).not.toBe('liu');
+    fireEvent.contextMenu(cityMarker);
+    await user.click(screen.getByTestId('city-info-officers-button'));
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: '状态' }));
+    expect(within(dialog).getAllByText('已行动')).toHaveLength(2);
+    expect(within(dialog).queryAllByText('待命')).toHaveLength(0);
   });
 });

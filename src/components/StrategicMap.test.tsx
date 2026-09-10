@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
 import { deployUnit } from '../game/battle/actions';
 import { sevenCellCityFootprint } from '../game/battle/grid';
@@ -8,7 +8,7 @@ import { createGame } from '../game/scenario/jingxiang208';
 import { createMobileDuelGame } from '../game/scenario/mobileDuel';
 import { GameProvider } from '../game/store/GameProvider';
 import { settleTenDay } from '../game/turn';
-import type { TerrainType } from '../game/types';
+import type { CityId, GameState, TerrainType } from '../game/types';
 import { GameShell } from './GameShell';
 
 const TERRAIN_LABELS: Record<TerrainType, string> = {
@@ -56,6 +56,39 @@ function panViewport(dx: number, dy: number) {
   fireEvent.pointerUp(viewport, { pointerId: 1 });
 }
 
+function resetCamera() {
+  // 单机开局镜头会自动居中到君主所在城池；需要以“地图中心”为基准的平移/可见性断言先复位镜头
+  fireEvent.click(screen.getByRole('button', { name: '复位地图' }));
+}
+
+/** 断言镜头正中落在指定城池的中心格上（默认按测试环境视口回退 1280×720，与镜头钳制同一口径） */
+function expectCameraCenteredOnCity(
+  state: GameState,
+  cityId: CityId,
+  viewport = { width: 1280, height: 720 },
+) {
+  const city = state.cities[cityId];
+  const mapContent = screen.getByTestId('map-content');
+  const centerCell = screen.getByTestId(`map-cell-${city.gridQ}-${city.gridR}`);
+  const cellSize = Number(centerCell.getAttribute('width'));
+  const viewX = Number.parseFloat(mapContent.getAttribute('data-view-x')!);
+  const viewY = Number.parseFloat(mapContent.getAttribute('data-view-y')!);
+  const scale = Number.parseFloat(mapContent.style.getPropertyValue('--map-scale'));
+  const viewportWidth = viewport.width;
+  const viewportHeight = viewport.height;
+  const worldWidth = (state.gridWidth ?? DEFAULT_GRID_WIDTH) * cellSize;
+  const worldHeight = (state.gridHeight ?? DEFAULT_GRID_HEIGHT) * cellSize;
+  const cssWidth = viewportWidth * scale;
+  const cssHeight = cssWidth * (worldHeight / worldWidth);
+  const left = (viewportWidth - cssWidth) / 2 + viewX;
+  const top = (viewportHeight - cssHeight) / 2 + viewY;
+  const centerX = Number(centerCell.getAttribute('x')) + cellSize / 2;
+  const centerY = Number(centerCell.getAttribute('y')) + cellSize / 2;
+
+  expect(left + (centerX * cssWidth) / worldWidth).toBeCloseTo(viewportWidth / 2, 0);
+  expect(top + (centerY * cssHeight) / worldHeight).toBeCloseTo(viewportHeight / 2, 0);
+}
+
 async function chooseDeployLeader(user: ReturnType<typeof userEvent.setup>, officerName = '刘备') {
   const deployDialog = screen.getByRole('dialog', { name: '出征编制' });
   await user.click(within(deployDialog).getByRole('button', { name: '选择武将' }));
@@ -92,6 +125,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     const state = createGame('liu', 1);
     renderGame(state);
     zoomToTerrain();
+    resetCamera();
     // 江陵 (q82,r137) 在地图中心左下方，向右拖 18 格、向上拖 37 格（每格约 42.7px）使其进入可见范围
     panViewport(768, -1580);
 
@@ -132,9 +166,10 @@ describe('StrategicMap', { timeout: 30000 }, () => {
 
     const passMarkers = screen.getAllByTestId('pass-marker');
     expect(passMarkers).toHaveLength(10);
-    const labels = passMarkers.map((marker) => marker.textContent);
+    // 标牌 textContent 含名称与兵力/人口（stats 随 WIP 加入标牌），故按子串匹配关名
+    const labels = passMarkers.map((marker) => marker.textContent ?? '');
     for (const label of ['壶关', '虎牢关', '潼关', '函谷关', '武关', '阳平关', '剑阁', '葭萌关', '涪水关', '江油关']) {
-      expect(labels).toContain(label);
+      expect(labels.some((text) => text.includes(label))).toBe(true);
     }
     // 小地图同步显示关隘点
     expect(document.querySelectorAll('.mini-pass-dot')).toHaveLength(10);
@@ -178,6 +213,138 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     expect(screen.getByTestId('map-content').style.getPropertyValue('--map-scale')).toBe('8');
   });
 
+  it('镜头拖拽/缩放均不越出地图边界，内容始终铺满视口', async () => {
+    renderGame();
+    const viewport = screen.getByTestId('map-viewport');
+    const mapContent = screen.getByTestId('map-content');
+    const scale = Number.parseFloat(mapContent.style.getPropertyValue('--map-scale'));
+    const x = () => Number.parseFloat(mapContent.getAttribute('data-view-x')!);
+    const y = () => Number.parseFloat(mapContent.getAttribute('data-view-y')!);
+    // 测试视口回退为 1280×720；content 等比宽 vw*scale、高 按 200:200
+    const contentWidth = 1280 * scale;
+    const contentHeight = contentWidth; // 200×200 网格
+    const maxX = Math.max(0, (contentWidth - 1280) / 2);
+    const maxY = Math.max(0, (contentHeight - 720) / 2);
+    expect(maxX).toBeGreaterThan(0);
+
+    // 向左下角大幅拖拽（远超可平移范围）：view 应被钳制在边界
+    panViewport(50000, 50000);
+    expect(x()).toBeCloseTo(maxX, 1);
+    expect(y()).toBeCloseTo(maxY, 1);
+    const xAtEdge = x();
+    const yAtEdge = y();
+
+    // 继续拖拽不越界
+    panViewport(50000, 50000);
+    expect(x()).toBeCloseTo(xAtEdge, 1);
+    expect(y()).toBeCloseTo(yAtEdge, 1);
+
+    // 反方向拖拽回到另一侧边界
+    panViewport(-50000, -50000);
+    expect(x()).toBeCloseTo(-maxX, 1);
+    expect(y()).toBeCloseTo(-maxY, 1);
+  });
+
+  it('单机进入游戏时镜头自动跳到本方君主所在城池并居中显示', () => {
+    const state = createGame('liu', 1);
+    renderGame(state);
+
+    // 刘备（君主）在江陵
+    expectCameraCenteredOnCity(state, 'jiangling');
+  });
+
+  it('不同势力开局分别定位到各自君主所在城池', () => {
+    const caoState = createGame('cao', 1);
+    renderGame(caoState);
+
+    // 曹操（君主）在宛
+    expectCameraCenteredOnCity(caoState, 'wan');
+  });
+
+  it('君主不在城中时退回本方首城作为开局定位', () => {
+    const state = createGame('liu', 1);
+    // 君主刘备随军出征：镜头应退回本方首座城池（江陵）
+    state.officers['liu-bei'].location = { kind: 'unit', unitId: 'liu-field' };
+    renderGame(state);
+
+    expectCameraCenteredOnCity(state, 'jiangling');
+  });
+
+  it('浏览器路径：等 ResizeObserver 报出真实视口尺寸后再居中（而非按回退视口）', () => {
+    const viewportSize = { width: 1600, height: 900 };
+    const originalResizeObserver = (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+    class ImmediateResizeObserver {
+      private readonly callback: (entries: Array<{ contentRect: { width: number; height: number } }>) => void;
+
+      constructor(callback: (entries: Array<{ contentRect: { width: number; height: number } }>) => void) {
+        this.callback = callback;
+      }
+
+      observe() {
+        this.callback([{ contentRect: viewportSize }]);
+      }
+
+      disconnect() {}
+    }
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = ImmediateResizeObserver;
+    try {
+      const state = createGame('liu', 1);
+      renderGame(state);
+
+      expectCameraCenteredOnCity(state, 'jiangling', viewportSize);
+    } finally {
+      (globalThis as { ResizeObserver?: unknown }).ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it('开局自动定位只执行一次：玩家拖动与回合推进都不会重置镜头', async () => {
+    const user = userEvent.setup();
+    renderGame(createGame('liu', 1));
+    const mapContent = screen.getByTestId('map-content');
+    const viewOf = () => ({
+      x: Number.parseFloat(mapContent.getAttribute('data-view-x')!),
+      y: Number.parseFloat(mapContent.getAttribute('data-view-y')!),
+    });
+
+    // 玩家把镜头拖离君主城池
+    panViewport(-320, 180);
+    const dragged = viewOf();
+    expect(dragged.x).not.toBe(0);
+
+    // 推进一旬（整个游戏状态被替换）后，镜头保持在玩家拖动后的位置
+    await user.click(screen.getByTestId('end-ten-day-button'));
+
+    expect(viewOf().x).toBeCloseTo(dragged.x, 1);
+    expect(viewOf().y).toBeCloseTo(dragged.y, 1);
+  });
+
+  it('点击小地图位置将主镜头切换到对应地图区域', () => {
+    renderGame();
+    const miniMap = screen.getByTestId('mini-map');
+    const mapContent = screen.getByTestId('map-content');
+    const x = () => Number.parseFloat(mapContent.getAttribute('data-view-x')!);
+    const y = () => Number.parseFloat(mapContent.getAttribute('data-view-y')!);
+
+    // 测试环境无真实布局：给容器一个 184×103.5 的虚拟边界供点击换算
+    const rect = { left: 0, top: 0, width: 184, height: 103.5, right: 184, bottom: 103.5 } as DOMRect;
+    vi.spyOn(miniMap, 'getBoundingClientRect').mockReturnValue(rect);
+
+    // 复位后点击小地图右下角（≈地图东南角）→ 镜头应向东南移动（view.x/view.y 负值增大）
+    fireEvent.pointerDown(miniMap, { button: 0, buttons: 1, clientX: 180, clientY: 100 });
+    const xEast = x();
+    const ySouth = y();
+    expect(xEast).toBeLessThan(0);
+    expect(ySouth).toBeLessThan(0);
+
+    // 点击小地图左上角（≈地图西北角）→ 镜头应移向西北（view.x/view.y 正值）
+    fireEvent.pointerDown(miniMap, { button: 0, buttons: 1, clientX: 6, clientY: 6 });
+    expect(x()).toBeGreaterThan(xEast);
+    expect(y()).toBeGreaterThan(ySouth);
+
+    // 点击后拖拽不应启动（小地图上按压不产生主地图平移拖拽）
+    expect(screen.getByTestId('map-content').getAttribute('data-view-x')).not.toBeNull();
+  });
+
   it('keeps zoom within the supported range', async () => {
     const user = userEvent.setup();
     renderGame();
@@ -193,6 +360,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     const user = userEvent.setup();
     renderGame();
     zoomToTerrain();
+    resetCamera();
     // 等比（方格不变形）后，初始垂直窗覆盖地图中部，江陵（r=120）在地图下方，需先下移视野使其部署格渲染
     panViewport(0, -1100);
 
@@ -204,12 +372,12 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     const deployDialog = await chooseDeployLeader(user, '刘备');
     await user.click(within(deployDialog).getByRole('button', { name: '确定出征' }));
 
-    const deploymentCell = screen.getAllByTestId(/deploy-target-/)[0];
-    const [, q, r] = deploymentCell.getAttribute('data-testid')!.match(/deploy-target-(\d+)-(\d+)/)!;
+    const deploymentCell = screen.getAllByTestId(/move-target-/)[0];
+    const [, q, r] = deploymentCell.getAttribute('data-testid')!.match(/move-target-(\d+)-(\d+)/)!;
     const terrain = [...deploymentCell.classList].find((className) => className.startsWith('terrain-'))?.replace('terrain-', '') as TerrainType;
     fireEvent.pointerEnter(deploymentCell);
 
-    expect(deploymentCell).toHaveAttribute('data-testid', `deploy-target-${q}-${r}`);
+    expect(deploymentCell).toHaveAttribute('data-testid', `move-target-${q}-${r}`);
     expect(deploymentCell).toHaveClass(`terrain-${terrain}`);
     expect(screen.getByTestId('hover-coordinate')).toBeInTheDocument();
 
@@ -261,6 +429,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
 
     renderGame(state);
     zoomToTerrain();
+    resetCamera();
 
     expect(screen.getByTestId('map-cell-100-100')).toHaveClass('is-facility-occupied');
     expect(screen.getByTestId('map-cell-100-101')).not.toHaveClass('is-facility-occupied');
@@ -507,6 +676,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     });
     renderGame(settleTenDay(deployed));
     zoomToTerrain();
+    resetCamera();
     // 等比后江陵（r=120）位于初始垂直窗下方，向下移动视野让部队/移动目标格渲染
     panViewport(0, -1100);
 
@@ -818,76 +988,147 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     expect(Number.parseFloat(jianglingMarker!.style.top)).toBeCloseTo(expectedTop, 4);
   });
 
-  it('指针越过视口边缘后锁定方向持续平移，移出地图仍继续，回到中央即停止', async () => {
-    renderGame();
-    const viewport = screen.getByTestId('map-viewport');
-    const mapContent = screen.getByTestId('map-content');
-    const x = () => Number.parseFloat(mapContent.getAttribute('data-view-x')!);
-    const y = () => Number.parseFloat(mapContent.getAttribute('data-view-y')!);
-    expect(x()).toBe(0);
-    expect(y()).toBe(0);
+  it('指针越过视口边缘后锁定方向持续平移，移出地图仍继续，回到中央即停止', () => {
+    vi.useFakeTimers();
+    try {
+      renderGame();
+      const viewport = screen.getByTestId('map-viewport');
+      const mapContent = screen.getByTestId('map-content');
+      const x = () => Number.parseFloat(mapContent.getAttribute('data-view-x')!);
+      const y = () => Number.parseFloat(mapContent.getAttribute('data-view-y')!);
+      const advance = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
+      // 单机开局镜头已自动居中到君主城池（刘备→江陵），此处只校验相对平移
+      const xStart = x();
 
-    // 鼠标进入左缘带：向右平移视角（看到左侧更多地图，view.x 增大），且在带内持续移动
-    fireEvent.pointerMove(viewport, { clientX: 10, clientY: 360 });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
-    const xAfterLeft = x();
-    expect(xAfterLeft).toBeGreaterThan(0);
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
-    expect(x()).toBeGreaterThan(xAfterLeft);
+      // 鼠标进入左缘带：向右平移视角（看到左侧更多地图，view.x 增大），且在带内持续移动
+      fireEvent.pointerMove(viewport, { clientX: 10, clientY: 360 });
+      advance(120);
+      const xAfterLeft = x();
+      expect(xAfterLeft).toBeGreaterThan(xStart);
+      advance(120);
+      expect(x()).toBeGreaterThan(xAfterLeft);
 
-    // 即使鼠标离开地图/视口（模拟移出网页），方向锁定仍然持续平移
-    fireEvent.pointerLeave(viewport);
-    const xAfterLeave = x();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
-    expect(x()).toBeGreaterThan(xAfterLeave);
+      // 即使鼠标离开地图/视口（模拟移出网页），方向锁定仍然持续平移
+      fireEvent.pointerLeave(viewport);
+      const xAfterLeave = x();
+      advance(120);
+      expect(x()).toBeGreaterThan(xAfterLeave);
 
-    // 鼠标回到视野中央：平移停止，位置不再变化
-    fireEvent.pointerMove(viewport, { clientX: 640, clientY: 360 });
-    const xCenter = x();
-    const yCenter = y();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
-    expect(x()).toBeCloseTo(xCenter);
-    expect(y()).toBeCloseTo(yCenter);
+      // 鼠标回到视野中央：平移停止，位置不再变化
+      fireEvent.pointerMove(viewport, { clientX: 640, clientY: 360 });
+      const xCenter = x();
+      const yCenter = y();
+      advance(150);
+      expect(x()).toBeCloseTo(xCenter);
+      expect(y()).toBeCloseTo(yCenter);
 
-    // 鼠标进入下缘带：向上平移视角（看到下方更多地图，view.y 减小），同样持续
-    fireEvent.pointerMove(viewport, { clientX: 640, clientY: 700 });
-    const yAfterBottom = y();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
-    expect(y()).toBeLessThan(yAfterBottom);
+      // 鼠标进入下缘带：向上平移视角（看到下方更多地图，view.y 减小），同样持续
+      fireEvent.pointerMove(viewport, { clientX: 640, clientY: 700 });
+      const yAfterBottom = y();
+      advance(120);
+      expect(y()).toBeLessThan(yAfterBottom);
 
-    // 回到中央后停止
-    fireEvent.pointerMove(viewport, { clientX: 640, clientY: 360 });
-    const yRest = y();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
-    expect(y()).toBeCloseTo(yRest);
+      // 回到中央后停止
+      fireEvent.pointerMove(viewport, { clientX: 640, clientY: 360 });
+      const yRest = y();
+      advance(150);
+      expect(y()).toBeCloseTo(yRest);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('摇杆式移动：正上方只向上，右上角则同时向上向右移动', async () => {
+  it('鼠标移出地图区域后，在页面其它位置移动仍实时改变滚动方向', async () => {
+    renderGame();
+    const viewport = screen.getByTestId('map-viewport');
+    const mapContent = screen.getByTestId('map-content');
+    const x = () => Number.parseFloat(mapContent.getAttribute('data-view-x')!);
+    const xStart = x();
+
+    // 指针进入地图右缘带 → 镜头向右移动（view.x 持续减小）
+    fireEvent.pointerMove(viewport, { clientX: 1270, clientY: 360 });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
+    const xAfterRight = x();
+    expect(xAfterRight).toBeLessThan(xStart);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
+    // 负载高时这 200ms 可能被拉长到数秒、镜头已顶到右边界钳制值而不再变化，故允许相等
+    expect(x()).toBeLessThanOrEqual(xAfterRight);
+
+    // 不回到地图内部，而是把指针移到地图区域外、页面左侧（document.body 目标）
+    fireEvent.pointerMove(document.body, { clientX: 10, clientY: 360 });
+    const xAtLeftOutside = x();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
+    // 方向应实时翻转为向左移动（view.x 重新增大）
+    expect(x()).toBeGreaterThan(xAtLeftOutside);
+  });
+
+  it('摇杆式移动：正上方只向上，右上角则同时向上向右移动', () => {
+    // 用假计时器逐帧推进边缘滚动：真实计时器在高负载下会被拉长到顶住地图边界，断言不再稳定
+    vi.useFakeTimers();
+    try {
+      renderGame();
+      const viewport = screen.getByTestId('map-viewport');
+      const mapContent = screen.getByTestId('map-content');
+      const x = () => Number.parseFloat(mapContent.getAttribute('data-view-x')!);
+      const y = () => Number.parseFloat(mapContent.getAttribute('data-view-y')!);
+      const advance = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
+
+      // 鼠标位于上缘正中（与画面中心同列）：只向上（view.y 增大），横向不移动
+      fireEvent.pointerMove(viewport, { clientX: 640, clientY: 10 });
+      const xPureUpStart = x();
+      const yPureUpStart = y();
+      advance(300);
+      expect(y()).toBeGreaterThan(yPureUpStart);
+      expect(x()).toBeCloseTo(xPureUpStart);
+
+      // 回到中央，等方向清零后再测斜向
+      fireEvent.pointerMove(viewport, { clientX: 640, clientY: 360 });
+      advance(200);
+      const xDiagonalStart = x();
+      const yDiagonalStart = y();
+
+      // 鼠标进入右上角边缘带：向上（view.y 增大）与向右（view.x 减小）同时进行
+      fireEvent.pointerMove(viewport, { clientX: 1270, clientY: 20 });
+      advance(300);
+      expect(y()).toBeGreaterThan(yDiagonalStart);
+      expect(x()).toBeLessThan(xDiagonalStart);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('右键菜单打开期间画面固定：拖拽与边缘滚动均不移动镜头', async () => {
     renderGame();
     const viewport = screen.getByTestId('map-viewport');
     const mapContent = screen.getByTestId('map-content');
     const x = () => Number.parseFloat(mapContent.getAttribute('data-view-x')!);
     const y = () => Number.parseFloat(mapContent.getAttribute('data-view-y')!);
 
-    // 鼠标位于上缘正中（与画面中心同列）：只向上（view.y 增大），横向不移动
-    fireEvent.pointerMove(viewport, { clientX: 640, clientY: 10 });
-    const xPureUpStart = x();
-    const yPureUpStart = y();
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
-    expect(y()).toBeGreaterThan(yPureUpStart);
-    expect(x()).toBeCloseTo(xPureUpStart);
+    // 打开地图右键菜单
+    fireEvent.contextMenu(viewport, { clientX: 320, clientY: 240 });
+    expect(screen.getByTestId('map-context-menu')).toBeVisible();
 
-    // 回到中央，等方向清零后再测斜向
-    fireEvent.pointerMove(viewport, { clientX: 640, clientY: 360 });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
-    const xDiagonalStart = x();
-    const yDiagonalStart = y();
+    // 菜单打开时，鼠标进入边缘带等待：镜头不应自动平移
+    fireEvent.pointerMove(viewport, { clientX: 1270, clientY: 360 });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    const xFrozen = x();
+    const yFrozen = y();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    expect(x()).toBeCloseTo(xFrozen);
+    expect(y()).toBeCloseTo(yFrozen);
 
-    // 鼠标进入右上角边缘带：向上（view.y 增大）与向右（view.x 减小）同时进行
-    fireEvent.pointerMove(viewport, { clientX: 1270, clientY: 20 });
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
-    expect(y()).toBeGreaterThan(yDiagonalStart);
-    expect(x()).toBeLessThan(xDiagonalStart);
+    // 菜单打开时，拖拽地图也不应平移
+    const xDragStart = x();
+    panViewport(400, 300);
+    expect(x()).toBeCloseTo(xDragStart);
+
+    // 关闭菜单后，镜头恢复可控（边缘滚动重新生效）
+    fireEvent.contextMenu(viewport, { clientX: 360, clientY: 260 });
+    expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
+    const xAfterClose = x();
+    fireEvent.pointerMove(viewport, { clientX: 1270, clientY: 360 });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
+    expect(x()).toBeLessThan(xAfterClose);
   });
 
   it('renders the mobile duel map with its own 16 by 33 grid dimensions', () => {

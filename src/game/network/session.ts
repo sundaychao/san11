@@ -1,19 +1,26 @@
 import { runAiTurn } from '../ai';
 import { createGame, FORCE_IDS } from '../scenario/jingxiang208';
+import { createGameFromMap, forcesOfMap } from '../scenario/customMap';
 import { createMobileDuelGame } from '../scenario/mobileDuel';
+import { getMap } from '../mapRegistry';
 import { settleForceTurnStart } from '../skills/rules/turn';
-import { settleTenDay } from '../turn';
+import { advanceTenDay } from '../turn';
 import type { ForceId, GameState } from '../types';
 import { reduceGameIntent } from './intentReducer';
 import type { GameIntent } from './intents';
 
 export const ONLINE_DUEL_MAX_PLAYERS = 2;
 
-/** 对战地图：small=荆襄小地图（2人），homeland=单机大地图（最多4人，不足用电脑势力补位） */
-export type RoomMap = 'small' | 'homeland';
+/** 对战地图：small=荆襄小地图（2人），homeland=单机大地图（最多4人，不足用电脑势力补位），其余字符串为地图注册表 mapId（自定义/内置其它图） */
+export type RoomMap = 'small' | 'homeland' | string;
 
+/** 地图允许的真人玩家上限：homeland=4，small=2，其余按该图有主城池的势力数（≤4，无则回退 2） */
 export function roomMaxPlayers(map: RoomMap): number {
-  return map === 'homeland' ? 4 : ONLINE_DUEL_MAX_PLAYERS;
+  if (map === 'homeland') return 4;
+  if (map === 'small') return ONLINE_DUEL_MAX_PLAYERS;
+  const sessionMap = getMap(map);
+  const forceCount = sessionMap ? forcesOfMap(sessionMap.payload).length : 0;
+  return forceCount > 0 ? Math.min(forceCount, 4) : ONLINE_DUEL_MAX_PLAYERS;
 }
 
 export interface OnlinePlayer {
@@ -102,7 +109,9 @@ export function joinOnlineRoom(room: OnlineRoom, input: JoinOnlineRoomInput): On
     throw new Error(
       room.map === 'homeland'
         ? '大地图房间最多支持 4 名玩家'
-        : '手机双人对战房间只支持 2 名玩家',
+        : room.map === 'small'
+          ? '手机双人对战房间只支持 2 名玩家'
+          : '该地图房间人数已达上限',
     );
   }
   if (room.phase !== 'lobby') throw new Error('游戏已经开始');
@@ -148,12 +157,12 @@ export function startOnlineRoom(room: OnlineRoom, input: StartOnlineRoomInput): 
   if (input.playerId !== room.hostPlayerId) throw new Error('只有房主可以开始游戏');
   if (room.phase !== 'lobby') throw new Error('游戏已经开始');
 
-  // 大地图房间不需要2名真人玩家：少于4人时其余势力由电脑代理
-  const minPlayers = room.map === 'homeland' ? 1 : 2;
+  // 小地图需要2名真人玩家，其余（homeland/自定义）可由房主一人选势力开局，不足用电脑补位
+  const minPlayers = room.map === 'small' ? 2 : 1;
   const players = Object.values(room.players);
   if (players.length > roomMaxPlayers(room.map)) throw new Error('该房间人数已达上限');
   if (players.length < minPlayers) {
-    throw new Error(room.map === 'homeland' ? '至少需要 1 名玩家' : '至少需要 2 名玩家');
+    throw new Error(room.map === 'small' ? '至少需要 2 名玩家' : '至少需要 1 名玩家');
   }
   if (players.some((player) => !player.forceId)) throw new Error('所有玩家都需要选择势力');
 
@@ -165,13 +174,18 @@ export function startOnlineRoom(room: OnlineRoom, input: StartOnlineRoomInput): 
   if (room.map === 'homeland') {
     // 复用单机大地图剧本，仅把人类玩家并入，其余势力在局间由 AI 控制
     state = createGame(hostForceId, room.seed);
-  } else {
+  } else if (room.map === 'small') {
     // 小地图保留原手机双人对战
     const guestForceId = turnPlayerIds
       .map((playerId) => room.players[playerId]?.forceId)
       .find((forceId): forceId is ForceId => Boolean(forceId && forceId !== hostForceId));
     if (!guestForceId) throw new Error('手机双人地图需要第二名玩家选择势力');
     state = createMobileDuelGame(hostForceId, guestForceId, room.seed);
+  } else {
+    // 其它地图按注册表 mapId 生成场景（含内置荆襄图），不足用的势力由 AI 控制
+    const sessionMap = getMap(room.map);
+    if (!sessionMap) throw new Error('找不到所选的剧本地图');
+    state = createGameFromMap(sessionMap.payload, hostForceId, room.seed);
   }
 
   return {
@@ -253,17 +267,24 @@ function stateForForceTurnStart(state: GameState, activeForceId: ForceId) {
   return next;
 }
 
-function advanceTenDay(room: OnlineRoom): GameState {
+/** 全部玩家都点了「进行」：统一走 turn.advanceTenDay（与单机同一条链路）。
+ *  人类玩家势力各自执行一次委任，未被占用的势力跑 AI 回合。 */
+function advanceRoomTenDay(room: OnlineRoom): GameState {
   if (!room.state) throw new Error('游戏尚未开始');
-  let state = room.state;
   const occupied = new Set(occupiedForceIds(room));
-  for (const forceId of FORCE_IDS) {
-    if (!occupied.has(forceId)) {
-      state = stateForForceTurnStart(personalizeState(state, forceId), forceId);
-      state = runAiTurn(state, forceId);
-    }
-  }
-  return settleTenDay(canonicalState(state, hostForceId(room)));
+  return advanceTenDay(room.state, {
+    delegatedForceIds: [...occupied],
+    runAiTurns: (state) => {
+      let next = state;
+      for (const forceId of FORCE_IDS) {
+        if (occupied.has(forceId)) continue;
+        next = stateForForceTurnStart(personalizeState(next, forceId), forceId);
+        next = runAiTurn(next, forceId);
+      }
+      return next;
+    },
+    prepareSettle: (state) => canonicalState(state, hostForceId(room)),
+  });
 }
 
 function settleActivePlayerTurnStart(room: OnlineRoom, activePlayerId: string | null): GameState | null {
@@ -293,7 +314,7 @@ export function reduceOnlineIntent(room: OnlineRoom, playerId: string, baseRevis
         ? {
           ...room,
           revision: room.revision + 1,
-          state: advanceTenDay(room),
+          state: advanceRoomTenDay(room),
           activePlayerId: room.turnPlayerIds[0] ?? null,
           completedTurnPlayerIds: [],
           tenDayReadyForceIds: [],

@@ -23,12 +23,12 @@ import {
 } from './actions';
 import { movementAllowanceForProfile } from './definitions';
 import type { GridCoord } from './grid';
-import { attackablePlots, type PlotAttackTarget } from './targetRules';
+import { attackablePlots, attackablePasses, type PlotAttackTarget } from './targetRules';
 import { strategyEnergyCostForUnit } from './strategies';
 import { formationMovementAllowanceBonus } from '../skills';
 import { troopMovementBonusForTroop } from '../techs';
 import { TROOP_LABELS } from '../armaments';
-import type { ArmyUnit, City, CityId, Facility, FacilityType, GameState, TroopType } from '../types';
+import type { ArmyUnit, City, CityId, Facility, FacilityType, GameState, Pass, TroopType } from '../types';
 
 export interface DeploymentTargetQueryInput {
   cityId: CityId;
@@ -57,6 +57,7 @@ export interface UnitActionQuery {
   unit?: ArmyUnit;
   attackUnits: ArmyUnit[];
   attackCities: City[];
+  attackPasses: Pass[];
   attackFacilities: Facility[];
   attackPlots: PlotAttackTarget[];
   jointAttackUnits: ArmyUnit[];
@@ -149,6 +150,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
       unit: undefined,
       attackUnits: [],
       attackCities: [],
+      attackPasses: [],
       attackFacilities: [],
       attackPlots: [],
       jointAttackUnits: [],
@@ -163,6 +165,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
 
   const attackUnits = attackableUnits(state, unitId, origin);
   const attackCities = attackableCities(state, unitId, origin);
+  const attackPasses = attackablePasses(state, unitId, origin);
   const attackFacilities = attackableFacilities(state, unitId, origin);
   const attackPlots = attackablePlots(state, unitId, origin);
   const jointAttackUnits = jointAttackableUnits(state, unitId, origin);
@@ -184,7 +187,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
     ? emptyCommandAvailability()
     : {
         wait: true,
-        attack: attackUnits.length > 0 || attackCities.length > 0 || attackFacilities.length > 0 || attackPlots.length > 0,
+        attack: attackUnits.length > 0 || attackCities.length > 0 || attackPasses.length > 0 || attackFacilities.length > 0 || attackPlots.length > 0,
         duel: attackUnits.length > 0,
         jointAttack: jointAttackUnits.length > 0,
         tactic: availableTactics.length > 0,
@@ -197,6 +200,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
     unit,
     attackUnits,
     attackCities,
+    attackPasses,
     attackFacilities,
     attackPlots,
     jointAttackUnits,

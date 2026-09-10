@@ -20,3 +20,17 @@ export function territoryCityAt(state: GameState, cell: TerritoryCell): City {
 export function territoryForceAt(state: GameState, cell: TerritoryCell): ForceId | null {
   return territoryCityAt(state, cell).ownerId;
 }
+
+/**
+ * 君主所在城池：优先取该势力君主当前驻扎的城池；
+ * 君主出征/被俘/已故等不在城中时，退回本方首座城池（与开局选中城池的口径一致）。
+ */
+export function rulerCityOf(state: GameState, forceId: ForceId): City | undefined {
+  const rulerId = state.forces[forceId]?.leaderId;
+  const ruler = rulerId ? state.officers[rulerId] : undefined;
+  if (ruler && ruler.location.kind === 'city') {
+    const city = state.cities[ruler.location.cityId];
+    if (city) return city;
+  }
+  return Object.values(state.cities).find((city) => city.ownerId === forceId);
+}

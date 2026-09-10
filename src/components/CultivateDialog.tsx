@@ -13,12 +13,14 @@ import {
 } from '../game/abilityResearch';
 import { useGame } from '../game/store/GameProvider';
 import { officerSkillsText } from '../game/skills';
-import type { CityId, Officer } from '../game/types';
+import type { CityId, Officer, PassId } from '../game/types';
 
 export type CultivateCategory = 'stat' | 'aptitude' | 'skill';
 
 interface CultivateDialogProps {
   cityId: CityId;
+  /** 关隘据点 id：存在时以关隘为宿主（执行武将从关隘驻军中选取） */
+  passId?: PassId;
   category: CultivateCategory;
   onClose: () => void;
 }
@@ -79,18 +81,22 @@ function categoryCssClass(cat: CultivateCategory): string {
   return cat === 'stat' ? 'cultivate-stat' : cat === 'aptitude' ? 'cultivate-apt' : 'cultivate-skill';
 }
 
-export function CultivateDialog({ cityId, category, onClose }: CultivateDialogProps) {
+export function CultivateDialog({ cityId, passId, category, onClose }: CultivateDialogProps) {
   const { state, issueCommand } = useGame();
   const forceId = state?.playerForceId;
-  const city = state?.cities[cityId];
-  if (!state || !forceId || !city) return null;
+  const garrison = passId ? state?.passes?.[passId] : state?.cities[cityId];
+  if (!state || !forceId || !garrison) return null;
 
   const officers: Officer[] = useMemo(
     () =>
       Object.values(state.officers).filter(
-        (officer) => officer.forceId === forceId && officer.location.kind === 'city' && officer.location.cityId === cityId,
+        (officer) =>
+          officer.forceId === forceId &&
+          (passId
+            ? officer.location.kind === 'pass' && officer.location.passId === passId
+            : officer.location.kind === 'city' && officer.location.cityId === cityId),
       ),
-    [state, forceId, cityId],
+    [state, forceId, cityId, passId],
   );
 
   const [selectedOfficerId, setSelectedOfficerId] = useState<string | null>(officers[0]?.id ?? null);
@@ -106,7 +112,7 @@ export function CultivateDialog({ cityId, category, onClose }: CultivateDialogPr
     const remain = abilityCultivateRemaining(state, forceId, selectedNode.id);
     if (remain <= 0 || !canCultivateOfficer(selectedOfficer, selectedNode)) return;
     if (ap < COMMAND_AP.cultivate) return;
-    issueCommand({ type: 'cultivate', cityId, officerId: selectedOfficer.id, nodeId: selectedNode.id });
+    issueCommand({ type: 'cultivate', cityId, passId, officerId: selectedOfficer.id, nodeId: selectedNode.id });
     onClose();
   };
 

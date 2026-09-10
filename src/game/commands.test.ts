@@ -303,7 +303,7 @@ describe('command engine', () => {
       type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: [],
     });
 
-    expect(enemy).toContain('只能调往己方城市');
+    expect(enemy).toContain('只能调往己方据点');
     expect(empty).toContain('至少移动一名武将');
   });
 
@@ -336,7 +336,7 @@ describe('command engine', () => {
 
     expect(validateCommand(state, 'liu', {
       type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['guan-yu'],
-    })).toContain('只能移动出发城市内的己方武将');
+    })).toContain('只能移动出发据点内的己方武将');
   });
 
   it('summons an officer from another owned city to the current city with the same travel time', () => {

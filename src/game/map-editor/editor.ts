@@ -1,6 +1,6 @@
 import { sevenCellCityFootprint } from '../battle/grid';
 import { GRID_HEIGHT, GRID_WIDTH } from '../battle/scenario';
-import type { GridCell, TerrainType } from '../types';
+import type { ForceId, GridCell, TerrainType } from '../types';
 
 export interface EditableCityMarker {
   id: string;
@@ -9,10 +9,27 @@ export interface EditableCityMarker {
   r: number;
 }
 
+/** 城池/关隘统一标记（schema v2）：type 区分城池与关隘，forceId 缺省/null 表示无主（空城/空关隘） */
+export interface EditorStrongholdMarker extends EditableCityMarker {
+  type?: 'city' | 'pass';
+  forceId?: ForceId | null;
+}
+
+/** 可持久化的地图载荷（schema v2） */
+export interface EditorMapPayload {
+  schemaVersion: 2;
+  width: number;
+  height: number;
+  backgroundImage: string;
+  grid: GridCell[];
+  cities: EditorStrongholdMarker[];
+  name?: string;
+}
+
 interface EditorSnapshot {
   backgroundImage: string;
   grid: GridCell[];
-  cities: EditableCityMarker[];
+  cities: EditorStrongholdMarker[];
   width: number;
   height: number;
 }
@@ -20,14 +37,14 @@ interface EditorSnapshot {
 export interface MapEditorState {
   backgroundImage: string;
   grid: GridCell[];
-  cities: EditableCityMarker[];
+  cities: EditorStrongholdMarker[];
   width: number;
   height: number;
   history: EditorSnapshot[];
   future: EditorSnapshot[];
 }
 
-export type MapEditorTool = TerrainType | 'city';
+export type MapEditorTool = TerrainType | 'city' | 'pass' | 'erase';
 
 export type TerrainMaskLayer = 'water' | 'mountain' | 'forest' | 'road' | 'city';
 
@@ -36,13 +53,15 @@ export interface TerrainMaskExport {
   content: string;
 }
 
-interface EditorJsonPayload {
+interface EditorJsonPayloadV1 {
   schemaVersion: 1;
   width: number;
   height: number;
   backgroundImage: string;
   grid: GridCell[];
   cities: EditableCityMarker[];
+  /** v1 预留：可能带独立的关隘标记（无 type，视为 pass） */
+  passes?: EditableCityMarker[];
 }
 
 export const MAX_EDITOR_GRID_SIZE = 512;
@@ -174,7 +193,7 @@ function isEditableCityMarker(value: unknown, width: number, height: number): va
     city.r! < height;
 }
 
-function parseEditorJsonPayload(json: string): EditorJsonPayload {
+function parseEditorJsonPayload(json: string): EditorMapPayload {
   let payload: unknown;
   try {
     payload = JSON.parse(json);
@@ -183,7 +202,9 @@ function parseEditorJsonPayload(json: string): EditorJsonPayload {
   }
 
   if (!payload || typeof payload !== 'object') throw new Error('地图 JSON 无效');
-  const value = payload as Partial<EditorJsonPayload>;
+
+  // 同时校验 v1 与 v2 公共字段
+  const value = payload as Partial<EditorMapPayload> & Partial<EditorJsonPayloadV1>;
   if (
     !Number.isInteger(value.width) || value.width! < 1 || value.width! > MAX_EDITOR_GRID_SIZE ||
     !Number.isInteger(value.height) || value.height! < 1 || value.height! > MAX_EDITOR_GRID_SIZE
@@ -193,7 +214,7 @@ function parseEditorJsonPayload(json: string): EditorJsonPayload {
   const expectedCellCount = width * height;
   const seen = new Set<string>();
   if (
-    value.schemaVersion !== 1 ||
+    (value.schemaVersion !== 1 && value.schemaVersion !== 2) ||
     typeof value.backgroundImage !== 'string' ||
     !Array.isArray(value.grid) ||
     value.grid.length !== expectedCellCount ||
@@ -211,17 +232,34 @@ function parseEditorJsonPayload(json: string): EditorJsonPayload {
     throw new Error('地图 JSON 无效');
   }
 
+  // v1：补齐 type/forceId 并升级为 v2
+  const rawCities = value.cities as Array<EditableCityMarker | EditorStrongholdMarker>;
+  const rawPasses = (value.passes ?? []) as EditableCityMarker[];
+  const cities: EditorStrongholdMarker[] = [
+    ...rawCities.map((city) => {
+      const marker = city as EditorStrongholdMarker;
+      return { ...marker, type: marker.type ?? 'city', forceId: marker.forceId === undefined ? null : marker.forceId };
+    }),
+    ...rawPasses.map((pass) => ({ ...pass, type: 'pass' as const, forceId: null as ForceId | null })),
+  ];
+
+  // v2 中额外校验 type 合法性（v1 已升级，天然合法）
+  if (!cities.every((city) => city.type === 'city' || city.type === 'pass')) {
+    throw new Error('地图 JSON 无效');
+  }
+
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     width,
     height,
     backgroundImage: value.backgroundImage,
     grid: cloneGrid(value.grid),
-    cities: cloneCities(value.cities),
+    cities,
+    name: typeof value.name === 'string' ? value.name : undefined,
   };
 }
 
-export function createEditorState(grid: GridCell[], cities: EditableCityMarker[] = [], width: number = GRID_WIDTH, height: number = GRID_HEIGHT): MapEditorState {
+export function createEditorState(grid: GridCell[], cities: EditorStrongholdMarker[] = [], width: number = GRID_WIDTH, height: number = GRID_HEIGHT): MapEditorState {
   return {
     backgroundImage: '',
     grid: cloneGrid(grid),
@@ -246,14 +284,59 @@ export function paintTerrain(state: MapEditorState, coord: { q: number; r: numbe
   });
 }
 
-export function placeCity(state: MapEditorState, city: EditableCityMarker): MapEditorState {
+/** 放置城池/关隘标记（缺省 type 视为城池） */
+export function placeCity(state: MapEditorState, city: EditorStrongholdMarker): MapEditorState {
+  const normalized: EditorStrongholdMarker = {
+    ...city,
+    type: city.type ?? 'city',
+    forceId: city.forceId === undefined ? null : city.forceId,
+  };
   return withHistory(state, {
     backgroundImage: state.backgroundImage,
     width: state.width,
     height: state.height,
     grid: cloneGrid(state.grid),
-    cities: [...state.cities.filter((candidate) => candidate.id !== city.id).map((candidate) => ({ ...candidate })), { ...city }],
+    cities: [...state.cities.filter((candidate) => candidate.id !== normalized.id).map((candidate) => ({ ...candidate })), { ...normalized }],
   });
+}
+
+/** 放置关隘标记 */
+export function placePass(state: MapEditorState, pass: EditorStrongholdMarker): MapEditorState {
+  return placeCity(state, { ...pass, type: 'pass' });
+}
+
+/** 擦除城池/关隘：移除标记并将该格地形重置为平地（擦除工具） */
+export function eraseStronghold(state: MapEditorState, id: string): MapEditorState {
+  const stronghold = state.cities.find((candidate) => candidate.id === id);
+  if (!stronghold) return state;
+  const footprintKeys = new Set(sevenCellCityFootprint(stronghold).map((coord) => `${coord.q},${coord.r}`));
+  const nextGrid = state.grid.map((cell) =>
+    footprintKeys.has(`${cell.q},${cell.r}`) ? { ...cell, terrain: 'plain' as TerrainType } : cell,
+  );
+  return withHistory(state, {
+    backgroundImage: state.backgroundImage,
+    width: state.width,
+    height: state.height,
+    grid: nextGrid,
+    cities: state.cities.filter((candidate) => candidate.id !== id).map((candidate) => ({ ...candidate })),
+  });
+}
+
+/** 新建全平地空白地图（默认 200×200） */
+export function createBlankMap(width: number = 200, height: number = 200): MapEditorState {
+  const grid: GridCell[] = [];
+  for (let q = 0; q < width; q += 1) {
+    for (let r = 0; r < height; r += 1) grid.push({ q, r, terrain: 'plain' });
+  }
+  return {
+    backgroundImage: '',
+    grid,
+    cities: [],
+    width,
+    height,
+    history: [],
+    future: [],
+  };
 }
 
 export function undoEditor(state: MapEditorState): MapEditorState {
@@ -308,19 +391,17 @@ export function setEditorBackgroundImage(state: MapEditorState, backgroundImage:
   });
 }
 
-export function exportEditorJson(state: MapEditorState): string {
-  return JSON.stringify(
-    {
-      schemaVersion: 1,
-      width: state.width,
-      height: state.height,
-      backgroundImage: state.backgroundImage,
-      grid: state.grid,
-      cities: state.cities,
-    },
-    null,
-    2,
-  );
+export function exportEditorJson(state: MapEditorState, name?: string): string {
+  const payload: EditorMapPayload = {
+    schemaVersion: 2,
+    width: state.width,
+    height: state.height,
+    backgroundImage: state.backgroundImage,
+    grid: state.grid,
+    cities: state.cities,
+    ...(name ? { name } : {}),
+  };
+  return JSON.stringify(payload, null, 2);
 }
 
 export function importEditorJson(state: MapEditorState, json: string): MapEditorState {

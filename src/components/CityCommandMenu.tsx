@@ -2,10 +2,10 @@ import { Building2, ChevronRight, Crown, FlaskConical, Globe, Swords, Users } fr
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
-import { COMMAND_AP, OFFICER_COMMANDS, cityAvailableOfficers } from '../game/commands';
+import { COMMAND_AP, OFFICER_COMMANDS, cityAvailableOfficers, passAvailableOfficers } from '../game/commands';
 import { ARMAMENT_FACILITY, hasPlotFacility, isCityBlocked } from '../game/innerAffairs';
 import { useGame } from '../game/store/GameProvider';
-import type { CityId, GameCommand, GameState } from '../game/types';
+import type { CityId, GameCommand, GameState, PassId } from '../game/types';
 import type { CultivateCategory } from './CultivateDialog';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -103,26 +103,36 @@ const SUB_COMMANDS: Record<MenuSection, SubItem[]> = {
 
 interface CityCommandMenuProps {
   cityId: CityId;
+  /** 关隘据点 id：存在时以关隘为宿主（武将/训练/巡查等判断走关隘自身数据） */
+  passId?: PassId;
+  /** 关隘等据点菜单：不显示「都市」段（无都市相关操作） */
+  hideUrban?: boolean;
   actionPoints: number;
   /** 商人本旬是否到访且未交易（无商人时禁用交易项） */
   merchantAvailable: boolean;
   position: { x: number; y: number };
-  onCommand(type: GameCommand['type']): void;
+  onCommand(type: GameCommand['type'], passId?: PassId): void;
   /** 右键"官职"项：打开独立拖拽面板而非原 select 对话框 */
   onAppointPosition?(): void;
-  onCultivate(category: CultivateCategory): void;
-  onOpenCultivatePicker?(): void;
+  onCultivate(category: CultivateCategory, passId?: PassId): void;
+  onOpenCultivatePicker?(passId?: PassId): void;
   onDeploy(cityId: CityId): void;
   onTransport(cityId: CityId): void;
   onClose(): void;
 }
 
-export function CityCommandMenu({ cityId, actionPoints, merchantAvailable, position, onClose, onCommand, onAppointPosition, onCultivate, onOpenCultivatePicker, onDeploy, onTransport }: CityCommandMenuProps) {
+export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoints, merchantAvailable, position, onClose, onCommand, onAppointPosition, onCultivate, onOpenCultivatePicker, onDeploy, onTransport }: CityCommandMenuProps) {
   const audio = useAudioEventAdapter();
   const { state } = useGame();
   const [activeSection, setActiveSection] = useState<MenuSection | null>(null);
   const [activeSubmenu, setActiveSubmenu] = useState<SubMenuId | null>(null);
   const menuRef = useRef<HTMLElement>(null);
+  // 据点可用武将：关隘模式按驻关武将过滤，城池模式按驻城武将过滤
+  const availableOfficers = state
+    ? (passId
+      ? passAvailableOfficers(state, state.playerForceId, passId)
+      : cityAvailableOfficers(state, state.playerForceId, cityId))
+    : [];
 
   const closeCurrentLevel = useCallback(() => {
     if (activeSubmenu) {
@@ -138,41 +148,46 @@ export function CityCommandMenu({ cityId, actionPoints, merchantAvailable, posit
 
   const isDisabled = (item: SubItem) => {
     if ('opens' in item && item.opens) return false;
-    // 城中无可行动武将：所有需要武将执行的命令置灰
-    const noOfficers = state && state.cities[cityId]
-      ? cityAvailableOfficers(state, state.playerForceId, cityId).length === 0
-      : false;
+    // 本据点无可行动武将：所有需要武将执行的命令置灰
+    const noOfficers = availableOfficers.length === 0;
     if (state && item.command && OFFICER_COMMANDS.has(item.command) && noOfficers) {
       return true;
     }
-    // 移动：本城无可行动武将时同样置灰（被移动的武将须在本城未行动）
+    // 移动：本据点无可行动武将时同样置灰（被移动的武将须在本据点未行动）
     if (item.command === 'transfer' && noOfficers) return true;
     // 出征/输送同样需要本城武将带队
     if ((item.action === 'deploy' || item.action === 'transport') && noOfficers) return true;
+    // 关隘暂未开放出征/输送（战斗层尚不支持从关隘出阵），需从所属城池出征
+    if ((item.action === 'deploy' || item.action === 'transport') && passId) return true;
     if ('cultivate' in item && item.cultivate) {
       if (state) return !hasCultivationAvailable(state, item.cultivate);
       return true;
     }
     if (item.command === 'trade') return !merchantAvailable || actionPoints < COMMAND_AP.trade;
-    // 婚姻：需本城同时存在一男一女可用武将，否则不可点击
+    // 婚姻：需本据点同时存在一男一女可用武将，否则不可点击
     if (item.command === 'marry' && state) {
       const leader = state.forces[state.playerForceId]?.leaderId;
-      const avail = cityAvailableOfficers(state, state.playerForceId, cityId);
-      const hasMan = avail.some((o) => o.id !== leader && !o.deathMonth && (o.gender ?? 'male') === 'male');
-      const hasWoman = avail.some((o) => o.id !== leader && !o.deathMonth && (o.gender ?? 'male') === 'female');
+      const hasMan = availableOfficers.some((o) => o.id !== leader && !o.deathMonth && (o.gender ?? 'male') === 'male');
+      const hasWoman = availableOfficers.some((o) => o.id !== leader && !o.deathMonth && (o.gender ?? 'male') === 'female');
       if (!hasMan || !hasWoman) return true;
     }
     if (state) {
-      const menuCity = state.cities[cityId];
-      // 兵临城下：攻击范围内有敌军时禁移动与开发
-      const blocked = isCityBlocked(state, menuCity);
-      if (item.command === 'transfer' && blocked) return true;
-      if (item.command === 'buildFacilityPlot' && blocked) return true;
-      if (item.command === 'train') return Boolean(menuCity?.trainedThisTenDay) || actionPoints < COMMAND_AP.train;
-      if (item.command === 'patrol') return Boolean(menuCity?.patrolledThisTenDay) || actionPoints < COMMAND_AP.patrol;
-      if (item.command === 'recruit') return !hasPlotFacility(menuCity, 'barracks') || actionPoints < COMMAND_AP.recruit;
+      const menuPass = passId ? state.passes?.[passId] : undefined;
+      const menuCity = menuPass ? undefined : state.cities[cityId];
+      // 兵临城下：攻击范围内有敌军时禁移动与开发（关隘不参与封锁判定）
+      if (menuCity && isCityBlocked(state, menuCity)) {
+        if (item.command === 'transfer') return true;
+        if (item.command === 'buildFacilityPlot') return true;
+      }
+      if (item.command === 'train') return Boolean(menuPass?.trainedThisTenDay ?? menuCity?.trainedThisTenDay) || actionPoints < COMMAND_AP.train;
+      if (item.command === 'patrol') return Boolean(menuPass?.patrolledThisTenDay ?? menuCity?.patrolledThisTenDay) || actionPoints < COMMAND_AP.patrol;
+      if (item.command === 'recruit') {
+        const menuGarrison = menuPass ?? menuCity;
+        return !menuGarrison || !hasPlotFacility(menuGarrison, 'barracks') || actionPoints < COMMAND_AP.recruit;
+      }
       if (item.command === 'produceArmament') {
-        const anyProducible = Object.values(ARMAMENT_FACILITY).some((facility) => hasPlotFacility(menuCity, facility));
+        const menuGarrison = menuPass ?? menuCity;
+        const anyProducible = menuGarrison ? Object.values(ARMAMENT_FACILITY).some((facility) => hasPlotFacility(menuGarrison, facility)) : false;
         if (!anyProducible) return true;
       }
     }
@@ -186,19 +201,24 @@ export function CityCommandMenu({ cityId, actionPoints, merchantAvailable, posit
   /** 禁用原因提示（悬停显示） */
   const disabledTitle = (item: SubItem): string | undefined => {
     if (!isDisabled(item)) return undefined;
-    if (state && state.cities[cityId] && cityAvailableOfficers(state, state.playerForceId, cityId).length === 0
+    const menuPass = state && passId ? state.passes?.[passId] : undefined;
+    const menuCity = state && !menuPass ? state.cities[cityId] : undefined;
+    if (availableOfficers.length === 0
       && ((item.command && OFFICER_COMMANDS.has(item.command)) || item.command === 'transfer' || item.action === 'deploy' || item.action === 'transport')) {
-      return '城中没有可行动的武将';
+      return passId ? '关内没有可行动的武将' : '城中没有可行动的武将';
     }
-    const menuBlockedCity = state ? state.cities[cityId] : undefined;
-    if (item.command === 'transfer' && state && menuBlockedCity && isCityBlocked(state, menuBlockedCity)) return '城池被敌方封锁，无法调动武将';
-    if (item.command === 'buildFacilityPlot' && state && menuBlockedCity && isCityBlocked(state, menuBlockedCity)) return '城池被敌方封锁，无法开发建设';
+    if ((item.action === 'deploy' || item.action === 'transport') && passId) return '关隘暂不能出阵，请从所属城池出征';
+    if (item.command === 'transfer' && state && menuCity && isCityBlocked(state, menuCity)) return '城池被敌方封锁，无法调动武将';
+    if (item.command === 'buildFacilityPlot' && state && menuCity && isCityBlocked(state, menuCity)) return '城池被敌方封锁，无法开发建设';
     if (item.command && actionPoints < COMMAND_AP[item.command]) return `行动力不足 ${COMMAND_AP[item.command]}`;
     if ((item.action === 'deploy' || item.action === 'transport') && actionPoints < DEPLOY_AP_COST) return `行动力不足 ${DEPLOY_AP_COST}`;
     if (item.command === 'trade' && !merchantAvailable) return '商人本旬未到访';
-    if (item.command === 'train' && state && state.cities[cityId]?.trainedThisTenDay) return '本旬该城已训练';
-    if (item.command === 'patrol' && state && state.cities[cityId]?.patrolledThisTenDay) return '本旬该城已巡查';
-    if (item.command === 'recruit' && state && !hasPlotFacility(state.cities[cityId], 'barracks')) return '需先建设兵舍才能征兵';
+    if (item.command === 'train' && (menuPass?.trainedThisTenDay ?? menuCity?.trainedThisTenDay)) return passId ? '本旬该关已训练' : '本旬该城已训练';
+    if (item.command === 'patrol' && (menuPass?.patrolledThisTenDay ?? menuCity?.patrolledThisTenDay)) return passId ? '本旬该关已巡查' : '本旬该城已巡查';
+    if (item.command === 'recruit') {
+      const menuGarrison = menuPass ?? menuCity;
+      if (!menuGarrison || !hasPlotFacility(menuGarrison, 'barracks')) return '需先建设兵舍才能征兵';
+    }
     return undefined;
   };
 
@@ -210,12 +230,12 @@ export function CityCommandMenu({ cityId, actionPoints, merchantAvailable, posit
         setActiveSubmenu('relate');
         return;
       }
-      onOpenCultivatePicker?.();
+      onOpenCultivatePicker?.(passId);
       onClose();
       return;
     }
     if ('cultivate' in item && item.cultivate) {
-      onCultivate(item.cultivate);
+      onCultivate(item.cultivate, passId);
       onClose();
       return;
     }
@@ -224,7 +244,7 @@ export function CityCommandMenu({ cityId, actionPoints, merchantAvailable, posit
     if (item.command === 'appointPosition' && onAppointPosition) {
       onAppointPosition();
     } else if (item.command) {
-      onCommand(item.command);
+      onCommand(item.command, passId);
     }
     onClose();
   };
@@ -266,7 +286,7 @@ export function CityCommandMenu({ cityId, actionPoints, merchantAvailable, posit
       onContextMenu={(event) => closePopupOnContextMenu(event, closeCurrentLevel, audio)}
     >
       <div className="city-command-primary">
-        {SECTIONS.map(({ id, label, Icon }) => (
+        {(hideUrban ? SECTIONS.filter((section) => section.id !== 'urban') : SECTIONS).map(({ id, label, Icon }) => (
           <button
             key={id}
             type="button"

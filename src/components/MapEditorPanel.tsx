@@ -1,39 +1,30 @@
+import { useState } from 'react';
 import {
-  Brush, Castle, Droplets, FileImage, FileJson, FileText, Mountain, RotateCcw, RotateCw, Trash2, Trees, Waves,
+  Brush, Castle, Droplets, Eraser, FileText, Mountain, RotateCcw, RotateCw, Save, TreePine, Waves,
 } from 'lucide-react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import type { MapEditorTool } from '../game/map-editor/editor';
 import type { TerrainType } from '../game/types';
-import { closePopupOnContextMenu } from './popupEvents';
 
-interface MapEditorPanelProps {
+export interface MapEditorPanelProps {
   activeTool: MapEditorTool;
-  backgroundImage: string;
   canRedo: boolean;
   canUndo: boolean;
-  calibrationMode: boolean;
-  exportValue: string;
-  onBackgroundImageChange(value: string): void;
-  onBackgroundImageUpload(file: File): void;
-  onCalibrationModeChange(value: boolean): void;
+  onBack(): void;
   onClear(): void;
-  onClose(): void;
-  onExportJson(): void;
-  onExportMasks(): void;
-  onExportTerrainControl(): void;
-  onImportJsonFile(file: File): void;
   onRedo(): void;
+  onSave(name: string): void;
   onSelectTool(tool: MapEditorTool): void;
   onUndo(): void;
 }
 
-const TERRAIN_TOOLS: Array<{ tool: TerrainType; label: string; icon: typeof Brush }> = [
+export const TERRAIN_TOOLS: Array<{ tool: TerrainType; label: string; icon: typeof Brush }> = [
   { tool: 'plain', label: '平地', icon: Brush },
   { tool: 'grass', label: '草地', icon: Brush },
   { tool: 'road', label: '主径', icon: FileText },
   { tool: 'path', label: '小径', icon: FileText },
   { tool: 'plank', label: '栈道', icon: FileText },
-  { tool: 'forest', label: '森林', icon: Trees },
+  { tool: 'forest', label: '森林', icon: TreePine },
   { tool: 'hill', label: '丘陵', icon: Mountain },
   { tool: 'mountain', label: '山崖', icon: Mountain },
   { tool: 'sand', label: '沙地', icon: Brush },
@@ -51,40 +42,30 @@ const TERRAIN_TOOLS: Array<{ tool: TerrainType; label: string; icon: typeof Brus
 
 export function MapEditorPanel({
   activeTool,
-  backgroundImage,
   canRedo,
   canUndo,
-  calibrationMode,
-  exportValue,
-  onBackgroundImageChange,
-  onBackgroundImageUpload,
-  onCalibrationModeChange,
+  onBack,
   onClear,
-  onClose,
-  onExportJson,
-  onExportMasks,
-  onExportTerrainControl,
-  onImportJsonFile,
   onRedo,
+  onSave,
   onSelectTool,
   onUndo,
 }: MapEditorPanelProps) {
   const audio = useAudioEventAdapter();
-  const activeLabel = activeTool === 'city' ? '城市' : TERRAIN_TOOLS.find((item) => item.tool === activeTool)?.label;
+  const [saveName, setSaveName] = useState('');
 
   return (
-    <section className="map-editor-panel tool-panel" data-testid="map-editor-panel" aria-label="地图编辑器" onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
+    <section className="map-editor-panel tool-panel" data-testid="map-editor-panel" aria-label="地图编辑器">
       <header>
         <div>
-          <p>方格图</p>
-          <h2>地图编辑器</h2>
+          <p>地图编辑</p>
+          <h2>地形 / 城池 / 关隘</h2>
         </div>
-        <button type="button" className="secondary-button" onClick={onClose}>关闭</button>
+        <button type="button" className="secondary-button" onClick={onBack}>{'< 返回'}</button>
       </header>
 
       <section className="map-editor-step">
-        <h3>第一步：编辑规则地形</h3>
-        <p>这里编辑的是游戏规则数据，移动、战斗和城市占地都以这些方格为准。</p>
+        <h3>地形刷子</h3>
         <div className="map-editor-tools" aria-label="地形刷子">
           {TERRAIN_TOOLS.map(({ tool, label, icon: Icon }) => (
             <button
@@ -98,6 +79,12 @@ export function MapEditorPanel({
               <span>{label}</span>
             </button>
           ))}
+        </div>
+      </section>
+
+      <section className="map-editor-step">
+        <h3>标记刷子</h3>
+        <div className="map-editor-tools" aria-label="标记刷子">
           <button
             type="button"
             className={activeTool === 'city' ? 'is-active' : ''}
@@ -105,87 +92,57 @@ export function MapEditorPanel({
             onClick={() => onSelectTool('city')}
           >
             <Castle />
-            <span>城市</span>
+            <span>城池</span>
+          </button>
+          <button
+            type="button"
+            className={activeTool === 'pass' ? 'is-active' : ''}
+            aria-pressed={activeTool === 'pass'}
+            onClick={() => onSelectTool('pass')}
+          >
+            <TreePine />
+            <span>关隘</span>
+          </button>
+          <button
+            type="button"
+            className={activeTool === 'erase' ? 'is-active' : ''}
+            aria-pressed={activeTool === 'erase'}
+            onClick={() => onSelectTool('erase')}
+          >
+            <Eraser />
+            <span>擦除</span>
           </button>
         </div>
         <div className="map-editor-actions">
           <button type="button" className="secondary-button" onClick={onUndo} disabled={!canUndo}><RotateCcw />撤销</button>
           <button type="button" className="secondary-button" onClick={onRedo} disabled={!canRedo}><RotateCw />重做</button>
-          <button type="button" className="secondary-button" onClick={onClear}><Trash2 />清空</button>
+          <button type="button" className="secondary-button" onClick={onClear}><Eraser />清空</button>
         </div>
       </section>
 
       <section className="map-editor-step">
-        <h3>第二步：导出给 AI 的素材</h3>
-        <p>先导出控制图和分层遮罩，再用生成地图流程制作水墨底图。</p>
-        <p>导出后，把 terrain-control.svg 和所有 mask-*.svg 文件交给 AI，用 san11-map-generation 生成水墨地图图片。</p>
-        <div className="map-editor-actions map-editor-actions-stack">
-          <button type="button" className="secondary-button" onClick={onExportTerrainControl}><FileImage />导出 AI 控制图</button>
-          <button type="button" className="secondary-button" onClick={onExportMasks}><FileImage />导出 AI 分层遮罩</button>
-        </div>
-      </section>
-
-      <section className="map-editor-step">
-        <h3>第三步：导入生成地图并校准</h3>
-        <p>把生成后的水墨地图作为底图显示，再逐格修正不匹配的地形标记。</p>
-        <p>AI 生成图片后，直接选择图片文件；编辑器会自动显示底图并进入校准模式。</p>
-        <label className="map-editor-upload-field">
-          <span>选择 AI 生成的地图图片</span>
+        <h3>保存</h3>
+        <p>输入地图名字后保存，返回地图列表可再次进入编辑。</p>
+        <label className="map-editor-background-field">
+          <span>地图名</span>
           <input
-            aria-label="选择 AI 生成的地图图片"
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/svg+xml"
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              if (file) onBackgroundImageUpload(file);
-              event.currentTarget.value = '';
-            }}
+            aria-label="地图名"
+            value={saveName}
+            onChange={(event) => setSaveName(event.currentTarget.value)}
+            placeholder="输入地图名字"
           />
         </label>
-        <label className="map-editor-calibration">
-          <input
-            type="checkbox"
-            checked={calibrationMode}
-            onChange={(event) => onCalibrationModeChange(event.currentTarget.checked)}
-          />
-          <span>显示生成地图，进入校准模式</span>
-        </label>
-
-        <details className="map-editor-advanced-path">
-          <summary>手动输入图片路径</summary>
-          <label className="map-editor-background-field">
-            <span>底图地址</span>
-            <input
-              aria-label="底图地址"
-              value={backgroundImage}
-              onChange={(event) => onBackgroundImageChange(event.currentTarget.value)}
-              placeholder="exports/watercolor-map-realistic-preview.png"
-            />
-          </label>
-        </details>
+        <button
+          type="button"
+          className="primary-button map-editor-full-button"
+          onClick={() => {
+            if (saveName.trim()) onSave(saveName.trim());
+          }}
+          disabled={!saveName.trim()}
+        >
+          <Save />保存地图
+        </button>
       </section>
-
-      <section className="map-editor-step">
-        <h3>第四步：导出最终游戏数据</h3>
-        <p>校准完成后导出 JSON；之后也可以把这份 JSON 导入回来，让当前游戏地图读取它。</p>
-        <button type="button" className="primary-button map-editor-full-button" onClick={onExportJson}><FileJson />导出最终游戏地图 JSON</button>
-        <label className="map-editor-upload-field">
-          <span>导入最终游戏地图 JSON</span>
-          <input
-            aria-label="导入最终游戏地图 JSON"
-            type="file"
-            accept="application/json,.json"
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              if (file) onImportJsonFile(file);
-              event.currentTarget.value = '';
-            }}
-          />
-        </label>
-      </section>
-
-      <p className="map-editor-status">当前工具：{activeLabel}</p>
-      <textarea data-testid="map-editor-export" readOnly value={exportValue} aria-label="地图编辑导出结果" />
     </section>
   );
 }

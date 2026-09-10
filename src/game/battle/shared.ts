@@ -5,7 +5,7 @@ export {
   removeUnit,
   unitTerrain,
 } from './legacyCore';
-export { areAdjacent, isCityInAttackRange } from './targetRules';
+export { areAdjacent, isCityInAttackRange, isPassInAttackRange } from './targetRules';
 export {
   deploymentCells,
   isLegalUnitCell,

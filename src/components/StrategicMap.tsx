@@ -6,10 +6,12 @@ import { isWaterTerrain } from '../game/battle/catalog';
 import { coordsWithinRange, gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
 import { china42Passes } from '../game/scenario/jingxiang208';
+import { passAt, passAttackRangeCoords, passBlockedKeys } from '../game/passes';
 import { PLOT_LABELS, CITY_ATTACK_RANGE, CITY_ATTACK_MIN } from '../game/innerAffairs';
+import { rulerCityOf } from '../game/territory';
 import type { EditableCityMarker } from '../game/map-editor/editor';
 import { useGame } from '../game/store/GameProvider';
-import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GridCell, StrategyResultReport, TroopType } from '../game/types';
+import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GridCell, PassId, StrategyResultReport, TroopType } from '../game/types';
 
 interface MapView {
   x: number;
@@ -20,17 +22,26 @@ interface MapView {
 // 缩放范围按横向可见格数定义：最高角度视野约 30 格，最低角度约 11 格
 const FARTHEST_VISIBLE_CELLS = 30;
 const NEAREST_VISIBLE_CELLS = 11;
+/** 编辑器模式下允许的最远视野列数：放宽可见范围以呈现一大片地形网格，同时避免全量 200×200 渲染卡顿 */
+const EDITOR_FARTHEST_CELLS = 64;
 // 每次缩放的倍率（视野格数按此比例增减）
 const ZOOM_FACTOR = 1.2;
 const CELL_SIZE = 43;
+// 实心地形（自带深色边界、以色块+描边表现）：不叠八角浅白方格线，保留自身描边
+const SOLID_TERRAIN = new Set(['mountain', 'shore', 'stream', 'river']);
+// 地形格四角斜切量（微切）：正方形四角各切掉一个小直角，轮廓变八边形
+const CELL_CORNER_CUT = 3;
+// 八角描边点：四角各内缩 CELL_CORNER_CUT，形成连续可见的八角线
+const octagonPoints = (x: number, y: number, size: number, cut: number): string =>
+  `${x + cut},${y} ${x + size - cut},${y} ${x + size},${y + cut} ${x + size},${y + size - cut} ${x + size - cut},${y + size} ${x + cut},${y + size} ${x},${y + size - cut} ${x},${y + cut}`;
 // 垂直（行）方向裁剪保留的行缓冲：水平方向按用户诉求精确到 30 格，纵向仅保留少量余量，防止边缘取整缺格
 const ROW_CULL_BUFFER = 3;
 // 边缘自动滚动：鼠标越过视口边缘该像素带后锁定滚动方向并持续平移
 const EDGE_PAN_ZONE_PX = 56;
 // 以接近 60fps 的小步长连续移动（而非低频大步长跳变），避免画面抖动/模糊；
-// 每帧 36px ≈ 2250px/s
+// 每帧 60px ≈ 3750px/s
 const EDGE_PAN_INTERVAL_MS = 16;
-const EDGE_PAN_MAX_STEP_PX = 36;
+const EDGE_PAN_MAX_STEP_PX = 60;
 const TROOP_TEXTURES: Record<TroopType, { glyph: string; label: string }> = {
   sword: { glyph: '剑', label: '剑兵' },
   spear: { glyph: '枪', label: '枪兵' },
@@ -69,7 +80,7 @@ const FACILITY_RANGE: Partial<Record<FacilityType, number>> = {
 const FORCE_COLORED_FACILITIES = new Set<FacilityType>(['drum', 'arrowTower', 'musicTower', 'fortress']);
 
 /** 无主城市的中性色（城牌/小地图圆点） */
-const NEUTRAL_CITY_COLOR = '#9aa0a6';
+const NEUTRAL_CITY_COLOR = '#ffffff';
 
 /** 原版 10 关所锚点（china42x 全图标记） */
 const PASS_ANCHORS = china42Passes();
@@ -88,6 +99,13 @@ const MAX_TERRAIN_CELLS = 8000;
 interface StrategicMapProps {
   onCityMenu?(cityId: CityId, position: { x: number; y: number }): void;
   onCityInfoMenu?(cityId: CityId, position: { x: number; y: number }): void;
+  /** 点击关隘中心锚点：打开关隘命令菜单（无都市段） */
+  onPassMenu?(passId: PassId, position: { x: number; y: number }): void;
+  /** 悬停关隘中心锚点：显示关隘信息弹窗 */
+  onPassHover?(passId: PassId, position: { x: number; y: number }): void;
+  onPassLeave?(): void;
+  /** 右键关隘：打开关隘信息菜单（关隘详细信息/所属武将/势力武将） */
+  onPassInfoMenu?(passId: PassId, position: { x: number; y: number }): void;
   backgroundImage?: string;
   editorGrid?: GridCell[];
   editorCities?: EditableCityMarker[];
@@ -124,8 +142,12 @@ interface StrategicMapProps {
   onCityLeave?(): void;
   onAttackTargetSelect?(unitId: string): void;
   onAttackCityTargetSelect?(cityId: CityId): void;
+  attackTargetPassIds?: PassId[];
+  onAttackPassTargetSelect?(passId: PassId): void;
   onFacilityTargetSelect?(facilityId: string): void;
   onFacilityContextMenu?(facilityId: string, position: { x: number; y: number }): void;
+  /** 移动模式下点击未完成的己方军事设施：询问是否委任修补 */
+  onFacilityRepairPrompt?(facilityId: string, position: { x: number; y: number }): void;
   /** 右键点击设施/城市设施：关闭撤销菜单 */
   onFacilityMenuClose?(): void;
   onFacilityHover?(facilityId: string, position: { x: number; y: number }): void;
@@ -141,6 +163,10 @@ interface StrategicMapProps {
   /** 悬停城市设施（建设用地上的设施） */
   onCityPlotHover?(cityId: CityId, plotIndex: number, position: { x: number; y: number }): void;
   onCityPlotLeave?(): void;
+  /** 出征编成确认后、落位前：在出发城池中心显示待出发部队预览（与正式部队共用渲染，取消出征即消失） */
+  previewUnits?: ArmyUnit[];
+  /** 右键菜单/浮层已打开时冻结镜头：禁止拖拽平移与边缘自动滚动 */
+  freezeView?: boolean;
 }
 
 export function StrategicMap({
@@ -154,6 +180,7 @@ export function StrategicMap({
   firePlots = [],
   moveTargets = [],
   attackTargetCityIds = [],
+  attackTargetPassIds = [],
   attackTargetFacilityIds = [],
   attackTargetUnitIds = [],
   attackTargetPlotKeys,
@@ -165,6 +192,10 @@ export function StrategicMap({
   deployDelegateMode = false,
   onCityMenu,
   onCityInfoMenu,
+  onPassMenu,
+  onPassHover,
+  onPassLeave,
+  onPassInfoMenu,
   onCellHover,
   onConstructionTargetSelect,
   onDeployTargetSelect,
@@ -181,8 +212,10 @@ export function StrategicMap({
   onCityLeave,
   onAttackTargetSelect,
   onAttackCityTargetSelect,
+  onAttackPassTargetSelect,
   onFacilityTargetSelect,
   onFacilityContextMenu,
+  onFacilityRepairPrompt,
   onFacilityMenuClose,
   onFacilityHover,
   onFacilityLeave,
@@ -191,40 +224,65 @@ export function StrategicMap({
   onCityPlotLeave,
   selectedDeployTarget,
   selectedUnitId,
+  previewUnits = [],
+  freezeView = false,
 }: StrategicMapProps) {
-  const { state, selectedCityId, selectCity } = useGame();
-  const [view, setView] = useState<MapView>(() => ({
-    x: 0,
-    y: 0,
-    scale: Math.round(((state?.gridWidth ?? DEFAULT_GRID_WIDTH) / FARTHEST_VISIBLE_CELLS) * 100) / 100,
-  }));
+  const { state, selectedCityId, selectCity, online } = useGame();
+  const [view, setView] = useState<MapView>(() => {
+    const gw = state?.gridWidth ?? DEFAULT_GRID_WIDTH;
+    // 编辑器模式下最远视角放宽（见 EDITOR_FARTHEST_CELLS），初始即呈现一大片可见地形网格
+    const initial = editorMode
+      ? Math.min(gw / FARTHEST_VISIBLE_CELLS, gw / EDITOR_FARTHEST_CELLS)
+      : gw / FARTHEST_VISIBLE_CELLS;
+    return { x: 0, y: 0, scale: Math.round(initial * 100) / 100 };
+  });
   const [hoveredFacilityId, setHoveredFacilityId] = useState<string | null>(null);
   const [hoveredCityId, setHoveredCityId] = useState<CityId | null>(null);
+  const [hoveredPassId, setHoveredPassId] = useState<PassId | null>(null);
   const [hoveredUnitId, setHoveredUnitId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<{ width: number; height: number } | null>(null);
+  /** 视口尺寸的 ref 副本：供常驻 interval（边缘滚动）读取最新布局，避免陈旧闭包 */
+  const viewportRef = useRef<{ width: number; height: number } | null>(null);
+  /** 地图网格宽高的 ref 副本：供常驻 interval 内镜头钳制读取最新比值 */
+  const gridSizeRef = useRef<{ width: number; height: number } | null>(null);
+  /** freezeView 的 ref 副本：供常驻 interval/pointermove 读取最新浮层冻结状态 */
+  const freezeViewRef = useRef(freezeView);
+  freezeViewRef.current = freezeView;
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const regionRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (state) {
+      gridSizeRef.current = {
+        width: state.gridWidth ?? DEFAULT_GRID_WIDTH,
+        height: state.gridHeight ?? DEFAULT_GRID_HEIGHT,
+      };
+    }
+  }, [state]);
 
   useEffect(() => {
     const region = regionRef.current;
     if (!region || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setViewport({ width: entry.contentRect.width, height: entry.contentRect.height });
+        const size = { width: entry.contentRect.width, height: entry.contentRect.height };
+        viewportRef.current = size;
+        setViewport(size);
       }
     });
     observer.observe(region);
     return () => observer.disconnect();
   }, []);
 
-  if (!state) return null;
-
-  const gridWidth = state.gridWidth ?? DEFAULT_GRID_WIDTH;
-  const gridHeight = state.gridHeight ?? DEFAULT_GRID_HEIGHT;
+  const gridWidth = state?.gridWidth ?? DEFAULT_GRID_WIDTH;
+  const gridHeight = state?.gridHeight ?? DEFAULT_GRID_HEIGHT;
   const worldWidth = gridWidth * CELL_SIZE;
   const worldHeight = gridHeight * CELL_SIZE;
   // 视野格数 = gridWidth / scale：最高角度约 30 格（scale 小），最低角度约 11 格（scale 大）
-  const minScale = gridWidth / FARTHEST_VISIBLE_CELLS;
+  // 编辑器模式放宽最远视野，让初始能呈现一大片地形网格
+  const minScale = editorMode
+    ? Math.min(gridWidth / FARTHEST_VISIBLE_CELLS, gridWidth / EDITOR_FARTHEST_CELLS)
+    : gridWidth / FARTHEST_VISIBLE_CELLS;
   const maxScale = gridWidth / NEAREST_VISIBLE_CELLS;
   const clampScale = (value: number) => {
     const clamped = Math.min(maxScale, Math.max(minScale, value));
@@ -243,9 +301,9 @@ export function StrategicMap({
     const top = viewport ? Math.round((viewport.height - (height as number)) / 2 + view.y) : 0;
     return { left, top, width, height };
   };
-  const localCity = Object.values(state.cities).find((city) => city.ownerId === state.playerForceId);
-  const opponentCity = Object.values(state.cities).find((city) => city.ownerId !== state.playerForceId);
-  const perspectiveRotated = state.scenarioId === 'mobile-duel' && Boolean(
+  const localCity = state ? Object.values(state.cities).find((city) => city.ownerId === state.playerForceId) : undefined;
+  const opponentCity = state ? Object.values(state.cities).find((city) => city.ownerId !== state.playerForceId) : undefined;
+  const perspectiveRotated = state?.scenarioId === 'mobile-duel' && Boolean(
     localCity && opponentCity && localCity.gridR < opponentCity.gridR,
   );
   const displayCellPosition = (q: number, r: number) => {
@@ -253,6 +311,32 @@ export function StrategicMap({
     return perspectiveRotated
       ? { x: worldWidth - position.x - CELL_SIZE, y: worldHeight - position.y - CELL_SIZE }
       : position;
+  };
+  // 把镜头中心对准指定格子的中心（世界坐标→CSS 像素→反推 view 偏移），并做边界钳制。
+  // 小地图跳转与“单机开局定位到君主城池”共用同一套换算，保证点哪格/定位哪城就落在视口正中。
+  const centerViewOnCell = (current: MapView, q: number, r: number): MapView => {
+    const vw = viewportRef.current?.width ?? 1280;
+    const vh = viewportRef.current?.height ?? 720;
+    // 目标世界格的中心（旋转场景沿用主视图同一套翻转后的坐标，保证点哪看哪）
+    const center = displayCellPosition(q, r);
+    const targetX = center.x + CELL_SIZE / 2;
+    const targetY = center.y + CELL_SIZE / 2;
+    const cssWidth = Math.max(1, vw * current.scale);
+    const cssHeight = cssWidth * (worldHeight / worldWidth);
+    return clampViewToMap({
+      ...current,
+      x: cssWidth / 2 - (targetX * cssWidth) / worldWidth,
+      y: cssHeight / 2 - (targetY * cssHeight) / worldHeight,
+    });
+  };
+  // 小地图跳转：把主镜头中心移到“地图区域相对位置 (fx, fy)”（0..1）所在的格子上。
+  // fx/fy 与小地图城市点按钮使用同一套 0..1 百分比坐标，保证点哪格就落到对应世界格。
+  const moveCameraToMapFraction = (fx: number, fy: number) => {
+    setView((current) => centerViewOnCell(
+      current,
+      Math.min(gridWidth - 1, Math.max(0, fx * gridWidth)),
+      Math.min(gridHeight - 1, Math.max(0, fy * gridHeight)),
+    ));
   };
   const displayCellCenterPercent = (q: number, r: number) => {
     const position = displayCellPosition(q, r);
@@ -264,34 +348,62 @@ export function StrategicMap({
 
   const zoom = (direction: number) => {
     setView((current) => (
-      { ...current, scale: clampScale(current.scale * (direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR)) }
+      clampViewToMap({ ...current, scale: clampScale(current.scale * (direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR)) })
     ));
+  };
+
+  // 镜头边界钳制：地图内容（等比放大后）必须始终铺满视口，不露出视口外的空白。
+  // 以“内容居中于视口”为 x/y=0，允许偏移量不超过 (内容尺寸 - 视口尺寸) / 2；
+  // 若内容比视口小（理论只在极端宽高比下）则固定为居中 0。
+  const clampViewToMap = (next: MapView): MapView => {
+    const vw = viewportRef.current?.width ?? 1280;
+    const vh = viewportRef.current?.height ?? 720;
+    const gw = gridSizeRef.current?.width ?? gridWidth;
+    const gh = gridSizeRef.current?.height ?? gridHeight;
+    const contentWidth = Math.max(1, vw * next.scale);
+    const contentHeight = Math.max(1, contentWidth * (gh / gw));
+    const maxX = Math.max(0, (contentWidth - vw) / 2);
+    const maxY = Math.max(0, (contentHeight - vh) / 2);
+    return {
+      ...next,
+      x: Math.min(maxX, Math.max(-maxX, next.x)),
+      y: Math.min(maxY, Math.max(-maxY, next.y)),
+    };
   };
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
+    if (freezeViewRef.current) return; // 右键菜单打开时冻结，禁止缩放
     zoom(event.deltaY < 0 ? 1 : -1);
   };
 
   const handleContextMenu = (event: MouseEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('button')) return;
+    // 编辑器模式：右键直接用于拖拽平移，不弹右键菜单
+    if (editorMode) { event.preventDefault(); return; }
     event.preventDefault();
     onMapContextMenu?.({ x: event.clientX + 10, y: event.clientY + 4 });
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (freezeViewRef.current) return; // 浮层菜单打开时画面固定，不启动拖拽
     if ((event.target as HTMLElement).closest('button')) return;
-    if (event.button !== 0) return;
+    // 常规模式：仅左键拖拽（左键也用于刷地形，两者由 button 区分）；
+    // 编辑器模式：左键刷地形、右键拖拽
+    const isDragButton = editorMode ? event.button === 2 : event.button === 0;
+    if (!isDragButton) return;
+    if (editorMode) event.preventDefault(); // 阻止右键触发浏览器默认菜单
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+    if (freezeViewRef.current) return; // 浮层菜单打开期间不响应拖拽平移
     const dx = event.clientX - drag.current.x;
     const dy = event.clientY - drag.current.y;
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
-    setView((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
+    setView((current) => clampViewToMap({ ...current, x: current.x + dx, y: current.y + dy }));
   };
 
   const stopDragging = (event: PointerEvent<HTMLDivElement>) => {
@@ -301,17 +413,24 @@ export function StrategicMap({
   // 边缘自动滚动（摇杆式二维矢量）：以视口中心为原点，鼠标进入四边边缘带后，
   // 镜头沿“鼠标相对中心的方向”以恒定合速移动；方向由相对中心的偏移矢量归一化得到，
   // 因此纯上方只向上、偏右上则向上为主并叠加向右、正右上角上/右两分量并存。
-  // 鼠标移出地图/窗口后沿用最后一次方向继续滚动，回到地图内部（脱离边缘带）才停止。
+  // 鼠标移出地图/窗口后，只要仍在页面内移动，方向会继续随鼠标实时变化；
+  // 只有鼠标回到地图内部（脱离边缘带）才停止。
   useEffect(() => {
     // 记录当前平移的归一化速度矢量（已折算为 view.x/view.y 方向：相对中心向右→x 减小，向上→y 增大）
     const panDirection = { x: 0, y: 0 };
     const pointerMove = (event: globalThis.PointerEvent) => {
       if (drag.current) return;
+      if (freezeViewRef.current) return; // 右键菜单打开时冻结：不进入边缘滚动方向计算
       const region = regionRef.current;
       if (!region) return;
       const target = event.target as Node | null;
-      // 指针需位于地图区域内才更新滚动方向；移出地图/窗口后沿用最后一次方向继续滚动
-      if (!target || !region.contains(target)) return;
+      const hoverEl = target instanceof HTMLElement ? target : null;
+      // 悬停在地图工具/小地图/按钮上时不滚动
+      if (hoverEl?.closest?.('button, .map-tools, .mini-map')) {
+        panDirection.x = 0;
+        panDirection.y = 0;
+        return;
+      }
       const rect = region.getBoundingClientRect();
       // 布局未就绪（如测试环境）时回退到有效视口尺寸，仍以视口左上角为原点
       const bounds = rect.width > 0 && rect.height > 0
@@ -319,14 +438,11 @@ export function StrategicMap({
         : { left: 0, top: 0, width: 1280, height: 720 };
       const relX = event.clientX - bounds.left;
       const relY = event.clientY - bounds.top;
+      // 滚动“激活”前，指针必须位于地图区域内（防止地图外 UI 上的移动误触发滚动）；
+      // 激活后（方向非 0）允许指针移出地图/窗口，只要仍在页面内移动就按当前位置实时刷新方向。
+      const insideRegion = target instanceof Node && region.contains(target);
+      if (!insideRegion && panDirection.x === 0 && panDirection.y === 0) return;
       const zone = EDGE_PAN_ZONE_PX;
-      // 悬停在地图工具/小地图/按钮上时不滚动
-      const hoverEl = target as HTMLElement;
-      if (hoverEl.closest?.('button, .map-tools, .mini-map')) {
-        panDirection.x = 0;
-        panDirection.y = 0;
-        return;
-      }
       const centerX = bounds.width / 2;
       const centerY = bounds.height / 2;
       const inBand = relX < zone || relX > bounds.width - zone
@@ -351,12 +467,23 @@ export function StrategicMap({
       panDirection.y = -dy / length;
     };
     const timer = window.setInterval(() => {
+      if (freezeViewRef.current) {
+        // 右键菜单打开期间冻结：停止边缘滚动并清零方向，避免菜单关闭后残留移动
+        panDirection.x = 0;
+        panDirection.y = 0;
+        return;
+      }
       if (drag.current || (panDirection.x === 0 && panDirection.y === 0)) return;
-      setView((current) => ({
-        ...current,
-        x: current.x + panDirection.x * EDGE_PAN_MAX_STEP_PX,
-        y: current.y + panDirection.y * EDGE_PAN_MAX_STEP_PX,
-      }));
+      setView((current) => {
+        const next = clampViewToMap({
+          ...current,
+          x: current.x + panDirection.x * EDGE_PAN_MAX_STEP_PX,
+          y: current.y + panDirection.y * EDGE_PAN_MAX_STEP_PX,
+        });
+        // 已到地图边缘且钳制后无变化：避免持续触发重渲染
+        if (next.x === current.x && next.y === current.y && next.scale === current.scale) return current;
+        return next;
+      });
     }, EDGE_PAN_INTERVAL_MS);
     document.addEventListener('pointermove', pointerMove);
     return () => {
@@ -365,6 +492,22 @@ export function StrategicMap({
     };
   }, []);
 
+  // 单机进入游戏：镜头自动跳到本方君主所在城池，并让该城池显示在视口正中。
+  // 每局只执行一次（进入/读档时），之后玩家的拖拽、缩放、边缘滚动都不会被重置。
+  const initialFocusCity = state && !editorMode && online.mode !== 'online'
+    ? rulerCityOf(state, state.playerForceId)
+    : undefined;
+  const initialFocusAppliedRef = useRef(false);
+  useEffect(() => {
+    if (initialFocusAppliedRef.current || !initialFocusCity) return;
+    // 浏览器里等 ResizeObserver 首次回报真实视口尺寸后再居中，避免先按回退尺寸居中、布局就绪后再跳一次；
+    // 无 ResizeObserver 的环境（如测试）直接用回退视口，行为确定可断言。
+    if (!viewport && typeof ResizeObserver !== 'undefined') return;
+    initialFocusAppliedRef.current = true;
+    setView((current) => centerViewOnCell(current, initialFocusCity.gridQ, initialFocusCity.gridR));
+  }, [viewport, initialFocusCity]);
+
+  if (!state) return null;
 
   const displayGrid = editorGrid ?? state.grid;
   const displayCities = editorMode
@@ -403,7 +546,10 @@ export function StrategicMap({
   const delegatePathKeys = new Set(delegatePath.map((coord) => `${coord.q},${coord.r}`));
   const firePlotTargetKeys = new Set(firePlotTargets.map((coord) => `${coord.q},${coord.r}`));
   const constructionTargetKeys = new Set(constructionTargets.map((coord) => `${coord.q},${coord.r}`));
+  // 关隘翼格：不可通行且在游戏视图下隐藏渲染（仅编辑器模式保留显示）
+  const blockedPassKeys = state ? passBlockedKeys(state) : new Set<string>();
   const attackTargetCityIdSet = new Set(attackTargetCityIds);
+  const attackTargetPassIdSet = new Set(attackTargetPassIds);
   const attackTargetFacilityIdSet = new Set(attackTargetFacilityIds);
   const attackTargetUnitIdSet = new Set(attackTargetUnitIds);
   const facilityOccupiedKeys = new Set(Object.values(state.facilities ?? {}).map((facility) => `${facility.q},${facility.r}`));
@@ -418,7 +564,7 @@ export function StrategicMap({
   const moveMode = moveTargetKeys.size > 0 || delegatePathKeys.size > 0;
   const firePlotMode = firePlotTargetKeys.size > 0;
   const constructionMode = constructionTargetKeys.size > 0;
-  const renderTerrain = renderTerrainByScale;
+  const renderTerrain = editorMode || renderTerrainByScale;
   // 全图视图下地形格子不渲染时，模式目标格子（部署/移动/火计）仍需独立渲染，否则玩家无法看到可点击目标
   const modeTargetCells = !renderTerrain && (deployMode || moveMode || firePlotMode)
     ? (() => {
@@ -459,6 +605,15 @@ export function StrategicMap({
         return coords.filter((c) => keys.has(gridKey(c)));
       })()
     : [];
+  // 关隘攻击范围格子（鼠标悬停关隘时显示，外1~2圈，不含关隘本身）
+  const passAttackRangeCells = hoveredPassId
+    ? (() => {
+        const pass = state.passes?.[hoveredPassId];
+        if (!pass) return [];
+        const keys = new Set(displayGrid.map(gridKey));
+        return passAttackRangeCoords(pass).filter((coord) => keys.has(gridKey(coord)));
+      })()
+    : [];
   // 部队光环范围格子（鼠标悬停有光环的部队时显示，含自身格）
   const unitAuraRangeCells = hoveredUnitId
     ? (() => {
@@ -472,6 +627,10 @@ export function StrategicMap({
     : [];
   const dismissUnitHover = () => onUnitLeave?.();
   const dismissCityHover = () => onCityLeave?.();
+  const dismissPassHover = () => {
+    setHoveredPassId(null);
+    onPassLeave?.();
+  };
   const selectCityFromMap = (cityId: CityId, position: { x: number; y: number }) => {
     const city = state.cities[cityId];
     if (!city) return;
@@ -485,7 +644,20 @@ export function StrategicMap({
       onCityMenu?.(cityId, position);
     }
   };
-  const renderUnitMarker = (unit: ArmyUnit) => {
+  /** 点击关隘中心锚点：攻击目标优先，否则打开关隘命令菜单（无都市段；仅归属方可见菜单） */
+  const selectPassFromMap = (passId: PassId, position: { x: number; y: number }) => {
+    const pass = state.passes?.[passId];
+    if (!pass) return;
+    dismissPassHover();
+    if (attackTargetPassIdSet.has(passId)) {
+      onAttackPassTargetSelect?.(passId);
+      return;
+    }
+    if (pass.ownerId === state.playerForceId) {
+      onPassMenu?.(passId, position);
+    }
+  };
+  const renderUnitMarker = (unit: ArmyUnit, preview = false) => {
     const position = displayCellPosition(unit.q, unit.r);
     const leaderName = state.officers[unit.leaderId]?.name ?? '';
     const troopType = unit.troopType ?? 'sword';
@@ -515,15 +687,16 @@ export function StrategicMap({
     return (
       <g
         key={unit.id}
-        data-testid="battle-unit-marker"
+        data-testid={preview ? 'deploy-preview-marker' : 'battle-unit-marker'}
         data-grid-position={`${unit.q},${unit.r}`}
         data-troop-type={troopType}
         data-unit-kind={unitKind}
         data-vehicle={onWater ? (vehicle ?? undefined) : undefined}
         data-force-id={unit.forceId}
         data-unit-status={statusFlags || undefined}
-        className={`battle-unit-marker troop-${troopType} unit-${unitKind}${onWater && vehicle ? ` vehicle-${vehicle}` : ''}${selectedUnitId === unit.id ? ' is-selected' : ''}${statusFlags ? ' has-status' : ''}`}
-        style={{ '--force-color': forceColor } as CSSProperties}
+        data-preview={preview ? 'true' : undefined}
+        className={`battle-unit-marker troop-${troopType} unit-${unitKind}${onWater && vehicle ? ` vehicle-${vehicle}` : ''}${selectedUnitId === unit.id ? ' is-selected' : ''}${statusFlags ? ' has-status' : ''}${preview ? ' is-deploy-preview' : ''}`}
+        style={{ '--force-color': forceColor, ...(preview ? { pointerEvents: 'none' } : {}) } as CSSProperties}
         aria-label={`${leaderName} ${texture.label}`}
         onPointerDown={(event) => {
           if (event.button === 0 || event.button === 2) dismissUnitHover();
@@ -614,7 +787,7 @@ export function StrategicMap({
           <text className="battle-unit-model-glyph" x={centerX} y={centerY + 4}>{texture.glyph}</text>
         </g>
         <text className="battle-unit-troops" x={centerX} y={centerY + 24}>{unit.troops.toLocaleString('en-US')}</text>
-        {canActThisTurn && (
+        {canActThisTurn && !preview && (
           <text className="battle-unit-ready-badge" data-testid="battle-unit-ready-badge" x={centerX + 17} y={centerY - 15}>{unit.delegate ? '委' : '未'}</text>
         )}
         {isAttackTarget && (
@@ -763,6 +936,8 @@ export function StrategicMap({
           {cellsToRender.map((cell) => {
             const position = displayCellPosition(cell.q, cell.r);
             const cellKey = `${cell.q},${cell.r}`;
+            // 关隘翼格：游戏视图下隐藏渲染（仅编辑器模式保留显示）
+            if (!editorMode && cell.terrain === 'pass' && blockedPassKeys.has(cellKey)) return null;
             const isDeployTarget = deployTargetKeys.has(cellKey);
             const isMoveTarget = moveTargetKeys.has(cellKey);
             const isDelegatePath = delegatePathKeys.has(cellKey) && !isMoveTarget;
@@ -771,15 +946,17 @@ export function StrategicMap({
             const isSelectedDeployTarget = selectedDeployKey === cellKey;
             const isFacilityOccupied = facilityOccupiedKeys.has(cellKey);
             const cityIdAtCell = cityFootprintByKey.get(cellKey);
+            const passAnchor = !editorMode ? passAt(state, cell) : undefined;
             return (
-              <rect
-                key={`${cell.q},${cell.r}`}
-                data-testid={editorMode ? `editor-cell-${cell.q}-${cell.r}` : isConstructionTarget ? `construction-target-${cell.q}-${cell.r}` : isDeployTarget ? `deploy-target-${cell.q}-${cell.r}` : isMoveTarget ? `move-target-${cell.q}-${cell.r}` : isFirePlotTarget ? `strategy-target-${cell.q}-${cell.r}` : `map-cell-${cell.q}-${cell.r}`}
-                x={position.x}
-                y={position.y}
-                width={CELL_SIZE}
-                height={CELL_SIZE}
-                className={`battle-cell terrain-${cell.terrain}${isFacilityOccupied ? ' is-facility-occupied' : ''}${isDeployTarget ? ' is-deploy-target' : ''}${isMoveTarget ? ' is-move-target' : ''}${isDelegatePath ? ' is-delegate-path' : ''}${isFirePlotTarget ? ' is-strategy-target' : ''}${isConstructionTarget ? ' is-construction-target' : ''}${isSelectedDeployTarget ? ' is-selected-deploy-target' : ''}`}
+              <>
+                <rect
+                  key={`${cell.q},${cell.r}`}
+                  data-testid={editorMode ? `editor-cell-${cell.q}-${cell.r}` : isConstructionTarget ? `construction-target-${cell.q}-${cell.r}` : isDeployTarget ? `deploy-target-${cell.q}-${cell.r}` : isMoveTarget ? `move-target-${cell.q}-${cell.r}` : isFirePlotTarget ? `strategy-target-${cell.q}-${cell.r}` : `map-cell-${cell.q}-${cell.r}`}
+                  x={position.x}
+                  y={position.y}
+                  width={CELL_SIZE}
+                  height={CELL_SIZE}
+                  className={`battle-cell terrain-${cell.terrain}${isFacilityOccupied ? ' is-facility-occupied' : ''}${isDeployTarget ? ' is-deploy-target' : ''}${isMoveTarget ? ' is-move-target' : ''}${isDelegatePath ? ' is-delegate-path' : ''}${isFirePlotTarget ? ' is-strategy-target' : ''}${isConstructionTarget ? ' is-construction-target' : ''}${isSelectedDeployTarget ? ' is-selected-deploy-target' : ''}`}
                 onPointerDown={(event) => {
                   if (event.button !== 0) return;
                   if (isConstructionTarget) {
@@ -814,6 +991,11 @@ export function StrategicMap({
                     onMoveTargetSelect?.({ q: cell.q, r: cell.r }, { x: event.clientX + 12, y: event.clientY + 4 });
                     return;
                   }
+                  if (passAnchor) {
+                    event.stopPropagation();
+                    selectPassFromMap(passAnchor.id, { x: event.clientX + 12, y: event.clientY });
+                    return;
+                  }
                   if (cityIdAtCell) {
                     event.stopPropagation();
                     selectCityFromMap(cityIdAtCell, { x: event.clientX + 12, y: event.clientY });
@@ -823,15 +1005,31 @@ export function StrategicMap({
                   event.stopPropagation();
                   onEditorCellPaint?.({ q: cell.q, r: cell.r });
                 }}
+                onPointerMove={(event) => {
+                  // 编辑器模式下，按住左键拖动时连续刷地形：
+                  // pointerenter 在快速拖动时可能跳格漏触发，pointermove 每次都在当前目标格上触发，更可靠
+                  if (!editorMode || event.button !== 0 || event.buttons !== 1) return;
+                  event.stopPropagation(); // 阻止冒泡到 map-region，避免干扰边缘自动滚动逻辑
+                  onEditorCellPaint?.({ q: cell.q, r: cell.r });
+                }}
                 onContextMenu={(event) => {
-                  if (!cityIdAtCell) return;
+                  if (!cityIdAtCell && !passAnchor) return;
                   dismissCityHover();
                   event.preventDefault();
                   event.stopPropagation();
+                  if (passAnchor) {
+                    dismissPassHover();
+                    onPassInfoMenu?.(passAnchor.id, { x: event.clientX + 12, y: event.clientY });
+                    return;
+                  }
                   onMapContextClose?.();
                 }}
                 onPointerEnter={(event) => {
                   onCellHover?.(cell);
+                  if (passAnchor) {
+                    setHoveredPassId(passAnchor.id);
+                    onPassHover?.(passAnchor.id, { x: event.clientX + 57, y: event.clientY + 47 });
+                  }
                   if (cityIdAtCell) {
                     setHoveredCityId(cityIdAtCell);
                     onCityHover?.(cityIdAtCell, { x: event.clientX + 57, y: event.clientY + 47 });
@@ -841,12 +1039,26 @@ export function StrategicMap({
                   onEditorCellPaint?.({ q: cell.q, r: cell.r });
                 }}
                 onPointerLeave={() => {
+                  if (passAnchor) {
+                    setHoveredPassId(null);
+                    onPassLeave?.();
+                  }
                   if (cityIdAtCell) {
                     setHoveredCityId(null);
                     onCityLeave?.();
                   }
                 }}
-              />
+                />
+                {/* 八角线层：四角微斜切的连续八角线；背景（上一格）保持方形（编辑器及实心地形隐藏） */}
+                {!editorMode && !SOLID_TERRAIN.has(cell.terrain) && (
+                  <polygon
+                    key={`${cell.q},${cell.r}-outline`}
+                    data-cell-outline={`${cell.q},${cell.r}`}
+                    points={octagonPoints(position.x, position.y, CELL_SIZE, CELL_CORNER_CUT)}
+                    className={`battle-cell-outline terrain-${cell.terrain}${isFacilityOccupied ? ' is-facility-occupied' : ''}${isDeployTarget ? ' is-deploy-target' : ''}${isMoveTarget ? ' is-move-target' : ''}${isDelegatePath ? ' is-delegate-path' : ''}${isFirePlotTarget ? ' is-strategy-target' : ''}${isConstructionTarget ? ' is-construction-target' : ''}${isSelectedDeployTarget ? ' is-selected-deploy-target' : ''}`}
+                  />
+                )}
+              </>
             );
           })}
           {/* 建设用地设施覆盖层：显示已建成设施 / 建设中状态 */}
@@ -909,6 +1121,23 @@ export function StrategicMap({
               );
             }).filter((x): x is NonNullable<typeof x> => x !== null)
           )}
+          {/* 关隘单格色块：与城池 footprint 同色（无主=中性灰），使空关隘与空城池观感一致 */}
+          {!editorMode && gridWidth === 200 && gridHeight === 200 && Object.values(state.passes ?? {}).map((pass) => {
+            const force = pass.ownerId ? state.forces[pass.ownerId] : undefined;
+            const position = displayCellPosition(pass.q, pass.r);
+            return (
+              <rect
+                key={`pass-footprint-${pass.id}`}
+                data-testid={`pass-footprint-${pass.id}`}
+                x={position.x + 2}
+                y={position.y + 2}
+                width={CELL_SIZE - 4}
+                height={CELL_SIZE - 4}
+                className={`city-footprint-cell${force ? '' : ' is-neutral'}`}
+                style={{ '--force-color': force?.color ?? NEUTRAL_CITY_COLOR, pointerEvents: 'none' } as CSSProperties}
+              />
+            );
+          })}
           {displayCities.flatMap((city) => (
             sevenCellCityFootprint(city).map((coord) => {
               const position = displayCellPosition(coord.q, coord.r);
@@ -923,7 +1152,7 @@ export function StrategicMap({
                   y={position.y + 2}
                   width={CELL_SIZE - 4}
                   height={CELL_SIZE - 4}
-                  className="city-footprint-cell"
+                  className={`city-footprint-cell${gameCity && !gameCity.ownerId ? ' is-neutral' : ''}`}
                   style={{ '--force-color': city.forceColor } as CSSProperties}
                   onPointerDown={(event) => {
                     if (!gameCity || event.button !== 0) return;
@@ -1003,6 +1232,22 @@ export function StrategicMap({
               />
             );
           })}
+          {/* 关隘攻击范围呼吸闪烁覆盖层（鼠标悬停关隘时显示） */}
+          {passAttackRangeCells.map((coord) => {
+            const position = displayCellPosition(coord.q, coord.r);
+            return (
+              <rect
+                key={`pass-attack-range-${coord.q}-${coord.r}`}
+                data-testid="pass-attack-range-cell"
+                data-pass-attack-position={`${coord.q},${coord.r}`}
+                x={position.x}
+                y={position.y}
+                width={CELL_SIZE}
+                height={CELL_SIZE}
+                className="city-attack-range-cell"
+              />
+            );
+          })}
           {/* 部队光环范围呼吸闪烁覆盖层（鼠标悬停部队时显示） */}
           {unitAuraRangeCells.map((coord) => {
             const position = displayCellPosition(coord.q, coord.r);
@@ -1042,6 +1287,11 @@ export function StrategicMap({
                   }
                   if (isFacilityTarget) {
                     onFacilityTargetSelect?.(facility.id);
+                    return;
+                  }
+                  // 移动模式下点击未完成的己方军事设施：交给上层询问是否委任修补（优先于打开设施菜单）
+                  if (moveMode && selectedUnitId && !isCompleted && state && facility.forceId === state.playerForceId) {
+                    onFacilityRepairPrompt?.(facility.id, { x: event.clientX + 10, y: event.clientY + 4 });
                     return;
                   }
                   onFacilityContextMenu?.(facility.id, { x: event.clientX + 10, y: event.clientY + 4 });
@@ -1102,18 +1352,59 @@ export function StrategicMap({
           {facilityRepairReports.map(renderFacilityRepairNumber)}
         </svg>
         <div className={`city-marker-layer${editorMode || deployMode || moveMode ? ' is-editing' : ''}`} aria-label="荆襄城市" style={zoomStyle()}>
-          {/* 原版关所锚点（china42x 200×200 全图；单格据点，暂为纯标记） */}
-          {gridWidth === 200 && gridHeight === 200 && PASS_ANCHORS.map((pass) => {
-            const position = displayCellCenterPercent(pass.q, pass.r);
+          {/* 原版关所锚点（china42x 200×200 全图；单格据点；标示牌与城池一致，无都市段） */}
+          {gridWidth === 200 && gridHeight === 200 && Object.values(state.passes ?? {}).map((pass) => {
+            const force = pass.ownerId ? state.forces[pass.ownerId] : undefined;
+            const isAttackTarget = attackTargetPassIdSet.has(pass.id);
+            const markerPosition = displayCellCenterPercent(pass.q, pass.r);
             return (
-              <span
+              <button
                 key={pass.id}
-                className="pass-marker"
-                style={{ left: `${position.left}%`, top: `${position.top}%` }}
+                type="button"
+                className={`city-marker${isAttackTarget ? ' is-attack-target' : ''}`}
+                style={{
+                  left: `${markerPosition.left}%`,
+                  top: `${markerPosition.top}%`,
+                  '--force-color': force?.color ?? NEUTRAL_CITY_COLOR,
+                } as CSSProperties}
+                aria-label={`${pass.name} ${force?.name ?? '无主'} ${pass.troops.toLocaleString('en-US')}兵 ${pass.population.toLocaleString('en-US')}人`}
                 data-testid="pass-marker"
+                onContextMenu={(event) => {
+                  dismissPassHover();
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onPassInfoMenu?.(pass.id, { x: event.clientX + 12, y: event.clientY });
+                }}
+                onClick={(event) => {
+                  selectPassFromMap(pass.id, { x: event.clientX + 12, y: event.clientY });
+                }}
+                onPointerEnter={(event) => {
+                  setHoveredPassId(pass.id);
+                  onPassHover?.(pass.id, { x: event.clientX + 57, y: event.clientY + 47 });
+                }}
+                onPointerLeave={() => {
+                  setHoveredPassId(null);
+                  onPassLeave?.();
+                }}
+                onMouseEnter={(event) => {
+                  setHoveredPassId(pass.id);
+                  onPassHover?.(pass.id, { x: event.clientX + 57, y: event.clientY + 47 });
+                }}
+                onMouseLeave={() => {
+                  setHoveredPassId(null);
+                  onPassLeave?.();
+                }}
               >
-                {pass.label}
-              </span>
+                <span className="city-marker-copy">
+                  {isAttackTarget && <span className="city-attack-target-arrow" data-testid="attack-pass-target-arrow">▼</span>}
+                  <strong>{pass.name}</strong>
+                  <span className="city-marker-stats" aria-hidden="true">
+                    <span className="city-marker-stat" data-testid="pass-marker-troops">{pass.troops}</span>
+                    <span className="city-marker-stat-divider" data-testid="pass-marker-stat-divider" />
+                    <span className="city-marker-stat" data-testid="pass-marker-population">{pass.population}</span>
+                  </span>
+                </span>
+              </button>
             );
           })}
           {Object.values(state.cities).map((city) => {
@@ -1181,7 +1472,8 @@ export function StrategicMap({
           })}
         </div>
         <svg className="battle-unit-layer" data-testid="battle-unit-layer" viewBox={`0 0 ${worldWidth} ${worldHeight}`} preserveAspectRatio="none" aria-label="战场部队" style={zoomStyle()}>
-          {Object.values(state.units).map(renderUnitMarker)}
+          {previewUnits.map((unit) => renderUnitMarker(unit, true))}
+          {Object.values(state.units).map((unit) => renderUnitMarker(unit))}
           {firePlots.map(renderFireMarker)}
           {damageReports.map(renderDamageNumber)}
           {strategyResultReports.map(renderStrategyResultLabel)}
@@ -1194,30 +1486,48 @@ export function StrategicMap({
         <button type="button" className="icon-button" aria-label="复位地图" title="复位地图" onClick={() => setView(resetView())}><Maximize2 /></button>
       </div>
 
-      <div className="mini-map tool-panel" aria-label="荆襄小地图">
-        {gridWidth === 200 && gridHeight === 200 && PASS_ANCHORS.map((pass) => (
-          <span
-            key={pass.id}
-            className="mini-pass-dot"
-            style={{
-              left: `${(perspectiveRotated ? 1 - (pass.q + 0.5) / gridWidth : (pass.q + 0.5) / gridWidth) * 100}%`,
-              top: `${(pass.r + 0.5) / gridHeight * 100}%`,
-            }}
-            aria-hidden="true"
-          />
-        ))}
+      <div
+        className="mini-map tool-panel"
+        aria-label="荆襄小地图"
+        data-testid="mini-map"
+        onPointerDown={(event) => {
+          // 小地图上的按压只用于镜头跳转，不触发主地图拖拽/其他地图操作
+          event.stopPropagation();
+          if (event.button !== 0) return;
+          if (freezeViewRef.current) return; // 右键菜单打开时冻结，禁止镜头跳转
+          const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) return;
+          const fx = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+          const fy = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+          moveCameraToMapFraction(fx, fy);
+        }}
+      >
+        {gridWidth === 200 && gridHeight === 200 && PASS_ANCHORS.map((pass) => {
+          const runtimePass = state.passes?.[pass.id as PassId];
+          const force = runtimePass?.ownerId ? state.forces[runtimePass.ownerId] : undefined;
+          return (
+            <span
+              key={pass.id}
+              className="mini-pass-dot"
+              style={{
+                left: `${(perspectiveRotated ? 1 - (pass.q + 0.5) / gridWidth : (pass.q + 0.5) / gridWidth) * 100}%`,
+                top: `${(pass.r + 0.5) / gridHeight * 100}%`,
+                backgroundColor: force?.color ?? NEUTRAL_CITY_COLOR,
+              }}
+              aria-hidden="true"
+            />
+          );
+        })}
         {Object.values(state.cities).map((city) => (
-          <button
+          <span
             key={city.id}
-            type="button"
-            className={selectedCityId === city.id ? 'is-selected' : ''}
+            className={`mini-city-dot${selectedCityId === city.id ? ' is-selected' : ''}`}
             style={{
               left: `${(perspectiveRotated ? 1 - city.mapX : city.mapX) * 100}%`,
-              top: `${(perspectiveRotated ? 1 - city.mapY : city.mapY) * 100}%`,
+              top: `${city.mapY * 100}%`,
               backgroundColor: (city.ownerId ? state.forces[city.ownerId]?.color : undefined) ?? NEUTRAL_CITY_COLOR,
             }}
-            aria-label={`在小地图选择${city.name}`}
-            onClick={() => selectCity(city.id)}
+            aria-hidden="true"
           />
         ))}
       </div>

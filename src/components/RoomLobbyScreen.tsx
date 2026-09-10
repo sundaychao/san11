@@ -1,10 +1,19 @@
 import { LogOut, Play } from 'lucide-react';
+import { getMap } from '../game/mapRegistry';
+import { forcesOfMap } from '../game/scenario/customMap';
 import { FORCE_IDS, SCENARIO_FORCES } from '../game/scenario/jingxiang208';
 import { useGame } from '../game/store/GameProvider';
 import type { ForceId } from '../game/types';
 
 function forceName(forceId: ForceId | null) {
   return forceId ? SCENARIO_FORCES[forceId].name : '未选择';
+}
+
+/** 房间可选地图对应的可选用势力：未指定或注册表缺失的地图回退内置 4 势力，注册表地图按其有主城池的势力列 */
+function availableForcesForMap(map: string | undefined): ForceId[] {
+  if (!map || map === 'small' || map === 'homeland') return [...FORCE_IDS];
+  const sessionMap = getMap(map);
+  return sessionMap ? forcesOfMap(sessionMap.payload) : [...FORCE_IDS];
 }
 
 export function RoomLobbyScreen() {
@@ -14,9 +23,14 @@ export function RoomLobbyScreen() {
   const isHost = online.playerId === online.hostPlayerId;
   const occupiedForceIds = new Set(online.players.flatMap((player) => player.forceId ? [player.forceId] : []));
   const isHomeland = online.map === 'homeland';
-  const minPlayers = isHomeland ? 1 : 2;
+  const availableForces = availableForcesForMap(online.map);
+  const minPlayers = online.map === 'small' ? 2 : 1;
   const readyToStart = online.players.length >= minPlayers && online.players.every((player) => player.forceId);
-  const mapLabel = isHomeland ? '大地图（最多4人，不足电脑补位）' : '小地图（荆襄双人对战）';
+  const mapLabel = online.map === 'small'
+    ? '小地图（荆襄双人对战）'
+    : online.map === 'homeland'
+      ? '大地图（最多4人，不足电脑补位）'
+      : getMap(online.map)?.name ?? online.map;
 
   const chooseForce = async (forceId: ForceId) => {
     try {
@@ -64,7 +78,7 @@ export function RoomLobbyScreen() {
         <section className="room-lobby-forces" aria-label="选择势力">
           <h2>选择势力</h2>
           <div>
-            {FORCE_IDS.map((forceId) => {
+            {availableForces.map((forceId) => {
               const force = SCENARIO_FORCES[forceId];
               const selectedBySelf = self?.forceId === forceId;
               const occupied = occupiedForceIds.has(forceId);

@@ -2,6 +2,7 @@ import { initialArmaments } from '../armaments';
 import { hasCityTrait } from '../cityTraits';
 import { initCityPopulation, initConstructionPlots } from '../innerAffairs';
 import { DEFAULT_OFFICER_LOYALTY, LEADER_INITIAL_LOYALTY } from '../loyalty';
+import { createScenarioPasses } from '../passes';
 import { INITIAL_OFFICER_MERIT, rankForCityCount } from '../ranks';
 import { derivePersonality } from '../debate';
 import { TREASURES } from '../treasures';
@@ -10,6 +11,18 @@ import china42Data from './china42x.json';
 
 type CitySeed = Omit<City, 'durability' | 'gridQ' | 'gridR' | 'id' | 'maxDurability'> & { id: CityId };
 type OfficerSeed = Omit<Officer, 'acted' | 'location'>;
+
+/** 自定义城新建时的默认经济资源（创建城池时复制一份） */
+export const DEFAULT_CITY_ECONOMY = {
+  gold: 5000,
+  food: 30000,
+  population: 400000,
+  troops: 12000,
+  commerce: 50,
+  agriculture: 55,
+  order: 80,
+  training: 65,
+};
 
 const forces: Record<ForceId, Force> = {
   cao: {
@@ -122,8 +135,9 @@ function aptitudes(
 }
 
 const defaultAptitudes = aptitudes('B', 'B', 'B', 'B', 'C', 'C');
+export { defaultAptitudes };
 
-const officerProfiles: Partial<Record<string, { skill: string; aptitudes: OfficerAptitudes }>> = {
+export const officerProfiles: Partial<Record<string, { skill: string; aptitudes: OfficerAptitudes }>> = {
   'cao-cao': { skill: '奸雄', aptitudes: aptitudes('A', 'A', 'A', 'S', 'A', 'B') },
   'cao-ren': { skill: '坚守', aptitudes: aptitudes('A', 'S', 'B', 'A', 'B', 'C') },
   'xun-yu': { skill: '王佐', aptitudes: aptitudes('C', 'C', 'B', 'C', 'A', 'C') },
@@ -162,7 +176,7 @@ const officerProfiles: Partial<Record<string, { skill: string; aptitudes: Office
 };
 
 // 武将性格（义理/野望）：影响季初忠诚波动与挖角难度；未列出的武将取默认 义理55/野望50
-const officerPersonalities: Partial<Record<string, { ambition?: number; righteousness?: number }>> = {
+export const officerPersonalities: Partial<Record<string, { ambition?: number; righteousness?: number }>> = {
   'xun-yu': { righteousness: 82 },
   'zhang-liao': { righteousness: 74 },
   'guo-jia': { ambition: 66 },
@@ -177,7 +191,7 @@ const officerPersonalities: Partial<Record<string, { ambition?: number; righteou
   'mi-fang': { ambition: 72, righteousness: 32 },
 };
 
-const officerSeeds: OfficerSeed[] = [
+export const officerSeeds: OfficerSeed[] = [
   { id: 'cao-cao', name: '曹操', forceId: 'cao', cityId: 'wan', stats: stats(96, 72, 91, 94, 96) },
   { id: 'cao-ren', name: '曹仁', forceId: 'cao', cityId: 'xiangyang', stats: stats(89, 86, 71, 62, 75) },
   { id: 'xun-yu', name: '荀彧', forceId: 'cao', cityId: 'wan', stats: stats(52, 14, 95, 98, 92) },
@@ -245,7 +259,7 @@ export const SCENARIO_START_YEAR = 208;
  * 武将出生年（公元纪年），用于老龄病逝判定。
  * 《三国志》未载生年者采用光荣《三国志》系列的通行推定值。
  */
-const officerBirthYears: Record<string, number> = {
+export const officerBirthYears: Record<string, number> = {
   // 曹操势力
   'cao-cao': 155, 'cao-ren': 168, 'xun-yu': 163, 'xu-huang': 165,
   'xiahou-dun': 157, 'xiahou-yuan': 160, 'zhang-liao': 169, 'yu-jin': 165,
@@ -274,7 +288,7 @@ function toRecord<T extends { id: string }>(items: T[]): Record<string, T> {
 export const FORCE_IDS: ForceId[] = ['cao', 'liu', 'sun', 'biao'];
 
 /** china42x.json 中的城市条目（原版精确坐标 + 原版建设用地坐标） */
-interface China42CityEntry {
+export interface China42CityEntry {
   id: string;
   label: string;
   q: number;
@@ -283,13 +297,13 @@ interface China42CityEntry {
   interior?: Array<[number, number]>;
 }
 
-function getChina42Grid(): GridCell[] {
+export function getChina42Grid(): GridCell[] {
   return (china42Data.grid as { q: number; r: number; terrain: GridCell['terrain'] }[]).map(
     (cell) => ({ q: cell.q, r: cell.r, terrain: cell.terrain }),
   );
 }
 
-function china42CityEntry(cityId: CityId): China42CityEntry {
+export function china42CityEntry(cityId: CityId): China42CityEntry {
   const city = (china42Data.cities as China42CityEntry[]).find((c) => c.id === cityId);
   if (!city) throw new Error(`华夏42城中找不到城市: ${cityId}`);
   return city;
@@ -372,6 +386,7 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
     force.rank = rankForCityCount(cityCount).id;
   }
 
+  const grid = getChina42Grid();
   const state: GameState = {
     schemaVersion: 2,
     scenarioId: 'jingxiang-208',
@@ -386,10 +401,12 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
     forces: initialForces,
     cities,
     officers,
-    grid: getChina42Grid(),
+    grid,
     gridWidth: china42Data.width,
     gridHeight: china42Data.height,
     units: {},
+    // 关隘据点：归属=最近/设定城池的所有者，有主关隘初始 2000 兵/1000 金/10000 粮/枪戟箭马各500
+    passes: createScenarioPasses({ cities, grid }),
     // 宝物开局散落于各城，尚未出土
     treasures: toRecord(TREASURES.map((treasure): TreasureState => ({
       id: treasure.id,

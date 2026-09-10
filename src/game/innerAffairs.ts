@@ -5,7 +5,7 @@ import { armamentProductionTenDays, isDelayedArmament, produceArmamentYield } fr
 import { cityCanBuildFacility, hasCityTrait } from './cityTraits';
 import type { TechBranchId } from './types';
 import { TECH_COSTS, TECH_BRANCHES, researchTenDays } from './techs';
-import type { ArmamentType, City, CityId, ForceId, GameState, GridCell, Legion, Officer, TerrainType } from './types';
+import type { ArmamentType, City, CityId, ForceId, GameState, GridCell, Legion, Officer, Pass, TerrainType } from './types';
 
 /** 本地 clamp，避免与 commands.ts 的循环依赖 */
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -471,7 +471,7 @@ export function constructTenDaysForOfficers(officers: Officer[]): number {
 }
 
 /** 征兵基础量 = 1000 + 魅力总和 × (治安+20) × 5 ÷ 100（魅力纯等权重加和） */
-export function recruitBaseYield(officers: Officer[], city: City): number {
+export function recruitBaseYield(officers: Officer[], city: City | Pass): number {
   const charismaSum = officers.reduce((sum, officer) => sum + officer.stats.charisma, 0);
   return 1000 + (charismaSum * (city.order + 20) * 5) / 100;
 }
@@ -696,7 +696,7 @@ export function initConstructionPlots(
 }
 
 /** 某类型地格的总等级（用于征兵/生产加成） */
-export function plotTotalLevel(city: City, type: PlotType): number {
+export function plotTotalLevel(city: City | Pass, type: PlotType): number {
   return (city.plots ?? []).reduce((sum, plot) => sum + (plot.type === type ? plot.level : 0), 0);
 }
 
@@ -709,8 +709,8 @@ export function plotCountIncludingConstructing(city: City, type: PlotType): numb
 }
 
 /** 城市是否已建成指定设施（至少 1 级） */
-export function hasPlotFacility(city: City, type: PlotType): boolean {
-  return plotTotalLevel(city, type) > 0;
+export function hasPlotFacility(stronghold: City | Pass, type: PlotType): boolean {
+  return plotTotalLevel(stronghold, type) > 0;
 }
 
 /** 兵装生产所需设施：枪/戟/弩→锻冶，冲车/井阑→工房，军马→厩舍，楼船→造船 */
@@ -730,7 +730,7 @@ export function armamentFacilityLabel(armament: ArmamentType): string {
 }
 
 /** 兵舍加成系数：每级兵舍征兵量 +15% */
-export function barracksYieldMultiplier(city: City): number {
+export function barracksYieldMultiplier(city: City | Pass): number {
   return 1 + (plotTotalLevel(city, 'barracks') * 15) / 100;
 }
 
@@ -740,7 +740,7 @@ export function barracksYieldMultiplier(city: City): number {
  * 早先的 smithyYieldMultiplier 固定取工房等级，对枪/戟/弩（实际需要锻冶）无效，故改为按兵装取对应设施。
  * 城池特性产量系数：匠造城锻造系(枪/戟/弩)产量×1.5；畜牧城军马产量×0.6、非畜牧城×0.2。
  */
-export function armamentYieldMultiplier(city: City, armamentType: ArmamentType): number {
+export function armamentYieldMultiplier(city: City | Pass, armamentType: ArmamentType): number {
   const facility = ARMAMENT_FACILITY[armamentType];
   const base = 1 + (plotTotalLevel(city, facility) * 15) / 100;
   if (facility === 'forge') return base * (hasCityTrait(city.id, 'craftsman') ? 1.5 : 1);
@@ -1172,7 +1172,7 @@ function inverseCost(daysOrTenDays: number): number {
 }
 
 export function defaultOfficersFor(
-  city: City,
+  stronghold: City | Pass,
   availableOfficers: Officer[],
   context: DefaultOfficersContext,
 ): string[] {
@@ -1206,16 +1206,16 @@ export function defaultOfficersFor(
     }
     case 'recruit':
       sortByStat = 'charisma';
-      score = (subset) => recruitBaseYield(subset, city);
+      score = (subset) => recruitBaseYield(subset, stronghold);
       break;
     case 'train':
       sortByStat = 'war';
       // 训练受 (100 - currentTraining) 上限影响，用 clamp 后的值作为 score
-      score = (subset) => Math.min(trainMoraleGain(subset, city.troops), Math.max(0, 100 - city.training));
+      score = (subset) => Math.min(trainMoraleGain(subset, stronghold.troops), Math.max(0, 100 - stronghold.training));
       break;
     case 'patrol':
       sortByStat = 'leadership';
-      score = (subset) => Math.min(patrolOrderGain(subset), Math.max(0, 100 - city.order));
+      score = (subset) => Math.min(patrolOrderGain(subset), Math.max(0, 100 - stronghold.order));
       break;
     case 'research': {
       sortByStat = TECH_BRANCHES.find((branch) => branch.id === context.branch)?.researchStat ?? 'politics';

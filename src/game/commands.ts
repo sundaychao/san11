@@ -12,10 +12,11 @@ import { RUMOR_AP_COST, RUMOR_GOLD_COST, resolveRumor, POACH_AP_COST, POACH_GOLD
 import { DIPLOMACY_AP_COST, GOODWILL_GOLD_COST, DIPLOMACY_GOLD_MAX, REINFORCEMENT_TEN_DAYS, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, adjustDiplomacy, areAllies, forceHasCity, goodwillGain, resolveAlliance, resolveRequestTroops, resolveTruce } from './diplomacy';
 import { CAPTIVE_RECRUIT_LOYALTY_THRESHOLD, capturableByLoyalty, executeCaptive, recruitCaptiveChance, releaseCaptive, resolveRecruitCaptive } from './captives';
 import { MARRY_TECHP_COST, RELATIONSHIP_LABELS, areRelated, enterRelationship, relationshipValidation } from './relationship';
+import { isPassBlocked } from './passes';
 import { createDebate } from './debate';
 import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, COMMAND_OFFICER_MAX,
                              appointSuccessorGovernor, hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
-import type { City, CityId, ForceId, GameCommand, GameState, Legion, Officer, TechBranchId } from './types';
+import type { City, CityId, ForceId, GameCommand, GameState, Legion, Officer, Pass, PassId, TechBranchId } from './types';
 
 export const COMMAND_AP = {
   recruit: 20,
@@ -87,8 +88,8 @@ export const TRADE_MAX_GRAIN = 30000;
 // 每旬各城商人到访概率
 export const MERCHANT_ARRIVAL_CHANCE = 1 / 4;
 
-export function grainPriceOf(city: City): number {
-  const price = city.grainPrice;
+export function grainPriceOf(stronghold: City | Pass): number {
+  const price = 'grainPrice' in stronghold ? stronghold.grainPrice : undefined;
   return typeof price === 'number' && price >= GRAIN_PRICE_MIN && price <= GRAIN_PRICE_MAX
     ? price
     : DEFAULT_GRAIN_PRICE;
@@ -117,6 +118,11 @@ export function rollMerchants(state: GameState): void {
     city.trainedThisTenDay = false;
     city.patrolledThisTenDay = false;
   }
+  // 关隘也随每旬重置训练/巡查标记（关隘无治安值、无商人到访）
+  for (const pass of Object.values(state.passes ?? {})) {
+    pass.trainedThisTenDay = false;
+    pass.patrolledThisTenDay = false;
+  }
 }
 
 // 交易效果：政治50为100%，每点政治约增减 1/350（政治81≈108%，政治100≈114%）
@@ -134,8 +140,8 @@ export interface TradeQuote {
 }
 
 // amount 统一为兵粮数量：买入时为拟购入的兵粮数（所需资金向上取整），卖出时为拟售出的兵粮数
-export function quoteTrade(city: City, politics: number, mode: 'buy' | 'sell', amount: number): TradeQuote {
-  const price = grainPriceOf(city);
+export function quoteTrade(stronghold: City | Pass, politics: number, mode: 'buy' | 'sell', amount: number): TradeQuote {
+  const price = grainPriceOf(stronghold);
   const effect = tradeEffectMultiplier(politics);
   if (mode === 'buy') {
     return { goldDelta: -Math.ceil(amount / (price * effect)), foodDelta: amount };
@@ -155,16 +161,51 @@ export function transferDuration(source: City, target: City) {
   return Math.max(1, Math.ceil(transferDistance(source, target) / 10));
 }
 
-/** 巡查费用：每 100,000 人口 50 金 */
-export function patrolGoldCost(city: City): number {
-  return Math.max(1, Math.ceil((city.population / 100_000) * 50));
+/** 据点坐标（城池用 gridQ/gridR，关隘用 q/r） */
+export function strongholdCoords(stronghold: City | Pass): { q: number; r: number } {
+  if (isPassGarrison(stronghold)) return { q: stronghold.q, r: stronghold.r };
+  return { q: stronghold.gridQ, r: stronghold.gridR };
 }
 
-function commandGoldCost(command: GameCommand, city?: City) {
+/** 据点间移动距离（关隘与城池可混算） */
+export function strongholdTransferDistance(source: City | Pass, target: City | Pass): number {
+  const a = strongholdCoords(source);
+  const b = strongholdCoords(target);
+  return Math.abs(a.q - b.q) + Math.abs(a.r - b.r);
+}
+
+/** 据点间移动耗时（旬） */
+export function strongholdTransferDuration(source: City | Pass, target: City | Pass): number {
+  return Math.max(1, Math.ceil(strongholdTransferDistance(source, target) / 10));
+}
+
+/** 据点补任太守（城池/关隘通用）：无主则清空，否则在驻扎武将中选政治最高者 */
+export function appointStrongholdSuccessor(state: GameState, stronghold: City | Pass): void {
+  if (!stronghold.ownerId) {
+    stronghold.governorId = null;
+    return;
+  }
+  const candidates = Object.values(state.officers).filter((officer) =>
+    officer.forceId === stronghold.ownerId &&
+    (isPassGarrison(stronghold)
+      ? officer.location.kind === 'pass' && officer.location.passId === stronghold.id
+      : officer.location.kind === 'city' && officer.location.cityId === stronghold.id));
+  const best = candidates.sort((a, b) => b.stats.politics - a.stats.politics || a.id.localeCompare(b.id))[0];
+  stronghold.governorId = best ? best.id : null;
+}
+
+/** 巡查费用：每 100,000 人口 50 金 */
+export function patrolGoldCost(stronghold: City | Pass): number {
+  return Math.max(1, Math.ceil((stronghold.population / 100_000) * 50));
+}
+
+function commandGoldCost(command: GameCommand, stronghold?: City | Pass) {
   switch (command.type) {
     case 'recruit': return 800;
-    case 'produceArmament': return city ? armamentCost(city, command.armamentType) : ARMAMENT_GOLD_COST;
-    case 'patrol': return city ? patrolGoldCost(city) : 300;
+    case 'produceArmament': return stronghold
+      ? (isPassGarrison(stronghold) ? ARMAMENT_GOLD_COST : armamentCost(stronghold, command.armamentType))
+      : ARMAMENT_GOLD_COST;
+    case 'patrol': return stronghold ? patrolGoldCost(stronghold) : 300;
     case 'talent': return 500;
     case 'abilityResearch': return ABILITY_RESEARCH_GOLD;
     case 'reward': return REWARD_GOLD_COST * command.officerIds.length;
@@ -192,16 +233,31 @@ export function researchTechPCost(state: GameState, forceId: ForceId, branch: Te
 
 function validateTransfer(state: GameState, forceId: ForceId, command: Extract<GameCommand, { type: 'transfer' }>) {
   const errors: string[] = [];
-  const target = state.cities[command.targetCityId];
-  if (!target || target.ownerId !== forceId) errors.push('只能调往己方城市');
-  if (command.targetCityId === command.cityId) errors.push('目标城市不能与出发城市相同');
+  const sourcePass = command.passId ? state.passes?.[command.passId] : undefined;
+  const sourceCity = state.cities[command.cityId];
+  const targetPass = command.targetPassId ? state.passes?.[command.targetPassId] : undefined;
+  const targetCity = state.cities[command.targetCityId];
+  if (sourcePass) {
+    if (sourcePass.ownerId !== forceId) errors.push('只能从己方关隘调动武将');
+  } else if (!sourceCity || sourceCity.ownerId !== forceId) {
+    errors.push('只能从己方城市调动武将');
+  }
+  const targetOwner = targetPass ? targetPass.ownerId : targetCity?.ownerId;
+  if (!targetOwner || targetOwner !== forceId) errors.push('只能调往己方据点');
+  const sourceToken = sourcePass ? sourcePass.id : command.cityId;
+  const targetToken = targetPass ? targetPass.id : command.targetCityId;
+  if (targetToken === sourceToken) errors.push('目标据点不能与出发据点相同');
   if (command.officerIds.length === 0) errors.push('至少移动一名武将');
-  if (isCityBlocked(state, state.cities[command.cityId])) errors.push('城池被敌方封锁，无法调动武将');
+  if (sourcePass) {
+    if (isPassBlocked(state, sourcePass)) errors.push('关隘被敌方封锁，无法调动武将');
+  } else if (isCityBlocked(state, sourceCity)) {
+    errors.push('城池被敌方封锁，无法调动武将');
+  }
 
   for (const officerId of command.officerIds) {
     const officer = state.officers[officerId];
-    if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== command.cityId) {
-      errors.push('只能移动出发城市内的己方武将');
+    if (!officerInStronghold(state, forceId, officerId, command)) {
+      errors.push('只能移动出发据点内的己方武将');
       break;
     }
     if (officer.acted) {
@@ -212,10 +268,17 @@ function validateTransfer(state: GameState, forceId: ForceId, command: Extract<G
   return errors;
 }
 
-/** 召唤：将本方势力其他城池的待命武将召唤至本城，耗时与移动相同 */
+/** 召唤：将本方势力其他据点（城池/关隘）的待命武将召唤至本据点，耗时与移动相同 */
 function validateSummon(state: GameState, forceId: ForceId, command: Extract<GameCommand, { type: 'summon' }>) {
   const errors: string[] = [];
-  const target = state.cities[command.cityId];
+  const targetPass = command.passId ? state.passes?.[command.passId] : undefined;
+  const target = targetPass ?? state.cities[command.cityId];
+  const targetLabel = targetPass ? targetPass.name : target?.name ?? '';
+  if (targetPass) {
+    if (targetPass.ownerId !== forceId) errors.push('只能召唤至己方关隘');
+  } else if (!target || target.ownerId !== forceId) {
+    errors.push('只能召唤至己方城市');
+  }
   if (command.officerIds.length === 0) errors.push('至少召唤一名武将');
   for (const officerId of command.officerIds) {
     const officer = state.officers[officerId];
@@ -223,17 +286,21 @@ function validateSummon(state: GameState, forceId: ForceId, command: Extract<Gam
       errors.push('只能召唤本方势力的武将');
       break;
     }
+    const sourcePass = officer.location.kind === 'pass' ? state.passes?.[officer.location.passId] : undefined;
     const sourceCity = officer.location.kind === 'city' ? state.cities[officer.location.cityId] : undefined;
-    if (officer.location.kind !== 'city' || !sourceCity) {
-      errors.push(`只能召唤${officer.name}所在城池的待命武将`);
+    if (officer.location.kind !== 'city' && officer.location.kind !== 'pass') {
+      errors.push(`只能召唤${officer.name}所在据点的待命武将`);
       break;
     }
-    if (sourceCity.ownerId !== forceId) {
-      errors.push('只能召唤本方势力城池的武将');
+    const source = sourcePass ?? sourceCity;
+    if (!source || source.ownerId !== forceId) {
+      errors.push('只能召唤本方势力据点的武将');
       break;
     }
-    if (officer.location.cityId === command.cityId) {
-      errors.push(`${officer.name}已在${target.name}，无需召唤`);
+    const officerToken = sourcePass ? sourcePass.id : sourceCity!.id;
+    const targetToken = targetPass ? targetPass.id : command.cityId;
+    if (officerToken === targetToken) {
+      errors.push(`${officer.name}已在${targetLabel}，无需召唤`);
       break;
     }
     if (officer.acted) {
@@ -248,9 +315,21 @@ type SingleOfficerCommand = Exclude<GameCommand, { type: 'transfer' } | { type: 
 
 function localOfficer(state: GameState, forceId: ForceId, command: SingleOfficerCommand) {
   const officer = state.officers[command.officerId];
-  return officer?.forceId === forceId && officer.location.kind === 'city' && officer.location.cityId === command.cityId
-    ? officer
-    : undefined;
+  if (!officer || officer.forceId !== forceId) return undefined;
+  if ('passId' in command && command.passId) {
+    return officer.location.kind === 'pass' && officer.location.passId === command.passId ? officer : undefined;
+  }
+  return officer.location.kind === 'city' && officer.location.cityId === command.cityId ? officer : undefined;
+}
+
+/** 武将是否位于命令对应据点（携带 passId 时校验关隘驻扎，否则校验城池） */
+function officerInStronghold(state: GameState, forceId: ForceId, officerId: string, command: GameCommand): boolean {
+  const officer = state.officers[officerId];
+  if (!officer || officer.forceId !== forceId) return false;
+  if ('passId' in command && command.passId) {
+    return officer.location.kind === 'pass' && officer.location.passId === command.passId;
+  }
+  return officer.location.kind === 'city' && officer.location.cityId === command.cityId;
 }
 
 /** 多人执行指令（征兵/兵装/训练/巡查/科技研究/开发建设）：提取执行武将数组 */
@@ -270,6 +349,39 @@ export function cityAvailableOfficers(state: GameState, forceId: ForceId, cityId
   );
 }
 
+/** 关隘中可执行命令的武将（驻扎关隘、待命、未行动、在世） */
+export function passAvailableOfficers(state: GameState, forceId: ForceId, passId: PassId): Officer[] {
+  return Object.values(state.officers).filter(
+    (officer) => officer.forceId === forceId && officer.location.kind === 'pass'
+      && officer.location.passId === passId && !officer.acted && !officer.deathMonth,
+  );
+}
+
+/** 命令对应的据点可用武将（命令携带 passId 时按关隘驻扎武将过滤，否则按城池过滤） */
+export function strongholdAvailableOfficers(state: GameState, forceId: ForceId, command: GameCommand): Officer[] {
+  if ('passId' in command && command.passId) return passAvailableOfficers(state, forceId, command.passId);
+  return cityAvailableOfficers(state, forceId, command.cityId);
+}
+
+/** 命令执行的资源宿主（关隘命令读写关隘自身金/粮/兵/气力/人口/兵装，其余读写城池） */
+export function commandGarrison<T extends GameCommand>(state: GameState, command: T): City | Pass {
+  if ('passId' in command && command.passId) {
+    const pass = state.passes?.[command.passId];
+    if (pass) return pass;
+  }
+  return state.cities[command.cityId];
+}
+
+/** 资源宿主是否为关隘（用于区分关隘与城池：关隘无都市设施/商人/地格） */
+export function isPassGarrison(g: City | Pass): g is Pass {
+  return 'flankKeys' in g;
+}
+
+/** 依赖都市设施/内政建设的命令：关隘不提供（视为「无都市选项」） */
+export const URBAN_COMMANDS: ReadonlySet<GameCommand['type']> = new Set([
+  'recruit', 'produceArmament', 'trade', 'buildFacilityPlot', 'cancelCityPlot',
+]);
+
 /** 需要本城武将执行的命令类型（执行时消耗一名武将行动） */
 export const OFFICER_COMMANDS: ReadonlySet<GameCommand['type']> = new Set([
   'recruit', 'produceArmament', 'train', 'patrol', 'talent', 'explore',
@@ -279,13 +391,28 @@ export const OFFICER_COMMANDS: ReadonlySet<GameCommand['type']> = new Set([
 export function validateCommand(state: GameState, forceId: ForceId, command: GameCommand): string[] {
   const errors: string[] = [];
   const city = state.cities[command.cityId];
+  const pass = 'passId' in command && command.passId ? state.passes?.[command.passId] : undefined;
+  const strongholdName = pass ? `${pass.name}` : city?.name ?? '';
   if (state.phase !== 'playing') errors.push('本局已经结束');
-  if (!city || city.ownerId !== forceId) errors.push('只能管理己方城市');
 
-  // 需要武将执行的命令：本城无可用（待命未行动）武将时统一拦截
-  if (city && city.ownerId === forceId && OFFICER_COMMANDS.has(command.type)
-    && cityAvailableOfficers(state, forceId, city.id).length === 0) {
-    errors.push('城中没有可行动的武将');
+  // 据点归属校验：命令携带 passId 时校验关隘归属，否则校验城池归属
+  if (pass) {
+    if (pass.ownerId !== forceId) errors.push('只能管理己方关隘');
+  } else if (!city || city.ownerId !== forceId) {
+    errors.push('只能管理己方城市');
+  }
+
+  // 关隘视为「无都市选项」：依赖都市设施/地格的内政命令在关隘不可用
+  if (pass && URBAN_COMMANDS.has(command.type)) {
+    errors.push('关隘无法执行该都市内政操作');
+    return [...new Set(errors)];
+  }
+
+  // 需要武将执行的命令：据点无可用（待命未行动）武将时统一拦截
+  const ownerOk = pass ? pass.ownerId === forceId : Boolean(city && city.ownerId === forceId);
+  if (ownerOk && OFFICER_COMMANDS.has(command.type)
+    && strongholdAvailableOfficers(state, forceId, command).length === 0) {
+    errors.push(`${pass ? '关隘' : '城中'}没有可行动的武将`);
   }
 
   // 褒奖：可勾选多位本城待命的己方武将（不受行动状态限制），按忠诚从低到高排序由 UI 决定
@@ -331,8 +458,8 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
       } else {
         for (const officerId of officerIds) {
           const officer = state.officers[officerId];
-          if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== command.cityId) {
-            errors.push('只能指派本城待命的己方武将');
+          if (!officerInStronghold(state, forceId, officerId, command)) {
+            errors.push(`${pass ? '关隘' : '本城'}没有该待命武将`);
             break;
           }
           if (officer.acted) {
@@ -344,7 +471,7 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     } else {
       const officer = localOfficer(state, forceId, command as SingleOfficerCommand);
       if (!officer) {
-        errors.push('武将不在目标城市');
+        errors.push(`${pass ? '武将不在目标关隘' : '武将不在目标城市'}`);
       } else if (officer.acted) {
         errors.push(`${officer.name}本月已行动`);
       }
@@ -358,8 +485,8 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     } else {
       for (const officerId of command.officerIds) {
         const officer = state.officers[officerId];
-        if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== command.cityId) {
-          errors.push('只能指派本城待命的己方武将');
+        if (!officerInStronghold(state, forceId, officerId, command)) {
+          errors.push(`${pass ? '关隘' : '本城'}没有该待命武将`);
           break;
         }
         if (officer.acted) {
@@ -369,7 +496,8 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
       }
       const apCost = EXPLORE_AP_PER_OFFICER * count;
       if (state.actionPoints[forceId] < apCost) errors.push(`行动力不足 ${apCost}`);
-      if (city.gold < EXPLORE_GOLD_PER_OFFICER * count) errors.push(`资金不足 ${EXPLORE_GOLD_PER_OFFICER * count}`);
+      const garrison = commandGarrison(state, command);
+      if (garrison.gold < EXPLORE_GOLD_PER_OFFICER * count) errors.push(`资金不足 ${EXPLORE_GOLD_PER_OFFICER * count}`);
     }
   }
 
@@ -408,11 +536,11 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     } else {
       const target = findLocalTalent(state, city);
       if (!target) {
-        errors.push('本城没有可登用的在野武将');
+        errors.push(`${pass ? '归属城池' : '本城'}没有可登用的在野武将`);
       } else if (target.bannedUntilMonth && target.bannedUntilMonth > state.month) {
         errors.push(`${target.name}短期内不愿仕官，暂时无法登用`);
       }
-      if (city.gold < 500) errors.push('资金不足 500');
+      if (commandGarrison(state, command).gold < 500) errors.push('资金不足 500');
     }
   }
 
@@ -424,8 +552,8 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
   if (command.type === 'poach') {
     const officer = state.officers[command.officerId];
     const target = state.officers[command.targetOfficerId];
-    if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== command.cityId) {
-      errors.push('执行武将不在本城待命');
+    if (!officerInStronghold(state, forceId, command.officerId, command)) {
+      errors.push(`${pass ? '执行武将不在关隘待命' : '执行武将不在本城待命'}`);
     } else if (officer.acted) {
       errors.push(`${officer.name}本月已行动`);
     }
@@ -439,10 +567,10 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     } else if (!state.forces[command.targetForceId]) {
       errors.push('目标势力无效');
     } else if (command.action === 'goodwill') {
-      if (city.gold < GOODWILL_GOLD_COST) errors.push(`资金不足 ${GOODWILL_GOLD_COST}`);
+      if (commandGarrison(state, command).gold < GOODWILL_GOLD_COST) errors.push(`资金不足 ${GOODWILL_GOLD_COST}`);
     } else if (command.action === 'alliance' || command.action === 'truce') {
       const gold = command.gold ?? 0;
-      if (gold < 0 || gold > city.gold) errors.push('资金不足');
+      if (gold < 0 || gold > commandGarrison(state, command).gold) errors.push('资金不足');
       if (gold > DIPLOMACY_GOLD_MAX) errors.push(`最多送出${DIPLOMACY_GOLD_MAX.toLocaleString('en-US')}金`);
       if (command.action === 'truce') {
         const months = command.months ?? 0;
@@ -496,7 +624,7 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
       for (const officer of officers) {
         if (officer.forceId !== forceId) errors.push(`只能与己方武将结义（${officer.name}）`);
         if (officer.id === leaderId) errors.push('君主不能参与结义');
-        if (officer.location.kind !== 'city' || officer.location.cityId !== command.cityId) errors.push(`${officer.name}必须在本城待命`);
+        if (!officerInStronghold(state, forceId, officer.id, command)) errors.push(`${officer.name}必须在本据点待命`);
         if (officer.acted) errors.push(`${officer.name}本月已行动`);
         if (officer.deathMonth) errors.push('已故武将无法结义');
       }
@@ -561,18 +689,20 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
   }
   if (!city) return [...new Set(errors)];
 
-  const goldCost = commandGoldCost(command, city);
-  if (city.gold < goldCost) errors.push(`资金不足 ${goldCost}`);
+  const stronghold = commandGarrison(state, command);
+  const isPass = isPassGarrison(stronghold);
+  const goldCost = commandGoldCost(command, stronghold);
+  if (stronghold.gold < goldCost) errors.push(`资金不足 ${goldCost}`);
   if (command.type === 'recruit') {
     if (!hasPlotFacility(city, 'barracks')) errors.push('需先建设兵舍才能征兵');
     if (city.food < 500) errors.push('兵粮不足 500');
     if (city.population < 500) errors.push('人口不足 500');
   }
   if (command.type === 'train') {
-    if (city.trainedThisTenDay) errors.push('本旬该城已训练');
-    if (city.food < 300) errors.push('兵粮不足 300');
+    if (stronghold.trainedThisTenDay) errors.push(isPass ? '本旬该关隘已训练' : '本旬该城已训练');
+    if (stronghold.food < 300) errors.push('兵粮不足 300');
   }
-  if (command.type === 'patrol' && city.patrolledThisTenDay) errors.push('本旬该城已巡查');
+  if (command.type === 'patrol' && stronghold.patrolledThisTenDay) errors.push(isPass ? '本旬该关隘已巡查' : '本旬该城已巡查');
   if (command.type === 'produceArmament') {
     if (!ARMAMENT_TYPES.includes(command.armamentType)) {
       errors.push('兵装类型无效');
@@ -607,7 +737,7 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
       if (level >= MAX_TECH_LEVEL) errors.push('该方向科技已研究完毕');
       else {
         const cost = TECH_COSTS[level];
-        if (city.gold < cost.gold) errors.push(`资金不足 ${cost.gold}`);
+        if (stronghold.gold < cost.gold) errors.push(`资金不足 ${cost.gold}`);
         const requiredTechP = researchTechPCost(state, forceId, command.branch, command.officerIds);
         if ((state.forces[forceId]?.techP ?? 0) < requiredTechP) errors.push(`技巧P不足 ${requiredTechP}`);
         // 每旬每势力同时只能研究一项（含城间）
@@ -662,6 +792,8 @@ function resolveTalentSearch(state: GameState, forceId: ForceId, city: City, off
     talent.location = { kind: 'city', cityId: city.id };
     talent.cityId = city.id;
     talent.loyalty = recruitmentInitialLoyalty(talent);
+    // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
+    talent.acted = true;
     addTechP(state, forceId, 150);
     return `${officer.name}在${city.name}登用了${talent.name}`;
   }
@@ -685,6 +817,8 @@ function resolveExplore(state: GameState, forceId: ForceId, city: City, officer:
     talent.location = { kind: 'city', cityId: city.id };
     talent.cityId = city.id;
     talent.loyalty = recruitmentInitialLoyalty(talent);
+    // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
+    talent.acted = true;
     addTechP(state, forceId, 150);
     parts.push(`登用了${talent.name}`);
   } else if (talent) {
@@ -729,52 +863,62 @@ function applyTreasureStatDelta(officer: Officer, treasureId: string, sign: 1 | 
 }
 
 function applyTransfer(state: GameState, command: Extract<GameCommand, { type: 'transfer' }>) {
-  const source = state.cities[command.cityId];
-  const target = state.cities[command.targetCityId];
-  const duration = transferDuration(source, target);
+  const sourcePass = command.passId ? state.passes?.[command.passId] : undefined;
+  const source = sourcePass ?? state.cities[command.cityId];
+  const targetPass = command.targetPassId ? state.passes?.[command.targetPassId] : undefined;
+  const target = targetPass ?? state.cities[command.targetCityId];
+  const duration = strongholdTransferDuration(source, target);
   const names: string[] = [];
   let governorLeft = false;
   for (const officerId of command.officerIds) {
     const officer = state.officers[officerId];
     names.push(officer.name);
-    // 若为出发城太守，调离后该城自动补任太守
+    // 若为出发据点太守，调离后自动补任太守
     if (source.governorId === officerId) {
       source.governorId = null;
       governorLeft = true;
     }
     officer.location = {
       kind: 'transfer',
-      fromCityId: command.cityId,
-      targetCityId: command.targetCityId,
+      fromCityId: sourcePass ? sourcePass.homeCityId : command.cityId,
+      fromPassId: sourcePass?.id,
+      targetCityId: targetPass ? targetPass.homeCityId : command.targetCityId,
+      targetPassId: targetPass?.id,
       remainingTenDays: duration,
     };
-    officer.cityId = command.cityId;
+    officer.cityId = sourcePass ? sourcePass.homeCityId : command.cityId;
     officer.acted = true;
   }
-  if (governorLeft) appointSuccessorGovernor(state, source);
+  if (governorLeft) appointStrongholdSuccessor(state, source);
   return `${source.name}向${target.name}移动${names.join('、')}，预计${duration}旬抵达`;
 }
 
-/** 召唤结算：各武将自所在城池向本城移动，耗时与移动相同 */
+/** 召唤结算：各武将自所在据点向本据点移动，耗时与移动相同 */
 function applySummon(state: GameState, command: Extract<GameCommand, { type: 'summon' }>) {
-  const target = state.cities[command.cityId];
+  const targetPass = command.passId ? state.passes?.[command.passId] : undefined;
+  const target = targetPass ?? state.cities[command.cityId];
   const parts: string[] = [];
   for (const officerId of command.officerIds) {
     const officer = state.officers[officerId];
-    const source = state.cities[officer.location.kind === 'city' ? officer.location.cityId : command.cityId];
-    const duration = transferDuration(source, target);
-    // 若为所在城太守，被召唤后该城自动补任太守
+    const sourcePass = officer.location.kind === 'pass' ? state.passes?.[officer.location.passId] : undefined;
+    const sourceCity = officer.location.kind === 'city' ? state.cities[officer.location.cityId] : undefined;
+    const source = sourcePass ?? sourceCity;
+    if (!source) continue;
+    const duration = strongholdTransferDuration(source, target);
+    // 若为所在据点太守，被召唤后自动补任太守
     const wasGovernor = source.governorId === officerId;
     if (wasGovernor) source.governorId = null;
     officer.location = {
       kind: 'transfer',
-      fromCityId: source.id,
-      targetCityId: command.cityId,
+      fromCityId: sourcePass ? sourcePass.homeCityId : sourceCity!.id,
+      fromPassId: sourcePass?.id,
+      targetCityId: targetPass ? targetPass.homeCityId : command.cityId,
+      targetPassId: targetPass?.id,
       remainingTenDays: duration,
     };
-    // cityId 保留在原出发城池（与移动一致），抵达后再归属本城
+    // cityId 保留在原出发据点（与移动一致），抵达后再归属本据点
     officer.acted = true;
-    if (wasGovernor) appointSuccessorGovernor(state, source);
+    if (wasGovernor) appointStrongholdSuccessor(state, source);
     parts.push(`${officer.name}自${source.name}向${target.name}移动，预计${duration}旬抵达`);
   }
   return parts.join('；');
@@ -786,6 +930,9 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
 
   const next = structuredClone(state);
   const city = next.cities[command.cityId];
+  const stronghold = commandGarrison(next, command);
+  const isPass = isPassGarrison(stronghold);
+  const garrisonName = stronghold?.name ?? (city?.name ?? '');
   let message = '';
   next.battleDamageReports = [];
   next.cityEffectReports = [];
@@ -873,34 +1020,34 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'train': {
       const officers = command.officerIds.map((officerId) => next.officers[officerId]);
       const names = officers.map((officer) => officer.name).join('、');
-      city.food -= 300;
-      city.trainedThisTenDay = true;
+      stronghold.food -= 300;
+      stronghold.trainedThisTenDay = true;
       // 气力提升 = 【(武力总和 + 武力最大值) ÷ 基数】+ 3，基数 = 士兵数÷2000 + 20
-      // 兵部：城池建有兵部时训练效果翻倍
-      let gain = trainMoraleGain(officers, city.troops);
-      if (hasPlotFacility(city, 'bingbu')) gain *= 2;
-      city.training = clamp(city.training + gain, 0, 100);
+      // 兵部：城池建有兵部时训练效果翻倍（关隘无都市设施不生效）
+      let gain = trainMoraleGain(officers, stronghold.troops);
+      if (!isPass && hasPlotFacility(city, 'bingbu')) gain *= 2;
+      stronghold.training = clamp(stronghold.training + gain, 0, 100);
       addTechP(next, forceId, TECHP_PER_TRAIN);
-      message = `${names}训练${city.name}守军，气力+${gain}`;
+      message = `${names}训练${garrisonName}守军，气力+${gain}`;
       for (const officer of officers) officer.acted = true;
       break;
     }
     case 'patrol': {
       const officers = command.officerIds.map((officerId) => next.officers[officerId]);
       const names = officers.map((officer) => officer.name).join('、');
-      city.gold -= patrolGoldCost(city);
-      city.patrolledThisTenDay = true;
+      stronghold.gold -= patrolGoldCost(stronghold);
+      stronghold.patrolledThisTenDay = true;
       // 治安提升 = 【统率总和 ÷ 28】+ 2
       const gain = patrolOrderGain(officers);
-      city.order = clamp(city.order + gain, 0, 100);
+      stronghold.order = clamp(stronghold.order + gain, 0, 100);
       addTechP(next, forceId, TECHP_PER_PATROL);
-      message = `${names}巡察${city.name}，治安+${gain}`;
+      message = `${names}巡察${garrisonName}，治安+${gain}`;
       for (const officer of officers) officer.acted = true;
       break;
     }
     case 'talent': {
       const officer = next.officers[command.officerId];
-      city.gold -= 500;
+      stronghold.gold -= 500;
       const target = findLocalTalent(next, city);
       if (!target) {
         message = `${officer.name}在${city.name}登庸人才，但城中无在野武将`;
@@ -921,7 +1068,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'explore': {
       const reports = command.officerIds.map((officerId) => {
         const officer = next.officers[officerId];
-        city.gold -= EXPLORE_GOLD_PER_OFFICER;
+        stronghold.gold -= EXPLORE_GOLD_PER_OFFICER;
         officer.acted = true;
         return resolveExplore(next, forceId, city, officer);
       });
@@ -962,7 +1109,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       const branchDef = TECH_BRANCHES.find((candidate) => candidate.id === command.branch)!;
       const level = techLevelOf(next, forceId, command.branch);
       const cost = TECH_COSTS[level];
-      city.gold -= cost.gold;
+      stronghold.gold -= cost.gold;
       const force = next.forces[forceId];
       // 指导：研究技巧P消耗减半（多名执行武将中任一人持有即生效）
       force.techP = Math.max(0, (force.techP ?? 0) - researchTechPCost(next, forceId, command.branch, command.officerIds));
@@ -975,6 +1122,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         officer.location = {
           kind: 'task',
           cityId: city.id,
+          passId: isPass ? command.passId : undefined,
           task: 'research',
           branch: command.branch,
           remainingTenDays: tenDays,
@@ -982,12 +1130,12 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         };
       }
       for (const officer of officers) officer.acted = true;
-      message = `${names}在${city.name}开始研究${branchDef.name}系「${branchDef.levels[level].name}」，预计${tenDays}旬完成`;
+      message = `${names}在${garrisonName}开始研究${branchDef.name}系「${branchDef.levels[level].name}」，预计${tenDays}旬完成`;
       break;
     }
     case 'abilityResearch': {
       const node = ABILITY_NODE_MAP[command.nodeId];
-      city.gold -= ABILITY_RESEARCH_GOLD;
+      stronghold.gold -= ABILITY_RESEARCH_GOLD;
       const force = next.forces[forceId];
       const current = force.abilityResearch ?? { researched: [], remaining: {} };
       force.abilityResearch = {
@@ -1003,6 +1151,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       officer.location = {
         kind: 'task',
         cityId: city.id,
+        passId: isPass ? command.passId : undefined,
         task: 'cultivate',
         nodeId: node.id,
         remainingTenDays: CULTIVATE_TEN_DAYS,
@@ -1040,7 +1189,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         officer.rewarded = true;
         names.push(`${officer.name} ${current} → ${officerLoyalty(officer)}`);
       }
-      city.gold -= REWARD_GOLD_COST * command.officerIds.length;
+      stronghold.gold -= REWARD_GOLD_COST * command.officerIds.length;
       message = `褒奖${names.join('、')}，忠诚+${REWARD_LOYALTY_GAIN}`;
       break;
     }
@@ -1064,7 +1213,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'rumor': {
       const officer = next.officers[command.officerId];
       const target = next.cities[command.targetCityId];
-      city.gold -= RUMOR_GOLD_COST;
+      stronghold.gold -= RUMOR_GOLD_COST;
       const result = resolveRumor(next, officer, target);
       officer.acted = true;
       if (result.captured) {
@@ -1090,7 +1239,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'poach': {
       const officer = next.officers[command.officerId];
       const target = next.officers[command.targetOfficerId];
-      city.gold -= POACH_GOLD_COST;
+      stronghold.gold -= POACH_GOLD_COST;
       const result = resolvePoach(next, officer, target);
       officer.acted = true;
       message = result.success
@@ -1106,7 +1255,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       officer.acted = true;
       switch (command.action) {
         case 'goodwill': {
-          city.gold -= GOODWILL_GOLD_COST;
+          stronghold.gold -= GOODWILL_GOLD_COST;
           const gain = goodwillGain(next, forceId, command.targetForceId, officer);
           adjustDiplomacy(next, forceId, command.targetForceId, gain);
           message = `${officer.name}出使${targetForce.name}，增进双方友好度 ${gain}`;
@@ -1114,7 +1263,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         }
         case 'alliance': {
           const gold = command.gold ?? 0;
-          city.gold -= gold;
+          stronghold.gold -= gold;
           const result = resolveAlliance(next, forceId, command.targetForceId, officer, gold);
           if (result.success) {
             next.forces[forceId].allies = [...fromAllies, command.targetForceId];
@@ -1130,7 +1279,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         case 'truce': {
           const gold = command.gold ?? 0;
           const months = command.months ?? TRUCE_MONTHS_MIN;
-          city.gold -= gold;
+          stronghold.gold -= gold;
           const result = resolveTruce(next, forceId, command.targetForceId, officer, gold, months);
           if (result.success) {
             const tenDays = months * 3;
@@ -1205,7 +1354,10 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       if (!target || target.location.kind !== 'captive') break;
       if (command.action === 'recruit') {
         const executor = Object.values(next.officers).find((o) =>
-          o.forceId === forceId && o.location.kind === 'city' && o.location.cityId === city.id && !o.acted && o.id !== next.forces[forceId].leaderId);
+          o.forceId === forceId && !o.acted && o.id !== next.forces[forceId].leaderId
+          && (isPass
+            ? o.location.kind === 'pass' && (o.location.passId === command.passId || command.passId == null)
+            : o.location.kind === 'city' && o.location.cityId === city.id));
         if (!executor) {
           message = '本城没有可用于登用俘虏的武将';
           break;

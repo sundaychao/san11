@@ -247,6 +247,30 @@ describe('舌战系统（移植小程序引擎）', () => {
     }
   });
 
+  it('舌战获胜登庸后，新加入武将标记为已行动（本旬不可再行动、下一旬才可行动）', () => {
+    const state = createGame('cao', 1);
+    const cao = state.officers['cao-cao'];
+    const target = injectUnaffiliated(state, 'wan');
+    state.debateSession = createDebate(state, cao, target);
+    const session = state.debateSession;
+    if (!session) return;
+    // 构造必败目标：当前话题 story，我方「故事 大」直接命中话题，对方只有一张「道理 小」，一击致胜
+    session.currentTopic = 'story';
+    session.p1.cards = [{ uid: 't-big', type: 'topic', topic: 'story', tier: 'big', id: 'story-big', name: '故事 大' }];
+    session.p2.cards = [{ uid: 't-sm', type: 'topic', topic: 'reason', tier: 'sm', id: 'reason-sm', name: '道理 小' }];
+    session.p2.rethinkUsed = true; // 封死 AI 重抽，保证必出「道理 小」
+    session.p2.hp = 1;
+
+    const next = resolveDebateRound(state, 't-big');
+    expect(next.debateSession?.status).toBe('finished');
+    expect(next.debateSession?.winner).toBe('recruiter');
+    // 目标被登用
+    expect(next.officers[target.id].forceId).toBe('cao');
+    expect(next.officers[target.id].location.kind).toBe('city');
+    // 新加入武将本旬已行动，不能再次执行指令
+    expect(next.officers[target.id].acted).toBe(true);
+  });
+
   it('怒气满触发性格激愤并按形态结算', () => {
     const state = createGame('cao', 1);
     const cao = state.officers['cao-cao'];

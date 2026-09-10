@@ -8,7 +8,7 @@ import * as skillRules from '../index';
 import { skillAttackRangeBonus, unitAttackRange } from '../../battle/targetRules';
 import { attackUnit } from '../../battle/combat';
 import { TECH_COSTS, TECHP_PER_BREAK_UNIT } from '../../techs';
-import { executeCommand, researchTechPCost } from '../../commands';
+import { cityAvailableOfficers, executeCommand, researchTechPCost } from '../../commands';
 import {
   absorbTroopsOnCritical,
   breakUnitEnergyRecovery,
@@ -372,5 +372,8 @@ describe('m15c skill hooks (行军/内政/灾害/攻击)', () => {
     const next = executeCommand(state, 'liu', { type: 'explore', cityId: 'jiangling', officerIds: ['liu-bei'] });
 
     expect(next.officers['mi-zhu'].forceId).toBe('liu');
+    // 本旬新加入的武将视为已行动，下一旬才可执行指令
+    expect(next.officers['mi-zhu'].acted).toBe(true);
+    expect(cityAvailableOfficers(next, 'liu', 'jiangling').map((officer) => officer.id)).not.toContain('mi-zhu');
   });
 });

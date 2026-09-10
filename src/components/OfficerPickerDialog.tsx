@@ -1,7 +1,7 @@
 import { X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { OfficerListTable, type OfficerListTab } from './OfficerListDialog';
-import type { Officer } from '../game/types';
+import type { City, Officer, Pass } from '../game/types';
 
 interface OfficerPickerDialogProps {
   /** 可选武将（本城待命、未行动，调用方已按相关能力排序） */
@@ -29,12 +29,14 @@ interface OfficerPickerDialogProps {
   tabs?: OfficerListTab[];
   /** 初始选中的 tab（默认"能力"） */
   initialTab?: OfficerListTab;
+  /** 召唤目标据点（启用"召唤"分类时用于计算各武将召唤日数） */
+  summonTarget?: City | Pass;
   onConfirm(ids: string[]): void;
   onClose(): void;
 }
 
 /** 执行武将勾选弹窗：复用武将一览的 tab + 可排序列 + checkbox，勾选 1~3 名武将共同执行指令 */
-export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, genderRule, hint, disabledOfficerIds, selectAllable, selectAllLimit, tabs, initialTab, onConfirm, onClose }: OfficerPickerDialogProps) {
+export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, genderRule, hint, disabledOfficerIds, selectAllable, selectAllLimit, tabs, initialTab, summonTarget, onConfirm, onClose }: OfficerPickerDialogProps) {
   const [picked, setPicked] = useState<string[]>(() => selectedIds.filter((id) => officers.some((officer) => officer.id === id)));
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -100,6 +102,7 @@ export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, g
             officerIds={officers.map((o) => o.id)}
             initialTab={initialTab ?? '能力'}
             tabs={tabs}
+            summonTarget={summonTarget}
             checkboxes={{
               checked: pickedSet,
               max,

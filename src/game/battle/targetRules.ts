@@ -1,5 +1,5 @@
 import { PLOT_LABELS, PLOT_MAX_DURABILITY, type PlotType } from '../innerAffairs';
-import type { ArmyUnit, City, Facility, ForceId, GameState } from '../types';
+import type { ArmyUnit, City, Facility, ForceId, GameState, Pass } from '../types';
 import { techLevelOf } from '../techs';
 import { effectsOfKind, resolveUnitSkills } from '../skills';
 import { rangedTargetBlockedByForest } from '../skills/rules/combat';
@@ -106,6 +106,25 @@ export function attackableCities(state: GameState, attackerId: string, origin?: 
     .sort((a, b) => (
       Math.min(...sevenCellCityFootprint(cityCenter(a)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, range))) -
       Math.min(...sevenCellCityFootprint(cityCenter(b)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, range))) ||
+      a.id.localeCompare(b.id)
+    ));
+}
+
+export function isPassInAttackRange(state: GameState, attacker: ArmyUnit, pass: Pass) {
+  const range = unitAttackRange(state, attacker);
+  return gridDistanceWithin(attacker, { q: pass.q, r: pass.r }, range) <= range;
+}
+
+export function attackablePasses(state: GameState, attackerId: string, origin?: GridCoord): Pass[] {
+  const attacker = state.units[attackerId];
+  if (!attacker || attacker.kind === 'transport') return [];
+  const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
+  const range = unitAttackRange(state, attackerAtOrigin);
+  return Object.values(state.passes ?? {})
+    // 有守军的无主关隘仍可攻击（消灭守军后占领）；无守军无主关隘直接进驻即可，不列为攻击目标
+    .filter((pass) => pass.ownerId !== attacker.forceId && (pass.ownerId !== null || pass.troops > 0) && isPassInAttackRange(state, attackerAtOrigin, pass))
+    .sort((a, b) => (
+      gridDistanceWithin(attackerAtOrigin, { q: a.q, r: a.r }, range) - gridDistanceWithin(attackerAtOrigin, { q: b.q, r: b.r }, range) ||
       a.id.localeCompare(b.id)
     ));
 }

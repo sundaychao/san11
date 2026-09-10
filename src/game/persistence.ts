@@ -1,7 +1,8 @@
 import { CITY_IDS, FORCE_IDS, OFFICER_IDS, china42InteriorByCityId, createScenarioCities } from './scenario/jingxiang208';
+import { createScenarioPasses, PASS_IDS } from './passes';
 import { createMobileDuelGrid } from './scenario/mobileDuel';
 import { ARMAMENT_TYPES } from './armaments';
-import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Stats, StrategyResultReport } from './types';
+import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, CityId, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Pass, PassId, Stats, StrategyResultReport } from './types';
 import china42Data from './scenario/china42.json';
 import china42xData from './scenario/china42x.json';
 import { initConstructionPlots } from './innerAffairs';
@@ -85,15 +86,51 @@ function validCity(value: unknown): value is City {
   );
 }
 
-function validOfficerLocation(location: unknown) {
+function validPass(value: unknown, custom?: boolean): value is Pass {
+  if (!value || typeof value !== 'object') return false;
+  const pass = value as Partial<Pass>;
+  const armaments = pass.armaments as Record<string, unknown> | undefined;
+  return (
+    typeof pass.id === 'string' &&
+    typeof pass.name === 'string' &&
+    (custom || CITY_IDS.includes(pass.homeCityId as CityId)) &&
+    (pass.ownerId === null || FORCE_IDS.includes(pass.ownerId!)) &&
+    (pass.governorId === null || typeof pass.governorId === 'string') &&
+    validResource(pass.gold) &&
+    validResource(pass.food) &&
+    validResource(pass.population) &&
+    validResource(pass.troops) &&
+    validPercentage(pass.training) &&
+    validPercentage(pass.order) &&
+    (pass.durability === undefined || (
+      validResource(pass.durability) &&
+      validResource(pass.maxDurability) &&
+      pass.durability! <= pass.maxDurability!
+    )) &&
+    Number.isInteger(pass.q) && pass.q! >= 0 &&
+    Number.isInteger(pass.r) && pass.r! >= 0 &&
+    Array.isArray(pass.flankKeys) &&
+    pass.flankKeys!.every((key) => typeof key === 'string') &&
+    (armaments === undefined || (
+      exactKeys(armaments, ARMAMENT_TYPES) &&
+      ARMAMENT_TYPES.every((type) => validResource(armaments[type]) && Number.isInteger(armaments[type]))
+    ))
+  );
+}
+
+function validOfficerLocation(location: unknown, custom?: boolean) {
   if (!location || typeof location !== 'object') return false;
   const value = location as Record<string, unknown>;
+  const cityRef = (cityId: unknown) => typeof cityId === 'string' && (custom || CITY_IDS.includes(cityId as City['id']));
+  const passRef = (passId: unknown) => typeof passId === 'string' && (custom || PASS_IDS.includes(passId as PassId));
   if (value.kind === 'unit') return typeof value.unitId === 'string';
-  if (value.kind === 'city' || value.kind === 'unaffiliated') return CITY_IDS.includes(value.cityId as City['id']);
+  if (value.kind === 'city' || value.kind === 'unaffiliated') return cityRef(value.cityId);
+  if (value.kind === 'pass') return passRef(value.passId);
   if (value.kind === 'task') {
-    const validCity = CITY_IDS.includes(value.cityId as City['id']) &&
+    const validPassId = value.passId === undefined || passRef(value.passId);
+    const validCity = cityRef(value.cityId) &&
       Number.isInteger(value.remainingTenDays) && Number(value.remainingTenDays) > 0;
-    if (!validCity) return false;
+    if (!validPassId || !validCity) return false;
     if (value.task === 'armament') {
       return ARMAMENT_TYPES.includes(value.armamentType as ArmamentType) &&
         Number.isInteger(value.amount) && Number(value.amount) >= 0;
@@ -106,8 +143,10 @@ function validOfficerLocation(location: unknown) {
     return false;
   }
   return value.kind === 'transfer' &&
-    CITY_IDS.includes(value.fromCityId as City['id']) &&
-    CITY_IDS.includes(value.targetCityId as City['id']) &&
+    cityRef(value.fromCityId) &&
+    cityRef(value.targetCityId) &&
+    (value.fromPassId === undefined || passRef(value.fromPassId)) &&
+    (value.targetPassId === undefined || passRef(value.targetPassId)) &&
     Number.isInteger(value.remainingTenDays) &&
     Number(value.remainingTenDays) > 0;
 }
@@ -119,7 +158,7 @@ function validOfficerAptitudes(value: unknown) {
     Object.values(aptitudes).every((grade) => APTITUDE_GRADES.includes(String(grade)));
 }
 
-function validOfficer(value: unknown): value is Officer {
+function validOfficer(value: unknown, custom?: boolean): value is Officer {
   if (!value || typeof value !== 'object') return false;
   const officer = value as Partial<Officer>;
   const stats = officer.stats;
@@ -128,7 +167,7 @@ function validOfficer(value: unknown): value is Officer {
     typeof officer.name === 'string' &&
     (officer.forceId === null || FORCE_IDS.includes(officer.forceId!)) &&
     typeof officer.cityId === 'string' &&
-    validOfficerLocation(officer.location) &&
+    validOfficerLocation(officer.location, custom) &&
     typeof officer.acted === 'boolean' &&
     (officer.skill === undefined || typeof officer.skill === 'string') &&
     (officer.learnedSkills === undefined ||
@@ -263,7 +302,7 @@ function validFacility(value: unknown): value is Facility {
 export function isGameState(value: unknown): value is GameState {
   if (!value || typeof value !== 'object') return false;
   const state = value as Partial<GameState>;
-  const validScenario = state.scenarioId === 'jingxiang-208' || state.scenarioId === 'mobile-duel';
+  const validScenario = state.scenarioId === 'jingxiang-208' || state.scenarioId === 'mobile-duel' || state.scenarioId === 'custom-map';
   if (
     state.schemaVersion !== 2 ||
     !validScenario ||
@@ -287,12 +326,16 @@ export function isGameState(value: unknown): value is GameState {
     (state.phase === 'finished' && state.month !== 24)
   ) return false;
 
+  const isCustom = state.scenarioId === 'custom-map';
   const expectedCityIds = state.scenarioId === 'mobile-duel' ? MOBILE_DUEL_CITY_IDS : CITY_IDS;
-  if (!exactKeys(state.cities, expectedCityIds) ||
+  if (isCustom) {
+    // 自定义地图：城标记 id 可任意，仅校验势力/行动力集合与内置势力一致（沿用 4 势力）
+    if (!exactKeys(state.actionPoints, FORCE_IDS) || !exactKeys(state.forces, FORCE_IDS)) return false;
+  } else if (!exactKeys(state.cities, expectedCityIds) ||
       !exactKeys(state.actionPoints, FORCE_IDS) || !exactKeys(state.forces, FORCE_IDS)) return false;
   if (state.scenarioId === 'jingxiang-208') {
     if (!exactKeys(state.officers, OFFICER_IDS)) return false;
-  } else if (!Object.keys(state.officers).every((officerId) => OFFICER_IDS.includes(officerId as (typeof OFFICER_IDS)[number]))) {
+  } else if (!isCustom && !Object.keys(state.officers).every((officerId) => OFFICER_IDS.includes(officerId as (typeof OFFICER_IDS)[number]))) {
     return false;
   }
 
@@ -303,12 +346,16 @@ export function isGameState(value: unknown): value is GameState {
   const validOfficerReferences = (officer: Officer) => {
     if (!cityById[officer.cityId]) return false;
     if (officer.location.kind === 'unit') return Boolean(state.units![officer.location.unitId]);
+    if (officer.location.kind === 'pass') return Boolean(state.passes?.[officer.location.passId]);
     if (officer.location.kind === 'transfer') {
-      // fromCityId 允许已易主的城（攻城撤退武将从被占城出发）；targetCityId 必须仍属本方
+      // fromCityId 允许已易主的城（攻城撤退武将从被占城出发）；目标据点必须仍属本方
+      const targetPass = officer.location.targetPassId ? state.passes?.[officer.location.targetPassId] : undefined;
+      const targetValid = targetPass
+        ? targetPass.ownerId === officer.forceId
+        : Boolean(cityById[officer.location.targetCityId]) && cityById[officer.location.targetCityId].ownerId === officer.forceId;
       return officer.forceId !== null &&
         Boolean(cityById[officer.location.fromCityId]) &&
-        Boolean(cityById[officer.location.targetCityId]) &&
-        cityById[officer.location.targetCityId].ownerId === officer.forceId;
+        targetValid;
     }
     return Boolean(cityById[officer.location.cityId]);
   };
@@ -320,11 +367,23 @@ export function isGameState(value: unknown): value is GameState {
         officerById[city.governorId].forceId === city.ownerId &&
         officerById[city.governorId].cityId === city.id
       ))) &&
-    officers.every((officer) => validOfficer(officer) && officerById[officer.id] === officer &&
+    officers.every((officer) => validOfficer(officer, isCustom) && officerById[officer.id] === officer &&
       Boolean(cityById[officer.cityId]) &&
-      // 俘虏关押在敌方城，cityId 不要求属本方
-      (officer.location.kind === 'captive' || officer.forceId === null || cityById[officer.cityId].ownerId === officer.forceId) &&
+      // 俘虏关押在敌方城，cityId 不要求属本方；关隘驻将按关隘归属校验
+      (officer.location.kind === 'captive' || officer.forceId === null ||
+        (officer.location.kind === 'pass'
+          ? Boolean(state.passes?.[officer.location.passId]) && state.passes![officer.location.passId].ownerId === officer.forceId
+          : cityById[officer.cityId].ownerId === officer.forceId)) &&
       validOfficerReferences(officer)) &&
+    Object.values(state.passes ?? {}).every((pass) => {
+      if (!validPass(pass, isCustom)) return false;
+      if (pass.governorId === null) return true;
+      const governor = officerById[pass.governorId];
+      return Boolean(governor) &&
+        governor.forceId === pass.ownerId &&
+        governor.location.kind === 'pass' &&
+        governor.location.passId === pass.id;
+    }) &&
     state.grid.every(validGridCell) &&
     Object.values(state.units).every((unit) => validUnit(unit) && state.units![unit.id] === unit &&
       Boolean(officerById[unit.leaderId])) &&
@@ -375,10 +434,11 @@ export function loadSave(storage: SaveAdapter, slot: SaveSlot): LoadResult {
     const injected = injectMissingCities(parsed);
     if (!isGameState(injected)) return { ok: false, reason: '存档无法读取' };
     const migrated = migrateTerrainGrid(injected);
+    const withPasses = injectMissingPasses(migrated);
     // 荆襄剧本：注入的无主新城按原版 interior 位置补建建设用地；
     // 旧档中被规模档位截断的城（如长安12格）也在此补足至原版格数，已有地格不受影响
-    if (migrated.scenarioId === 'jingxiang-208') initConstructionPlots(migrated, china42InteriorByCityId());
-    return { ok: true, state: migrated };
+    if (withPasses.scenarioId === 'jingxiang-208') initConstructionPlots(withPasses, china42InteriorByCityId());
+    return { ok: true, state: withPasses };
   } catch {
     return { ok: false, reason: '存档无法读取' };
   }
@@ -403,7 +463,56 @@ function injectMissingCities(value: unknown): unknown {
   return injected ? { ...state, cities } : value;
 }
 
+/**
+ * 旧版存档升级：补入全部关隘据点，并为每个关隘补齐后续新增字段
+ * （太守 governorId / 气力 training / 治安 order / 每旬训练巡查标记）。
+ * 已有 passes 字段的存档保留其实际拥有权等变化，仅缺失字段补默认值。
+ */
+function injectMissingPasses(value: unknown): GameState {
+  const state = value as GameState;
+  if (state.scenarioId !== 'jingxiang-208' || !state.grid) return state;
+  const defaults = createScenarioPasses(state);
+  if (!state.passes || Object.keys(state.passes).length === 0) {
+    return { ...state, passes: defaults };
+  }
+  let changed = false;
+  const passes = { ...state.passes } as Record<PassId, Pass>;
+  for (const id of PASS_IDS) {
+    const def = defaults[id];
+    const existing = passes[id];
+    if (!existing) {
+      passes[id] = def;
+      changed = true;
+      continue;
+    }
+    const patched: Pass = {
+      ...def,
+      ...existing,
+      governorId: existing.governorId ?? null,
+      training: existing.training ?? def.training,
+      order: existing.order ?? def.order,
+      durability: existing.durability ?? def.durability,
+      maxDurability: existing.maxDurability ?? def.maxDurability,
+      trainedThisTenDay: existing.trainedThisTenDay ?? false,
+      patrolledThisTenDay: existing.patrolledThisTenDay ?? false,
+      armaments: existing.armaments ?? def.armaments,
+      flankKeys: existing.flankKeys ?? def.flankKeys,
+      q: existing.q ?? def.q,
+      r: existing.r ?? def.r,
+    };
+    if (existing.governorId == null || existing.training == null || existing.order == null ||
+        existing.durability == null || existing.maxDurability == null ||
+        existing.trainedThisTenDay == null || existing.patrolledThisTenDay == null) {
+      changed = true;
+    }
+    passes[id] = patched;
+  }
+  return changed ? { ...state, passes } : state;
+}
+
 function migrateTerrainGrid(state: GameState): GameState {
+  // 自定义地图自带完整显式 grid，不做任何地形迁移/兜底替换
+  if (state.scenarioId === 'custom-map') return state;
   // 已是细分地形新地图（china42x，含草地等原版 20 值地形）：
   // 仅归一旧档关所格（曾与建设用地混同为 construction），其余保持原样
   if (state.grid.some((cell) => cell.terrain === 'grass')) return normalizePassCells(state);

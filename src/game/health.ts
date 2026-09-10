@@ -158,6 +158,7 @@ export function rollDeath(state: GameState, officer: Officer, chance: number, ca
 const SCENARIO_START_YEARS: Record<GameState['scenarioId'], number> = {
   'jingxiang-208': 208,
   'mobile-duel': 208,
+  'custom-map': 208,
 };
 
 /** 指定月份的公元年份（局内 month 从 1 起，每 12 个月推进一年） */

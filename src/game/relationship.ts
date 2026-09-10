@@ -1,6 +1,13 @@
 import { officerSkillNames } from './skills';
 import { clampLoyalty, officerLoyalty, setOfficerLoyalty } from './loyalty';
-import type { ForceId, GameState, Officer } from './types';
+import type { ForceId, GameState, Officer, OfficerLocation } from './types';
+
+/** 两名武将是否同据点（同城或同关隘） */
+function sameStronghold(a: Officer, b: Officer): boolean {
+  if (a.location.kind === 'city' && b.location.kind === 'city') return a.location.cityId === b.location.cityId;
+  if (a.location.kind === 'pass' && b.location.kind === 'pass') return a.location.passId === b.location.passId;
+  return false;
+}
 
 /**
  * 婚姻 / 结义系统（参考《三国志11》原版「仲介」功能）：
@@ -44,9 +51,7 @@ export function relationshipValidation(
   const leaderId = state.forces[forceId]?.leaderId;
   if (a.id === leaderId || b.id === leaderId) errors.push('君主不能参与仲介');
   if (a.forceId !== forceId || b.forceId !== forceId) errors.push('只能与己方武将结为关系');
-  if (a.location.kind !== 'city' || b.location.kind !== 'city' || a.location.cityId !== b.location.cityId) {
-    errors.push('双方必须同在本城待命');
-  }
+  if (!sameStronghold(a, b)) errors.push('双方必须同在本据点待命');
   if (areRelated(a, b)) errors.push('二人已结为关系');
   if (a.deathMonth || b.deathMonth) errors.push('已故武将无法结为关系');
   if (kind === 'spouse' && typeof a.gender === 'string' && typeof b.gender === 'string' && a.gender === b.gender) {
@@ -55,12 +60,15 @@ export function relationshipValidation(
   return errors;
 }
 
-/** 结为关系的常用武将名单（同势力、同城、非君主、未婚配） */
-export function relationCandidates(state: GameState, forceId: ForceId, cityId: string, self: Officer, kind: RelationshipKind): Officer[] {
+/** 结为关系的常用武将名单（同势力、同据点、非君主、未婚配） */
+export function relationCandidates(state: GameState, forceId: ForceId, location: OfficerLocation, self: Officer, kind: RelationshipKind): Officer[] {
   return Object.values(state.officers).filter((officer) => {
     if (officer.id === self.id) return false;
     if (officer.forceId !== forceId) return false;
-    if (officer.location.kind !== 'city' || officer.location.cityId !== cityId) return false;
+    const loc = officer.location;
+    if (loc.kind !== location.kind) return false;
+    if (loc.kind === 'city' && location.kind === 'city' && loc.cityId !== location.cityId) return false;
+    if (loc.kind === 'pass' && location.kind === 'pass' && loc.passId !== location.passId) return false;
     if (state.forces[forceId]?.leaderId === officer.id) return false;
     if (officer.deathMonth) return false;
     if (areRelated(self, officer)) return false;

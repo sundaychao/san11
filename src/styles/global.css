@@ -94,6 +94,128 @@ button { color: inherit; }
 .invalid-save { grid-column: 2; display: grid; gap: 7px; padding: 10px 12px; border: 1px solid #a95b51; color: #edaaa2; font-size: 12px; }
 .invalid-save > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .invalid-save button { min-height: 34px; padding: 0 10px; border: 1px solid #c97b71; border-radius: 2px; background: transparent; color: #f0b0a8; cursor: pointer; }
+/* 首页主菜单：右列大按钮面板 */
+.home-menu {
+  grid-column: 2;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+.home-option {
+  min-height: 96px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(244, 237, 217, 0.06);
+  color: var(--paper);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, border-color 160ms ease-out;
+}
+.home-option:hover:not(:disabled), .home-option:focus-visible { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.16); outline: none; }
+.home-option.is-disabled { opacity: 0.5; cursor: not-allowed; }
+.home-option.is-disabled:hover:not(:disabled) { background: rgba(244, 237, 217, 0.06); }
+.home-option svg { width: 26px; height: 26px; color: var(--gold); }
+.home-option.is-disabled svg { color: var(--muted); }
+.home-option span { display: grid; gap: 4px; }
+.home-option strong { font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 22px; }
+.home-option small { color: var(--muted); font-size: 12px; }
+.home-save-quick { display: flex; gap: 8px; }
+.home-save-quick button { flex: 1; min-height: 40px; border: 1px solid var(--gold-line); border-radius: 3px; background: rgba(244, 237, 217, 0.08); color: var(--paper); cursor: pointer; }
+.home-save-quick button:hover, .home-save-quick button:focus-visible { background: rgba(197, 173, 111, 0.18); outline: none; }
+/* 地图编辑全屏界面：画布铺满，控制面板固定在右侧 */
+.map-editor-screen { position: fixed; inset: 0; background: #202a25; }
+.map-editor-screen .map-editor-canvas { position: absolute; inset: 0; }
+.map-editor-screen .map-editor-canvas .map-region { position: relative; width: 100%; height: 100%; }
+.map-editor-screen .map-editor-panel { left: auto; right: 12px; top: 12px; bottom: 12px; max-height: none; }
+/* 新建地图尺寸输入：居中面板 */
+.map-editor-size-dialog {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - 32px));
+  padding: 22px 24px;
+}
+.map-editor-size-dialog header { text-align: center; }
+.map-editor-size-dialog h2 { margin: 0 0 4px; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 26px; }
+.map-editor-size-dialog header p { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+.editor-size-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.editor-size-field { display: grid; gap: 6px; font-size: 13px; color: var(--paper); }
+.editor-size-field span { text-align: center; }
+.editor-size-field input {
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--gold-line);
+  border-radius: 3px;
+  background: #151b19;
+  color: var(--paper);
+  font-size: 18px;
+  text-align: center;
+}
+.editor-size-fields button {
+  grid-column: 1 / -1;
+  min-height: 42px;
+}
+.editor-size-fields button[type='button'] { grid-column: 1 / 2; }
+.editor-size-fields button.secondary-button { grid-column: 2 / 3; }
+/* 地图列表：平铺卡片 + 新建占位 */
+.map-list-screen {
+  min-height: 100dvh;
+  display: grid;
+  align-content: center;
+  gap: 22px;
+  justify-items: center;
+  padding: 40px 24px;
+  background: #202a25;
+}
+.map-list-header { display: flex; align-items: baseline; gap: 14px; width: min(880px, 100%); }
+.map-list-header h1 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 30px; }
+.map-list-header p { margin: 0; color: var(--muted); font-size: 12px; }
+.map-list-grid { width: min(880px, 100%); display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.map-card {
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(244, 237, 217, 0.06);
+  color: var(--paper);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, border-color 160ms ease-out;
+}
+.map-card:hover, .map-card:focus-visible { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.16); outline: none; }
+.map-card-name { font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 22px; }
+.map-card-meta { color: var(--muted); font-size: 12px; }
+.map-card-forces { display: flex; align-items: center; gap: 6px; min-height: 13px; }
+.map-card-forces i { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.35); }
+.map-card-empty { color: var(--muted); font-size: 12px; font-style: normal; }
+.map-card-new { justify-content: center; align-items: center; gap: 8px; border-style: dashed; }
+.map-card-new svg { width: 30px; height: 30px; color: var(--gold); }
+.map-card-new .map-card-name { color: var(--gold); }
+/* 势力选择 */
+.force-select-screen {
+  min-height: 100dvh;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  justify-items: center;
+  padding: 40px 24px;
+  background: #202a25;
+}
+.force-select-header { display: flex; align-items: baseline; gap: 16px; width: min(720px, 100%); }
+.force-select-header h1 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 30px; }
+.force-select-header p { margin: 0; color: var(--muted); font-size: 13px; }
+.force-selection { width: min(720px, 100%); }
+.force-select-empty { color: var(--muted); font-size: 14px; }
 .auth-screen { min-height: 100dvh; display: grid; place-items: center; padding: 36px 20px; background: #202a25; }
 .auth-card { width: min(430px, 100%); display: grid; gap: 15px; padding: 20px; }
 .auth-card header { display: grid; gap: 5px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
@@ -176,18 +298,30 @@ button { color: inherit; }
 .battle-grid-overlay.is-moving { pointer-events: auto; }
 .battle-grid-overlay.is-strategy-targeting { pointer-events: auto; }
 .battle-cell { fill: rgba(232, 214, 134, 0.36); stroke: rgba(255, 250, 218, 0.46); stroke-width: 0.4; vector-effect: non-scaling-stroke; }
-.battle-grid-overlay.is-editing .battle-cell { cursor: crosshair; fill: rgba(232, 214, 134, 0.36); stroke: rgba(255, 250, 218, 0.46); stroke-width: 0.4; }
-.battle-grid-overlay.is-editing .terrain-plain { fill: rgba(232, 214, 134, 0.36); stroke: rgba(255, 250, 218, 0.46); }
-.battle-grid-overlay.is-editing .terrain-road { fill: rgba(222, 222, 222, 0.5); stroke: rgba(246, 246, 246, 0.6); }
-.battle-grid-overlay.is-editing .terrain-forest { fill: rgba(28, 95, 42, 0.5); stroke: rgba(72, 170, 90, 0.6); }
-.battle-grid-overlay.is-editing .terrain-hill { fill: rgba(160, 103, 54, 0.42); stroke: rgba(226, 170, 91, 0.5); }
-.battle-grid-overlay.is-editing .terrain-mountain { fill: #1e2122; stroke: #1e2122; stroke-width: 1; }
-.battle-grid-overlay.is-editing .terrain-shallowWater { fill: rgba(38, 125, 168, 0.45); stroke: rgba(126, 213, 238, 0.52); }
-.battle-grid-overlay.is-editing .terrain-deepWater { fill: rgba(16, 57, 99, 0.58); stroke: rgba(86, 148, 196, 0.66); }
-.battle-grid-overlay.is-deploying .battle-cell.is-deploy-target { fill: rgba(104, 186, 123, 0.28); stroke: rgba(206, 255, 190, 0.82); stroke-width: 1.6; cursor: pointer; }
-.battle-grid-overlay.is-deploying .battle-cell.is-selected-deploy-target { fill: rgba(242, 215, 120, 0.38); stroke: #f2d778; stroke-width: 2.4; }
-.battle-grid-overlay.is-moving .battle-cell.is-move-target { stroke: rgba(255, 255, 255, 0.9); stroke-width: 1.1; cursor: pointer; }
-.battle-grid-overlay.is-moving .battle-cell.is-delegate-path { fill: rgba(255, 210, 60, 0.4); stroke: rgba(255, 230, 120, 0.95); stroke-width: 1.8; pointer-events: none; }
+.battle-grid-overlay.is-editing .battle-cell { cursor: crosshair; fill: rgba(232, 214, 134, 0.22); stroke: rgba(255, 250, 218, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-plain { fill: rgba(196, 170, 108, 0.72); stroke: rgba(240, 220, 160, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-grass { fill: rgba(112, 178, 86, 0.72); stroke: rgba(180, 232, 140, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-road { fill: rgba(222, 222, 222, 0.75); stroke: rgba(246, 246, 246, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-path { fill: rgba(200, 172, 120, 0.72); stroke: rgba(238, 216, 168, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-plank { fill: rgba(160, 110, 60, 0.78); stroke: rgba(224, 172, 108, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-sand { fill: rgba(224, 202, 138, 0.72); stroke: rgba(248, 234, 178, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-wasteland { fill: rgba(178, 168, 122, 0.72); stroke: rgba(222, 212, 168, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-wetland { fill: rgba(108, 158, 142, 0.76); stroke: rgba(168, 222, 202, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-poison { fill: rgba(148, 72, 172, 0.8); stroke: rgba(214, 150, 236, 0.92); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-forest { fill: rgba(28, 95, 42, 0.8); stroke: rgba(72, 170, 90, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-hill { fill: rgba(160, 103, 54, 0.74); stroke: rgba(226, 170, 91, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-mountain { fill: #1e2122; stroke: #6a6f72; stroke-width: 1; }
+.battle-grid-overlay.is-editing .terrain-shore { fill: #77785e; stroke: #a8aa82; stroke-width: 1; }
+.battle-grid-overlay.is-editing .terrain-water { fill: rgba(38, 125, 168, 0.72); stroke: rgba(126, 213, 238, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-stream { fill: #668c99; stroke: #a5c0c7; stroke-width: 1; }
+.battle-grid-overlay.is-editing .terrain-river { fill: rgba(46, 108, 182, 0.74); stroke: rgba(120, 180, 236, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-sea { fill: rgba(18, 58, 122, 0.76); stroke: rgba(84, 136, 204, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-shallow { fill: rgba(96, 186, 196, 0.72); stroke: rgba(164, 232, 236, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-ferry { fill: rgba(160, 116, 64, 0.8); stroke: rgba(214, 178, 122, 0.95); stroke-width: 1.4; }
+.battle-grid-overlay.is-deploying .battle-cell.is-deploy-target { stroke: rgba(255, 210, 60, 0.95); stroke-width: 1.1; cursor: pointer; }
+.battle-grid-overlay.is-deploying .battle-cell.is-selected-deploy-target { stroke: #ffe98a; stroke-width: 2.6; }
+.battle-grid-overlay.is-moving .battle-cell.is-move-target { stroke: rgba(255, 210, 60, 0.95); stroke-width: 1.1; cursor: pointer; }
+.battle-grid-overlay.is-moving .battle-cell.is-delegate-path { stroke: rgba(255, 255, 255, 0.95); stroke-width: 1.8; pointer-events: none; }
 .battle-grid-overlay.is-strategy-targeting .battle-cell.is-strategy-target { fill: rgba(232, 88, 48, 0.34); stroke: rgba(255, 211, 88, 0.95); stroke-width: 1.8; cursor: pointer; }
 .battle-grid-overlay.is-construction-targeting .battle-cell.is-construction-target { fill: rgba(255, 200, 80, 0.38); stroke: rgba(255, 240, 140, 0.95); stroke-width: 2; stroke-dasharray: none; cursor: pointer; }
 .battle-grid-overlay.is-construction-targeting { pointer-events: auto; }
@@ -211,9 +345,11 @@ button { color: inherit; }
 .terrain-sea { fill: rgba(18, 58, 122, 0.56); stroke: rgba(84, 136, 204, 0.62); }
 .terrain-shallow { fill: rgba(96, 186, 196, 0.44); stroke: rgba(164, 232, 236, 0.54); }
 .terrain-ferry { fill: rgba(160, 116, 64, 0.55); stroke: rgba(214, 178, 122, 0.85); stroke-width: 1.4; }
-/* 关隘（原版关所据点）：石砌关墙实线样式，与建设用地虚线区分 */
+/* 关隘（原版关所据点）：石砌关墙实线样式，与建设用地虚线区分（编辑器识别用） */
 .terrain-pass { fill: rgba(122, 96, 56, 0.62); stroke: rgba(236, 210, 154, 0.9); stroke-width: 1.6; stroke-dasharray: none; }
-.terrain-construction { fill: rgba(190, 193, 198, 0.45); stroke: rgba(228, 231, 236, 0.75); stroke-width: 1.2; stroke-dasharray: 3 2; }
+/* 游戏视图下关隘底色与平原一致：色块为半透明，若底色偏深会把空关隘压暗、与空城池不同色 */
+.battle-grid-overlay:not(.is-editing) .terrain-pass { fill: rgba(196, 170, 108, 0.42); }
+.terrain-construction { fill: rgba(190, 193, 198, 0.45); stroke: rgba(228, 231, 236, 0.75); stroke-width: 2.2; stroke-dasharray: 7 4; }
 .construction-overlay { pointer-events: auto; cursor: pointer; }
 .construction-overlay .construction-glyph { fill: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 11px; font-weight: 900; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95); paint-order: stroke; stroke: rgba(20, 15, 8, 0.65); stroke-width: 2.4; }
 .construction-overlay.is-building .construction-glyph { fill: #ffd842; animation: construction-pulse 1.6s ease-in-out infinite; }
@@ -221,7 +357,34 @@ button { color: inherit; }
 .construction-overlay.is-attack-target rect { stroke: #ffd842; stroke-width: 1.6; filter: drop-shadow(0 0 2px rgba(255, 216, 66, 0.7)); }
 .construction-target-cell { fill: rgba(104, 186, 123, 0.34); stroke: rgba(206, 255, 190, 0.9); stroke-width: 2; stroke-dasharray: none; cursor: pointer; }
 .battle-cell.is-facility-occupied { fill: rgba(18, 24, 23, 0.58); stroke: rgba(255, 237, 154, 0.56); stroke-width: 0.9; }
+/* —— 八角地形格线：游戏主视图下背景保持完整方形，方格线四角微斜切成八角轮廓 —— */
+.battle-grid-overlay:not(.is-editing) .battle-cell { stroke: none; }
+/* 实心地形（山崖/川/岸/江河）保留自身深色边界描边，不叠八角浅白线 */
+.battle-grid-overlay:not(.is-editing) .terrain-mountain { stroke: #1e2122; stroke-width: 1; }
+.battle-grid-overlay:not(.is-editing) .terrain-shore { stroke: #77785e; stroke-width: 1; }
+.battle-grid-overlay:not(.is-editing) .terrain-stream { stroke: #668c99; stroke-width: 1; }
+.battle-grid-overlay:not(.is-editing) .terrain-river { stroke: rgba(120, 180, 236, 0.6); stroke-width: 1; }
+/* 建设用地保留自身虚线描边 */
+.battle-grid-overlay:not(.is-editing) .terrain-construction { stroke: rgba(228, 231, 236, 0.75); stroke-width: 2.2; stroke-dasharray: 7 4; }
+.battle-cell-outline {
+  fill: none;
+  pointer-events: none;
+  stroke: rgba(255, 250, 218, 0.5);
+  stroke-width: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+.battle-grid-overlay.is-deploying .battle-cell-outline.is-deploy-target { stroke: rgba(255, 210, 60, 0.95); stroke-width: 1.1; }
+.battle-grid-overlay.is-deploying .battle-cell-outline.is-selected-deploy-target { stroke: #ffe98a; stroke-width: 2.6; }
+.battle-grid-overlay.is-moving .battle-cell-outline.is-move-target { stroke: rgba(255, 210, 60, 0.95); stroke-width: 1.1; }
+.battle-grid-overlay.is-moving .battle-cell-outline.is-delegate-path { stroke: rgba(255, 255, 255, 0.95); stroke-width: 1.8; }
+.battle-grid-overlay.is-strategy-targeting .battle-cell-outline.is-strategy-target { stroke: rgba(255, 211, 88, 0.95); stroke-width: 1.8; }
+.battle-grid-overlay.is-construction-targeting .battle-cell-outline.is-construction-target { stroke: rgba(255, 240, 140, 0.95); stroke-width: 2; }
+/* 建设用地：八角线用虚线表示（区别于普通地形的实线，提示可建设） */
+.battle-cell-outline.terrain-construction { stroke: rgba(228, 231, 236, 0.75); stroke-width: 2.2; stroke-dasharray: 7 4; }
+.battle-cell-outline.is-facility-occupied { stroke: rgba(255, 237, 154, 0.56); stroke-width: 0.9; }
 .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 42%, transparent); stroke: rgba(255, 244, 205, 0.58); stroke-width: 1.3; vector-effect: non-scaling-stroke; pointer-events: auto; cursor: pointer; }
+/* 空城池/空关隘：无主时显示纯白（不透明更明显） */
+.city-footprint-cell.is-neutral { fill: rgba(255, 255, 255, 0.78); stroke: rgba(255, 255, 255, 0.74); }
 .battle-grid-overlay.is-editing .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 78%, rgba(255, 231, 145, 0.62)); stroke: rgba(255, 250, 188, 1); stroke-width: 2.3; pointer-events: none; cursor: crosshair; }
 .battle-unit-marker { pointer-events: auto; cursor: pointer; }
 .battle-unit-model { filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.66)); }
@@ -303,7 +466,10 @@ button { color: inherit; }
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
   box-shadow: 0 2px 5px rgba(10, 14, 12, 0.5);
 }
-.mini-pass-dot { position: absolute; z-index: 0; width: 5px; height: 5px; border: 1px solid rgba(232, 213, 168, 0.9); background: #6b5638; transform: translate(-50%, -50%); pointer-events: none; }
+.mini-pass-dot { position: absolute; z-index: 0; width: 5px; height: 5px; border: 1px solid #f4edd9; background: #6b5638; transform: translate(-50%, -50%); pointer-events: none; }
+/* 出征编成确认后、落位前：出发城中心的待出发部队预览标牌（纯展示，不响应点击） */
+.deploy-preview-marker { position: absolute; z-index: 4; display: flex; align-items: center; gap: 3px; padding: 1px 4px; border: 1px solid rgba(244, 237, 217, 0.85); border-radius: 2px; background: rgba(12, 28, 31, 0.82); color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 11px; font-weight: 700; line-height: 1.2; white-space: nowrap; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 0 4px rgba(0, 0, 0, 0.5); }
+.deploy-preview-marker::before { content: ''; width: 6px; height: 6px; background: var(--force-color, #f2c238); }
 .map-tools { position: absolute; z-index: 6; top: 14px; left: 14px; display: flex; gap: 5px; padding: 5px; }
 .map-tools .icon-button { background: rgba(24, 37, 33, 0.9); }
 .hover-coordinate { position: fixed; z-index: 16; left: 50%; bottom: 16px; min-width: 118px; padding: 7px 14px; transform: translateX(-50%); color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 13px; font-weight: 700; text-align: center; pointer-events: none; }
@@ -377,9 +543,10 @@ button { color: inherit; }
 .facility-info-panel dl > div { display: grid; grid-template-columns: 48px 1fr; align-items: center; min-height: 24px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(244, 237, 217, 0.05); }
 .facility-info-panel dt { padding-left: 5px; color: var(--muted); font-size: 11px; }
 .facility-info-panel dd { margin: 0; padding: 2px 6px; color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
-.mini-map { position: absolute; z-index: 6; right: 14px; bottom: 14px; width: 184px; aspect-ratio: 16 / 9; overflow: hidden; background: #617061; }
-.mini-map > button { position: absolute; width: 8px; height: 8px; padding: 0; border: 1px solid #f4edd9; border-radius: 0; transform: translate(-50%, -50%); cursor: pointer; }
-.mini-map > button.is-selected { width: 12px; height: 12px; outline: 2px solid #f2d778; }
+.mini-map { position: absolute; z-index: 6; right: 14px; bottom: 14px; width: 236px; aspect-ratio: 16 / 9; overflow: hidden; background: #617061; }
+/* 小地图城市点：纯展示不可点击（点小地图任意处跳转镜头），选中高亮沿用 */
+.mini-map .mini-city-dot { position: absolute; width: 8px; height: 8px; border: 1px solid #f4edd9; border-radius: 0; transform: translate(-50%, -50%); pointer-events: none; }
+.mini-map .mini-city-dot.is-selected { width: 12px; height: 12px; outline: 2px solid #f2d778; }
 .tool-panel { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--panel-shadow); }
 .map-editor-toggle { position: fixed; z-index: 30; top: 78px; left: 160px; min-height: 40px; }
 .map-editor-panel { position: fixed; z-index: 36; left: 14px; top: 124px; width: 340px; max-height: calc(100dvh - 146px); display: grid; gap: 10px; padding: 12px; overflow: auto; }
@@ -595,13 +762,15 @@ button { color: inherit; }
 }
 .map-context-menu button:disabled, .map-context-menu button.is-disabled,
 .unit-command-menu button:disabled, .unit-command-menu button.is-disabled, .unit-tactic-menu button:disabled,
-.unit-strategy-menu button:disabled {
+.unit-strategy-menu button:disabled,
+.city-info-menu button:disabled, .city-info-menu button.is-disabled {
   color: #787465;
   cursor: default;
 }
 .map-context-menu button:disabled:hover, .map-context-menu button.is-disabled:hover,
 .unit-command-menu button:disabled:hover, .unit-tactic-menu button:disabled:hover,
-.unit-strategy-menu button:disabled:hover {
+.unit-strategy-menu button:disabled:hover,
+.city-info-menu button:disabled:hover, .city-info-menu button.is-disabled:hover {
   background: transparent;
 }
 .intel-panel { position: fixed; z-index: 34; top: 82px; left: 18px; width: min(520px, calc(100vw - 360px)); max-height: calc(100dvh - 118px); display: grid; gap: 14px; padding: 16px; overflow: auto; }
@@ -1429,7 +1598,7 @@ button { color: inherit; }
 @media (max-width: 700px) {
   .start-screen { grid-template-columns: 1fr; place-content: start; gap: 28px; padding: 34px 20px; overflow: auto; }
   .start-title h1 { font-size: 38px; }
-  .auth-entry, .online-entry, .save-actions, .start-error, .invalid-save { grid-column: 1; }
+  .auth-entry, .online-entry, .save-actions, .start-error, .invalid-save, .home-menu { grid-column: 1; }
   .online-fields { grid-template-columns: 1fr; }
   .room-lobby-screen { align-items: start; overflow: auto; }
   .room-lobby-card { width: 100%; }

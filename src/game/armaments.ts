@@ -1,5 +1,5 @@
 import { citySpecialtyOf, type CitySpecialty } from './cityTraits';
-import type { ArmamentType, CityArmaments, City, Officer, TroopType, VehicleType } from './types';
+import type { ArmamentType, CityArmaments, City, Officer, Pass, TroopType, VehicleType } from './types';
 
 export const ARMAMENT_TYPES: ArmamentType[] = ['spear', 'halberd', 'crossbow', 'cavalry', 'ram', 'tower', 'ship'];
 export const DELAYED_ARMAMENT_TYPES: ArmamentType[] = ['ram', 'tower', 'ship'];
@@ -37,8 +37,8 @@ const SPECIALTY_ARMAMENT: Partial<Record<CitySpecialty, ArmamentType[]>> = {
   siege: ['ram', 'tower'],
 };
 
-/** 兵装生产价格：大都市全部60%，对应特色城市该兵装60%，其余原价 */
-export function armamentCost(city: Pick<City, 'id'>, armamentType: ArmamentType): number {
+/** 兵装生产价格：大都市全部60%，对应特色城市该兵装60%，其余原价（关隘无特色，按原价） */
+export function armamentCost(city: Pick<City | Pass, 'id'>, armamentType: ArmamentType): number {
   const specialty = citySpecialtyOf(city.id);
   if (!specialty) return ARMAMENT_GOLD_COST;
   if (specialty === 'metropolis') return Math.round(ARMAMENT_GOLD_COST * 0.6);

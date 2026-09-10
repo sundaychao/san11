@@ -21,6 +21,44 @@ function preferredSpawnCell(state: GameState, cityId: Parameters<typeof deployme
   return options.find((coord) => !isWaterTerrain(cellAt(state, coord)?.terrain)) ?? options[0];
 }
 
+/** 六边形网格的近似距离（奇偶行平铺：将 r 按 q 折叠成轴向行距） */
+export function hexGridDistance(a: { q: number; r: number }, b: { q: number; r: number }) {
+  const ar = a.r - Math.floor(a.q / 2);
+  const br = b.r - Math.floor(b.q / 2);
+  const dq = a.q - b.q;
+  const dr = ar - br;
+  return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+}
+
+/** 在给定部署格（deployTargets）中挑离 toward 最近的陆地格；无陆地则退化为最近格 */
+export function chooseDelegateSpawnCell(targets: { q: number; r: number }[], toward: { q: number; r: number }): { q: number; r: number } | undefined {
+  if (targets.length === 0) return undefined;
+  return [...targets]
+    .sort((a, b) => (
+      hexGridDistance(a, toward) - hexGridDistance(b, toward)
+      || a.q - b.q
+      || a.r - b.r
+    ))[0];
+}
+
+/**
+ * 出征超距委任的出生格选择：在出征可部署格中挑「离委任目标最近」的陆地格，
+ * 使部队从城池朝目标方向出城（而不是固定取第一个部署格导致反方向绕路）。
+ */
+export function preferredSpawnCellToward(
+  state: GameState,
+  cityId: Parameters<typeof deploymentCells>[1],
+  movement: number,
+  troopType: Parameters<typeof deploymentCells>[3],
+  toward: { q: number; r: number },
+  vehicle?: 'boat' | 'ship',
+) {
+  const options = deploymentCells(state, cityId, movement, troopType, vehicle);
+  const land = options.filter((coord) => !isWaterTerrain(cellAt(state, coord)?.terrain));
+  const pool = land.length > 0 ? land : options;
+  return chooseDelegateSpawnCell(pool, toward);
+}
+
 export function deployUnit(state: GameState, forceId: ForceId, input: DeployInput): GameState {
   const city = state.cities[input.cityId];
   const target = input.targetCityId ? state.cities[input.targetCityId] : undefined;

@@ -1,6 +1,7 @@
 import {
   attackCity,
   attackFacility,
+  attackPass,
   attackPlot,
   attackUnit,
   buildFacility,
@@ -16,7 +17,7 @@ import {
   useUnitTactic,
   waitUnit,
 } from '../battle/actions';
-import { setBuildDelegate, setMoveDelegate } from '../battle/delegate';
+import { setBuildDelegate, setMoveDelegate, setRepairDelegate } from '../battle/delegate';
 import type { GridCoord } from '../battle/grid';
 import { executeCommand } from '../commands';
 import { dismissDebate, resolveDebateAbandon, resolveDebateRethink, resolveDebateRound } from '../debate';
@@ -64,12 +65,26 @@ export function reduceGameIntent(
     case 'deployUnit':
       return deployUnit(state, forceId, intent.input);
     case 'deployUnitDelegate': {
-      // 出征到指定部署格后立即记录移动/建设委任（本旬 moved=true 不会自动执行，下旬开始自动行军）
+      // 出征到指定部署格后立即沿最优路径行军到本旬最远处（与普通移动的超距委任一致），
+      // 并记录移动/建设委任：部署时 moved=true 会挡住 delegateMoveStep，先放开让部队行军，
+      // moveUnit 内部会重新置 moved=true 并清空剩余移动力，防止本旬二次行动。
       const deployed = deployUnitWithId(state, forceId, intent.input);
-      deployed.state.units[deployed.unitId].delegate = intent.facility
-        ? { kind: 'build', target: intent.target, facility: intent.facility }
-        : { kind: 'move', target: intent.target };
-      return deployed.state;
+      deployed.state.units[deployed.unitId].moved = false;
+      const next = intent.facility
+        ? setBuildDelegate(deployed.state, forceId, deployed.unitId, intent.target, intent.facility)
+        : setMoveDelegate(deployed.state, forceId, deployed.unitId, intent.target);
+      if (!next.units[deployed.unitId]) return next; // 行军中进驻/回城：部队消失，委任自然结束
+      // 建设/修补委任由 setBuildDelegate 内部维护；移动委任未到达目标时已由 setMoveDelegate 记录
+      if (intent.facility) {
+        next.units[deployed.unitId].delegate = { kind: 'build', target: intent.target, facility: intent.facility };
+      } else {
+        const unit = next.units[deployed.unitId];
+        // 兜底：本旬行军受阻（如被围）时 delegateMoveStep 不会记录委任，补设以免委任丢失
+        if (!unit.delegate && (unit.q !== intent.target.q || unit.r !== intent.target.r)) {
+          unit.delegate = { kind: 'move', target: intent.target };
+        }
+      }
+      return next;
     }
     case 'deployUnitAction': {
       const deployed = deployUnitWithId(state, forceId, intent.input);
@@ -86,6 +101,8 @@ export function reduceGameIntent(
           return attackPlot(deployed.state, forceId, deployed.unitId, intent.action.cityId, intent.action.plotIndex);
         case 'attackCity':
           return attackCity(deployed.state, forceId, deployed.unitId, intent.action.cityId);
+        case 'attackPass':
+          return attackPass(deployed.state, forceId, deployed.unitId, intent.action.passId);
         case 'useUnitTactic':
           return useUnitTactic(deployed.state, forceId, deployed.unitId, intent.action.targetId, intent.action.tacticId);
         case 'useUnitStrategy':
@@ -106,6 +123,8 @@ export function reduceGameIntent(
       return setMoveDelegate(state, forceId, intent.unitId, intent.target);
     case 'setBuildDelegate':
       return setBuildDelegate(state, forceId, intent.unitId, intent.target, intent.facility);
+    case 'setRepairDelegate':
+      return setRepairDelegate(state, forceId, intent.unitId, intent.facilityId);
     case 'waitUnit':
       return waitUnit(state, forceId, intent.unitId);
     case 'attackUnit': {
@@ -149,6 +168,10 @@ export function reduceGameIntent(
     case 'attackCity': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
       return cancelUnitDelegate(attackCity(moved, forceId, intent.attackerId, intent.cityId), intent.attackerId);
+    }
+    case 'attackPass': {
+      const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
+      return cancelUnitDelegate(attackPass(moved, forceId, intent.attackerId, intent.passId), intent.attackerId);
     }
     case 'duelUnit': {
       const moved = moveIfRequested(state, forceId, intent.unitId, intent.destination);

@@ -30,8 +30,11 @@ export function isWaterTerrain(terrain: TerrainType | undefined): boolean {
   return terrain !== undefined && WATER_TERRAINS.has(terrain);
 }
 
-/** 不可通行地形（川/岸/崖；原版 baseCost=999） */
-export const BLOCKED_TERRAINS: ReadonlySet<TerrainType> = new Set<TerrainType>(['stream', 'shore', 'mountain']);
+/** 不可通行地形（川/崖/山；原版 baseCost=999）。
+ * 岸边(shore)不在其中：本作按「岸边停靠」规则放开——岸是水陆交接的陆地格，
+ * 移动消耗与水域一致，陆地↔岸边为普通移动、岸边↔水域为跨水边界（需旬初出发），
+ * 部队在岸边停下后须下一旬才能下水/上岸，任何岸线都可作为渡点。 */
+export const BLOCKED_TERRAINS: ReadonlySet<TerrainType> = new Set<TerrainType>(['stream', 'mountain']);
 
 /**
  * 地形移动消耗（对齐原版基准：主径/土/草地 4、砂地/荒地/浅滩/小径 5、
@@ -50,7 +53,7 @@ const INFANTRY_TERRAIN_COST: Record<TerrainType, number> = {
   forest: 6,
   hill: 6,
   mountain: Number.POSITIVE_INFINITY,
-  shore: Number.POSITIVE_INFINITY,
+  shore: 6,
   water: 6,
   stream: Number.POSITIVE_INFINITY,
   river: 6,
@@ -66,6 +69,7 @@ const CAVALRY_TERRAIN_COST: Record<TerrainType, number> = {
   forest: 8,
   wetland: 8,
   poison: 10,
+  shore: 8,
   water: 8,
   river: 8,
   sea: 8,
@@ -78,6 +82,7 @@ const SIEGE_TERRAIN_COST: Record<TerrainType, number> = {
   plank: 8,
   wetland: 8,
   poison: 10,
+  shore: 8,
   water: 8,
   river: 8,
   sea: 8,
@@ -262,8 +267,13 @@ export function movementAllowanceForUnit(unit: Pick<ArmyUnit, 'kind' | 'troopTyp
 
 export function movementCostForCell(cell: GridCell | undefined, profile: MovementProfile = 'sword', vehicle?: 'boat' | 'ship') {
   if (!cell) return Number.POSITIVE_INFINITY;
-  if (vehicle === 'ship' && isWaterTerrain(cell.terrain)) {
+  // 岸边并入水域：岸线是水陆交接的滩涂，移动消耗与水域一致（楼船按固定水域消耗 4），
+  // 与地图生成器「岸边并入水域」及旧档「shore→water」归一约定一致。
+  // 岸边仍不算水面（isWaterTerrain=false）：陆地↔岸边是普通移动，
+  // 岸边↔水域是跨水边界（需旬初出发），从而形成「岸边停靠、上下水分旬」规则。
+  const effectiveTerrain: TerrainType = cell.terrain === 'shore' ? 'water' : cell.terrain;
+  if (vehicle === 'ship' && isWaterTerrain(effectiveTerrain)) {
     return SHIP_WATER_COST;
   }
-  return TERRAIN_COST_BY_PROFILE[profile][cell.terrain];
+  return TERRAIN_COST_BY_PROFILE[profile][effectiveTerrain];
 }

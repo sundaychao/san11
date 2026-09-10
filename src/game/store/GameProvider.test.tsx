@@ -51,6 +51,19 @@ function LocalTenDayProbe({ targetId }: { targetId: string }) {
   );
 }
 
+function LocalRepairProbe({ facilityId }: { facilityId: string }) {
+  const game = useGame();
+  const report = game.state?.facilityRepairReports?.find((entry) => entry.facilityId === facilityId);
+  return (
+    <div>
+      <output aria-label="repair-amount">{report?.amount ?? 0}</output>
+      <output aria-label="repair-kind">{report?.kind ?? 'none'}</output>
+      <output aria-label="durability">{game.state?.facilities?.[facilityId]?.durability ?? 0}</output>
+      <button onClick={() => game.endTenDay()}>end ten day</button>
+    </div>
+  );
+}
+
 function LocalTenDayTwoTargetProbe({ firstTargetId, secondTargetId }: { firstTargetId: string; secondTargetId: string }) {
   const game = useGame();
   return (
@@ -465,6 +478,44 @@ describe('GameProvider', () => {
 
     expect(screen.getByLabelText('target-troops')).toHaveTextContent('2700');
     expect(screen.getByLabelText('damage-reports')).toHaveTextContent('arrow-target');
+  });
+
+  it('keeps delegated facility repair reports visible after advancing the ten-day turn', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    state.officers['liu-bei'].location = { kind: 'unit', unitId: 'delegate-unit' };
+    state.units['delegate-unit'] = {
+      id: 'delegate-unit',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      homeCityId: 'jiangling',
+      troopType: 'sword',
+      q: 10,
+      r: 10,
+      troops: 3000,
+      food: 6000,
+      energy: 100,
+      movementRemaining: 20,
+      moved: false,
+      acted: false,
+      delegate: { kind: 'repair', facilityId: 'tower' },
+    };
+    state.facilities = {
+      tower: { id: 'tower', type: 'arrowTower', forceId: 'liu', q: 11, r: 10, durability: 100, completed: false },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={new MemoryStorage()}>
+        <LocalRepairProbe facilityId="tower" />
+      </GameProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'end ten day' }));
+
+    expect(screen.getByLabelText('repair-kind')).toHaveTextContent('repair');
+    expect(Number(screen.getByLabelText('repair-amount').textContent)).toBeGreaterThan(0);
+    expect(Number(screen.getByLabelText('durability').textContent)).toBeGreaterThan(100);
   });
 
   it('fires opponent force effects before local AI turns and player effects before the next ten-day turn', async () => {

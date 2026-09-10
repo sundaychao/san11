@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { StartScreen } from './StartScreen';
+import { OnlineScreen } from './OnlineScreen';
 
 type GameContextTestValue = Record<string, any>;
 
@@ -14,7 +14,7 @@ vi.mock('../game/store/GameProvider', () => ({
   },
 }));
 
-describe('StartScreen online rooms', () => {
+describe('OnlineScreen online rooms', () => {
   beforeEach(() => {
     gameValue.current = {
       auth: { token: 'token', userId: 'user', username: 'Player', loading: false, error: null },
@@ -39,6 +39,7 @@ describe('StartScreen online rooms', () => {
           playerCount: 1,
           maxPlayers: 4,
           selectedForceIds: ['liu'],
+          map: 'homeland',
         }],
         tenDayReadyForceIds: [],
         error: null,
@@ -61,10 +62,10 @@ describe('StartScreen online rooms', () => {
 
   it('shows lobby rooms and joins by clicking the room entry', async () => {
     const user = userEvent.setup();
-    render(<StartScreen />);
+    render(<OnlineScreen onBack={() => {}} />);
 
     expect(screen.getByText('ABCD')).toBeVisible();
-    expect(screen.getByText('Host · 小地图')).toBeVisible();
+    expect(screen.getByText('Host · 大地图')).toBeVisible();
     expect(screen.getByText('1/4')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: '进入 ABCD' }));
@@ -75,8 +76,8 @@ describe('StartScreen online rooms', () => {
     });
   });
 
-  it('loads the lobby rooms once after the authenticated start screen appears', async () => {
-    render(<StartScreen />);
+  it('loads the lobby rooms once after the authenticated online screen appears', async () => {
+    render(<OnlineScreen onBack={() => {}} />);
 
     await waitFor(() => {
       expect(gameValue.current?.loadOnlineRooms).toHaveBeenCalledWith({ serverUrl: 'http://server.test' });
@@ -87,47 +88,47 @@ describe('StartScreen online rooms', () => {
   it('does not auto-load the room list while the previous room is resuming', async () => {
     gameValue.current!.online.resumingRoom = true;
 
-    render(<StartScreen />);
+    render(<OnlineScreen onBack={() => {}} />);
 
     await waitFor(() => {
       expect(gameValue.current?.loadOnlineRooms).not.toHaveBeenCalled();
     });
   });
 
-  it('creates a new lobby room from the primary online action', async () => {
+  it('creates a lobby room on the default (builtin) map', async () => {
     const user = userEvent.setup();
-    render(<StartScreen />);
+    render(<OnlineScreen onBack={() => {}} />);
 
-    await user.click(screen.getByRole('button', { name: '创建新房间' }));
+    await user.click(screen.getByRole('button', { name: /创建新房间/ }));
 
-    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'small' });
+    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'china42x' });
   });
 
-  it('lets the host create a large homeland-mapped room', async () => {
+  it('lets the host pick a specific map from the available list', async () => {
     const user = userEvent.setup();
-    render(<StartScreen />);
+    render(<OnlineScreen onBack={() => {}} />);
 
-    await user.click(screen.getByRole('radio', { name: /大地图/ }));
-    await user.click(screen.getByRole('button', { name: '创建新房间' }));
+    await user.click(screen.getByRole('radio', { name: /荆襄地图/ }));
+    await user.click(screen.getByRole('button', { name: /创建新房间/ }));
 
-    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'homeland' });
+    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'china42x' });
   });
 
   it('keeps creating a room available while the lobby connection is refreshing', async () => {
     const user = userEvent.setup();
     gameValue.current!.online.connecting = true;
-    render(<StartScreen />);
+    render(<OnlineScreen onBack={() => {}} />);
 
-    const createButton = screen.getByRole('button', { name: '创建新房间' });
+    const createButton = screen.getByRole('button', { name: /创建新房间/ });
     expect(createButton).toBeEnabled();
 
     await user.click(createButton);
-    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'small' });
+    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'china42x' });
   });
 
   it('refreshes the room list from the current server', async () => {
     const user = userEvent.setup();
-    render(<StartScreen />);
+    render(<OnlineScreen onBack={() => {}} />);
 
     await user.click(screen.getByRole('button', { name: '刷新房间' }));
 
@@ -136,7 +137,7 @@ describe('StartScreen online rooms', () => {
 
   it('resumes the last playing room from the current server', async () => {
     const user = userEvent.setup();
-    render(<StartScreen />);
+    render(<OnlineScreen onBack={() => {}} />);
 
     await user.click(screen.getByRole('button', { name: '继续上次对战' }));
 

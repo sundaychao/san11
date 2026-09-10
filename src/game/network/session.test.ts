@@ -7,13 +7,26 @@ import {
   selectPlayerForce,
   startOnlineRoom,
 } from './session';
-import { neighborsOf } from '../battle/grid';
+import { neighborsOf, sevenCellCityFootprint } from '../battle/grid';
+import { cellAt } from '../battle/movementRules';
 import { settleForceTurnStart } from '../skills/rules/turn';
 import { reduceGameIntent } from './intentReducer';
+import type { City } from '../types';
 
 describe('online room session', () => {
   function readyStartedRoom() {
     const created = createOnlineRoom({ roomId: 'ABCD', hostPlayerId: 'host', hostName: 'Host', seed: 1 });
+    const joined = joinOnlineRoom(created, { playerId: 'guest', playerName: 'Guest' });
+    const ready = selectPlayerForce(
+      selectPlayerForce(joined, { playerId: 'host', forceId: 'liu' }),
+      { playerId: 'guest', forceId: 'cao' },
+    );
+    return startOnlineRoom(ready, { playerId: 'host' });
+  }
+
+  /** 大地图（含空城）双人房间，用于验证联网旬末的委任执行 */
+  function readyHomelandRoom() {
+    const created = createOnlineRoom({ roomId: 'HOME', hostPlayerId: 'host', hostName: 'Host', seed: 1, map: 'homeland' });
     const joined = joinOnlineRoom(created, { playerId: 'guest', playerName: 'Guest' });
     const ready = selectPlayerForce(
       selectPlayerForce(joined, { playerId: 'host', forceId: 'liu' }),
@@ -220,6 +233,57 @@ describe('online room session', () => {
     expect(guestReady.room.tenDayReadyForceIds).toEqual([]);
     expect(guestReady.room.state?.tenDay).toBe(2);
   });
+
+  it('联网：全部玩家点进行后，人类势力的委任同样自动执行（进驻空城 → 武将已行动）', () => {
+    const room = structuredClone(readyHomelandRoom());
+    if (!room.state) throw new Error('room state should exist');
+    const state = room.state;
+
+    // 找一处「无主空城 + 城外陆格站位」
+    let targetCity: City | undefined;
+    let spawn: { q: number; r: number } | undefined;
+    for (const city of Object.values(state.cities)) {
+      if (city.ownerId !== null || city.troops > 0) continue;
+      const footprint = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR });
+      const footprintKeys = new Set(footprint.map((coord) => `${coord.q},${coord.r}`));
+      for (const cell of footprint) {
+        const found = neighborsOf(cell.q, cell.r)
+          .find((coord) => cellAt(state, coord) && !footprintKeys.has(`${coord.q},${coord.r}`));
+        if (found) {
+          spawn = found;
+          break;
+        }
+      }
+      if (spawn) {
+        targetCity = city;
+        break;
+      }
+    }
+    expect(targetCity).toBeDefined();
+    expect(spawn).toBeDefined();
+    if (!targetCity || !spawn) return;
+
+    state.units['host-delegate-unit'] = {
+      id: 'host-delegate-unit', kind: 'combat', forceId: 'liu', leaderId: 'liu-bei', officerIds: ['liu-bei'],
+      homeCityId: 'jiangling', troopType: 'sword', q: spawn.q, r: spawn.r, troops: 3000, food: 6000,
+      energy: 100, movementRemaining: 60, moved: false, acted: false,
+      delegate: { kind: 'move', target: { q: targetCity.gridQ, r: targetCity.gridR } },
+    };
+    state.officers['liu-bei'].location = { kind: 'unit', unitId: 'host-delegate-unit' };
+
+    const hostReady = reduceOnlineIntent(room, 'host', room.revision, { type: 'endTenDay' });
+    expect(hostReady.ok).toBe(true);
+    if (!hostReady.ok) return;
+    const guestReady = reduceOnlineIntent(hostReady.room, 'guest', hostReady.room.revision, { type: 'endTenDay' });
+    expect(guestReady.ok).toBe(true);
+    if (!guestReady.ok) return;
+
+    const next = guestReady.room.state;
+    expect(next?.cities[targetCity.id].ownerId).toBe('liu');
+    expect(next?.officers['liu-bei'].location).toEqual({ kind: 'city', cityId: targetCity.id });
+    // 委任进驻的武将，新一旬仍为已行动
+    expect(next?.officers['liu-bei'].acted).toBe(true);
+  }, 30000);
 
   it('applies fire plot intents in a mobile duel room', () => {
     const room = structuredClone(readyStartedRoom());

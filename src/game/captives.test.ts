@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createGame } from './scenario/jingxiang208';
 import type { ArmyUnit, ForceId } from './types';
-import { captureChance, hasNamedHorse, captureCityOnCapture } from './captives';
+import { captureChance, hasNamedHorse, captureCityOnCapture, resolveRecruitCaptive } from './captives';
 
 function looterFixture(state: ReturnType<typeof createGame>, forceId: ForceId): ArmyUnit {
   state.units.attacker = {
@@ -134,5 +134,29 @@ describe('captureCityOnCapture', () => {
     captureCityOnCapture(state, attacker, 'xiangyang');
 
     expect(defender.location.kind).toBe('unaffiliated');
+  });
+});
+
+describe('resolveRecruitCaptive', () => {
+  it('登用俘虏成功后，新加入武将本旬视为已行动', () => {
+    const state = createGame('liu', 1);
+    const executor = state.officers['zhuge-liang'];
+    executor.acted = false;
+    const target = state.officers['cao-ren'];
+    target.forceId = 'cao';
+    target.loyalty = 0;
+    target.location = { kind: 'captive', cityId: 'jiangling', captorForceId: 'liu', capturedTenDays: 0 };
+    target.cityId = 'jiangling';
+
+    // 成功率上限 90%，循环直到本次判定成功
+    let result = resolveRecruitCaptive(state, 'liu', executor, target);
+    for (let guard = 0; !result.success && guard < 200; guard += 1) {
+      result = resolveRecruitCaptive(state, 'liu', executor, target);
+    }
+
+    expect(result.success).toBe(true);
+    expect(target.forceId).toBe('liu');
+    expect(target.location.kind).toBe('city');
+    expect(target.acted).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { clamp, rollGrainPrices, rollMerchants } from './commands';
+import { clamp, rollGrainPrices, rollMerchants, appointStrongholdSuccessor } from './commands';
 import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
 import { MAX_TECH_LEVEL, TECH_BRANCHES, TECHP_CITY_POP_DIVISOR, TECHP_RURAL_POP_DIVISOR, techLevelOf, addTechP } from './techs';
@@ -18,11 +18,14 @@ import { settleCaptives } from './captives';
 import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
 import { settleLegionAutomation, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, cityQuarterlyFoodIncome, CITY_GOLD_CAP, CITY_FOOD_CAP, cityTroopCap, DEFAULT_OFFICER_SALARY } from './innerAffairs';
 import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
+import { settlePassRangedAttack } from './passes';
+import { executeDelegations, delegationMergedOfficerIds, keepDelegationMergedOfficersActed } from './battle/delegate';
 import { addOfficerMerit, MERIT_PER_MONTH, positionDefinition, rankDefinition, rankForCityCount, rankIndex } from './ranks';
 import { settleForceTurnStart } from './skills/rules/turn';
 import { cityIncomeMultiplier } from './skills/rules/city';
 import { tenDayIndex } from './diplomacy';
-import type { ArmyUnit, City, ForceId, GameState } from './types';
+import { passIncomeMultiplierByBlockade, passQuarterlyFoodIncome, passMonthlyGoldIncome, PASS_GOLD_CAP, PASS_FOOD_CAP } from './passes';
+import type { ArmyUnit, City, FacilityRepairReport, ForceId, GameState } from './types';
 
 interface CityEvent {
   name: string;
@@ -302,6 +305,19 @@ export function settleMonth(state: GameState): GameState {
     const troopCap = cityTroopCap(city);
     if (city.troops > troopCap) city.troops = troopCap;
   }
+  // 关隘据点：与城池一致的钱粮产出与人口自然增长（无治安值，产出不乘治安修正）
+  for (const pass of Object.values(next.passes ?? {})) {
+    if (!pass.ownerId) continue;
+    // 关隘被敌方封锁（攻击区内有敌军）时无收入
+    const incomeMultiplier = passIncomeMultiplierByBlockade(next, pass);
+    pass.gold += passMonthlyGoldIncome(pass) * incomeMultiplier;
+    if (shouldSettleQuarterFood) {
+      pass.food += passQuarterlyFoodIncome(pass) * incomeMultiplier;
+    }
+    pass.population += Math.floor(pass.population * 0.005);
+    if (pass.gold > PASS_GOLD_CAP) pass.gold = PASS_GOLD_CAP;
+    if (pass.food > PASS_FOOD_CAP) pass.food = PASS_FOOD_CAP;
+  }
   for (const forceId of FORCE_IDS) next.actionPoints[forceId] = BASE_TEN_DAY_ACTION_POINTS;
   for (const officer of Object.values(next.officers)) { officer.acted = false; officer.rewarded = false; }
   settleAbilityResearch(next);
@@ -468,13 +484,19 @@ function settleOfficerTransfers(next: GameState) {
     officer.location.remainingTenDays -= 1;
     if (officer.location.remainingTenDays > 0) continue;
 
+    const targetPassId = officer.location.targetPassId;
+    const targetPass = targetPassId ? next.passes?.[targetPassId] : undefined;
     const targetCityId = officer.location.targetCityId;
-    const target = next.cities[targetCityId];
-    // 抵达其他城池：若仍挂名原出发城太守，原城自动补任
+    const target = targetPass ?? next.cities[targetCityId];
+    // 抵达其他据点：若仍挂名原出发据点太守，原据点自动补任
     const governedCity = Object.values(next.cities).find((candidate) => candidate.governorId === officer.id && candidate.id !== targetCityId);
     if (governedCity) appointSuccessorGovernor(next, governedCity);
-    officer.location = { kind: 'city', cityId: targetCityId };
-    officer.cityId = targetCityId;
+    const governedPass = Object.values(next.passes ?? {}).find((candidate) => candidate.governorId === officer.id && candidate.id !== targetPassId);
+    if (governedPass) appointStrongholdSuccessor(next, governedPass);
+    officer.location = targetPass
+      ? { kind: 'pass', passId: targetPass.id }
+      : { kind: 'city', cityId: targetCityId };
+    officer.cityId = targetPass ? targetPass.homeCityId : targetCityId;
     officer.acted = false;
     next.logs.push({
       id: `transfer-arrive-${next.month}-${officer.id}-${next.logs.length}`,
@@ -514,7 +536,13 @@ function settleOfficerTasks(next: GameState) {
     if (officer.location.remainingTenDays > 0) continue;
 
     const task = officer.location;
+    const taskPass = task.passId ? next.passes?.[task.passId] : undefined;
     const city = next.cities[task.cityId];
+    // 任务结束后武将回到原据点（关隘或城池）
+    const officerReturn = taskPass
+      ? { kind: 'pass' as const, passId: taskPass.id }
+      : { kind: 'city' as const, cityId: city.id };
+    const returnCityId = taskPass ? taskPass.homeCityId : city.id;
     if (task.task === 'research') {
       // 研究完成：势力科技等级+1（多人研究仅主将 lead 结算一次，随从静默释放）
       if (task.lead !== false) {
@@ -531,15 +559,15 @@ function settleOfficerTasks(next: GameState) {
           });
         }
       }
-      officer.location = { kind: 'city', cityId: city.id };
-      officer.cityId = city.id;
+      officer.location = officerReturn;
+      officer.cityId = returnCityId;
       officer.acted = false;
       continue;
     }
     if (task.task === 'construction') {
-      // 建设任务工期结束：释放武将回城（设施完成由 settlePlotConstruction 结算）
-      officer.location = { kind: 'city', cityId: city.id };
-      officer.cityId = city.id;
+      // 建设任务工期结束：释放武将回据点（设施完成由 settlePlotConstruction 结算）
+      officer.location = officerReturn;
+      officer.cityId = returnCityId;
       officer.acted = false;
       continue;
     }
@@ -559,23 +587,24 @@ function settleOfficerTasks(next: GameState) {
           message: `${officer.name}完成「${node.label}」培育`,
         });
       }
-      officer.location = { kind: 'city', cityId: city.id };
-      officer.cityId = city.id;
+      officer.location = officerReturn;
+      officer.cityId = returnCityId;
       officer.acted = false;
       continue;
     }
     // 兵装生产完成：入账并释放（多人生产仅主将 lead 结算一次，随从静默释放）
+    const armamentBase = taskPass ?? city;
     if (task.lead !== false) {
-      const current = armamentsOf(city.armaments);
-      city.armaments = {
+      const current = armamentsOf(armamentBase.armaments);
+      armamentBase.armaments = {
         ...current,
         [task.armamentType]: current[task.armamentType] + task.amount,
       };
       next.cityEffectReports = [{
         id: `city-effect-${next.month}-${next.logs.length}`,
-        cityId: city.id,
-        q: city.gridQ,
-        r: city.gridR,
+        cityId: taskPass ? taskPass.homeCityId : city.id,
+        q: taskPass ? taskPass.q : city.gridQ,
+        r: taskPass ? taskPass.r : city.gridR,
         amount: task.amount,
         label: ARMAMENT_LABELS[task.armamentType],
         kind: 'armament',
@@ -584,11 +613,11 @@ function settleOfficerTasks(next: GameState) {
         id: `armament-complete-${next.month}-${officer.id}-${next.logs.length}`,
         month: next.month,
         forceId: officer.forceId,
-        message: `${officer.name}完成${city.name}${ARMAMENT_LABELS[task.armamentType]}生产，增加了${task.amount}`,
+        message: `${officer.name}完成${armamentBase.name}${ARMAMENT_LABELS[task.armamentType]}生产，增加了${task.amount}`,
       });
     }
-    officer.location = { kind: 'city', cityId: city.id };
-    officer.cityId = city.id;
+    officer.location = officerReturn;
+    officer.cityId = returnCityId;
     officer.acted = false;
   }
 }
@@ -601,6 +630,9 @@ export function settleTenDay(state: GameState): GameState {
   // 城池箭矢射击（敌方部队进入攻击范围时先造成伤害）
   const cityArrowEvents = settleCityRangedAttack(next);
   for (const msg of cityArrowEvents) next.logs.push({ id: `city-arrow-${next.month}-${next.tenDay}-${next.logs.length}`, month: next.month, forceId: null, message: msg });
+  // 关隘箭矢射击（敌方部队进入关隘攻击范围时先造成伤害）
+  const passArrowEvents = settlePassRangedAttack(next);
+  for (const msg of passArrowEvents) next.logs.push({ id: `pass-arrow-${next.month}-${next.tenDay}-${next.logs.length}`, month: next.month, forceId: null, message: msg });
 
   for (const city of Object.values(next.cities)) {
     settleCitySupply(next, city);
@@ -634,5 +666,47 @@ export function settleTenDay(state: GameState): GameState {
   // 每旬推进都重置全部武将的"本旬已行动"标记，保证下一旬武将可再次执行指令
   for (const officer of Object.values(next.officers)) { officer.acted = false; officer.rewarded = false; }
   next.turnForceId = next.playerForceId;
+  return next;
+}
+
+export interface TenDayAdvanceOptions {
+  /** 需要自动执行委任的势力：单机＝当前行动势力；联网＝所有人类玩家势力 */
+  delegatedForceIds?: readonly ForceId[];
+  /** 在这些势力上跑 AI 回合（单机＝除玩家外全部势力；联网＝未被玩家占用的势力） */
+  runAiTurns?: (state: GameState) => GameState;
+  /** 旬末结算前的最后处理（联网用于切回房主视角） */
+  prepareSettle?: (state: GameState) => GameState;
+}
+
+/**
+ * 推进一旬的统一入口：委任自动执行 → 各势力 AI 回合 → 旬末结算。
+ * 单机（GameProvider.endTenDay）与联网（session.advanceTenDay）都调用这里，
+ * 保证两边行为一致：以后新增的旬末逻辑只改这一处即可同时生效。
+ */
+export function advanceTenDay(state: GameState, options: TenDayAdvanceOptions = {}): GameState {
+  const delegatedForceIds = options.delegatedForceIds ?? [state.turnForceId];
+  const mergedOfficerIds: string[] = [];
+  // 委任产生的耐久报告会在后续 AI 回合/旬末被清空，先收集再补回
+  const repairReports: FacilityRepairReport[] = [];
+  let next = state;
+
+  for (const forceId of delegatedForceIds) {
+    const before = next;
+    const beforeReports = before.facilityRepairReports ?? [];
+    next = executeDelegations(next, forceId);
+    const afterReports = next.facilityRepairReports ?? [];
+    if (afterReports !== beforeReports && afterReports.length > 0) repairReports.push(...afterReports);
+    // 委任自动进驻/回城的武将：旬末会重置全部「本旬已行动」，需在推进后补回标记
+    mergedOfficerIds.push(...delegationMergedOfficerIds(before, next));
+  }
+
+  if (options.runAiTurns) next = options.runAiTurns(next);
+  if (options.prepareSettle) next = options.prepareSettle(next);
+
+  next = settleTenDay(next);
+  keepDelegationMergedOfficersActed(next, mergedOfficerIds);
+  if (repairReports.length > 0) {
+    next.facilityRepairReports = [...(next.facilityRepairReports ?? []), ...repairReports];
+  }
   return next;
 }

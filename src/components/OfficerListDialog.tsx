@@ -11,7 +11,8 @@ import { officerMerit, positionDefinition } from '../game/ranks';
 import { PLOT_LABELS } from '../game/innerAffairs';
 import { TECH_BRANCH_LABELS } from '../game/techs';
 import { skillDefinition, officerSkillNames, officerSkillsText } from '../game/skills';
-import type { ForceId, GameState, Officer, OfficerAptitudes, Stats } from '../game/types';
+import { strongholdTransferDuration } from '../game/commands';
+import type { City, ForceId, GameState, Officer, OfficerAptitudes, Pass, Stats } from '../game/types';
 import { OfficerHealthBadge } from './OfficerHealthBadge';
 import { OfficerDetailDialog } from './OfficerDetailDialog';
 import { closePopupOnContextMenu } from './popupEvents';
@@ -19,6 +20,8 @@ import { closePopupOnContextMenu } from './popupEvents';
 interface OfficerListDialogProps {
   scope?: 'player' | 'all' | { forceId: ForceId };
   officerIds?: string[];
+  /** 可选：自定义标题（如城池/关隘名）；缺省时按 scope / 是否指定 officerIds 推导 */
+  title?: string;
   onClose(): void;
 }
 
@@ -33,6 +36,8 @@ export interface OfficerListTableProps {
   tabs?: OfficerListTab[];
   /** 初始选中的 tab（默认"所属"，若指定 officerIds 则默认"能力"） */
   initialTab?: OfficerListTab;
+  /** 召唤目标据点（启用"召唤"分类时用于计算各武将召唤日数） */
+  summonTarget?: City | Pass;
   /** 可选：checkbox 配置，启用后第一列为勾选框 */
   checkboxes?: {
     /** 已选中的 id 集合 */
@@ -50,7 +55,7 @@ export interface OfficerListTableProps {
   onRowClick?: (officer: Officer) => void;
 }
 
-export type OfficerListTab = '奖赏' | '所属' | '能力' | '特技' | '适性' | '状态';
+export type OfficerListTab = '奖赏' | '召唤' | '所属' | '能力' | '特技' | '适性' | '状态';
 type SortDirection = 'desc' | 'asc';
 type SortKey =
   | 'name'
@@ -62,6 +67,7 @@ type SortKey =
   | 'location'
   | 'position'
   | 'merit'
+  | 'summonDays'
   | keyof Stats
   | 'skill'
   | 'skillDescription'
@@ -98,6 +104,7 @@ function scopeIsAll(scope: OfficerListDialogProps['scope']) {
 
 function locationText(officer: Officer, state: GameState) {
   if (officer.location.kind === 'city') return state.cities[officer.location.cityId].name;
+  if (officer.location.kind === 'pass') return state.passes?.[officer.location.passId]?.name ?? '关隘';
   if (officer.location.kind === 'unit') return '部队';
   if (officer.location.kind === 'transfer') return '在途';
   return state.cities[officer.location.cityId].name;
@@ -109,6 +116,24 @@ function homeCityText(officer: Officer, state: GameState) {
 
 function ownershipText(officer: Officer, state: GameState) {
   return officer.forceId ? `${state.forces[officer.forceId].name}军` : '在野';
+}
+
+/** 召唤所需旬数：武将所在据点 → 目标据点；武将不在据点或未指定目标时返回 null */
+function summonDurationOf(officer: Officer, state: GameState, target?: City | Pass): number | null {
+  if (!target) return null;
+  const source = officer.location.kind === 'pass'
+    ? state.passes?.[officer.location.passId]
+    : officer.location.kind === 'city'
+      ? state.cities[officer.location.cityId]
+      : undefined;
+  if (!source) return null;
+  return strongholdTransferDuration(source, target);
+}
+
+/** 召唤日数：1旬 = 10天 */
+function summonDaysText(officer: Officer, state: GameState, target?: City | Pass): string {
+  const duration = summonDurationOf(officer, state, target);
+  return duration === null ? '—' : `${duration * 10}天`;
 }
 
 function ageText(officer: Officer, state: GameState) {
@@ -214,6 +239,18 @@ function loyaltyHint(officer: Officer, state: GameState): string | undefined {
 }
 
 function columnsForTab(activeTab: OfficerListTab, scope: OfficerListDialogProps['scope']): OfficerColumn[] {
+  if (activeTab === '召唤') return [
+    { label: '武将', sortKey: 'name' },
+    { label: '军团', sortKey: 'force' },
+    { label: '所在', sortKey: 'location' },
+    { label: '日数', sortKey: 'summonDays' },
+    { label: '身份', sortKey: 'position' },
+    { label: '统帅', sortKey: 'leadership' },
+    { label: '武力', sortKey: 'war' },
+    { label: '智力', sortKey: 'intelligence' },
+    { label: '政治', sortKey: 'politics' },
+    { label: '魅力', sortKey: 'charisma' },
+  ];
   if (activeTab === '所属') {
     const cols: OfficerColumn[] = [
       { label: '武将', sortKey: 'name' },
@@ -265,7 +302,23 @@ function columnsForTab(activeTab: OfficerListTab, scope: OfficerListDialogProps[
   ];
 }
 
-function renderOfficerCells(officer: Officer, state: GameState, activeTab: OfficerListTab, scope: OfficerListDialogProps['scope']) {
+function renderOfficerCells(officer: Officer, state: GameState, activeTab: OfficerListTab, scope: OfficerListDialogProps['scope'], summonTarget?: City | Pass) {
+  if (activeTab === '召唤') {
+    const position = positionDefinition(officer.positionId);
+    return (
+      <>
+        <td>{ownershipText(officer, state)}</td>
+        <td>{locationText(officer, state)}</td>
+        <td>{summonDaysText(officer, state, summonTarget)}</td>
+        <td>{position?.name ?? '—'}</td>
+        <td>{officer.stats.leadership}</td>
+        <td>{officer.stats.war}</td>
+        <td>{officer.stats.intelligence}</td>
+        <td>{officer.stats.politics}</td>
+        <td>{officer.stats.charisma}</td>
+      </>
+    );
+  }
   if (activeTab === '所属') {
     const hint = loyaltyHint(officer, state);
     const loyaltyCell = <td title={hint}>{isForceLeader(officer, state) ? '-' : officerLoyalty(officer)}</td>;
@@ -359,7 +412,7 @@ function defaultOfficerCompare(left: Officer, right: Officer) {
     left.id.localeCompare(right.id);
 }
 
-function sortValue(officer: Officer, state: GameState, sortKey: SortKey) {
+function sortValue(officer: Officer, state: GameState, sortKey: SortKey, summonTarget?: City | Pass) {
   if (sortKey === 'name') return officer.name;
   if (sortKey === 'age') return officerAge(state, officer) ?? -1;
   if (sortKey === 'force') return ownershipText(officer, state);
@@ -369,6 +422,7 @@ function sortValue(officer: Officer, state: GameState, sortKey: SortKey) {
   if (sortKey === 'location') return locationText(officer, state);
   if (sortKey === 'position') return positionDefinition(officer.positionId)?.name ?? '—';
   if (sortKey === 'merit') return officerMerit(officer);
+  if (sortKey === 'summonDays') return summonDurationOf(officer, state, summonTarget) ?? -1;
   if (sortKey === 'skill') return officerSkillsText(officer);
   if (sortKey === 'skillDescription') {
     const primary = officerSkillNames(officer)[0];
@@ -399,6 +453,7 @@ export function OfficerListTable({
   checkboxes,
   testId,
   onRowClick,
+  summonTarget,
 }: OfficerListTableProps) {
   const { state } = useGame();
   const [activeTab, setActiveTab] = useState<OfficerListTab>(() => initialTab
@@ -407,21 +462,33 @@ export function OfficerListTable({
   const scopeForColumns: OfficerListDialogProps['scope'] = scope;
   const officers = useMemo(() => {
     if (!state) return [];
-    const base = officerIds?.length
+    // officerIds 一旦显式传入（哪怕是空数组）即为权威列表，不再回退到 scope 过滤——
+    // 否则空城（无属武将）会错误显示我方势力武将。
+    const base = officerIds !== undefined
       ? officerIds.map((id) => state.officers[id]).filter((officer): officer is Officer => Boolean(officer))
       : Object.values(state.officers).filter((officer) => {
         if (scope === 'all') return true;
         if (typeof scope === 'object' && scope !== null) return officer.forceId === scope.forceId;
         return officer.forceId === state.playerForceId;
       });
-    if (officerIds?.length && !sort) return base;
+    if (officerIds !== undefined && !sort && activeTab !== '召唤') return base;
     return [...base].sort((left, right) => {
-      if (!sort) return defaultOfficerCompare(left, right);
-      return compareSortValues(sortValue(left, state, sort.key), sortValue(right, state, sort.key), sort.direction) ||
+      if (!sort) {
+        // 召唤分类默认按所需旬数（日数）从低到高排列
+        if (activeTab === '召唤') {
+          const leftDuration = summonDurationOf(left, state, summonTarget) ?? Number.MAX_SAFE_INTEGER;
+          const rightDuration = summonDurationOf(right, state, summonTarget) ?? Number.MAX_SAFE_INTEGER;
+          return leftDuration - rightDuration ||
+            left.name.localeCompare(right.name) ||
+            left.id.localeCompare(right.id);
+        }
+        return defaultOfficerCompare(left, right);
+      }
+      return compareSortValues(sortValue(left, state, sort.key, summonTarget), sortValue(right, state, sort.key, summonTarget), sort.direction) ||
         left.name.localeCompare(right.name) ||
         left.id.localeCompare(right.id);
     });
-  }, [officerIds, scope, sort, state]);
+  }, [officerIds, scope, sort, state, activeTab, summonTarget]);
   const columns = columnsForTab(activeTab, scopeForColumns);
   const changeTab = (tab: OfficerListTab) => {
     setActiveTab(tab);
@@ -517,7 +584,7 @@ export function OfficerListTable({
                       </button>
                     ) : (<>{officer.name}<OfficerHealthBadge officer={officer} /></>)}
                   </th>
-                  {renderOfficerCells(officer, state, activeTab, scopeForColumns)}
+                  {renderOfficerCells(officer, state, activeTab, scopeForColumns, summonTarget)}
                 </tr>
               );
             })}
@@ -529,18 +596,19 @@ export function OfficerListTable({
 }
 
 /** 武将一览弹窗：全势力/玩家势力/指定势力的完整武将列表（不含选择器） */
-export function OfficerListDialog({ scope = 'player', officerIds, onClose }: OfficerListDialogProps) {
+export function OfficerListDialog({ scope = 'player', officerIds, title, onClose }: OfficerListDialogProps) {
   const audio = useAudioEventAdapter();
   const { state } = useGame();
   const [detailOfficerId, setDetailOfficerId] = useState<string | null>(null);
   if (!state) return null;
 
-  const titleText = officerIds?.length
-    ? '所属部队'
-    : scope === 'all' ? '全势力'
-      : typeof scope === 'object' && scope !== null
-        ? `${state.forces[scope.forceId]?.name ?? ''}军`
-        : `${state.forces[state.playerForceId].name}军`;
+  const titleText = title
+    ?? (officerIds !== undefined
+      ? '所属武将'
+      : scope === 'all' ? '全势力'
+        : typeof scope === 'object' && scope !== null
+          ? `${state.forces[scope.forceId]?.name ?? ''}军`
+          : `${state.forces[state.playerForceId].name}军`);
   const detailOfficer = detailOfficerId ? state.officers[detailOfficerId] : undefined;
 
   return (
