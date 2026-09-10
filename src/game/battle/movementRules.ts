@@ -4,8 +4,25 @@ import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './
 import { isWaterTerrain, movementAllowanceForProfile, movementCostForCell, movementProfileForUnit, ZOC_FACILITY_TYPES, type MovementProfile } from './catalog';
 import { passBlockedKeys, passCenterBlockedFor } from '../passes';
 
+/**
+ * grid 坐标索引缓存：state.grid 是长度数万的数组，cellAt 原先是 O(n) 线性扫描，
+ * 一次全图 Dijkstra（数十万次取格）会因此慢到秒级。这里按 grid 数组引用缓存
+ * "q,r → cell"，把取格降到 O(1)。生产代码只会整体替换 state.grid（structuredClone / map），
+ * 不会原地改写格内容，因此按数组引用缓存是安全的（原地改写会拿到新数组，索引随之重建）。
+ */
+const cellIndexByGrid = new WeakMap<GameState['grid'], Map<string, GridCell>>();
+
+function cellIndexFor(grid: GameState['grid']): Map<string, GridCell> {
+  const cached = cellIndexByGrid.get(grid);
+  if (cached) return cached;
+  const index = new Map<string, GridCell>();
+  for (const cell of grid) index.set(`${cell.q},${cell.r}`, cell);
+  cellIndexByGrid.set(grid, index);
+  return index;
+}
+
 export function cellAt(state: GameState, coord: GridCoord): GridCell | undefined {
-  return state.grid.find((cell) => cell.q === coord.q && cell.r === coord.r);
+  return cellIndexFor(state.grid).get(`${coord.q},${coord.r}`);
 }
 
 export function allCityKeys(state: GameState) {

@@ -731,6 +731,48 @@ describe('ten-day settlement', () => {
     expect(afterFour.logs.some((log) => log.message.includes('关羽抵达武陵'))).toBe(true);
   });
 
+  it('keeps transferring officers marked as acted until they arrive', () => {
+    const state = createGame('liu', 1);
+    const transferred = executeCommand(state, 'liu', {
+      type: 'transfer', cityId: 'jiangling', targetCityId: 'wuling', officerIds: ['guan-yu'],
+    });
+    expect(transferred.officers['guan-yu'].acted).toBe(true);
+
+    // 途中每旬都保持「已行动」：人不在任何据点，本旬本就下不了命令
+    const afterOne = settleTenDay(transferred);
+    const afterTwo = settleTenDay(afterOne);
+    const afterThree = settleTenDay(afterTwo);
+    expect(afterOne.officers['guan-yu'].acted).toBe(true);
+    expect(afterTwo.officers['guan-yu'].acted).toBe(true);
+    expect(afterThree.officers['guan-yu'].acted).toBe(true);
+
+    // 抵达当旬即可行动（settleOfficerTransfers 释放为 city 并置回 false）
+    const afterFour = settleTenDay(afterThree);
+    expect(afterFour.officers['guan-yu'].location).toEqual({ kind: 'city', cityId: 'wuling' });
+    expect(afterFour.officers['guan-yu'].acted).toBe(false);
+
+    // 同城的待命武将不受影响，照常每旬重置
+    expect(afterOne.officers['liu-bei'].acted).toBe(false);
+  });
+
+  it('keeps officers on a multi-ten-day task marked as acted while the task runs', () => {
+    const state = createGame('liu', 1);
+    state.officers['guan-yu'].location = {
+      kind: 'task', cityId: 'jiangling', task: 'armament', armamentType: 'ram', amount: 2, remainingTenDays: 3,
+    };
+    state.officers['guan-yu'].acted = true;
+
+    const afterOne = settleTenDay(state);
+    const afterTwo = settleTenDay(afterOne);
+    expect(afterOne.officers['guan-yu'].acted).toBe(true);
+    expect(afterTwo.officers['guan-yu'].acted).toBe(true);
+
+    // 任务完成那一旬释放回城，即可再次下令
+    const afterThree = settleTenDay(afterTwo);
+    expect(afterThree.officers['guan-yu'].location).toEqual({ kind: 'city', cityId: 'jiangling' });
+    expect(afterThree.officers['guan-yu'].acted).toBe(false);
+  });
+
   it('completes tech research and raises the force branch level', () => {
     const state = createGame('liu', 1);
     state.forces.liu.techs = { spear: 1 };

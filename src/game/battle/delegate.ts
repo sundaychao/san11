@@ -25,12 +25,70 @@ interface PathOptions {
   profile?: ReturnType<typeof movementProfileForUnit>;
 }
 
+/** 二叉最小堆（按累计消耗优先，惰性删除），供正向/反向 Dijkstra 复用 */
+function createMinHeap() {
+  const heap: { key: string; cost: number }[] = [];
+  const index = new Map<string, number>();
+  const swap = (a: number, b: number) => {
+    [heap[a], heap[b]] = [heap[b], heap[a]];
+    index.set(heap[a]!.key, a);
+    index.set(heap[b]!.key, b);
+  };
+  const bubbleUp = (i: number) => {
+    while (i > 0) {
+      const parent = Math.floor((i - 1) / 2);
+      if (heap[parent]!.cost <= heap[i]!.cost) break;
+      swap(parent, i);
+      i = parent;
+    }
+  };
+  const sinkDown = (i: number) => {
+    for (;;) {
+      const left = i * 2 + 1;
+      const right = left + 1;
+      let smallest = i;
+      if (left < heap.length && heap[left]!.cost < heap[smallest]!.cost) smallest = left;
+      if (right < heap.length && heap[right]!.cost < heap[smallest]!.cost) smallest = right;
+      if (smallest === i) break;
+      swap(smallest, i);
+      i = smallest;
+    }
+  };
+  return {
+    get size() { return heap.length; },
+    push(key: string, cost: number) {
+      if (index.has(key)) {
+        const i = index.get(key)!;
+        if (heap[i]!.cost <= cost) return;
+        heap[i] = { key, cost };
+        bubbleUp(i);
+        return;
+      }
+      heap.push({ key, cost });
+      index.set(key, heap.length - 1);
+      bubbleUp(heap.length - 1);
+    },
+    pop(): { key: string; cost: number } | undefined {
+      if (heap.length === 0) return undefined;
+      const top = heap[0]!;
+      const last = heap.pop()!;
+      index.delete(top.key);
+      if (heap.length > 0) {
+        heap[0] = last;
+        index.set(last.key, 0);
+        sinkDown(0);
+      }
+      return top;
+    },
+  };
+}
+
 /**
  * 计算从 start 到 target 的最优（移动消耗最低）路径，返回 [start, ..., target]；
  * 无法到达时返回 undefined。与每旬移动不同，跨水域边界不要求先停在边界（可跨旬停顿后继续）。
  * 城市 footprint：本方/空城格可按移动规则穿越（不停留）；敌方城池不可穿越。
- * 委任逐旬的停靠点排除城格（见 farthestReachableAlongPath），避免途经城内格触发回城/进驻；
- * 例外是委任目标所在的城池（目标为城格时，停在该城任意 footprint 格即进城，见该函数）。
+ * 委任逐旬的停靠点排除城格（见 pickBestDelegateStop），避免途经城内格触发回城/进驻；
+ * 例外是委任目标所在的城池（目标为城格时，停在该城任意 footprint 格即进城）。
  */
 export function optimalPathCells(state: GameState, start: GridCoord, target: GridCoord, options: PathOptions = {}): GridCoord[] | undefined {
   const startKey = gridKey(start);
@@ -44,43 +102,12 @@ export function optimalPathCells(state: GameState, start: GridCoord, target: Gri
   const costs = new Map<string, number>([[startKey, 0]]);
   const parents = new Map<string, string>();
   const settled = new Set<string>();
-  // 简单二叉堆（按累计消耗最小优先）
-  const heap: { key: string; cost: number }[] = [{ key: startKey, cost: 0 }];
-  const heapIndex = new Map<string, number>([[startKey, 0]]);
-  const bubbleUp = (index: number) => {
-    while (index > 0) {
-      const parent = Math.floor((index - 1) / 2);
-      if (heap[parent].cost <= heap[index].cost) break;
-      [heap[parent], heap[index]] = [heap[index], heap[parent]];
-      heapIndex.set(heap[parent].key, parent);
-      heapIndex.set(heap[index].key, index);
-      index = parent;
-    }
-  };
-  const sinkDown = (index: number) => {
-    for (;;) {
-      const left = index * 2 + 1;
-      const right = left + 1;
-      let smallest = index;
-      if (left < heap.length && heap[left].cost < heap[smallest].cost) smallest = left;
-      if (right < heap.length && heap[right].cost < heap[smallest].cost) smallest = right;
-      if (smallest === index) break;
-      [heap[smallest], heap[index]] = [heap[index], heap[smallest]];
-      heapIndex.set(heap[smallest].key, smallest);
-      heapIndex.set(heap[index].key, index);
-      index = smallest;
-    }
-  };
+  const heap = createMinHeap();
+  heap.push(startKey, 0);
 
-  while (heap.length > 0) {
-    const current = heap[0]!;
-    const last = heap.pop()!;
-    if (heap.length > 0) {
-      heap[0] = last;
-      heapIndex.set(last.key, 0);
-      sinkDown(0);
-    }
-    heapIndex.delete(current.key);
+  while (heap.size > 0) {
+    const current = heap.pop()!;
+    if (settled.has(current.key)) continue;
     settled.add(current.key);
     if (current.key === targetKey) break;
     if (costs.get(current.key)! < current.cost) continue;
@@ -98,15 +125,7 @@ export function optimalPathCells(state: GameState, start: GridCoord, target: Gri
       if (costs.has(key) && costs.get(key)! <= nextCost) continue;
       costs.set(key, nextCost);
       parents.set(key, current.key);
-      if (heapIndex.has(key)) {
-        const index = heapIndex.get(key)!;
-        heap[index] = { key, cost: nextCost };
-        bubbleUp(index);
-      } else {
-        heap.push({ key, cost: nextCost });
-        heapIndex.set(key, heap.length - 1);
-        bubbleUp(heap.length - 1);
-      }
+      heap.push(key, nextCost);
     }
   }
 
@@ -134,22 +153,106 @@ function targetCityFootprintKeys(state: GameState, target: GridCoord): Set<strin
   return keys;
 }
 
-/** 本回合沿最优路径能到达的最远格（path 上第一个在 reachableCosts 内的格，从目标端倒查）。
- * 途经的城市格不可作为停靠点（停靠即回城/进驻），但委任目标所在城池的 footprint 格例外：
- * 停在该城任意格即进城/占领，正是委任目的——否则本旬已能踏入城内却会停在城外，下一旬才进入。 */
-function farthestReachableAlongPath(state: GameState, unit: ArmyUnit, path: GridCoord[]): GridCoord | undefined {
-  const reachable = reachableCosts(state, unit);
-  const startKey = gridKey(unit);
-  const targetCityKeys = targetCityFootprintKeys(state, path[path.length - 1]);
+/**
+ * 反向 Dijkstra：从 target 出发，按与 optimalPathCells 一致的城/设施/关隘阻挡规则，
+ * 计算"每个格走到 target 的最小移动消耗"。
+ * 反向边 current→neighbor 的权 = 进入 current 的消耗（正向 neighbor→current 付的就是这笔），
+ * 边的合法性 = 正向走时 destination（即 current）的可进入性。
+ *
+ * 用途：委任选点时摆脱"单一最短路径"的局限——目标存在多条等价最短路径时，
+ * 旧版"沿 Dijkstra 选中的那条路径取最远可达格"会漏掉其他同样最优、推进更多的落点。
+ * 例：宛→洛阳存在多条等价路径分支时，旧版可能停在其中一条上的较近处。
+ *
+ * stopWhenCostExceeds：已找到 total 上限后可提前终止——未出堆的格 dist ≥ 当前出堆 cost，
+ * 一旦出堆 cost 超过上限，其 dStart + dist 已不可能更优。
+ */
+function minCostToTarget(
+  state: GameState,
+  target: GridCoord,
+  options: PathOptions,
+  stopWhenCostExceeds: () => number,
+): Map<string, number> {
+  const targetKey = gridKey(target);
   const cityKeys = allCityKeys(state);
-  for (let i = path.length - 1; i >= 0; i -= 1) {
-    const key = gridKey(path[i]);
-    if (key === startKey) break;
-    if (!reachable.has(key)) continue;
-    if (cityKeys.has(key) && !targetCityKeys.has(key)) continue;
-    return path[i];
+  const unitKeys = occupiedUnitKeys(state, options.ignoredUnitId);
+  const facilityKeys = occupiedFacilityKeys(state);
+  const blockedPassKeys = passBlockedKeys(state);
+  const profile = options.profile ?? 'sword';
+  const costs = new Map<string, number>([[targetKey, 0]]);
+  const settled = new Set<string>();
+  const heap = createMinHeap();
+  heap.push(targetKey, 0);
+
+  while (heap.size > 0) {
+    const current = heap.pop()!;
+    if (settled.has(current.key)) continue;
+    settled.add(current.key);
+    if (current.cost > stopWhenCostExceeds()) break;
+    const [q, r] = current.key.split(',').map(Number);
+    const currentCell = cellAt(state, { q, r });
+    // 反向边的权：正向从 neighbor 走进 current 时付的消耗
+    const enterCurrentCost = movementCostForCell(currentCell, profile, options.vehicle);
+    if (!Number.isFinite(enterCurrentCost)) continue;
+    for (const neighbor of neighborsOf(q, r)) {
+      const key = gridKey(neighbor);
+      if (settled.has(key)) continue;
+      if (cityKeys.has(key) && !(options.allowedCityTransitKeys?.has(key) ?? false)) continue;
+      if (unitKeys.has(key)) continue;
+      if (facilityKeys.has(key)) continue;
+      if (blockedPassKeys.has(key)) continue;
+      const nextCost = current.cost + enterCurrentCost;
+      if (costs.has(key) && costs.get(key)! <= nextCost) continue;
+      costs.set(key, nextCost);
+      heap.push(key, nextCost);
+    }
   }
-  return undefined;
+
+  return costs;
+}
+
+/**
+ * 委任移动一步的落点选取：在本旬可达集中挑"本旬已付消耗 + 到 target 剩余消耗"最小的格，
+ * 并列时取已消耗最大者（= 沿路走得最远）。目标城 footprint 格允许作为落点
+ * （moveUnit 会处理进驻）；其他城格不允许（reachableCosts 一般已过滤，此处兜底）。
+ * 返回 undefined = 不可达或本旬无法前进。
+ *
+ * 因为对任意格 c 恒有 dStart(c) + dist(c) ≥ C（起点到 target 的最优总消耗），
+ * 且落在最优路径上的格恰好取到 C，所以本函数等价于"在所有最优路径中挑本旬能走到的最远格"，
+ * 天然覆盖多条等价最短路径（旧版只认 Dijkstra 选中的那一条）。
+ * 反过来说：若玩家觉得落点"不够近"，那是该目标下本旬移动力所允许的最优解，不是选点缺陷。
+ */
+function pickBestDelegateStop(state: GameState, unit: ArmyUnit, target: GridCoord): GridCoord | undefined {
+  const startKey = gridKey(unit);
+  const reachable = reachableCosts(state, unit);
+  const targetCityKeys = targetCityFootprintKeys(state, target);
+  const cityKeys = allCityKeys(state);
+  const candidates: { key: string; q: number; r: number; dStart: number }[] = [];
+  for (const [key, dStart] of reachable) {
+    if (key === startKey) continue; // 不留在原地
+    if (cityKeys.has(key) && !targetCityKeys.has(key)) continue;
+    const [q, r] = key.split(',').map(Number);
+    candidates.push({ key, q, r, dStart });
+  }
+  if (candidates.length === 0) return undefined;
+
+  // 目标本身就是落点候选（本旬可达）时无需反向搜索：dist=0 已是最优，用它先立一个上限
+  let best: { q: number; r: number; dStart: number; total: number } | undefined;
+  const onTarget = candidates.find((c) => c.key === gridKey(target));
+  if (onTarget) best = { q: onTarget.q, r: onTarget.r, dStart: onTarget.dStart, total: onTarget.dStart };
+
+  const stopWhenCostExceeds = () => (best ? best.total : Number.POSITIVE_INFINITY);
+  const distToTarget = minCostToTarget(state, target, pathOptionsFor(state, unit), stopWhenCostExceeds);
+  for (const candidate of candidates) {
+    const dist = distToTarget.get(candidate.key);
+    if (dist === undefined) continue; // 该格走不到 target（死路/被围）
+    const total = candidate.dStart + dist;
+    if (!best
+      || total < best.total
+      || (total === best.total && candidate.dStart > best.dStart)) {
+      best = { q: candidate.q, r: candidate.r, dStart: candidate.dStart, total };
+    }
+  }
+  return best ? { q: best.q, r: best.r } : undefined;
 }
 
 function pathOptionsFor(state: GameState, unit: ArmyUnit): PathOptions {
@@ -163,7 +266,7 @@ function pathOptionsFor(state: GameState, unit: ArmyUnit): PathOptions {
   };
 }
 
-/** 移动委任一步：本回合沿最优路径向 target 移动最远距离；已到达则结束委任。
+/** 移动委任一步：本回合向 target 前进一格（选取可达集中"到 target 剩余消耗最小"者）；已到达则结束委任。
  * 建设/修补委任通过 preserveDelegate 保留原委任类型（部队只靠近到与目标相接的格，不站上目标）。 */
 function delegateMoveStep(state: GameState, forceId: ForceId, unitId: string, target: GridCoord, preserveDelegate?: UnitDelegate): GameState {
   const unit = state.units[unitId];
@@ -177,10 +280,9 @@ function delegateMoveStep(state: GameState, forceId: ForceId, unitId: string, ta
     }
     return state;
   }
-  const path = optimalPathCells(state, { q: unit.q, r: unit.r }, target, pathOptionsFor(state, unit));
-  if (!path) return state; // 无法到达：保留委任，下旬重试
-  const dest = farthestReachableAlongPath(state, unit, path);
-  if (!dest) return state; // 本回合无法前进（如被围）：保留委任
+  // 选点：可达集中"到 target 剩余消耗最小"的格（不可达/被围时返回 undefined，详见 pickBestDelegateStop）
+  const dest = pickBestDelegateStop(state, unit, target);
+  if (!dest) return state; // 不可达或本回合无法前进：保留委任
   const next = moveUnit(state, forceId, unitId, dest);
   if (!next.units[unitId]) return next; // 回城/进驻：部队消失，委任自然结束
   if (preserveDelegate) {

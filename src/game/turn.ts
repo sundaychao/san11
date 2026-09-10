@@ -1,4 +1,4 @@
-import { clamp, rollGrainPrices, rollMerchants, appointStrongholdSuccessor } from './commands';
+import { clamp, rollGrainPrices, rollMerchants, appointStrongholdSuccessor, officerIsBusy } from './commands';
 import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
 import { MAX_TECH_LEVEL, TECH_BRANCHES, TECHP_CITY_POP_DIVISOR, TECHP_RURAL_POP_DIVISOR, techLevelOf, addTechP } from './techs';
@@ -319,7 +319,11 @@ export function settleMonth(state: GameState): GameState {
     if (pass.food > PASS_FOOD_CAP) pass.food = PASS_FOOD_CAP;
   }
   for (const forceId of FORCE_IDS) next.actionPoints[forceId] = BASE_TEN_DAY_ACTION_POINTS;
-  for (const officer of Object.values(next.officers)) { officer.acted = false; officer.rewarded = false; }
+  // 与旬末同一口径：在途 / 执行任务 / 被俘的武将跨月也保持 acted=true（见 officerIsBusy）
+  for (const officer of Object.values(next.officers)) {
+    if (!officerIsBusy(officer)) officer.acted = false;
+    officer.rewarded = false;
+  }
   settleAbilityResearch(next);
   settleBarbarianRaids(next);
 
@@ -663,8 +667,13 @@ export function settleTenDay(state: GameState): GameState {
   }
 
   restoreTenDayActionPoints(next, state);
-  // 每旬推进都重置全部武将的"本旬已行动"标记，保证下一旬武将可再次执行指令
-  for (const officer of Object.values(next.officers)) { officer.acted = false; officer.rewarded = false; }
+  // 每旬推进都重置全部武将的"本旬已行动"标记，保证下一旬武将可再次执行指令。
+  // 但仍在途 / 执行任务 / 被俘的武将下不了任何命令，保持 acted=true —— 否则列表显示"未行动"、
+  // 玩家点进去却发现无将可用（抵达或任务完成后由 settleOfficerTransfers/Tasks 释放并置回 false）。
+  for (const officer of Object.values(next.officers)) {
+    if (!officerIsBusy(officer)) officer.acted = false;
+    officer.rewarded = false;
+  }
   next.turnForceId = next.playerForceId;
   return next;
 }

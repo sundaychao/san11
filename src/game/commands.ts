@@ -268,6 +268,20 @@ function validateTransfer(state: GameState, forceId: ForceId, command: Extract<G
   return errors;
 }
 
+/**
+ * 武将是否处于「无法接受新指令」的状态：
+ * - `transfer`：移动 / 召唤在途（含俘虏逃跑回城途中），不在任何据点
+ * - `task`：执行内政任务中（军备生产 / 科技 / 培育 / 建设）
+ * - `captive`：被俘关押中
+ *
+ * 这三类武将本旬都下不了命令，因此视为「已行动」。旬末重置 `acted` 时必须跳过他们，
+ * 否则跨旬后会出现「显示未行动、实际下不了令」的错位（概览列表灰显、命令对话框禁用都读 `acted`）。
+ */
+export function officerIsBusy(officer: Officer): boolean {
+  const kind = officer.location.kind;
+  return kind === 'transfer' || kind === 'task' || kind === 'captive';
+}
+
 /** 召唤：将本方势力其他据点（城池/关隘）的待命武将召唤至本据点，耗时与移动相同 */
 function validateSummon(state: GameState, forceId: ForceId, command: Extract<GameCommand, { type: 'summon' }>) {
   const errors: string[] = [];

@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { reduceGameIntent } from '../network/intentReducer';
 import { createGame } from '../scenario/jingxiang208';
 import type { ArmyUnit, City, FacilityType } from '../types';
-import { movementCells, reachableCosts } from './movementRules';
-import { cellAt } from './movementRules';
+import { cellAt, movementCells, ownCityTransitKeysFor, reachableCosts } from './movementRules';
 import { neighborsOf, sevenCellCityFootprint } from './grid';
 import { FACILITY_BUILD_COSTS, facilityBuildTargets, movementAllowanceForUnit } from './legacyCore';
-import { movementCostForCell } from './catalog';
+import { movementCostForCell, movementProfileForUnit } from './catalog';
 import { buildFacility } from './facilities';
 import { deployUnitWithId, deploymentCells, chooseDelegateSpawnCell } from './deployment';
+import { getDeploymentTargets } from './queries';
 import { advanceTenDay, settleTenDay } from '../turn';
 import { cityAvailableOfficers } from '../commands';
 import {
@@ -17,6 +17,7 @@ import {
   executeDelegations,
   hasExecutableDelegation,
   keepDelegationMergedOfficersActed,
+  optimalPathCells,
   runDelegatedUnits,
   setBuildDelegate,
   setMoveDelegate,
@@ -152,6 +153,71 @@ describe('部队委任', () => {
       expect(unit.delegate).toEqual({ kind: 'move', target });
       // 本轮已前进（未停在原地）
       expect(unit.q !== spawn.q || unit.r !== spawn.r).toBe(true);
+    }, 30000);
+
+    it('落点是可达集中「已付消耗 + 到目标剩余消耗」最小且已付消耗最大者（宛骑兵→洛阳）', () => {
+      // 回归用例：宛（曹操）骑兵委任洛阳。旧实现沿 Dijkstra 选出的单一最短路径取最远可达格，
+      // 目标存在多条等价最短路径时会漏掉同样最优、却推进更多的落点（玩家反馈 (73,89) 不如 (73,88)）。
+      const state = createGame('cao', 1);
+      const luoyang = state.cities.luoyang;
+      const target = { q: luoyang.gridQ, r: luoyang.gridR };
+      state.cities.wan.armaments = { ...state.cities.wan.armaments, cavalry: 5000 } as NonNullable<typeof state.cities.wan.armaments>;
+      const query = { cityId: 'wan' as const, troopType: 'cavalry' as const, officerIds: ['cao-cao'] };
+      const deployCells = getDeploymentTargets(state, query);
+      // 取最西侧部署格：此处到洛阳有多条等价最优路径，正是旧实现会选歪的场景
+      const spawn = deployCells.reduce((west, cell) => (cell.q < west.q ? cell : west));
+      expect(spawn).toBeDefined();
+      const sim = deployUnitWithId(state, 'cao', {
+        cityId: 'wan', officerIds: ['cao-cao'], troopType: 'cavalry',
+        troops: 1500, food: 6000, destination: spawn,
+      });
+      const unit = sim.state.units[sim.unitId];
+      unit.moved = false;
+      unit.acted = false;
+
+      const next = setMoveDelegate(sim.state, 'cao', sim.unitId, target);
+      const landed = next.units[sim.unitId];
+      expect(landed).toBeDefined();
+      if (!landed) return;
+      // 本旬已前进
+      expect(landed.q !== spawn.q || landed.r !== spawn.r).toBe(true);
+
+      const profile = movementProfileForUnit(unit);
+      const pathOptions = {
+        ignoredUnitId: sim.unitId,
+        movingForceId: 'cao' as const,
+        vehicle: unit.vehicle,
+        profile,
+        allowedCityTransitKeys: ownCityTransitKeysFor(sim.state, 'cao'),
+      };
+      const pathCostOf = (path: { q: number; r: number }[]) => path.slice(1)
+        .reduce((sum, cell) => sum + movementCostForCell(cellAt(sim.state, cell), profile, unit.vehicle), 0);
+
+      // 暴力基准：逐格枚举本旬可达集，求 min(已付消耗 + 剩余消耗)，并列取已付消耗最大者
+      const reachable = reachableCosts(sim.state, unit);
+      const startKey = `${spawn.q},${spawn.r}`;
+      let baseline: { q: number; r: number; total: number; paid: number } | undefined;
+      for (const [key, paid] of reachable) {
+        if (key === startKey) continue;
+        const [q, r] = key.split(',').map(Number);
+        const restPath = optimalPathCells(sim.state, { q, r }, target, pathOptions);
+        if (!restPath) continue;
+        const total = paid + pathCostOf(restPath);
+        if (!baseline || total < baseline.total || (total === baseline.total && paid > baseline.paid)) {
+          baseline = { q, r, total, paid };
+        }
+      }
+      expect(baseline).toBeDefined();
+      if (!baseline) return;
+
+      // 实际落点必须达到暴力基准：同样的最小总消耗，且已付消耗（推进量）也是最大的
+      const paid = reachable.get(`${landed.q},${landed.r}`);
+      expect(paid).toBeDefined();
+      const restPath = optimalPathCells(sim.state, { q: landed.q, r: landed.r }, target, pathOptions);
+      expect(restPath).toBeDefined();
+      if (paid === undefined || !restPath) return;
+      expect(paid + pathCostOf(restPath)).toBe(baseline.total);
+      expect(paid).toBe(baseline.paid);
     }, 30000);
 
     it('每旬自动沿最优路径移动，到达目标后结束委任', () => {

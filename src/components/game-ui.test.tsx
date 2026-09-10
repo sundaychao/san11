@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { App } from '../app/App';
 import { deployUnit } from '../game/battle/actions';
+import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
 import { cityPlots, PLOT_BASE_VALUE } from '../game/innerAffairs';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
@@ -168,6 +169,131 @@ describe('game interface shell', () => {
     const guanYuRow = within(panel).getByTestId('force-overview-officer-guan-yu');
     expect(liuBeiRow).toHaveClass('has-acted');
     expect(guanYuRow).toHaveClass('is-ready');
+  });
+
+  it('centers the map camera on the city/officer/unit row clicked from the overview', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    // 部署一支部队，让「部队」tab 有内容可点
+    const deployed = deployUnit(state, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'wuling',
+      troopType: 'sword',
+      troops: 3000,
+      food: 5000,
+    });
+    render(
+      <GameProvider initialState={deployed} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const panel = screen.getByTestId('force-overview-panel');
+
+    /** 断言：map-content 镜头让指定 (q, r) 落在视口正中（按 jsdom fallback 视口 1280×720 换算） */
+    const viewport = { width: 1280, height: 720 };
+    function expectCenteredOn(q: number, r: number) {
+      const mapContent = screen.getByTestId('map-content');
+      const cell = screen.getByTestId(`map-cell-${q}-${r}`);
+      const cellSize = Number(cell.getAttribute('width'));
+      const viewX = Number.parseFloat(mapContent.getAttribute('data-view-x')!);
+      const viewY = Number.parseFloat(mapContent.getAttribute('data-view-y')!);
+      const scale = Number.parseFloat(mapContent.style.getPropertyValue('--map-scale'));
+      const worldWidth = (state.gridWidth ?? DEFAULT_GRID_WIDTH) * cellSize;
+      const worldHeight = (state.gridHeight ?? DEFAULT_GRID_HEIGHT) * cellSize;
+      const cssWidth = viewport.width * scale;
+      const cssHeight = cssWidth * (worldHeight / worldWidth);
+      const left = (viewport.width - cssWidth) / 2 + viewX;
+      const top = (viewport.height - cssHeight) / 2 + viewY;
+      const centerX = Number(cell.getAttribute('x')) + cellSize / 2;
+      const centerY = Number(cell.getAttribute('y')) + cellSize / 2;
+      expect(left + (centerX * cssWidth) / worldWidth).toBeCloseTo(viewport.width / 2, 0);
+      expect(top + (centerY * cssHeight) / worldHeight).toBeCloseTo(viewport.height / 2, 0);
+    }
+
+    // 开局自动居中到玩家势力城池（江陵）
+    expectCenteredOn(state.cities.jiangling.gridQ, state.cities.jiangling.gridR);
+
+    // 城池 tab：点击「武陵」应跳到武陵
+    await user.click(within(panel).getByTestId('force-overview-city-wuling'));
+    expectCenteredOn(state.cities.wuling.gridQ, state.cities.wuling.gridR);
+
+    // 武将 tab：点击张飞（驻扎在武陵）应跳到武陵
+    await user.click(within(panel).getByRole('button', { name: '武将' }));
+    await user.click(within(panel).getByTestId('force-overview-officer-zhang-fei'));
+    expectCenteredOn(state.cities.wuling.gridQ, state.cities.wuling.gridR);
+
+    // 部队 tab：点击部署的部队应跳到部队所在格（guan-yu 从江陵朝 wuling 行军）
+    await user.click(within(panel).getByRole('button', { name: '部队' }));
+    const unitRow = within(panel).getByTestId('force-overview-units').querySelector('button');
+    expect(unitRow).toBeTruthy();
+    const unitCell = Object.values(deployed.units)[0]!;
+    await user.click(unitRow!);
+    expectCenteredOn(unitCell.q, unitCell.r);
+  });
+
+  it('marks a field unit and its officers as idle while the unit has neither moved nor acted', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    const deployed = deployUnit(state, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'wuling',
+      troopType: 'sword',
+      troops: 3000,
+      food: 5000,
+    });
+    const unit = Object.values(deployed.units)[0]!;
+    // 新的一旬：部队与本旬行动标记都已恢复
+    unit.acted = false;
+    unit.moved = false;
+    deployed.officers['guan-yu'].acted = false;
+    render(
+      <GameProvider initialState={deployed} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const panel = screen.getByTestId('force-overview-panel');
+    await user.click(within(panel).getByRole('button', { name: '武将' }));
+    expect(within(panel).getByTestId('force-overview-officer-guan-yu')).toHaveClass('is-ready');
+
+    await user.click(within(panel).getByRole('button', { name: '部队' }));
+    expect(within(panel).getByTestId(`force-overview-unit-${unit.id}`)).toHaveClass('is-ready');
+  });
+
+  it.each([
+    ['moved', { moved: true, acted: false }],
+    ['acted', { moved: false, acted: true }],
+  ])('greys out a field unit and its officers once the unit has %s', async (_label, flags) => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    const deployed = deployUnit(state, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'wuling',
+      troopType: 'sword',
+      troops: 3000,
+      food: 5000,
+    });
+    const unit = Object.values(deployed.units)[0]!;
+    unit.acted = flags.acted;
+    unit.moved = flags.moved;
+    // 引擎只在部队进城时同步随军武将的 acted，其它行动路径不会 —— 列表必须自己跟随部队
+    deployed.officers['guan-yu'].acted = false;
+    render(
+      <GameProvider initialState={deployed} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const panel = screen.getByTestId('force-overview-panel');
+    await user.click(within(panel).getByRole('button', { name: '武将' }));
+    expect(within(panel).getByTestId('force-overview-officer-guan-yu')).toHaveClass('has-acted');
+
+    await user.click(within(panel).getByRole('button', { name: '部队' }));
+    expect(within(panel).getByTestId(`force-overview-unit-${unit.id}`)).toHaveClass('has-acted');
   });
 
   it('opens a nested city command menu next to a clicked city', async () => {
