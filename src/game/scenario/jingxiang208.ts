@@ -7,7 +7,7 @@ import { INITIAL_OFFICER_MERIT, rankForCityCount } from '../ranks';
 import { derivePersonality } from '../debate';
 import { TREASURES } from '../treasures';
 import type { City, CityId, Force, ForceId, GameState, GridCell, Officer, OfficerAptitudes, Stats, TreasureState } from '../types';
-import china42Data from './china42x.json';
+import china42Data from './maps/china42x.json';
 
 type CitySeed = Omit<City, 'durability' | 'gridQ' | 'gridR' | 'id' | 'maxDurability'> & { id: CityId };
 type OfficerSeed = Omit<Officer, 'acted' | 'location'>;

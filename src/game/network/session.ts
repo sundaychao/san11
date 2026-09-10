@@ -3,6 +3,7 @@ import { createGame, FORCE_IDS } from '../scenario/jingxiang208';
 import { createGameFromMap, forcesOfMap } from '../scenario/customMap';
 import { createMobileDuelGame } from '../scenario/mobileDuel';
 import { getMap } from '../mapRegistry';
+import type { EditorMapPayload } from '../map-editor/editor';
 import { settleForceTurnStart } from '../skills/rules/turn';
 import { advanceTenDay } from '../turn';
 import type { ForceId, GameState } from '../types';
@@ -14,12 +15,12 @@ export const ONLINE_DUEL_MAX_PLAYERS = 2;
 /** 对战地图：small=荆襄小地图（2人），homeland=单机大地图（最多4人，不足用电脑势力补位），其余字符串为地图注册表 mapId（自定义/内置其它图） */
 export type RoomMap = 'small' | 'homeland' | string;
 
-/** 地图允许的真人玩家上限：homeland=4，small=2，其余按该图有主城池的势力数（≤4，无则回退 2） */
-export function roomMaxPlayers(map: RoomMap): number {
+/** 地图允许的真人玩家上限：homeland=4，small=2，其余按该图有主城池的势力数（≤4，无则回退 2）；优先用建房带入的 payload 判定 */
+export function roomMaxPlayers(map: RoomMap, mapPayload?: EditorMapPayload): number {
   if (map === 'homeland') return 4;
   if (map === 'small') return ONLINE_DUEL_MAX_PLAYERS;
-  const sessionMap = getMap(map);
-  const forceCount = sessionMap ? forcesOfMap(sessionMap.payload).length : 0;
+  const payload = mapPayload ?? getMap(map)?.payload;
+  const forceCount = payload ? forcesOfMap(payload).length : 0;
   return forceCount > 0 ? Math.min(forceCount, 4) : ONLINE_DUEL_MAX_PLAYERS;
 }
 
@@ -39,6 +40,8 @@ export interface OnlineRoom {
   revision: number;
   seed: number;
   map: RoomMap;
+  /** 建房时由客户端带入的地图 payload（自定义/热插图等服务端注册表没有的地图必备） */
+  mapPayload?: EditorMapPayload;
   state: GameState | null;
   players: Record<string, OnlinePlayer>;
   playerOrder: string[];
@@ -54,6 +57,7 @@ export interface CreateOnlineRoomInput {
   hostName?: string;
   seed?: number;
   map?: RoomMap;
+  mapPayload?: EditorMapPayload;
 }
 
 export interface JoinOnlineRoomInput {
@@ -86,6 +90,7 @@ export function createOnlineRoom(input: CreateOnlineRoomInput): OnlineRoom {
     revision: 1,
     seed: input.seed ?? Date.now(),
     map: input.map ?? 'small',
+    mapPayload: input.mapPayload,
     state: null,
     players: {
       [input.hostPlayerId]: {
@@ -105,7 +110,7 @@ export function createOnlineRoom(input: CreateOnlineRoomInput): OnlineRoom {
 
 export function joinOnlineRoom(room: OnlineRoom, input: JoinOnlineRoomInput): OnlineRoom {
   const isNewPlayer = !room.players[input.playerId];
-  if (isNewPlayer && Object.keys(room.players).length >= roomMaxPlayers(room.map)) {
+  if (isNewPlayer && Object.keys(room.players).length >= roomMaxPlayers(room.map, room.mapPayload)) {
     throw new Error(
       room.map === 'homeland'
         ? '大地图房间最多支持 4 名玩家'
@@ -160,7 +165,7 @@ export function startOnlineRoom(room: OnlineRoom, input: StartOnlineRoomInput): 
   // 小地图需要2名真人玩家，其余（homeland/自定义）可由房主一人选势力开局，不足用电脑补位
   const minPlayers = room.map === 'small' ? 2 : 1;
   const players = Object.values(room.players);
-  if (players.length > roomMaxPlayers(room.map)) throw new Error('该房间人数已达上限');
+  if (players.length > roomMaxPlayers(room.map, room.mapPayload)) throw new Error('该房间人数已达上限');
   if (players.length < minPlayers) {
     throw new Error(room.map === 'small' ? '至少需要 2 名玩家' : '至少需要 1 名玩家');
   }
@@ -182,10 +187,11 @@ export function startOnlineRoom(room: OnlineRoom, input: StartOnlineRoomInput): 
     if (!guestForceId) throw new Error('手机双人地图需要第二名玩家选择势力');
     state = createMobileDuelGame(hostForceId, guestForceId, room.seed);
   } else {
-    // 其它地图按注册表 mapId 生成场景（含内置荆襄图），不足用的势力由 AI 控制
-    const sessionMap = getMap(room.map);
-    if (!sessionMap) throw new Error('找不到所选的剧本地图');
-    state = createGameFromMap(sessionMap.payload, hostForceId, room.seed);
+    // 其它地图按 mapId 生成场景，不足用的势力由 AI 控制。
+    // 优先用建房时客户端带入的 payload（自定义/热插图），否则从注册表取（内置图）
+    const payload = room.mapPayload ?? getMap(room.map)?.payload;
+    if (!payload) throw new Error('找不到所选的剧本地图');
+    state = createGameFromMap(payload, hostForceId, room.seed);
   }
 
   return {

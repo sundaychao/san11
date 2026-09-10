@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createBattleGrid, GRID_HEIGHT, GRID_WIDTH } from '../battle/scenario';
 import type { GridCell } from '../types';
 import {
+  assignPlot,
   clearEditor,
   createBlankMap,
   createEditorState,
@@ -210,5 +211,108 @@ describe('map editor core', () => {
       { id: 'c', label: '城', q: 2, r: 2, type: 'city', forceId: null },
       { id: 'p', label: '关', q: 9, r: 9, type: 'pass', forceId: null },
     ]);
+  });
+});
+
+describe('map editor 建设用地归属 (plots)', () => {
+  function base() {
+    return createEditorState(
+      createBattleGrid(),
+      [
+        { id: 'city-a', label: '甲城', q: 8, r: 8, type: 'city', forceId: null },
+        { id: 'city-b', label: '乙城', q: 20, r: 20, type: 'city', forceId: null },
+      ],
+      GRID_WIDTH,
+      GRID_HEIGHT,
+    );
+  }
+
+  it('assigns a plot coord to an existing city', () => {
+    const state = base();
+    const edited = assignPlot(state, 'city-a', { q: 9, r: 8 });
+
+    expect(edited.plots).toEqual([{ cityId: 'city-a', q: 9, r: 8 }]);
+    expect(edited.history.length).toBeGreaterThan(0);
+  });
+
+  it('re-assigns one coord from one city to another (一格一主)', () => {
+    const state = assignPlot(base(), 'city-a', { q: 9, r: 8 });
+    const edited = assignPlot(state, 'city-b', { q: 9, r: 8 });
+
+    expect(edited.plots).toEqual([{ cityId: 'city-b', q: 9, r: 8 }]);
+  });
+
+  it('cancels a plot assignment with null cityId', () => {
+    const state = assignPlot(base(), 'city-a', { q: 9, r: 8 });
+    const edited = assignPlot(state, null, { q: 9, r: 8 });
+
+    expect(edited.plots).toEqual([]);
+  });
+
+  it('ignores assignment when the target city does not exist', () => {
+    const edited = assignPlot(base(), 'ghost', { q: 9, r: 8 });
+
+    expect(edited.plots).toEqual([]);
+  });
+
+  it('never assigns a plot onto a city center coord', () => {
+    const edited = assignPlot(base(), 'city-a', { q: 8, r: 8 });
+
+    expect(edited.plots).toEqual([]);
+  });
+
+  it('round-trips plots through export and import', () => {
+    const state = assignPlot(assignPlot(base(), 'city-a', { q: 9, r: 8 }), 'city-b', { q: 21, r: 20 });
+    const json = JSON.parse(exportEditorJson(state));
+    expect(json.plots).toEqual([
+      { cityId: 'city-a', q: 9, r: 8 },
+      { cityId: 'city-b', q: 21, r: 20 },
+    ]);
+
+    const imported = importEditorJson(base(), JSON.stringify(json));
+    expect(imported.plots).toEqual(json.plots);
+  });
+
+  it('drops orphan plots and duplicate coords on import (一格一主)', () => {
+    const source = base();
+    const payload = JSON.parse(exportEditorJson(source));
+    payload.cities = [
+      { id: 'city-a', label: '甲城', q: 8, r: 8, type: 'city', forceId: null },
+      { id: 'city-c', label: '丙城', q: 30, r: 30, type: 'city', forceId: null },
+    ];
+    payload.plots = [
+      { cityId: 'city-a', q: 9, r: 8 },
+      { cityId: 'ghost', q: 1, r: 1 },      // 指向不存在的城 → 丢弃
+      { cityId: 'city-c', q: 31, r: 30 },
+      { cityId: 'city-c', q: 31, r: 30 },   // 重复坐标 → 保留首次
+    ];
+
+    const imported = importEditorJson(source, JSON.stringify(payload));
+    expect(imported.plots).toEqual([
+      { cityId: 'city-a', q: 9, r: 8 },
+      { cityId: 'city-c', q: 31, r: 30 },
+    ]);
+  });
+
+  it('releases a city plots when its stronghold is erased', () => {
+    const state = assignPlot(assignPlot(base(), 'city-a', { q: 9, r: 8 }), 'city-b', { q: 21, r: 20 });
+    const edited = eraseStronghold(state, 'city-a');
+
+    expect(edited.plots).toEqual([{ cityId: 'city-b', q: 21, r: 20 }]);
+  });
+
+  it('undo restores prior plots state and redo reapplies it', () => {
+    const state = base();
+    const assigned = assignPlot(state, 'city-a', { q: 9, r: 8 });
+    const undone = undoEditor(assigned);
+    const redone = redoEditor(undone);
+
+    expect(undone.plots).toEqual([]);
+    expect(redone.plots).toEqual([{ cityId: 'city-a', q: 9, r: 8 }]);
+  });
+
+  it('exported svg includes plot-cell markers', () => {
+    const svg = exportEditorSvg(assignPlot(base(), 'city-a', { q: 9, r: 8 }));
+    expect(svg).toContain('data-plot-cell="city-a:9,8"');
   });
 });

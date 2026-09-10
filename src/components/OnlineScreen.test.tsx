@@ -101,7 +101,7 @@ describe('OnlineScreen online rooms', () => {
 
     await user.click(screen.getByRole('button', { name: /创建新房间/ }));
 
-    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'china42x' });
+    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith(expect.objectContaining({ serverUrl: 'http://server.test', map: 'china42x' }));
   });
 
   it('lets the host pick a specific map from the available list', async () => {
@@ -111,7 +111,7 @@ describe('OnlineScreen online rooms', () => {
     await user.click(screen.getByRole('radio', { name: /荆襄地图/ }));
     await user.click(screen.getByRole('button', { name: /创建新房间/ }));
 
-    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'china42x' });
+    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith(expect.objectContaining({ serverUrl: 'http://server.test', map: 'china42x' }));
   });
 
   it('keeps creating a room available while the lobby connection is refreshing', async () => {
@@ -123,7 +123,7 @@ describe('OnlineScreen online rooms', () => {
     expect(createButton).toBeEnabled();
 
     await user.click(createButton);
-    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith({ serverUrl: 'http://server.test', map: 'china42x' });
+    expect(gameValue.current?.createOnlineRoom).toHaveBeenCalledWith(expect.objectContaining({ serverUrl: 'http://server.test', map: 'china42x' }));
   });
 
   it('refreshes the room list from the current server', async () => {

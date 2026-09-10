@@ -5,7 +5,7 @@
  * 逐值提取原版 20 种细分地形（语义经 sango_infinity Build/Content/Data/Common/
  * TerrainTypes.json 权威表核验：sango terrainType = 原版tType+1，39971/40000 格
  * 数值吻合，且各地形高度/水位/贴图统计一致），生成 china42x 系列地图文件：
- *   public/maps/china42x.json、src/game/scenario/china42x.json、
+ *   public/maps/china42x.json、src/game/scenario/maps/china42x.json、
  *   public/maps/china42x.svg、public/maps/china42x.png（预览）
  *
  * 与 v1（convert-xsyg-map.ts → china42.json）的区别：
@@ -542,7 +542,7 @@ function main() {
   mkdirSync(outDir, { recursive: true });
   const jsonPath = resolve(outDir, 'china42x.json');
   writeFileSync(jsonPath, JSON.stringify(payload), 'utf8');
-  const srcJsonPath = resolve(process.cwd(), 'src/game/scenario/china42x.json');
+  const srcJsonPath = resolve(process.cwd(), 'src/game/scenario/maps/china42x.json');
   writeFileSync(srcJsonPath, JSON.stringify(payload), 'utf8');
   const svgPath = resolve(outDir, 'china42x.svg');
   writeFileSync(svgPath, renderSvg(grid, cities), 'utf8');

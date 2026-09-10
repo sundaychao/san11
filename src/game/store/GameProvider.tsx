@@ -27,7 +27,7 @@ import { createGame } from '../scenario/jingxiang208';
 import { createGameFromMap } from '../scenario/customMap';
 import { BUILTIN_MAP_CHINA42_ID, getMap } from '../mapRegistry';
 import { settleForceTurnStart } from '../skills/rules/turn';
-import type { EditableCityMarker } from '../map-editor/editor';
+import type { EditableCityMarker, EditorMapPayload } from '../map-editor/editor';
 import type { City, CityId, FacilityType, ForceId, GameCommand, GameState, GridCell, PassId, TroopType } from '../types';
 import { createGameEngine, type GameEngine } from '../engine';
 import {
@@ -52,7 +52,7 @@ interface GameContextValue {
   loginAccount(input: { username: string; password: string; serverUrl?: string }): Promise<void>;
   logoutAccount(): void;
   loadOnlineRooms(input?: { serverUrl?: string }): Promise<void>;
-  createOnlineRoom(input: { serverUrl?: string; seed?: number; map?: RoomMap }): Promise<void>;
+  createOnlineRoom(input: { serverUrl?: string; seed?: number; map?: RoomMap; mapPayload?: EditorMapPayload }): Promise<void>;
   joinOnlineRoom(input: { roomId: string; serverUrl?: string }): Promise<void>;
   resumeOnlineRoom(input?: { serverUrl?: string; roomId?: string }): Promise<void>;
   selectOnlineForce(forceId: ForceId): Promise<void>;

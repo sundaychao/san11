@@ -163,6 +163,48 @@ button { color: inherit; }
 }
 .editor-size-fields button[type='button'] { grid-column: 1 / 2; }
 .editor-size-fields button.secondary-button { grid-column: 2 / 3; }
+/* 编辑器建设用地覆盖层：半透明淡蓝方框，不拦截点击（pointer-events none 交由底层格刷格） */
+.editor-plot-cell {
+  fill: rgba(110, 176, 220, 0.42);
+  stroke: #7ac0e0;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.editor-plot-cell.is-selected {
+  fill: rgba(255, 200, 90, 0.5);
+  stroke: #ffe08a;
+}
+/* 编辑器建设用地圈地提示与「确定/取消选择」按钮排 */
+.map-editor-plot-hint {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: rgba(12, 18, 16, 0.72);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.map-editor-plot-hint strong { color: #ffe08a; }
+.map-editor-plot-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.map-editor-plot-actions .primary-button {
+  padding: 6px 16px;
+  background: linear-gradient(180deg, #b98a2f, #8a5f1d);
+  color: #ffe9b8;
+  border: 1px solid #6b4a16;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.map-editor-plot-actions button:disabled {
+  opacity: 0.45;
+  filter: saturate(0.4);
+  cursor: not-allowed;
+}
 /* 地图列表：平铺卡片 + 新建占位 */
 .map-list-screen {
   min-height: 100dvh;
@@ -201,6 +243,37 @@ button { color: inherit; }
 .map-card-new { justify-content: center; align-items: center; gap: 8px; border-style: dashed; }
 .map-card-new svg { width: 30px; height: 30px; color: var(--gold); }
 .map-card-new .map-card-name { color: var(--gold); }
+.map-card-import { justify-content: center; align-items: center; gap: 8px; border-style: dashed; }
+.map-card-import svg { width: 24px; height: 24px; color: var(--gold); }
+.map-card-import .map-card-name { color: var(--gold); }
+/* 地图卡片容器（方便挂删除按钮） */
+.map-card-wrapper { position: relative; }
+.map-card-wrapper .map-card { width: 100%; }
+.map-card-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(201, 123, 113, 0.5);
+  border-radius: 3px;
+  background: rgba(201, 123, 113, 0.18);
+  color: #f0b0a8;
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+  cursor: pointer;
+}
+.map-card-wrapper:hover .map-card-delete { opacity: 1; }
+.map-card-delete svg { width: 14px; height: 14px; }
+.map-card-delete:hover { background: rgba(201, 123, 113, 0.36); }
+/* 工具栏 */
+.map-list-toolbar {
+  display: flex;
+  gap: 10px;
+  width: min(880px, 100%);
+}
 /* 势力选择 */
 .force-select-screen {
   min-height: 100dvh;
@@ -386,6 +459,8 @@ button { color: inherit; }
 /* 空城池/空关隘：无主时显示纯白（不透明更明显） */
 .city-footprint-cell.is-neutral { fill: rgba(255, 255, 255, 0.78); stroke: rgba(255, 255, 255, 0.74); }
 .battle-grid-overlay.is-editing .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 78%, rgba(255, 231, 145, 0.62)); stroke: rgba(255, 250, 188, 1); stroke-width: 2.3; pointer-events: none; cursor: crosshair; }
+/* 编辑器模式：关隘标记深棕色独立样式，只占单格 */
+.pass-footprint-cell { fill: #6b3a1f; stroke: #d4a06a; stroke-width: 2.4; vector-effect: non-scaling-stroke; pointer-events: none; }
 .battle-unit-marker { pointer-events: auto; cursor: pointer; }
 .battle-unit-model { filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.66)); }
 .battle-unit-marker.is-selected .battle-unit-body { stroke: #8fd2ff; stroke-width: 3.2; }

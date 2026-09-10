@@ -537,6 +537,7 @@ function growCluster(
 export function initConstructionPlots(
   state: GameState,
   interiorByCityId?: ReadonlyMap<string, GridCoord[]>,
+  manualPlotsByCity?: ReadonlyMap<string, GridCoord[]>,
 ): void {
   const grid = state.grid ?? [];
   const cellByKey = new Map<string, GridCell>();
@@ -580,6 +581,7 @@ export function initConstructionPlots(
   // 为每城分配 construction 地格
   for (const city of cityList) {
     const interior = interiorByCityId?.get(city.id);
+    const manual = manualPlotsByCity?.get(city.id);
 
     // 已有地格数据（本函数已生成过或存档带来的）：补足被旧规模档位截断的空地格，
     // 不改动任何已有地格（避免覆盖已建设施）；坐标来源与原版不符的（编辑器/小地图剧本）不动
@@ -601,6 +603,12 @@ export function initConstructionPlots(
           }
         }
       }
+      continue;
+    }
+
+    // 手动圈定的建设用地（编辑器 map.plots，方案甲：完全信任，只保证一格一主）
+    if (manual && manual.length > 0) {
+      applyCityPlots(city, manual);
       continue;
     }
 

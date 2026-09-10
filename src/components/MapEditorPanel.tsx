@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Brush, Castle, Droplets, Eraser, FileText, Mountain, RotateCcw, RotateCw, Save, TreePine, Waves,
+  Brush, Castle, Droplets, Eraser, FileText, Grid3x3, Mountain, RotateCcw, RotateCw, Save, TreePine, Waves,
 } from 'lucide-react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import type { MapEditorTool } from '../game/map-editor/editor';
@@ -10,8 +10,12 @@ export interface MapEditorPanelProps {
   activeTool: MapEditorTool;
   canRedo: boolean;
   canUndo: boolean;
+  plotCity?: { id: string; label: string } | null;
+  canConfirmPlots: boolean;
   onBack(): void;
   onClear(): void;
+  onClearPlotCity(): void;
+  onConfirmPlots(): void;
   onRedo(): void;
   onSave(name: string): void;
   onSelectTool(tool: MapEditorTool): void;
@@ -44,8 +48,12 @@ export function MapEditorPanel({
   activeTool,
   canRedo,
   canUndo,
+  plotCity,
+  canConfirmPlots,
   onBack,
   onClear,
+  onClearPlotCity,
+  onConfirmPlots,
   onRedo,
   onSave,
   onSelectTool,
@@ -105,6 +113,15 @@ export function MapEditorPanel({
           </button>
           <button
             type="button"
+            className={activeTool === 'plot' ? 'is-active' : ''}
+            aria-pressed={activeTool === 'plot'}
+            onClick={() => onSelectTool('plot')}
+          >
+            <Grid3x3 />
+            <span>建设用地</span>
+          </button>
+          <button
+            type="button"
             className={activeTool === 'erase' ? 'is-active' : ''}
             aria-pressed={activeTool === 'erase'}
             onClick={() => onSelectTool('erase')}
@@ -113,6 +130,28 @@ export function MapEditorPanel({
             <span>擦除</span>
           </button>
         </div>
+        {activeTool === 'plot' && (
+          <div className="map-editor-plot-hint" data-testid="editor-plot-hint">
+            {plotCity ? (
+              <>
+                <span>为「<strong>{plotCity.label}</strong>」圈地（点击地块归属此城，再次点击同一地块取消）</span>
+                <div className="map-editor-plot-actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={!canConfirmPlots}
+                    onClick={onConfirmPlots}
+                  >
+                    确定
+                  </button>
+                  <button type="button" className="secondary-button" onClick={onClearPlotCity}>取消选择</button>
+                </div>
+              </>
+            ) : (
+              <span>请先点击一座城池，选择要圈建设用地的归属城</span>
+            )}
+          </div>
+        )}
         <div className="map-editor-actions">
           <button type="button" className="secondary-button" onClick={onUndo} disabled={!canUndo}><RotateCcw />撤销</button>
           <button type="button" className="secondary-button" onClick={onRedo} disabled={!canRedo}><RotateCw />重做</button>

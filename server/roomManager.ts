@@ -1,6 +1,7 @@
 import type { Socket } from 'socket.io';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import type { ForceId } from '../src/game/types';
+import type { EditorMapPayload } from '../src/game/map-editor/editor';
 import type { GameIntentPayload, OnlineRoomListItem, OnlineRoomView, OnlineSnapshot } from '../src/game/network/protocol';
 import {
   createOnlineRoom,
@@ -166,7 +167,7 @@ export class RoomManager {
     if (currentRoom?.players[playerId]) this.removePlayerFromRoom(currentRoom, playerId);
   }
 
-  createRoom(input: { playerId: string; playerName: string; seed?: number; map?: RoomMap }) {
+  createRoom(input: { playerId: string; playerName: string; seed?: number; map?: RoomMap; mapPayload?: EditorMapPayload }) {
     this.pruneExpiredLobbyDisconnects();
     this.leaveAnyCurrentRoom(input.playerId);
     const roomId = createRoomCode(new Set(this.rooms.keys()));
@@ -176,6 +177,7 @@ export class RoomManager {
       hostName: input.playerName,
       seed: input.seed,
       map: input.map,
+      mapPayload: input.mapPayload,
     });
     this.rooms.set(room.id, room);
     this.playerRooms.set(input.playerId, room.id);
@@ -223,7 +225,7 @@ export class RoomManager {
         hostName: room.players[room.hostPlayerId]?.name ?? '房主',
         map: room.map,
         playerCount: Object.keys(room.players).length,
-        maxPlayers: roomMaxPlayers(room.map),
+        maxPlayers: roomMaxPlayers(room.map, room.mapPayload),
         selectedForceIds: [...new Set(Object.values(room.players).flatMap((player) => (
           player.forceId ? [player.forceId] : []
         )))],

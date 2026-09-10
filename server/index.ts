@@ -121,6 +121,7 @@ io.on('connection', (socket) => {
         playerName: session.username,
         seed: payload.seed,
         map: payload.map,
+        mapPayload: payload.mapPayload,
       });
       manager.bindSocket(socket, snapshot);
       ack({ ok: true, snapshot });

@@ -9,8 +9,10 @@ import {
   writeSave,
 } from './persistence';
 import { createGame } from './scenario/jingxiang208';
+import { createGameFromMap } from './scenario/customMap';
+import type { EditorMapPayload } from './map-editor/editor';
 import china42Data from './scenario/china42.json';
-import china42xData from './scenario/china42x.json';
+import china42xData from './scenario/maps/china42x.json';
 import type { GridCell } from './types';
 import { createMobileDuelGame } from './scenario/mobileDuel';
 
@@ -34,6 +36,72 @@ describe('persistence', () => {
 
     expect(restored).toEqual({ ok: true, state });
     expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
+  });
+
+  it('accepts custom-map states whose cities/units use arbitrary ids (editor cities like city-20-25)', () => {
+    // 编辑器创建的新城 id 形如 city-20-25，不在内置 CITY_IDS 中；
+    // 部队的 homeCityId 指向此类自定义城，存档校验必须放行，否则部署/移动后 persist 抛错、
+    // 导致指令执行中断、UI 菜单与可移动范围格残留。
+    const width = 40;
+    const height = 40;
+    const grid = [];
+    for (let r = 0; r < height; r++) {
+      for (let q = 0; q < width; q++) grid.push({ q, r, terrain: 'plain' as const });
+    }
+    const map: EditorMapPayload = {
+      schemaVersion: 2,
+      width,
+      height,
+      backgroundImage: '',
+      grid,
+      cities: [
+        { type: 'city', id: 'city-20-25', label: '新城', q: 20, r: 25, forceId: 'liu' },
+        { type: 'city', id: 'city-30-15', label: '敌城', q: 30, r: 15, forceId: 'cao' },
+      ],
+    };
+    const state = createGameFromMap(map, 'liu', 5);
+    expect((state.cities as Record<string, { id: string }> )['city-20-25']).toBeDefined();
+
+    writeSave(storage, 'auto', state); // 不应抛「拒绝写入无效存档」
+    expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
+  });
+
+  it('honors editor-designated construction plots (map.plots) over auto-fallback', () => {
+    const width = 20;
+    const height = 20;
+    const grid = [];
+    for (let r = 0; r < height; r++) {
+      for (let q = 0; q < width; q++) grid.push({ q, r, terrain: 'plain' as const });
+    }
+    const map: EditorMapPayload = {
+      schemaVersion: 2,
+      width,
+      height,
+      backgroundImage: '',
+      grid,
+      cities: [
+        { type: 'city', id: 'city-10-10', label: '都城', q: 10, r: 10, forceId: 'liu' },
+        { type: 'city', id: 'city-16-16', label: '邻城', q: 16, r: 16, forceId: 'cao' },
+      ],
+      plots: [
+        { cityId: 'city-10-10', q: 11, r: 10 },
+        { cityId: 'city-10-10', q: 11, r: 11 },
+        { cityId: 'city-10-10', q: 9, r: 11 },
+        { cityId: 'city-16-16', q: 17, r: 16 },
+      ],
+    };
+
+    const state = createGameFromMap(map, 'liu', 5);
+    const cities = state.cities as Record<string, { plots?: Array<{ q: number; r: number }> }>;
+    const city = cities['city-10-10'];
+    const coords = (city.plots ?? []).map((plot) => `${plot.q},${plot.r}`);
+    const gridByKey = new Map(state.grid.map((cell) => [`${cell.q},${cell.r}`, cell.terrain]));
+
+    expect(coords).toEqual(['11,10', '11,11', '9,11']);
+    expect(gridByKey.get('11,10')).toBe('construction');
+    expect(gridByKey.get('11,11')).toBe('construction');
+    // 邻城按其手动归属落位，而不是争夺 11,11
+    expect((cities['city-16-16'.toLowerCase()]?.plots ?? []).map((plot) => `${plot.q},${plot.r}`)).toEqual(['17,16']);
   });
 
   it('normalizes legacy china42x pass cells from construction to pass on load', () => {

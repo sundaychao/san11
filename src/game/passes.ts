@@ -1,7 +1,7 @@
 import { emptyArmaments } from './armaments';
 import { gridKey, neighborsOf, ringCoordsWithinRange, type GridCoord } from './battle/grid';
 import type { CityArmaments, CityId, ForceId, GameState, Pass, PassId } from './types';
-import china42Data from './scenario/china42x.json';
+import china42Data from './scenario/maps/china42x.json';
 
 /** 原版关隘锚点（单格，来自 Scen000.s11 建筑坐标，与 jingxiang208.china42Passes 同源） */
 interface PassAnchor {

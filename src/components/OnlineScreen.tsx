@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { getMap, listMaps, BUILTIN_MAP_CHINA42_ID } from '../game/mapRegistry';
+import { getMap, listMaps, loadRuntimeMaps, BUILTIN_MAP_CHINA42_ID, type SessionMap } from '../game/mapRegistry';
 import type { RoomMap } from '../game/network/session';
 import { useGame } from '../game/store/GameProvider';
 
@@ -21,7 +21,7 @@ interface OnlineScreenProps {
  */
 export function OnlineScreen({ onBack }: OnlineScreenProps) {
   const { auth, createOnlineRoom, joinOnlineRoom, loadOnlineRooms, online, resumeOnlineRoom, clearError } = useGame();
-  const maps = listMaps();
+  const [maps, setMaps] = useState<SessionMap[]>(() => listMaps());
   const [roomId, setRoomId] = useState('');
   const [selectedMap, setSelectedMap] = useState<string>(() => (
     maps.some((map) => map.id === BUILTIN_MAP_CHINA42_ID) ? BUILTIN_MAP_CHINA42_ID : (maps[0]?.id ?? '')
@@ -29,6 +29,13 @@ export function OnlineScreen({ onBack }: OnlineScreenProps) {
   const [serverUrl, setServerUrl] = useState(online.serverUrl);
   const [hasRequestedRooms, setHasRequestedRooms] = useState(false);
   const onlineBusy = online.connecting || online.resumingRoom;
+
+  // 热拔插：异步拉取 public/maps 下的运行时地图，完成后刷新列表
+  useEffect(() => {
+    let active = true;
+    void loadRuntimeMaps().then(() => { if (active) { setMaps(listMaps()); } });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!auth.token || hasRequestedRooms || online.resumingRoom || online.roomId) return;
@@ -40,7 +47,13 @@ export function OnlineScreen({ onBack }: OnlineScreenProps) {
 
   const createRoom = async () => {
     try {
-      await createOnlineRoom({ serverUrl, map: selectedMap as RoomMap });
+      // 带上选中地图的 payload：自定义/热插图服务端注册表没有，开局需要它才能生成场景
+      const selected = getMap(selectedMap);
+      await createOnlineRoom({
+        serverUrl,
+        map: selectedMap as RoomMap,
+        mapPayload: selected?.payload,
+      });
     } catch {
       // GameProvider exposes the server error through online.error.
     }

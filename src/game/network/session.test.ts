@@ -35,6 +35,47 @@ describe('online room session', () => {
     return startOnlineRoom(ready, { playerId: 'host' });
   }
 
+  /** 自定义图 payload：两座分属 liu/cao 的有主城，注册表里无此 mapId */
+  function customPayload() {
+    const width = 20;
+    const height = 20;
+    const grid = [];
+    for (let r = 0; r < height; r++) {
+      for (let q = 0; q < width; q++) grid.push({ q, r, terrain: 'plain' as const });
+    }
+    return {
+      schemaVersion: 2,
+      width,
+      height,
+      backgroundImage: '',
+      grid,
+      cities: [
+        { type: 'city', id: 'my-city-a', label: '甲城', q: 6, r: 6, forceId: 'liu' },
+        { type: 'city', id: 'my-city-b', label: '乙城', q: 14, r: 14, forceId: 'cao' },
+      ],
+    };
+  }
+
+  it('starts a lobby with a custom-map payload that is absent from the server registry', () => {
+    // 回归：服务端 getMap 找不到自定义图 mapId → 之前 startOnlineRoom 抛「找不到所选的剧本地图」。
+    // 修复后开局应优先用建房时客户端带入的 mapPayload 生成场景。
+    const payload = customPayload();
+    const created = createOnlineRoom({
+      roomId: 'CSTM', hostPlayerId: 'host', hostName: 'Host', seed: 1,
+      map: 'my-custom-map', mapPayload: payload,
+    });
+    const joined = joinOnlineRoom(created, { playerId: 'guest', playerName: 'Guest' });
+    const ready = selectPlayerForce(
+      selectPlayerForce(joined, { playerId: 'host', forceId: 'liu' }),
+      { playerId: 'guest', forceId: 'cao' },
+    );
+
+    const started = startOnlineRoom(ready, { playerId: 'host' });
+
+    expect(started.phase).toBe('playing');
+    expect(started.state?.cities).toBeDefined();
+  });
+
   function addTurnStartMusicians(room: ReturnType<typeof readyStartedRoom>) {
     room.state!.officers['zhang-fei'].skill = '乐奏';
     room.state!.officers['cao-cao'].skill = '乐奏';

@@ -4,7 +4,7 @@ import { createMobileDuelGrid } from './scenario/mobileDuel';
 import { ARMAMENT_TYPES } from './armaments';
 import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, CityId, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Pass, PassId, Stats, StrategyResultReport } from './types';
 import china42Data from './scenario/china42.json';
-import china42xData from './scenario/china42x.json';
+import china42xData from './scenario/maps/china42x.json';
 import { initConstructionPlots } from './innerAffairs';
 
 export const AUTO_SAVE_KEY = 'jingxiang-208-autosave-v1';
@@ -195,7 +195,7 @@ function validGridCell(value: unknown): value is GridCell {
     TERRAIN_VALUES.includes(cell.terrain!);
 }
 
-function validUnit(value: unknown): value is ArmyUnit {
+function validUnit(value: unknown, custom?: boolean): value is ArmyUnit {
   if (!value || typeof value !== 'object') return false;
   const unit = value as Partial<ArmyUnit>;
   const validStatus = (status: unknown) => status === undefined || (Number.isInteger(status) && Number(status) > 0);
@@ -203,7 +203,7 @@ function validUnit(value: unknown): value is ArmyUnit {
     FORCE_IDS.includes(unit.forceId!) &&
     (unit.kind === undefined || unit.kind === 'combat' || unit.kind === 'transport') &&
     typeof unit.leaderId === 'string' &&
-    CITY_IDS.includes(unit.homeCityId!) &&
+    (custom || CITY_IDS.includes(unit.homeCityId!)) &&
     (unit.troopType === undefined || TROOP_TYPES.includes(unit.troopType)) &&
     (unit.vehicle === undefined || unit.vehicle === 'boat' || unit.vehicle === 'ship') &&
     (unit.siegeWeapon === undefined || unit.siegeWeapon === 'ram' || unit.siegeWeapon === 'tower') &&
@@ -385,7 +385,7 @@ export function isGameState(value: unknown): value is GameState {
         governor.location.passId === pass.id;
     }) &&
     state.grid.every(validGridCell) &&
-    Object.values(state.units).every((unit) => validUnit(unit) && state.units![unit.id] === unit &&
+    Object.values(state.units).every((unit) => validUnit(unit, isCustom) && state.units![unit.id] === unit &&
       Boolean(officerById[unit.leaderId])) &&
     (state.battleDamageReports === undefined || (
       Array.isArray(state.battleDamageReports) &&

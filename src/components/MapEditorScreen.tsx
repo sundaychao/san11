@@ -5,6 +5,7 @@ import { GameProvider } from '../game/store/GameProvider';
 import {
   createBlankMap,
   createEditorState,
+  commitPlots,
   eraseStronghold,
   exportEditorJson,
   paintTerrain,
@@ -12,6 +13,7 @@ import {
   placePass,
   redoEditor,
   undoEditor,
+  type EditorCityPlot,
   type EditorMapPayload,
   type MapEditorState,
   type MapEditorTool,
@@ -72,7 +74,7 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
     // 重新编辑已有地图（内置或自定义）：直接以当前荷载进入编辑器
     const payload = getMap(mapId)?.payload;
     return payload
-      ? createEditorState(payload.grid, payload.cities, payload.width, payload.height)
+      ? createEditorState(payload.grid, payload.cities, payload.width, payload.height, payload.plots ?? [])
       : createBlankMap(200, 200);
   });
   // 新建地图时先确认尺寸（宽×高格数）；已有地图编辑时为哨兵值，跳过尺寸输入页
@@ -81,14 +83,84 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
   );
   const [activeTool, setActiveTool] = useState<MapEditorTool>('plain');
   const [pendingPlacement, setPendingPlacement] = useState<PendingPlacement | null>(null);
+  // 「建设用地」模式下当前圈地归属的城
+  const [plotCityId, setPlotCityId] = useState<string | null>(null);
+  // 「建设用地」草稿：确定前不落库，取消即整体丢弃
+  const [draftAdds, setDraftAdds] = useState<EditorCityPlot[]>([]);
+  const [draftRemoves, setDraftRemoves] = useState<string[]>([]);
 
   const stub = useMemo(() => editorStub(editor), [editor]);
 
   const markerAt = (q: number, r: number) => editor.cities.find((c) => c.q === q && c.r === r);
   const placementMarker = pendingPlacement ? markerAt(pendingPlacement.q, pendingPlacement.r) : undefined;
+  const plotCity = plotCityId ? editor.cities.find((c) => c.id === plotCityId) : undefined;
+
+  // 预览图：已提交 + 本轮草稿（草稿覆盖同坐标、草稿移除剔除）
+  const previewPlots = useMemo(() => {
+    const byKey = new Map<string, EditorCityPlot>();
+    const removeSet = new Set(draftRemoves);
+    for (const plot of editor.plots) {
+      if (removeSet.has(`${plot.q},${plot.r}`)) continue;
+      byKey.set(`${plot.q},${plot.r}`, plot);
+    }
+    for (const plot of draftAdds) byKey.set(`${plot.q},${plot.r}`, plot);
+    return [...byKey.values()];
+  }, [editor.plots, draftAdds, draftRemoves]);
+  const hasPlotDraft = draftAdds.length > 0 || draftRemoves.length > 0;
+
+  const resetPlotDraft = () => {
+    setDraftAdds([]);
+    setDraftRemoves([]);
+  };
+
+  const selectPlotCity = (id: string | null) => {
+    setPlotCityId(id);
+    resetPlotDraft();
+  };
+
+  const confirmPlots = () => {
+    setEditor((current) => (current ? commitPlots(current, draftAdds, draftRemoves) : current));
+    resetPlotDraft();
+    setPlotCityId(null);
+  };
+
+  const handleSelectTool = (tool: MapEditorTool) => {
+    setActiveTool(tool);
+    if (tool !== 'plot') selectPlotCity(null);
+  };
 
   const handlePaint = (coord: { q: number; r: number }) => {
+    if (activeTool === 'plot') {
+      // 点击城址（type==='city'）→ 选中该城作为圈地归属（并丢弃上一轮草稿）
+      const city = editor.cities.find((c) => c.q === coord.q && c.r === coord.r && c.type === 'city');
+      if (city) {
+        emitAudioEvent({ type: 'menu-click-on' });
+        selectPlotCity(plotCityId === city.id ? null : city.id);
+        return;
+      }
+      if (!plotCityId) return;
+      const key = `${coord.q},${coord.r}`;
+      setDraftAdds((adds) => {
+        if (adds.some((p) => p.q === coord.q && p.r === coord.r)) {
+          // 已在草稿：本格原是已提交归属 → 转为「取消」；否则恢复「无归属」
+          if (editor.plots.some((p) => p.q === coord.q && p.r === coord.r && p.cityId === plotCityId)) {
+            setDraftRemoves((removes) => {
+              const rest = removes.filter((k) => k !== key);
+              return rest.includes(key) ? rest : [...rest, key];
+            });
+            return adds.filter((p) => p.q !== coord.q || p.r !== coord.r);
+          }
+          return adds.filter((p) => p.q !== coord.q || p.r !== coord.r);
+        }
+        // 本条自主：从「取消」恢复为「归属」；然后加入草稿（原属他城/无归属 → 归属本城）
+        setDraftRemoves((removes) => removes.filter((k) => k !== key));
+        return [...adds, { cityId: plotCityId, q: coord.q, r: coord.r }];
+      });
+      return;
+    }
     if (activeTool === 'erase') {
+      const marker = editor.cities.find((c) => c.q === coord.q && c.r === coord.r);
+      if (marker && marker.id === plotCityId) selectPlotCity(null);
       setEditor((current) => {
         if (!current) return current;
         const marker = current.cities.find((c) => c.q === coord.q && c.r === coord.r);
@@ -173,6 +245,8 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
             editorMode
             editorGrid={editor.grid}
             editorCities={editor.cities}
+            editorPlots={activeTool === 'plot' ? previewPlots : editor.plots}
+            editorPlotCityId={activeTool === 'plot' ? plotCityId : null}
             onEditorCellPaint={handlePaint}
           />
         </div>
@@ -180,11 +254,18 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
           activeTool={activeTool}
           canUndo={editor.history.length > 0}
           canRedo={editor.future.length > 0}
+          plotCity={plotCity ? { id: plotCity.id, label: plotCity.label } : null}
+          canConfirmPlots={hasPlotDraft}
           onBack={onBack}
-          onClear={() => setEditor((current) => (current ? eraseStrongholdCurrentMap(current) : current))}
+          onClear={() => {
+            selectPlotCity(null);
+            setEditor((current) => (current ? eraseStrongholdCurrentMap(current) : current));
+          }}
+          onConfirmPlots={confirmPlots}
+          onClearPlotCity={() => selectPlotCity(null)}
           onRedo={() => setEditor((current) => (current ? redoEditor(current) : current))}
           onSave={handleSave}
-          onSelectTool={setActiveTool}
+          onSelectTool={handleSelectTool}
           onUndo={() => setEditor((current) => (current ? undoEditor(current) : current))}
         />
 
@@ -280,7 +361,7 @@ function EditorSizeFields({ defaultWidth, defaultHeight, onCancel, onSubmit }: {
           onKeyDown={(event) => { if (event.key === 'Enter') submit(); }}
         />
       </label>
-      <button type="button" data-testid="editor-size-create" disabled={!valid} onClick={submit}>
+      <button type="button" className="primary-button" data-testid="editor-size-create" disabled={!valid} onClick={submit}>
         创建地图
       </button>
       <button type="button" className="secondary-button" data-testid="editor-size-back" onClick={onCancel}>

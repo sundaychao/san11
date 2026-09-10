@@ -9,7 +9,7 @@ import { china42Passes } from '../game/scenario/jingxiang208';
 import { passAt, passAttackRangeCoords, passBlockedKeys } from '../game/passes';
 import { PLOT_LABELS, CITY_ATTACK_RANGE, CITY_ATTACK_MIN } from '../game/innerAffairs';
 import { rulerCityOf } from '../game/territory';
-import type { EditableCityMarker } from '../game/map-editor/editor';
+import type { EditableCityMarker, EditorCityPlot } from '../game/map-editor/editor';
 import { useGame } from '../game/store/GameProvider';
 import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GridCell, PassId, StrategyResultReport, TroopType } from '../game/types';
 
@@ -109,6 +109,8 @@ interface StrategicMapProps {
   backgroundImage?: string;
   editorGrid?: GridCell[];
   editorCities?: EditableCityMarker[];
+  editorPlots?: EditorCityPlot[];
+  editorPlotCityId?: string | null;
   editorMode?: boolean;
   onEditorCellPaint?(coord: GridCoord): void;
   deployTargets?: GridCoord[];
@@ -175,6 +177,8 @@ export function StrategicMap({
   deployTargets = [],
   editorCities,
   editorGrid,
+  editorPlots,
+  editorPlotCityId,
   editorMode = false,
   firePlotTargets = [],
   firePlots = [],
@@ -492,9 +496,9 @@ export function StrategicMap({
     };
   }, []);
 
-  // 单机进入游戏：镜头自动跳到本方君主所在城池，并让该城池显示在视口正中。
+  // 进入游戏（单机/联网）：镜头自动跳到本方君主所在城池，并让该城池显示在视口正中。
   // 每局只执行一次（进入/读档时），之后玩家的拖拽、缩放、边缘滚动都不会被重置。
-  const initialFocusCity = state && !editorMode && online.mode !== 'online'
+  const initialFocusCity = state && !editorMode
     ? rulerCityOf(state, state.playerForceId)
     : undefined;
   const initialFocusAppliedRef = useRef(false);
@@ -511,7 +515,7 @@ export function StrategicMap({
 
   const displayGrid = editorGrid ?? state.grid;
   const displayCities = editorMode
-    ? (editorCities ?? []).map((city) => ({ ...city, forceColor: '#d1b943' }))
+    ? (editorCities ?? []).filter((m) => (m as any).type !== 'pass').map((city) => ({ ...city, forceColor: '#d1b943' }))
     : Object.values(state.cities).map((city) => ({
       id: city.id,
       label: city.name,
@@ -519,6 +523,10 @@ export function StrategicMap({
       r: city.gridR,
       forceColor: (city.ownerId ? state.forces[city.ownerId]?.color : undefined) ?? NEUTRAL_CITY_COLOR,
     }));
+  /** 编辑器模式：单独渲染关隘标记，只占 1 格（城池占 7 格） */
+  const displayEditorPasses = editorMode
+    ? (editorCities ?? []).filter((m) => (m as any).type === 'pass').map((city) => ({ ...city, forceColor: '#6b3a1f' }))
+    : [];
 
   let visibleCells = displayGrid;
   const effectiveViewport = viewport ?? { width: 1280, height: 720 };
@@ -1138,6 +1146,23 @@ export function StrategicMap({
               />
             );
           })}
+          {/* 编辑器：手动圈定的建设用地归属覆盖层 */}
+          {editorMode && editorPlots?.map((plot) => {
+            const position = displayCellPosition(plot.q, plot.r);
+            const selected = plot.cityId === editorPlotCityId;
+            return (
+              <rect
+                key={`editor-plot-${plot.cityId}-${plot.q}-${plot.r}`}
+                data-testid="editor-plot-cell"
+                data-plot-cell={`${plot.cityId}:${plot.q},${plot.r}`}
+                x={position.x + 2}
+                y={position.y + 2}
+                width={CELL_SIZE - 4}
+                height={CELL_SIZE - 4}
+                className={`editor-plot-cell${selected ? ' is-selected' : ''}`}
+              />
+            );
+          })}
           {displayCities.flatMap((city) => (
             sevenCellCityFootprint(city).map((coord) => {
               const position = displayCellPosition(coord.q, coord.r);
@@ -1155,6 +1180,13 @@ export function StrategicMap({
                   className={`city-footprint-cell${gameCity && !gameCity.ownerId ? ' is-neutral' : ''}`}
                   style={{ '--force-color': city.forceColor } as CSSProperties}
                   onPointerDown={(event) => {
+                    if (editorMode) {
+                      // 编辑器：点击城址排不上号即选中该城（供建设用地圈地定位归属城）
+                      if (event.button !== 0) return;
+                      event.stopPropagation();
+                      onEditorCellPaint?.({ q: city.q, r: city.r });
+                      return;
+                    }
                     if (!gameCity || event.button !== 0) return;
                     event.stopPropagation();
                     const footprintKey = `${coord.q},${coord.r}`;
@@ -1200,6 +1232,23 @@ export function StrategicMap({
               );
             })
           ))}
+          {/* 编辑器模式：关隘标记只占 1 格（区别于城池的 7 格 footprint） */}
+          {displayEditorPasses.map((pass) => {
+            const position = displayCellPosition(pass.q, pass.r);
+            return (
+              <rect
+                key={`editor-pass-${pass.id}`}
+                data-testid="editor-pass-footprint"
+                x={position.x + 2}
+                y={position.y + 2}
+                width={CELL_SIZE - 4}
+                height={CELL_SIZE - 4}
+                className="pass-footprint-cell"
+                style={{ '--force-color': pass.forceColor } as CSSProperties}
+                onPointerDown={(event) => { event.stopPropagation(); event.preventDefault(); }}
+              />
+            );
+          })}
           {facilityRangeCells.map((coord) => {
             const position = displayCellPosition(coord.q, coord.r);
             return (

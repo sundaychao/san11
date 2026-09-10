@@ -232,8 +232,14 @@ export function createGameFromMap(
   };
 
   assignInitialRanks(state);
-  // 建设用地：自定义图无 interior → 走现成 fallback 在城址外围自动搜索空地
-  initConstructionPlots(state);
+  // 建设用地：优先采用编辑器手动圈定的归属（map.plots，方案甲），其余城市走现成 fallback 自动搜索
+  const manualPlotsByCity = new Map<string, { q: number; r: number }[]>();
+  for (const plot of map.plots ?? []) {
+    const list = manualPlotsByCity.get(plot.cityId);
+    if (list) list.push({ q: plot.q, r: plot.r });
+    else manualPlotsByCity.set(plot.cityId, [{ q: plot.q, r: plot.r }]);
+  }
+  initConstructionPlots(state, undefined, manualPlotsByCity);
   initCityPopulation(state);
   return state;
 }

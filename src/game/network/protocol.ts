@@ -1,4 +1,5 @@
 import type { ForceId, GameState } from '../types';
+import type { EditorMapPayload } from '../map-editor/editor';
 import type { GameIntent } from './intents';
 import type { OnlinePlayer, OnlineRoomPhase, RoomMap } from './session';
 
@@ -49,6 +50,8 @@ export interface CreateRoomPayload {
   token: string;
   seed?: number;
   map?: RoomMap;
+  /** 所选地图的完整 payload；自定义/热插图服务端注册表没有，必须由房主带入 */
+  mapPayload?: EditorMapPayload;
 }
 
 export interface JoinRoomPayload {
