@@ -85,6 +85,11 @@ export function SaveLoadDialog({ mode, getCamera, onClose }: SaveLoadDialogProps
     clearError();
   }, [pendingSave, clearError]);
 
+  // 翻页时槽位行会被卸载，浏览器不会再派发 mouseleave，必须手动清掉悬停预览，否则右侧会停在上页的档位
+  useEffect(() => {
+    setHoveredSlot(null);
+  }, [page]);
+
   const [start, end] = slotPageRange(page);
   const pageSlots = useMemo(
     () => Array.from({ length: end - start + 1 }, (_, index) => start + index),

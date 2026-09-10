@@ -247,6 +247,9 @@ interface StrategicMapProps {
   /** 读档后要还原的镜头；与 restoreCameraToken 配合，token 变化即重新应用一次 */
   restoreCamera?: MapCamera | null;
   restoreCameraToken?: number;
+  /** 外部列表（城池/武将/部队）请求把镜头居中到指定格；与 focusToken 配合，token 变化即执行一次 */
+  focusCell?: GridCoord | null;
+  focusToken?: number;
 }
 
 export function StrategicMap({
@@ -311,6 +314,8 @@ export function StrategicMap({
   onViewChange,
   restoreCamera = null,
   restoreCameraToken = 0,
+  focusCell = null,
+  focusToken = 0,
 }: StrategicMapProps) {
   const { state, selectedCityId, selectCity, online } = useGame();
   const [view, setView] = useState<MapView>(() => {
@@ -643,6 +648,25 @@ export function StrategicMap({
     setView(applyCamera(pending));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restoreCameraToken, viewport]);
+
+  // 列表点击跳转：把镜头居中到指定格。与读档还原同一套「等真实视口」的等待逻辑，
+  // 但只改中心、保留当前缩放（玩家自己调的远近不该被列表点击重置）。
+  const pendingFocusRef = useRef<GridCoord | null>(null);
+  const consumedFocusTokenRef = useRef(0);
+  useEffect(() => {
+    if (focusToken <= 0 || consumedFocusTokenRef.current === focusToken) return;
+    pendingFocusRef.current = focusCell;
+    if (!focusCell) consumedFocusTokenRef.current = focusToken;
+  }, [focusCell, focusToken]);
+  useEffect(() => {
+    const pending = pendingFocusRef.current;
+    if (!pending) return;
+    if (!viewportRef.current && typeof ResizeObserver !== 'undefined') return;
+    pendingFocusRef.current = null;
+    consumedFocusTokenRef.current = focusToken;
+    setView((current) => centerViewOnCell(current, pending.q, pending.r));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusToken, viewport]);
 
   // 回报镜头变化（仅写入调用方 ref，不触发重渲染）
   const onViewChangeRef = useRef(onViewChange);

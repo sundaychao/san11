@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { initialArmaments } from '../game/armaments';
 import { deployTransportUnit, deployUnit, deployUnitPreviewWithId, movementCells } from '../game/battle/actions';
@@ -11,7 +12,7 @@ import { computeDelegatePath, setMoveDelegate } from '../game/battle/delegate';
 import { deployUnitWithId } from '../game/battle/deployment';
 import { executeCommand } from '../game/commands';
 import { createGame } from '../game/scenario/jingxiang208';
-import { GameProvider } from '../game/store/GameProvider';
+import { GameProvider, useGame } from '../game/store/GameProvider';
 import { settleTenDay } from '../game/turn';
 import { GameShell } from './GameShell';
 import { OfficerListDialog } from './OfficerListDialog';
@@ -24,13 +25,54 @@ function renderState(state = createGame('liu', 3)) {
   );
 }
 
-/** 顶栏不再放「武将」按钮：武将一览直接挂载组件测试，功能本身的覆盖不变 */
+/** 顶栏不再放「武将」按钮：武将一览直接挂载组件测试，功能本身的覆盖不变。
+    用一层 Host 托管开关，右键关闭弹窗的用例才验证得到"卸载" */
 function renderOfficerList(state = createGame('liu', 3)) {
+  function Host() {
+    const [open, setOpen] = useState(true);
+    return open ? <OfficerListDialog onClose={() => setOpen(false)} /> : null;
+  }
   return render(
     <GameProvider initialState={state}>
-      <OfficerListDialog onClose={() => {}} />
+      <Host />
     </GameProvider>,
   );
+}
+
+/** 探针：把 GameProvider 中指定部队的最新坐标渲染到 DOM，便于断言委任执行后的位移 */
+function renderStateWithProbe(state = createGame('liu', 3), unitId = '') {
+  function Probe() {
+    const { state: current } = useGame();
+    const unit = current?.units[unitId];
+    return <span data-testid="probe-unit-pos">{unit ? `${unit.q},${unit.r}` : 'gone'}</span>;
+  }
+  return render(
+    <GameProvider initialState={state}>
+      <GameShell />
+      <Probe />
+    </GameProvider>,
+  );
+}
+
+/** 打开地图右键命令菜单。右键语义是"先关闭已打开的浮层"，有前置菜单时一次点不开，故重试 */function openMapCommandMenu() {
+  const viewport = screen.getByTestId('map-viewport');
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    fireEvent.contextMenu(viewport, { clientX: 900, clientY: 650 });
+    if (screen.queryByTestId('map-context-proceed-button')) return;
+  }
+  throw new Error('地图命令菜单未打开');
+}
+
+/** 推进一旬：顶栏「结束本旬」按钮已移除，改走地图右键菜单的「进行」 */
+async function proceedTenDayByMapMenu(user: ReturnType<typeof userEvent.setup>) {
+  openMapCommandMenu();
+  await user.click(screen.getByTestId('map-context-proceed-button'));
+}
+
+/** 同上，供 fake timers 场景使用（userEvent 在假定时器下会挂起） */
+function proceedTenDayByMapMenuSync() {
+  openMapCommandMenu();
+  fireEvent.click(screen.getByTestId('map-context-proceed-button'));
 }
 
 // 默认最高角度视野约 30 格且中心在地图中心 (100,100)；测试视口 fallback 1280×720。
@@ -906,8 +948,7 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(screen.getByTestId('unit-info-panel')).toHaveTextContent('900');
     fireEvent.pointerLeave(unitMarker);
 
-    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
-    await user.click(screen.getByTestId('map-context-proceed-button'));
+    await proceedTenDayByMapMenu(user);
     fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1, clientX: 300, clientY: 180 });
     fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1, clientX: 300, clientY: 180 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '设置' }));
@@ -994,6 +1035,88 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(within(unitMarker).getByText('1,000')).toBeVisible();
   });
 
+  it('右键菜单「委任部队行动」：无委任部队时置灰禁用', () => {
+    renderState();
+    openMapCommandMenu();
+
+    const button = screen.getByTestId('map-context-delegate-button');
+    expect(button).toBeVisible();
+    expect(button).toBeDisabled();
+    expect(button).toHaveClass('is-disabled');
+  });
+
+  it('右键菜单「委任部队行动」：点击后委任部队行动一步，菜单项随即置灰', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    const query = { cityId: 'jiangling' as const, troopType: 'sword' as const, officerIds: ['liu-bei'] };
+    const deployKeys = new Set(getDeploymentTargets(state, query).map(gridKey));
+    const preview = deployUnitPreviewWithId(state, state.playerForceId, {
+      cityId: 'jiangling', officerIds: ['liu-bei'], troopType: 'sword', troops: 4000, food: 6000,
+    });
+    const spawnUnit = preview.state.units[preview.unitId];
+    const spawn = { q: spawnUnit.q, r: spawnUnit.r };
+    const cityKeysOf = cityKeys(state);
+    const facilityKeys = new Set(Object.values(state.facilities ?? {}).map((facility) => gridKey(facility)));
+    // 在出生点附近 BFS：找一处「出征范围外、委任路径可达」的格作为委任目标
+    let target: { q: number; r: number } | undefined;
+    const visited = new Set<string>([gridKey(spawn)]);
+    let frontier = [spawn];
+    for (let distance = 1; distance <= 8 && !target; distance += 1) {
+      const next: { q: number; r: number }[] = [];
+      for (const cell of frontier) {
+        for (const neighbor of neighborsOf(cell.q, cell.r)) {
+          const key = gridKey(neighbor);
+          if (visited.has(key)) continue;
+          visited.add(key);
+          if (cityKeysOf.has(key) || facilityKeys.has(key)) continue;
+          if (!passableNonCityCell(state, neighbor)) continue;
+          next.push(neighbor);
+          if (deployKeys.has(key)) continue;
+          const path = computeDelegatePath(preview.state, preview.unitId, neighbor);
+          if (path && path.length > 1) {
+            target = neighbor;
+            break;
+          }
+        }
+        if (target) break;
+      }
+      frontier = next;
+    }
+    expect(target).toBeDefined();
+    if (!target) return;
+
+    // 旬初状态：部队已带移动委任，但尚未行动、移动力充足
+    const sim = deployUnitWithId(state, 'liu', {
+      cityId: 'jiangling', officerIds: ['liu-bei'], troopType: 'sword',
+      troops: 4000, food: 6000, destination: spawn,
+    });
+    const unitId = sim.unitId;
+    const unit = sim.state.units[unitId];
+    unit.delegate = { kind: 'move', target };
+    unit.moved = false;
+    unit.acted = false;
+    unit.movementRemaining = 20;
+    const before = `${unit.q},${unit.r}`;
+
+    renderStateWithProbe(sim.state, unitId);
+    expect(screen.getByTestId('probe-unit-pos')).toHaveTextContent(before);
+
+    openMapCommandMenu();
+    const enabled = screen.getByTestId('map-context-delegate-button');
+    expect(enabled).toBeEnabled();
+    expect(enabled).not.toHaveClass('is-disabled');
+
+    await user.click(enabled);
+
+    // 部队沿委任路径前进了一步
+    expect(screen.getByTestId('probe-unit-pos')).not.toHaveTextContent(before);
+    // 再开菜单：已无可行动的委任部队 → 置灰禁用
+    openMapCommandMenu();
+    const disabled = screen.getByTestId('map-context-delegate-button');
+    expect(disabled).toBeDisabled();
+    expect(disabled).toHaveClass('is-disabled');
+  }, 30000);
+
   it('shows unit commands on a selected unit and moves to a selected cell only after wait is chosen', async () => {
     const user = userEvent.setup();
     renderState();
@@ -1012,8 +1135,7 @@ describe('command interface', { timeout: 30000 }, () => {
     fireEvent.pointerDown(screen.getAllByTestId(/move-target-/)[0], { button: 0, buttons: 1 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '待命' }));
 
-    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
-    await user.click(screen.getByTestId('map-context-proceed-button'));
+    await proceedTenDayByMapMenu(user);
     const unitMarker = screen.getByTestId('battle-unit-marker');
     fireEvent.pointerDown(unitMarker, { button: 0, buttons: 1 });
     expect(screen.getAllByTestId(/move-target-/).length).toBeGreaterThan(0);
@@ -1926,8 +2048,7 @@ describe('command interface', { timeout: 30000 }, () => {
       act(() => vi.advanceTimersByTime(2000));
       expect(screen.queryByTestId('battle-damage-number')).not.toBeInTheDocument();
 
-      fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
-      fireEvent.click(screen.getByTestId('map-context-proceed-button'));
+      proceedTenDayByMapMenuSync();
       expect(screen.queryByTestId('battle-damage-number')).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();

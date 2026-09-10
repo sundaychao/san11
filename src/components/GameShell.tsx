@@ -5,7 +5,7 @@ import { effectiveUnitAbilities, harmfulStrategySuccessChance, deployUnitPreview
 import type { CSSProperties } from 'react';
 import { gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticFacilityTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
-import { computeDelegatePath } from '../game/battle/delegate';
+import { computeDelegatePath, hasExecutableDelegation } from '../game/battle/delegate';
 import { chooseDelegateSpawnCell } from '../game/battle/deployment';
 import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { canBuildPlotAtCoord, hasEnemyUnitsNear, isPlotOccupiedByOtherCity, PLOT_GOLD_COST, PLOT_LABELS, startBuildCityPlot, type PlotType } from '../game/innerAffairs';
@@ -84,7 +84,7 @@ type DeployDelegateMenuState = {
 };
 
 export function GameShell() {
-  const { attackCity, attackFacility, attackPlot, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, deployUnitDelegate, dismantleFacility, duelUnit, endTenDay, clearPendingCamera, issueCommand, moveUnit, pendingCamera, repairFacility, setBuildDelegate, setMoveDelegate, setRepairDelegate, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
+  const { attackCity, attackFacility, attackPlot, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, deployUnitDelegate, dismantleFacility, duelUnit, endTenDay, executeDelegatedUnits, clearPendingCamera, issueCommand, moveUnit, online, pendingCamera, repairFacility, setBuildDelegate, setMoveDelegate, setRepairDelegate, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
   const { emit: emitAudioEvent } = useAudioEventAdapter();
   /** 储存 / 载入对话框：null 表示关闭 */
   const [saveDialogMode, setSaveDialogMode] = useState<SaveLoadDialogMode | null>(null);
@@ -92,6 +92,9 @@ export function GameShell() {
   const cameraRef = useRef<MapCamera | null>(null);
   const [cameraRestore, setCameraRestore] = useState<{ camera: MapCamera; token: number } | null>(null);
   const cameraTokenRef = useRef(0);
+  /** 右侧概览列表点击后的镜头跳转请求（城池/武将/部队），token 变化即执行一次 */
+  const [mapFocus, setMapFocus] = useState<{ cell: GridCoord; token: number } | null>(null);
+  const mapFocusTokenRef = useRef(0);
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   /** 当前命令/培育对话框的关隘宿主：非空时以关隘为据点宿主执行命令（cityId 仅作归辖城） */
   const [activeCommandPassId, setActiveCommandPassId] = useState<PassId | null>(null);
@@ -204,6 +207,10 @@ export function GameShell() {
   const repairConfirmRef = useRef<HTMLElement>(null);
   const unitHoverCloseTimerRef = useRef<number | null>(null);
   const canOperateCurrentTurn = !state || state.turnForceId === state.playerForceId;
+  /** 右键菜单「委任部队行动」可用性：本方存在尚未行动的委任部队；联网由服务器统一推进，故置灰 */
+  const canExecuteDelegation = canOperateCurrentTurn
+    && online.mode !== 'online'
+    && Boolean(state && hasExecutableDelegation(state, state.playerForceId));
   /** 命令/培育宿主：关隘宿主用其归辖城充当 cityId，否则用当前选中城池 */
   const activeHostPass = activeCommandPassId ? state?.passes?.[activeCommandPassId] : undefined;
   const activeHostCityId = activeHostPass ? activeHostPass.homeCityId : selectedCityId;
@@ -1390,6 +1397,13 @@ export function GameShell() {
     setSelectedUnitId(null);
   }, [canOperateCurrentTurn, endTenDay]);
 
+  /** 右键菜单「委任部队行动」：让委任部队立刻行动一步，不推进回合、不结算旬末 */
+  const executeDelegationFromMap = useCallback(() => {
+    setMapContextMenu(null);
+    setShowMapIntelOptions(false);
+    executeDelegatedUnits();
+  }, [executeDelegatedUnits]);
+
   const openIntelFromMap = useCallback(() => {
     setShowMapIntelOptions((current) => {
       if (!current) emitAudioEvent({ type: 'menu-click-on' });
@@ -1461,6 +1475,12 @@ export function GameShell() {
 
   /** 读取实时镜头：存档时随档落盘 */
   const readCamera = useCallback(() => cameraRef.current, []);
+
+  /** 右侧概览列表点击：把主镜头居中到目标格（保留当前缩放） */
+  const focusMapCell = useCallback((cell: GridCoord) => {
+    mapFocusTokenRef.current += 1;
+    setMapFocus({ cell, token: mapFocusTokenRef.current });
+  }, []);
 
   // 读档（含从首页读档）后把存档镜头写回主地图，保证画面与存档时完全一致
   useEffect(() => {
@@ -1931,6 +1951,8 @@ export function GameShell() {
         onViewChange={(camera) => { cameraRef.current = camera; }}
         restoreCamera={cameraRestore?.camera ?? null}
         restoreCameraToken={cameraRestore?.token ?? 0}
+        focusCell={mapFocus?.cell ?? null}
+        focusToken={mapFocus?.token ?? 0}
         freezeView={Boolean(
           mapContextMenu || unitIntelMenu || cityInfoMenu || facilityContextMenu
           || plotContextMenu || cancelConfirm || saveDialogMode,
@@ -1963,7 +1985,7 @@ export function GameShell() {
       {state && hoveredPass && state.passes?.[hoveredPass.passId] && (
         <PassInfoPanel pass={state.passes[hoveredPass.passId]} state={state} position={hoveredPass.position} />
       )}
-      <ForceOverviewPanel />
+      <ForceOverviewPanel onFocus={focusMapCell} />
       {state && cityStatusId && selectedCityId === cityStatusId
         && state.cities[cityStatusId]?.ownerId === state.playerForceId && (
           <CityStatusPanel city={state.cities[cityStatusId]} state={state} />
@@ -2033,6 +2055,15 @@ export function GameShell() {
             disabled={!canOperateCurrentTurn}
           >
             进行
+          </button>
+          <button
+            type="button"
+            className={!canExecuteDelegation ? 'is-disabled' : undefined}
+            data-testid="map-context-delegate-button"
+            onClick={executeDelegationFromMap}
+            disabled={!canExecuteDelegation}
+          >
+            委任部队行动
           </button>
           <button type="button" data-testid="map-context-intel-button" onClick={openIntelFromMap}>情报</button>
           <button type="button" data-testid="map-context-save-button" onClick={saveFromMap}>储存</button>

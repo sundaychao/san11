@@ -33,6 +33,7 @@ import {
   type SaveSlotMeta,
 } from '../saveSlots';
 import type { GridCoord } from '../battle/grid';
+import { hasExecutableDelegation, runDelegatedUnits } from '../battle/delegate';
 import { advanceTenDay, settleMonth, settleTenDay } from '../turn';
 import { createGame } from '../scenario/jingxiang208';
 import { createGameFromMap } from '../scenario/customMap';
@@ -112,6 +113,8 @@ interface GameContextValue {
   applyMapEditorMap(map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number }): void;
   endMonth(): void;
   endTenDay(): void;
+  /** 让当前玩家的委任部队立刻行动一步（不推进回合、不结算旬末） */
+  executeDelegatedUnits(): void;
   manualSave(): void;
   resetGame(): void;
   clearSave(slot: SaveSlot): void;
@@ -527,6 +530,16 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     persist('auto', next);
   }, [isOnline, persist, replaceGameState, sendOnlineIntent, state]);
 
+  /** 委任部队立刻行动一步：不推进回合，只跑 executeDelegations 这一步 */
+  const executeDelegatedUnits = useCallback(() => {
+    if (!state) return;
+    if (!hasExecutableDelegation(state, state.playerForceId)) return;
+    const next = runDelegatedUnits(state, state.playerForceId);
+    replaceGameState(next);
+    setError(null);
+    persist('auto', next);
+  }, [persist, replaceGameState, state]);
+
   const manualSave = useCallback(() => {
     if (isOnline()) {
       const message = '联网模式由服务器自动保存';
@@ -625,12 +638,13 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     applyMapEditorMap,
     endMonth,
     endTenDay,
+    executeDelegatedUnits,
     manualSave,
     resetGame,
     clearSave: clearSaveSlot,
     selectCity: setSelectedCityId,
     clearError: () => setError(null),
-  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattlePass, attackBattlePlot, attackBattleUnit, jointAttackBattleUnit, auth, availability, buildBattleFacility, clearPendingCamera, clearSaveSlot, createOnlineRoom, deleteSaveSlot, deployBattleUnit, deployBattleUnitAction, deployBattleUnitDelegate, deployTransport, disconnectOnline, dismantleBattleFacility, dismissDebateView, duelBattleUnit, endMonth, endTenDay, error, issueCommand, joinOnlineRoom, latestSaveSlot, loadFromSlot, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, pendingCamera, playDebateRound, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, rethinkDebate, saveSlots, saveToSlot, selectedCityId, selectOnlineForce, setBuildBattleDelegate, setMoveBattleDelegate, setRepairBattleDelegate, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
+  }), [applyMapEditorMap, attackBattleCity, attackBattleFacility, attackBattlePass, attackBattlePlot, attackBattleUnit, jointAttackBattleUnit, auth, availability, buildBattleFacility, clearPendingCamera, clearSaveSlot, createOnlineRoom, deleteSaveSlot, deployBattleUnit, deployBattleUnitAction, deployBattleUnitDelegate, deployTransport, disconnectOnline, dismantleBattleFacility, dismissDebateView, duelBattleUnit, endMonth, endTenDay, executeDelegatedUnits, error, issueCommand, joinOnlineRoom, latestSaveSlot, loadFromSlot, loadGame, loadOnlineRooms, loginAccount, logoutAccount, manualSave, moveBattleUnit, online, pendingCamera, playDebateRound, registerAccount, repairBattleFacility, resetGame, resumeOnlineRoom, rethinkDebate, saveSlots, saveToSlot, selectedCityId, selectOnlineForce, setBuildBattleDelegate, setMoveBattleDelegate, setRepairBattleDelegate, startGame, startOnlineGame, state, useBattleFirePlot, useBattleStrategy, useBattleTactic, waitBattleUnit]);
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 }

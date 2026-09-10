@@ -15,7 +15,9 @@ import {
   computeDelegatePath,
   delegationMergedOfficerIds,
   executeDelegations,
+  hasExecutableDelegation,
   keepDelegationMergedOfficersActed,
+  runDelegatedUnits,
   setBuildDelegate,
   setMoveDelegate,
   setRepairDelegate,
@@ -625,5 +627,108 @@ describe('部队委任', () => {
       const repaired = reduceGameIntent(ready, 'liu', { type: 'repairFacility', unitId: 'delegate-unit', facilityId });
       expect(repaired.units['delegate-unit'].delegate).toBeUndefined();
     });
+  });
+
+  describe('委任部队行动（右键菜单「委任部队行动」）', () => {
+    it('hasExecutableDelegation：无委任部队为 false，有未行动的委任部队为 true', () => {
+      const state = createGame('liu', 1);
+      const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
+        .find((n) => cellAt(state, n))!;
+      injectUnit(state, spawn);
+      expect(hasExecutableDelegation(state, 'liu')).toBe(false);
+
+      const target = findRemoteLandCell(state, spawn, 6);
+      expect(target).toBeDefined();
+      if (!target) return;
+
+      // setMoveDelegate 本回合已前进（moved=true）→ 不可再执行一步
+      const delegated = setMoveDelegate(state, 'liu', 'delegate-unit', target);
+      expect(delegated.units['delegate-unit'].moved).toBe(true);
+      expect(hasExecutableDelegation(delegated, 'liu')).toBe(false);
+
+      // 旬初重置（未行动）→ 可执行；非本势力不适用
+      const ready = freshTurn(structuredClone(delegated));
+      expect(hasExecutableDelegation(ready, 'liu')).toBe(true);
+      expect(hasExecutableDelegation(ready, 'cao')).toBe(false);
+    }, 30000);
+
+    it('hasExecutableDelegation：已行动 / 混乱的委任部队为 false', () => {
+      const state = createGame('liu', 1);
+      const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
+        .find((n) => cellAt(state, n))!;
+      const target = { q: spawn.q + 4, r: spawn.r };
+
+      injectUnit(state, spawn, { delegate: { kind: 'move', target }, acted: true });
+      expect(hasExecutableDelegation(state, 'liu')).toBe(false);
+
+      injectUnit(state, spawn, { delegate: { kind: 'move', target }, moved: true });
+      expect(hasExecutableDelegation(state, 'liu')).toBe(false);
+
+      injectUnit(state, spawn, { delegate: { kind: 'move', target }, confusedTenDays: 2 });
+      expect(hasExecutableDelegation(state, 'liu')).toBe(false);
+
+      injectUnit(state, spawn, { delegate: { kind: 'move', target } });
+      expect(hasExecutableDelegation(state, 'liu')).toBe(true);
+    });
+
+    it('runDelegatedUnits：委任部队各行动一步，且不推进回合；行动后无可执行委任', () => {
+      const state = createGame('liu', 1);
+      const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
+        .find((n) => cellAt(state, n))!;
+      injectUnit(state, spawn);
+      const target = findRemoteLandCell(state, spawn, 6);
+      expect(target).toBeDefined();
+      if (!target) return;
+
+      const delegated = setMoveDelegate(state, 'liu', 'delegate-unit', target);
+      const ready = freshTurn(structuredClone(delegated));
+      const before = { q: ready.units['delegate-unit'].q, r: ready.units['delegate-unit'].r };
+      const { month, tenDay, turnForceId } = ready;
+
+      const after = runDelegatedUnits(ready, 'liu');
+      const unit = after.units['delegate-unit'];
+      expect(unit.q !== before.q || unit.r !== before.r).toBe(true);
+      expect(unit.moved).toBe(true);
+      // 不推进回合：时间与行动势力均不变
+      expect(after.month).toBe(month);
+      expect(after.tenDay).toBe(tenDay);
+      expect(after.turnForceId).toBe(turnForceId);
+      // 行动后没有可再执行的委任 → 菜单项置灰
+      expect(hasExecutableDelegation(after, 'liu')).toBe(false);
+    }, 30000);
+
+    it('runDelegatedUnits：无委任部队时原样返回，不做任何改动', () => {
+      const state = createGame('liu', 1);
+      const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
+        .find((n) => cellAt(state, n))!;
+      injectUnit(state, spawn);
+
+      const after = runDelegatedUnits(state, 'liu');
+      const unit = after.units['delegate-unit'];
+      expect(unit.q).toBe(spawn.q);
+      expect(unit.r).toBe(spawn.r);
+      expect(unit.moved).toBe(false);
+      expect(after.turnForceId).toBe(state.turnForceId);
+    });
+
+    it('runDelegatedUnits：委任进驻空城时，随军武将立即标记为已行动', () => {
+      const state = createGame('liu', 1);
+      const found = findEmptyCityAndSpawn(state);
+      expect(found).toBeDefined();
+      if (!found) return;
+      const { city: targetCity, spawn } = found;
+
+      injectUnit(state, spawn, {
+        movementRemaining: 60,
+        delegate: { kind: 'move', target: { q: targetCity.gridQ, r: targetCity.gridR } },
+      });
+
+      const after = runDelegatedUnits(state, 'liu');
+      expect(after.units['delegate-unit']).toBeUndefined();
+      expect(after.cities[targetCity.id].ownerId).toBe('liu');
+      // 不经过旬末重置，也需保持「本旬已行动」
+      expect(after.officers['liu-bei'].acted).toBe(true);
+      expect(cityAvailableOfficers(after, 'liu', targetCity.id).map((officer) => officer.id)).not.toContain('liu-bei');
+    }, 30000);
   });
 });

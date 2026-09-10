@@ -164,8 +164,8 @@ describe('game interface shell', () => {
 
     await user.click(within(panel).getByRole('button', { name: '武将' }));
 
-    const liuBeiRow = within(panel).getByText('刘备').closest('li');
-    const guanYuRow = within(panel).getByText('关羽').closest('li');
+    const liuBeiRow = within(panel).getByTestId('force-overview-officer-liu-bei');
+    const guanYuRow = within(panel).getByTestId('force-overview-officer-guan-yu');
     expect(liuBeiRow).toHaveClass('has-acted');
     expect(guanYuRow).toHaveClass('is-ready');
   });
@@ -1119,6 +1119,12 @@ describe('game interface shell', () => {
     expect(slot5.className).not.toContain('is-previewed');
     expect(within(dialog).getByTestId('save-detail-slot')).toHaveTextContent('09');
     expect(within(dialog).getByText('2:00:00')).toBeVisible();
+
+    // 翻页后不得残留上一页的悬停预览（槽位行被卸载，mouseleave 不会触发）
+    fireEvent.mouseOver(slot5, { relatedTarget: document.body });
+    expect(within(dialog).getByTestId('save-detail-slot')).toHaveTextContent('05');
+    await user.click(within(dialog).getByTestId('save-page-2'));
+    expect(within(dialog).getByTestId('save-detail-slot')).toHaveTextContent('09');
   });
 });
 

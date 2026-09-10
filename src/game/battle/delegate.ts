@@ -293,6 +293,26 @@ export function executeDelegations(state: GameState, forceId: ForceId = state.tu
   return { ...next, turnForceId: previousTurnForceId, facilityRepairReports: repairReports };
 }
 
+/** 该势力是否存在"可以立刻行动一步"的委任部队（右键菜单「委任部队行动」的可用性依据） */
+export function hasExecutableDelegation(state: GameState, forceId: ForceId = state.turnForceId): boolean {
+  return Object.values(state.units).some((unit) => (
+    unit.forceId === forceId
+    && Boolean(unit.delegate)
+    && !unit.acted
+    && !unit.moved
+    && !unitIsIncapacitated(unit)
+  ));
+}
+
+/**
+ * 手动执行委任：不推进回合，只让委任部队各行动一步（右键菜单「委任部队行动」）。
+ * 与 advanceTenDay 的第一步同源；因为不经过旬末重置，这里直接补上"委任进驻/回城的武将标记已行动"。
+ */
+export function runDelegatedUnits(state: GameState, forceId: ForceId = state.turnForceId): GameState {
+  const next = executeDelegations(state, forceId);
+  return keepDelegationMergedOfficersActed(next, delegationMergedOfficerIds(state, next));
+}
+
 /**
  * 委任自动执行后消失的部队（进驻/回城）中并入城池的武将 id。
  * 这类武将的「本旬已行动」是在旬末重置之前标记的，旬末重置会把标记一并清掉，
