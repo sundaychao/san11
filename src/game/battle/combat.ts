@@ -269,7 +269,8 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   const city = state.cities[cityId];
   if (!city) throw new Error('城市不存在');
   if (city.ownerId === forceId) throw new Error('不能攻击己方城市');
-  if (!city.ownerId && city.troops === 0) throw new Error('空城无守军，可直接进驻');
+  // 无主无守军城同样可打：守军已是 0，只会掉耐久；耐久归零即攻破占领（资源减半、耐久重置 20%）。
+  // 想兵不血刃并保住资源，应改用 moveUnit 进驻。
   if (attacker.energy < 10) throw new Error('气力不足');
   if (!isCityInAttackRange(state, attacker, city)) throw new Error('城市不在攻击范围');
   const next = structuredClone(state);
@@ -284,7 +285,8 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
   if (nextCity.troops === 0 || nextCity.durability === 0) {
-    captureCityOnCapture(next, nextAttacker, cityId);
+    // 攻方就在城下，破城后主力直接进城接管
+    captureCityOnCapture(next, nextAttacker, cityId, { mergeAttacker: true });
   }
   return next;
 }
@@ -294,7 +296,7 @@ export function attackPass(state: GameState, forceId: ForceId, attackerId: strin
   const pass = state.passes?.[passId];
   if (!pass) throw new Error('关隘不存在');
   if (pass.ownerId === forceId) throw new Error('不能攻击己方关隘');
-  if (!pass.ownerId && pass.troops === 0) throw new Error('空关隘无守军，可直接进驻');
+  // 无主无守军关隘同样可打（与城池同口径）：耐久归零即攻破占领
   if (attacker.energy < 10) throw new Error('气力不足');
   if (!isPassInAttackRange(state, attacker, pass)) throw new Error('关隘不在攻击范围');
   const next = structuredClone(state);
@@ -310,7 +312,8 @@ export function attackPass(state: GameState, forceId: ForceId, attackerId: strin
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
   if (nextPass.troops === 0 || nextPass.durability === 0) {
-    capturePassOnCapture(next, nextAttacker, passId);
+    // 攻方就在关下，破关后主力直接进关接管
+    capturePassOnCapture(next, nextAttacker, passId, { mergeAttacker: true });
   }
   return next;
 }

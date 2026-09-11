@@ -74,7 +74,7 @@ export function applyGroundFireDamageToPlots(next: GameState) {
   }
 }
 
-/** 点火瞬间对目标格上的城内开发设施与所属城池本体造成一次即时耐久伤害（与点火对部队/野外设施的即时伤害一致，量值参考每旬烧灼）：开发设施掉 150，城池若目标格在其 7 格内则掉 150 */
+/** 点火瞬间对目标格上的城内开发设施、所属城池本体、关隘本体造成一次即时耐久伤害（与点火对部队/野外设施的即时伤害一致，量值参考每旬烧灼）：开发设施掉 150，城池若目标格在其 7 格内则掉 150，关隘若目标格即其锚点则掉 150。无主空城/无主关隘同样会烧 */
 export function applyImmediateFireDamageToCityAndPlot(next: GameState, target: GridCoord) {
   for (const city of Object.values(next.cities)) {
     for (const plot of city.plots ?? []) {
@@ -87,21 +87,33 @@ export function applyImmediateFireDamageToCityAndPlot(next: GameState, target: G
       plot.value = 0;
       plot.constructing = undefined;
     }
-    if (!city.ownerId) continue;
     const inFootprint = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })
       .some((coord) => coord.q === target.q && coord.r === target.r);
     if (inFootprint) city.durability = Math.max(0, city.durability - GROUND_FIRE_CITY_DURABILITY);
   }
+  // 关隘为单格据点：锚点格被点火即掉耐久（无主关隘同样会烧）
+  for (const pass of Object.values(next.passes ?? {})) {
+    if (pass.q !== target.q || pass.r !== target.r) continue;
+    pass.durability = Math.max(0, pass.durability - GROUND_FIRE_CITY_DURABILITY);
+  }
 }
 
-/** 城池每回合受火焰耐久损伤：7 格（中心+周围一圈）中有几个着火格，耐久就掉 base×N */
+/** 城池每回合受火焰耐久损伤：7 格（中心+周围一圈）中有几个着火格，耐久就掉 base×N。无主空城同样会烧 */
 export function applyGroundFireDamageToCities(next: GameState) {
   const burningKeys = new Set((next.firePlots ?? []).map(gridKey));
   for (const city of Object.values(next.cities)) {
-    if (!city.ownerId) continue;
     const burningCells = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })
       .filter((coord) => burningKeys.has(gridKey(coord))).length;
     if (burningCells === 0) continue;
     city.durability = Math.max(0, city.durability - GROUND_FIRE_CITY_DURABILITY * burningCells);
+  }
+}
+
+/** 关隘每回合受火焰耐久损伤：锚点格着火即掉 base（关隘为单格据点，没有 7 格 footprint）。无主关隘同样会烧 */
+export function applyGroundFireDamageToPasses(next: GameState) {
+  const burningKeys = new Set((next.firePlots ?? []).map(gridKey));
+  for (const pass of Object.values(next.passes ?? {})) {
+    if (!burningKeys.has(gridKey({ q: pass.q, r: pass.r }))) continue;
+    pass.durability = Math.max(0, pass.durability - GROUND_FIRE_CITY_DURABILITY);
   }
 }

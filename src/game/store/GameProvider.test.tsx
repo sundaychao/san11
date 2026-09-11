@@ -1227,13 +1227,21 @@ describe('GameProvider', () => {
     await user.click(screen.getByRole('button', { name: 'create room' }));
     await user.click(screen.getByRole('button', { name: 'start online' }));
 
-    // 在线模式下地图在 state 就绪前挂载，scale 停留在默认 2.33（视野约 86 列），
-    // 且血色衣冠地图下江陵出生格 (77,134) 在初始视野（r≤128）之外，先平移到部队处让移动目标格渲染
+    // 在线模式下地图在 state 就绪前挂载，scale 停留在默认 2.33（视野约 88 列 × 57 行），
+    // 只有落在视口裁剪带内的格子才会渲染，移动目标格因此可能缺失。
+    // 这里按当前 view 精确平移到部队格，把它放到视口中心，不依赖初始视野落在哪。
     const unit = state.units[unitId];
     const cellPx = (1280 * 2.33) / 200;
     const viewportEl = screen.getByTestId('map-viewport');
+    const mapContent = screen.getByTestId('map-content');
+    const cssWidth = 1280 * 2.33;
+    const cssHeight = cssWidth * (200 / 200);
+    const left = (1280 - cssWidth) / 2 + Number(mapContent.getAttribute('data-view-x'));
+    const top = (720 - cssHeight) / 2 + Number(mapContent.getAttribute('data-view-y'));
+    const dragX = (1280 / 2 - (unit.q + 0.5) * cellPx) - left;
+    const dragY = (720 / 2 - (unit.r + 0.5) * cellPx) - top;
     fireEvent.pointerDown(viewportEl, { pointerId: 1, button: 0, buttons: 1, clientX: 640, clientY: 360 });
-    fireEvent.pointerMove(viewportEl, { pointerId: 1, clientX: 640 + (100 - unit.q) * cellPx, clientY: 360 + (100 - unit.r) * cellPx });
+    fireEvent.pointerMove(viewportEl, { pointerId: 1, clientX: 640 + dragX, clientY: 360 + dragY });
     fireEvent.pointerUp(viewportEl, { pointerId: 1 });
 
     const unitMarker = screen.getByTestId('battle-unit-marker');

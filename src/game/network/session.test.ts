@@ -12,6 +12,7 @@ import { cellAt } from '../battle/movementRules';
 import { settleForceTurnStart } from '../skills/rules/turn';
 import { reduceGameIntent } from './intentReducer';
 import type { City } from '../types';
+import type { EditorMapPayload } from '../map-editor/editor';
 
 describe('online room session', () => {
   function readyStartedRoom() {
@@ -36,7 +37,7 @@ describe('online room session', () => {
   }
 
   /** 自定义图 payload：两座分属 liu/cao 的有主城，注册表里无此 mapId */
-  function customPayload() {
+  function customPayload(): EditorMapPayload {
     const width = 20;
     const height = 20;
     const grid = [];

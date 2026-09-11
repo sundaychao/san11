@@ -84,10 +84,10 @@ interface GameContextValue {
   deleteSaveSlot(slot: number): void;
   clearPendingCamera(): void;
   issueCommand(command: GameCommand): void;
-  deployUnit(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }): void;
-  deployUnitDelegate(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, target: { q: number; r: number }, facility?: FacilityType): void;
-  deployUnitAction(input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction): void;
-  deployTransportUnit(input: { cityId: CityId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }): void;
+  deployUnit(input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }): void;
+  deployUnitDelegate(input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, target: { q: number; r: number }, facility?: FacilityType): void;
+  deployUnitAction(input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction): void;
+  deployTransportUnit(input: { cityId?: CityId; passId?: PassId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }): void;
   moveUnit(unitId: string, destination: { q: number; r: number }): void;
   setMoveDelegate(unitId: string, target: { q: number; r: number }): void;
   setBuildDelegate(unitId: string, target: { q: number; r: number }, facility: FacilityType): void;
@@ -377,11 +377,11 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     dispatchLocalIntent(intent, afterSuccess);
   }, [dispatchLocalIntent, isOnline, sendOnlineIntent]);
 
-  const deployBattleUnit = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }) => {
+  const deployBattleUnit = useCallback((input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }) => {
     dispatchIntent({ type: 'deployUnit', input }, () => emitAudioEvent({ type: 'unit-moved' }));
   }, [dispatchIntent, emitAudioEvent]);
 
-  const deployBattleUnitDelegate = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, target: { q: number; r: number }, facility?: FacilityType) => {
+  const deployBattleUnitDelegate = useCallback((input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, target: { q: number; r: number }, facility?: FacilityType) => {
     dispatchIntent({ type: 'deployUnitDelegate', input, target, facility }, () => emitAudioEvent({ type: 'unit-moved' }));
   }, [dispatchIntent, emitAudioEvent]);
 
@@ -393,12 +393,12 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     if (action.type === 'buildFacility' || action.type === 'repairFacility') emitAudioEvent({ type: 'project-started' });
   }, [emitAudioEvent]);
 
-  const deployBattleUnitAction = useCallback((input: { cityId: CityId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction) => {
+  const deployBattleUnitAction = useCallback((input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction) => {
     const afterSuccess = () => afterDeployActionAudio(action);
     dispatchIntent({ type: 'deployUnitAction', input, action }, afterSuccess);
   }, [afterDeployActionAudio, dispatchIntent]);
 
-  const deployTransport = useCallback((input: { cityId: CityId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }) => {
+  const deployTransport = useCallback((input: { cityId?: CityId; passId?: PassId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }) => {
     dispatchIntent({ type: 'deployTransportUnit', input });
   }, [dispatchIntent]);
 

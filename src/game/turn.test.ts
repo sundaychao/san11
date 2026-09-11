@@ -368,6 +368,38 @@ describe('ten-day settlement', () => {
     expect(next.units['supply-test'].food).toBe(4600);
   });
 
+  it('sends expiring reinforcement officers to a friendly city when their home city has fallen', () => {
+    const state = createGame('liu', 1);
+    state.tenDay = 1;
+    state.units['reinforcement'] = {
+      id: 'reinforcement',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      officerIds: ['liu-bei'],
+      homeCityId: 'jiangling',
+      troopType: 'sword',
+      q: 35,
+      r: 20,
+      troops: 3000,
+      food: 5000,
+      energy: 70,
+      movementRemaining: 0,
+      moved: true,
+      acted: true,
+      expiresTenDay: 0,
+    };
+    state.officers['liu-bei'].location = { kind: 'unit', unitId: 'reinforcement' };
+    // 归属据点江陵已落入曹操之手，武将不得被送进敌城（刘备仍保有武陵）
+    state.cities['jiangling'].ownerId = 'cao';
+
+    const next = settleTenDay(state);
+
+    expect(next.units.reinforcement).toBeUndefined();
+    expect(next.officers['liu-bei'].location).toEqual({ kind: 'city', cityId: 'wuling' });
+    expect(next.logs.some((log) => log.message.includes('武陵'))).toBe(true);
+  });
+
   it('ticks down unit plot statuses each ten-day', () => {
     const state = createGame('liu', 1);
     state.units['plot-status-unit'] = {

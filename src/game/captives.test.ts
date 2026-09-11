@@ -135,6 +135,43 @@ describe('captureCityOnCapture', () => {
 
     expect(defender.location.kind).toBe('unaffiliated');
   });
+
+  it('mergeAttacker（近战/兵器攻破）：主力整体进城，兵粮金钱与武将并入，部队解散', () => {
+    const { state, attacker } = siegeFixture();
+    const city = state.cities.xiangyang;
+    const beforeGold = city.gold;
+    const beforeFood = city.food;
+    const unitTroops = attacker.troops;
+    const unitFood = attacker.food;
+    const carriedGold = attacker.gold ?? 0;
+    state.officers['guan-yu'].location = { kind: 'unit', unitId: 'attacker' };
+
+    captureCityOnCapture(state, attacker, 'xiangyang', { mergeAttacker: true });
+
+    expect(state.units.attacker).toBeUndefined();
+    // 城破守军溃散，由入城主力接管（不是叠加）
+    expect(city.troops).toBe(unitTroops);
+    expect(city.gold).toBe(Math.floor(beforeGold / 2) + carriedGold);
+    expect(city.food).toBe(Math.floor(beforeFood / 2) + unitFood);
+    expect(state.officers['guan-yu'].location).toEqual({ kind: 'city', cityId: 'xiangyang' });
+    expect(state.officers['guan-yu'].acted).toBe(true);
+  });
+
+  it('默认（火攻等远程破城）：主力留在野外，只拨 min(1000, 兵力20%) 守备队进城', () => {
+    const { state, attacker } = siegeFixture();
+    const city = state.cities.xiangyang;
+    city.troops = 0;
+    const unitTroops = attacker.troops;
+    state.officers['guan-yu'].location = { kind: 'unit', unitId: 'attacker' };
+
+    captureCityOnCapture(state, attacker, 'xiangyang');
+
+    expect(state.units.attacker).toBeDefined();
+    expect(city.troops).toBe(Math.min(1000, Math.floor(unitTroops * 0.2)));
+    expect(attacker.troops).toBe(unitTroops - city.troops);
+    // 远程破城时武将不进城，仍在原部队
+    expect(state.officers['guan-yu'].location).toEqual({ kind: 'unit', unitId: 'attacker' });
+  });
 });
 
 describe('resolveRecruitCaptive', () => {

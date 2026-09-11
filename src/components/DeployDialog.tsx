@@ -7,12 +7,15 @@ import { unitTroopCapOf } from '../game/ranks';
 import { effectiveStat } from '../game/health';
 import { useGame } from '../game/store/GameProvider';
 import { officerSkillsText } from '../game/skills';
-import type { CityId, Officer, OfficerAptitudes, Stats, TroopType } from '../game/types';
+import type { CityId, Officer, OfficerAptitudes, PassId, Stats, TroopType } from '../game/types';
 import { OfficerHealthBadge } from './OfficerHealthBadge';
 import { closePopupOnContextMenu } from './popupEvents';
 
 export interface DeployConfirmInput {
-  cityId: CityId;
+  /** 出发城池 id（从城池出征时） */
+  cityId?: CityId;
+  /** 出发关隘 id（从关隘出征时；与 cityId 二选一） */
+  passId?: PassId;
   officerIds: string[];
   troopType: TroopType;
   vehicle: 'boat' | 'ship';
@@ -23,7 +26,8 @@ export interface DeployConfirmInput {
 }
 
 interface DeployDialogProps {
-  cityId: CityId;
+  cityId?: CityId;
+  passId?: PassId;
   onConfirm(input: DeployConfirmInput): void;
   onClose(): void;
 }
@@ -298,7 +302,7 @@ function OfficerPicker({
   );
 }
 
-export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) {
+export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialogProps) {
   const audio = useAudioEventAdapter();
   const { state } = useGame();
   const [officerIds, setOfficerIds] = useState<string[]>([]);
@@ -313,11 +317,14 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const dialogRef = useRef<HTMLFormElement>(null);
 
   if (!state) return null;
-  const city = state.cities[cityId];
+  const pass = passId ? state.passes?.[passId] : undefined;
+  const source = pass ?? (cityId ? state.cities[cityId] : undefined);
+  if (!source) return null;
   const officers = Object.values(state.officers).filter((officer) => (
     officer.forceId === state.playerForceId &&
-    officer.location.kind === 'city' &&
-    officer.location.cityId === cityId
+    (pass
+      ? officer.location.kind === 'pass' && officer.location.passId === passId
+      : officer.location.kind === 'city' && officer.location.cityId === cityId)
   ));
   const availableOfficers = officers.filter((officer) => !officer.acted);
   const recommendedOfficerIds = recommendedOfficerIdsForTroop(availableOfficers, troopType);
@@ -326,13 +333,13 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const activeOfficerId = activeOfficerIds[0] ?? '';
   const activeOfficer = state.officers[activeOfficerId];
   const armamentType = TROOP_ARMAMENT[troopType];
-  const cityArmaments = armamentsOf(city.armaments);
+  const cityArmaments = armamentsOf(source.armaments);
   const armamentStock = armamentType ? cityArmaments[armamentType] : null;
   const shipStock = cityArmaments.ship;
   const leaderCap = unitTroopCapOf(state, state.playerForceId, activeOfficerId);
   const troopMax = Math.min(
     leaderCap,
-    Math.max(0, city.troops - 500),
+    Math.max(0, source.troops - 500),
     armamentStock ?? Number.POSITIVE_INFINITY,
   );
   const troopMin = 1000;
@@ -341,9 +348,9 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
   const activeTroops = String(troopRangeDisabled
     ? troopMin
     : Math.min(troopMax, Math.max(troopMin, toAmount(troops || String(Math.min(4000, troopMax))))));
-  const goldMax = Math.max(0, city.gold);
+  const goldMax = Math.max(0, source.gold);
   const activeGold = String(Math.min(goldMax, Math.max(0, toAmount(gold || String(Math.min(1000, goldMax))))));
-  const foodMax = Math.max(0, city.food);
+  const foodMax = Math.max(0, source.food);
   const activeFood = String(Math.min(foodMax, Math.max(0, toAmount(food || String(Math.min(6000, foodMax))))));
   const troopAmount = toAmount(activeTroops);
   const goldAmount = toAmount(activeGold);
@@ -353,9 +360,9 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
     state.actionPoints[state.playerForceId] < DEPLOY_AP_COST ? `行动力不足 ${DEPLOY_AP_COST}` : '',
     !activeOfficerId ? '没有可出征武将' : '',
     !Number.isInteger(troopAmount) || troopAmount < 1000 || troopAmount > leaderCap ? `士兵必须为 1000-${leaderCap}` : '',
-    city.troops - troopAmount < 500 ? '城市至少保留 500 兵力' : '',
-    !Number.isInteger(goldAmount) || goldAmount < 0 || goldAmount > city.gold ? '资金不足' : '',
-    !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > city.food ? '兵粮不足' : '',
+    source.troops - troopAmount < 500 ? '城市至少保留 500 兵力' : '',
+    !Number.isInteger(goldAmount) || goldAmount < 0 || goldAmount > source.gold ? '资金不足' : '',
+    !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > source.food ? '兵粮不足' : '',
     armamentType && armamentStock !== null && armamentStock < troopAmount ? `${TROOP_LABELS[troopType]}兵装不足` : '',
     vehicle === 'ship' && shipStock < 1 ? '楼船兵装不足' : '',
     troopType === 'siege' && cityArmaments[siegeWeapon] < 1 ? `${TROOP_TYPES.find((item) => item.siegeWeapon === siegeWeapon)?.label}不足` : '',
@@ -366,7 +373,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
     if (errors.length > 0) return;
     try {
       onConfirm({
-        cityId,
+        ...(passId ? { passId } : { cityId }),
         officerIds: activeOfficerIds,
         troopType,
         vehicle,
@@ -400,7 +407,7 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
       <form ref={dialogRef} className="deploy-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="deploy-title" onSubmit={submit}>
         <header>
           <div>
-            <p>{city.name} · 行动力 20</p>
+            <p>{source.name} · 行动力 20</p>
             <h2 id="deploy-title">出征编制</h2>
           </div>
           <button type="button" className="icon-button" aria-label="关闭出征编制" title="关闭" onClick={onClose}><X /></button>
@@ -483,11 +490,12 @@ export function DeployDialog({ cityId, onClose, onConfirm }: DeployDialogProps) 
           </div>
           <h3>据点库存</h3>
           <dl className="deploy-stock">
-            <div><dt>士兵</dt><dd>{city.troops.toLocaleString('en-US')} → {Math.max(0, city.troops - Math.max(0, troopAmount)).toLocaleString('en-US')}</dd></div>
-            <div><dt>兵粮</dt><dd>{city.food.toLocaleString('en-US')} → {Math.max(0, city.food - Math.max(0, foodAmount)).toLocaleString('en-US')}</dd></div>
+            <div><dt>士兵</dt><dd>{source.troops.toLocaleString('en-US')} → {Math.max(0, source.troops - Math.max(0, troopAmount)).toLocaleString('en-US')}</dd></div>
+            <div><dt>兵粮</dt><dd>{source.food.toLocaleString('en-US')} → {Math.max(0, source.food - Math.max(0, foodAmount)).toLocaleString('en-US')}</dd></div>
             <div><dt>兵装</dt><dd>{armamentStock === null ? '剑兵不限' : `${armamentStock.toLocaleString('en-US')} → ${Math.max(0, armamentStock - Math.max(0, troopAmount)).toLocaleString('en-US')}`}</dd></div>
-            <div><dt>资金</dt><dd>{city.gold.toLocaleString('en-US')} → {Math.max(0, city.gold - Math.max(0, goldAmount)).toLocaleString('en-US')}</dd></div>
+            <div><dt>资金</dt><dd>{source.gold.toLocaleString('en-US')} → {Math.max(0, source.gold - Math.max(0, goldAmount)).toLocaleString('en-US')}</dd></div>
           </dl>
+          <p className="deploy-note">带走的兵装随部队移动：回城/进军据点时，枪戟弩马按存活士兵返还，楼船/冲车/井阑整件返还。</p>
         </aside>
 
         {(errors.length > 0 || submitError) && (

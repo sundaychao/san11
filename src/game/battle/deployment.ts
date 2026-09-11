@@ -1,9 +1,10 @@
-import { ARMAMENT_LABELS, armamentsOf, TROOP_ARMAMENT, TROOP_LABELS } from '../armaments';
+import { ARMAMENT_LABELS, armamentsCarriedByDeploy, armamentsOf, takeArmaments, TROOP_ARMAMENT, TROOP_LABELS } from '../armaments';
 import { energyCapOf, techLevelOf, troopMovementBonusForTroop } from '../techs';
 import { unitTroopCapOf } from '../ranks';
 import { appointSuccessorGovernor, hasPlotFacility } from '../innerAffairs';
+import { appointStrongholdSuccessor } from '../strongholds';
 import { formationMovementAllowanceBonus } from '../skills/rules/movement';
-import type { ForceId, GameState } from '../types';
+import type { City, CityId, ForceId, GameState, Pass, PassId } from '../types';
 import { isWaterTerrain } from './catalog';
 import {
   DEPLOY_AP_COST,
@@ -11,13 +12,18 @@ import {
   type DeployInput,
   type TransportInput,
 } from './legacyCore';
-import { cellAt, deploymentCells, spawnCellFor } from './movementRules';
+import { cellAt, deploymentCellsForStronghold, spawnCellFor } from './movementRules';
 
-export { deploymentCells } from './movementRules';
+export { deploymentCells, deploymentCellsForStronghold } from './movementRules';
 export type { DeployInput, TransportInput } from './legacyCore';
 
-function preferredSpawnCell(state: GameState, cityId: Parameters<typeof deploymentCells>[1], movement: number, troopType: Parameters<typeof deploymentCells>[3], vehicle?: 'boat' | 'ship') {
-  const options = deploymentCells(state, cityId, movement, troopType, vehicle);
+/** 解析出征/输送出发据点：passId 优先（关隘），否则按 cityId 取城池 */
+function deploySourceOf(state: GameState, input: { cityId?: CityId; passId?: PassId }): City | Pass | undefined {
+  return input.passId ? state.passes?.[input.passId] : input.cityId ? state.cities[input.cityId] : undefined;
+}
+
+function preferredSpawnCell(state: GameState, source: City | Pass, movement: number, troopType: Parameters<typeof deploymentCellsForStronghold>[3], vehicle?: 'boat' | 'ship') {
+  const options = deploymentCellsForStronghold(state, source.id, movement, troopType, vehicle);
   return options.find((coord) => !isWaterTerrain(cellAt(state, coord)?.terrain)) ?? options[0];
 }
 
@@ -47,20 +53,20 @@ export function chooseDelegateSpawnCell(targets: { q: number; r: number }[], tow
  */
 export function preferredSpawnCellToward(
   state: GameState,
-  cityId: Parameters<typeof deploymentCells>[1],
+  cityId: Parameters<typeof deploymentCellsForStronghold>[1],
   movement: number,
-  troopType: Parameters<typeof deploymentCells>[3],
+  troopType: Parameters<typeof deploymentCellsForStronghold>[3],
   toward: { q: number; r: number },
   vehicle?: 'boat' | 'ship',
 ) {
-  const options = deploymentCells(state, cityId, movement, troopType, vehicle);
+  const options = deploymentCellsForStronghold(state, cityId, movement, troopType, vehicle);
   const land = options.filter((coord) => !isWaterTerrain(cellAt(state, coord)?.terrain));
   const pool = land.length > 0 ? land : options;
   return chooseDelegateSpawnCell(pool, toward);
 }
 
 export function deployUnit(state: GameState, forceId: ForceId, input: DeployInput): GameState {
-  const city = state.cities[input.cityId];
+  const source = deploySourceOf(state, input);
   const target = input.targetCityId ? state.cities[input.targetCityId] : undefined;
   const officerIds = input.officerIds?.length ? input.officerIds : input.officerId ? [input.officerId] : [];
   const leaderId = officerIds[0];
@@ -70,66 +76,67 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   const vehicle = input.vehicle ?? 'boat';
   const gold = input.gold ?? 0;
   const armamentType = TROOP_ARMAMENT[troopType];
-  const cityArmaments = armamentsOf(city?.armaments);
+  const sourceArmaments = armamentsOf(source?.armaments);
   const movementAllowance = movementAllowanceForProfile(troopType) + formationMovementAllowanceBonus(state, officerIds, troopType) + troopMovementBonusForTroop(state, forceId, troopType);
   if (state.phase !== 'playing') throw new Error('游戏已经结束');
   if (state.turnForceId !== forceId) throw new Error('不是当前势力旬');
-  if (!city || city.ownerId !== forceId) throw new Error('只能从己方城市出征');
+  if (!source || source.ownerId !== forceId) throw new Error('只能从己方据点出征');
   if (input.targetCityId && !target) throw new Error('目标城市不存在');
   if (officerIds.length === 0) throw new Error('至少选择一名武将');
   if (!officer) throw new Error('武将不存在');
   if (officerIds.length > 3 || new Set(officerIds).size !== officerIds.length) throw new Error('最多选择一名主将和两名副将');
-  if (officers.some((candidate) => !candidate || candidate.forceId !== forceId || candidate.location.kind !== 'city' || candidate.location.cityId !== city.id)) {
-    throw new Error('武将不在出征城市');
+  const officerAtSource = (candidate: NonNullable<typeof officers[number]>) => input.passId
+    ? candidate.location.kind === 'pass' && candidate.location.passId === input.passId
+    : candidate.location.kind === 'city' && candidate.location.cityId === input.cityId;
+  if (officers.some((candidate) => !candidate || candidate.forceId !== forceId || !officerAtSource(candidate))) {
+    throw new Error('武将不在出征据点');
   }
   if (officers.some((candidate) => candidate.acted)) throw new Error('选择的武将已经行动');
   if (state.actionPoints[forceId] < DEPLOY_AP_COST) throw new Error('行动力不足 20');
   if (!Number.isInteger(input.troops) || input.troops < 1000 || input.troops > unitTroopCapOf(state, forceId, leaderId)) {
     throw new Error(`出征兵力必须为 1000-${unitTroopCapOf(state, forceId, leaderId)}`);
   }
-  if (!Number.isInteger(gold) || gold < 0 || gold > city.gold) throw new Error('资金不足');
-  if (!Number.isInteger(input.food) || input.food < 0 || input.food > city.food) throw new Error('粮草不足');
-  if (city.troops - input.troops < 500) throw new Error('城市至少保留 500 兵力');
-  if (armamentType && cityArmaments[armamentType] < input.troops) throw new Error(`${TROOP_LABELS[troopType]}兵装不足`);
-  if (vehicle === 'ship' && cityArmaments.ship < 1) throw new Error('楼船兵装不足');
+  if (!Number.isInteger(gold) || gold < 0 || gold > source.gold) throw new Error('资金不足');
+  if (!Number.isInteger(input.food) || input.food < 0 || input.food > source.food) throw new Error('粮草不足');
+  if (source.troops - input.troops < 500) throw new Error('据点至少保留 500 兵力');
+  if (armamentType && sourceArmaments[armamentType] < input.troops) throw new Error(`${TROOP_LABELS[troopType]}兵装不足`);
+  if (vehicle === 'ship' && sourceArmaments.ship < 1) throw new Error('楼船兵装不足');
   if (troopType === 'siege' && !input.siegeWeapon) throw new Error('需要选择冲车或井阑');
-  if (troopType === 'siege' && cityArmaments[input.siegeWeapon!] < 1) throw new Error(`${ARMAMENT_LABELS[input.siegeWeapon!]}不足`);
+  if (troopType === 'siege' && sourceArmaments[input.siegeWeapon!] < 1) throw new Error(`${ARMAMENT_LABELS[input.siegeWeapon!]}不足`);
 
   const spawn = input.destination ?? (target
-    ? spawnCellFor(state, city, target, troopType, vehicle)
-    : preferredSpawnCell(state, input.cityId, movementAllowance, troopType, vehicle));
+    ? (input.passId
+      // 关隘为单格据点，无 spawnCellFor 的城池面向逻辑：取部署格中朝目标最近者
+      ? chooseDelegateSpawnCell(deploymentCellsForStronghold(state, source.id, movementAllowance, troopType, vehicle), { q: target.gridQ, r: target.gridR })
+      : spawnCellFor(state, source as City, target, troopType, vehicle))
+    : preferredSpawnCell(state, source, movementAllowance, troopType, vehicle));
   if (!spawn) throw new Error('没有合法出生格');
-  if (!deploymentCells(state, input.cityId, movementAllowance, troopType, vehicle).some((coord) => coord.q === spawn.q && coord.r === spawn.r)) {
+  if (!deploymentCellsForStronghold(state, source.id, movementAllowance, troopType, vehicle).some((coord) => coord.q === spawn.q && coord.r === spawn.r)) {
     throw new Error('出征位置超出移动范围');
   }
 
   const next = structuredClone(state);
   next.cityEffectReports = [];
   const unitId = `unit-${next.month}-${next.tenDay}-${leaderId}-${Object.keys(next.units).length + 1}`;
-  next.cities[input.cityId].troops -= input.troops;
-  next.cities[input.cityId].gold -= gold;
-  next.cities[input.cityId].food -= input.food;
-  if (armamentType) {
-    next.cities[input.cityId].armaments = { ...cityArmaments, [armamentType]: cityArmaments[armamentType] - input.troops };
-  }
-  if (vehicle === 'ship') {
-    next.cities[input.cityId].armaments = { ...cityArmaments, ship: cityArmaments.ship - 1 };
-  }
-  if (troopType === 'siege' && input.siegeWeapon) {
-    next.cities[input.cityId].armaments = {
-      ...cityArmaments,
-      [input.siegeWeapon]: cityArmaments[input.siegeWeapon] - 1,
-    };
+  const departSource = input.passId ? next.passes![input.passId] : next.cities[input.cityId!];
+  departSource.troops -= input.troops;
+  departSource.gold -= gold;
+  departSource.food -= input.food;
+  // 兵装扣减：枪戟弩马按兵力 1:1、楼船/冲车/井阑各 1 件。一次性算出并扣除，
+  // 避免「兵种兵装」与「楼船/兵器」逐项覆盖导致漏扣（见 takeArmaments 注释）。
+  const carriedArmaments = armamentsCarriedByDeploy(troopType, input.troops, vehicle, input.siegeWeapon);
+  if (Object.keys(carriedArmaments).length > 0) {
+    departSource.armaments = takeArmaments(sourceArmaments, carriedArmaments);
   }
   next.actionPoints[forceId] -= DEPLOY_AP_COST;
   for (const officerId of officerIds) {
     next.officers[officerId].acted = true;
     next.officers[officerId].location = { kind: 'unit', unitId };
   }
-  // 太守出征：出发城自动补任太守（本城最高政治值武将）
-  const departCity = next.cities[input.cityId];
-  if (departCity.governorId && officerIds.includes(departCity.governorId)) {
-    appointSuccessorGovernor(next, departCity);
+  // 太守出征：出发据点自动补任太守（本据点最高政治值武将）
+  if (departSource.governorId && officerIds.includes(departSource.governorId)) {
+    if (input.passId) appointStrongholdSuccessor(next, departSource);
+    else appointSuccessorGovernor(next, departSource as City);
   }
   // 科技：军制1级熟练兵气力上限+20；2级随军参谋初始气力+政治×20%
   const energyCap = energyCapOf(state, forceId);
@@ -139,14 +146,16 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   const initialEnergy = Math.min(energyCap, 100 + staffOfficerBonus);
   // 战力：出城战力 = 城中士气×25% + 部队最高政治×(基础20% + 科技加成0 + 兵部加成20%)
   const maxPolitics = officers.reduce((max, candidate) => Math.max(max, candidate.stats.politics), 0);
-  const bingbuBonus = hasPlotFacility(city, 'bingbu') ? 0.2 : 0;
-  const initialStamina = Math.min(100, Math.floor(city.training * 0.25 + maxPolitics * (0.2 + bingbuBonus)));
+  const bingbuBonus = hasPlotFacility(source, 'bingbu') ? 0.2 : 0;
+  const initialStamina = Math.min(100, Math.floor(source.training * 0.25 + maxPolitics * (0.2 + bingbuBonus)));
   next.units[unitId] = {
-    id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.cityId,
+    id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.passId ? (source as Pass).homeCityId : input.cityId!,
     troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: initialEnergy, stamina: initialStamina,
     movementRemaining: movementAllowance, moved: true, acted: false,
+    // 记下本次带走的兵装：部队回城/进关并账时原样返还（未记录者不返还）
+    ...(Object.keys(carriedArmaments).length > 0 ? { armaments: carriedArmaments } : {}),
   };
-  next.logs.push({ id: `deploy-${unitId}`, month: next.month, forceId, message: `${officer.name}率军从${city.name}出征` });
+  next.logs.push({ id: `deploy-${unitId}`, month: next.month, forceId, message: `${officer.name}率军从${source.name}出征` });
   return next;
 }
 
@@ -159,23 +168,23 @@ export function deployUnitWithId(state: GameState, forceId: ForceId, input: Depl
 }
 
 export function deployUnitPreviewWithId(state: GameState, forceId: ForceId, input: DeployInput): { state: GameState; unitId: string } {
-  const city = state.cities[input.cityId];
+  const source = deploySourceOf(state, input);
   const officerIds = input.officerIds?.length ? input.officerIds : input.officerId ? [input.officerId] : [];
   const leaderId = officerIds[0];
   const troopType = input.troopType ?? 'sword';
   const vehicle = input.vehicle ?? 'boat';
   const gold = input.gold ?? 0;
   const movementAllowance = movementAllowanceForProfile(troopType) + formationMovementAllowanceBonus(state, officerIds, troopType) + troopMovementBonusForTroop(state, forceId, troopType);
-  const spawn = input.destination ?? preferredSpawnCell(state, input.cityId, movementAllowance, troopType, vehicle);
-  if (!city || !leaderId || !spawn) throw new Error('无法创建出征预览');
+  const spawn = input.destination ?? preferredSpawnCell(state, source!, movementAllowance, troopType, vehicle);
+  if (!source || !leaderId || !spawn) throw new Error('无法创建出征预览');
   const next = structuredClone(state);
   const unitId = `preview-deploy-${leaderId}`;
   const previewOfficers = officerIds.map((officerId) => state.officers[officerId]);
   const previewMaxPolitics = previewOfficers.reduce((max, candidate) => Math.max(max, candidate?.stats.politics ?? 0), 0);
-  const previewBingbuBonus = hasPlotFacility(city, 'bingbu') ? 0.2 : 0;
-  const initialStamina = Math.min(100, Math.floor(city.training * 0.25 + previewMaxPolitics * (0.2 + previewBingbuBonus)));
+  const previewBingbuBonus = hasPlotFacility(source, 'bingbu') ? 0.2 : 0;
+  const initialStamina = Math.min(100, Math.floor(source.training * 0.25 + previewMaxPolitics * (0.2 + previewBingbuBonus)));
   next.units[unitId] = {
-    id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.cityId,
+    id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.passId ? (source as Pass).homeCityId : input.cityId!,
     troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: 100, stamina: initialStamina,
     movementRemaining: movementAllowance, moved: true, acted: false,
   };
@@ -183,44 +192,49 @@ export function deployUnitPreviewWithId(state: GameState, forceId: ForceId, inpu
 }
 
 export function deployTransportUnit(state: GameState, forceId: ForceId, input: TransportInput): GameState {
-  const city = state.cities[input.cityId];
+  const source = deploySourceOf(state, input);
   const officer = state.officers[input.officerId];
   if (state.phase !== 'playing') throw new Error('游戏已经结束');
   if (state.turnForceId !== forceId) throw new Error('不是当前势力旬');
-  if (!city || city.ownerId !== forceId) throw new Error('只能从己方城市输送');
-  if (!officer || officer.forceId !== forceId || officer.location.kind !== 'city' || officer.location.cityId !== city.id) throw new Error('武将不在输送城市');
+  if (!source || source.ownerId !== forceId) throw new Error('只能从己方据点输送');
+  const officerAtSource = input.passId
+    ? officer?.location.kind === 'pass' && officer.location.passId === input.passId
+    : officer?.location.kind === 'city' && officer.location.cityId === input.cityId;
+  if (!officer || officer.forceId !== forceId || !officerAtSource) throw new Error('武将不在输送据点');
   if (officer.acted) throw new Error('武将已经行动');
   if (state.actionPoints[forceId] < DEPLOY_AP_COST) throw new Error('行动力不足 20');
   if (!Number.isInteger(input.troops) || input.troops < 0 || input.troops > 10000) throw new Error('输送士兵必须为 0-10000');
-  if (!Number.isInteger(input.gold) || input.gold < 0 || input.gold > city.gold) throw new Error('资金不足');
-  if (!Number.isInteger(input.food) || input.food < 0 || input.food > city.food) throw new Error('兵粮不足');
+  if (!Number.isInteger(input.gold) || input.gold < 0 || input.gold > source.gold) throw new Error('资金不足');
+  if (!Number.isInteger(input.food) || input.food < 0 || input.food > source.food) throw new Error('兵粮不足');
   if (input.troops === 0 && input.gold === 0 && input.food === 0) throw new Error('至少输送一种资源');
-  if (city.troops - input.troops < 500) throw new Error('城市至少保留 500 兵力');
+  if (source.troops - input.troops < 500) throw new Error('据点至少保留 500 兵力');
 
-  const spawn = input.destination ?? deploymentCells(state, input.cityId, undefined, 'transport')[0];
+  const spawn = input.destination ?? deploymentCellsForStronghold(state, source.id, undefined, 'transport')[0];
   if (!spawn) throw new Error('没有合法输送位置');
-  if (!deploymentCells(state, input.cityId, undefined, 'transport').some((coord) => coord.q === spawn.q && coord.r === spawn.r)) {
+  if (!deploymentCellsForStronghold(state, source.id, undefined, 'transport').some((coord) => coord.q === spawn.q && coord.r === spawn.r)) {
     throw new Error('输送位置超出移动范围');
   }
 
   const next = structuredClone(state);
   next.cityEffectReports = [];
   const unitId = `transport-${next.month}-${next.tenDay}-${input.officerId}-${Object.keys(next.units).length + 1}`;
-  next.cities[input.cityId].troops -= input.troops;
-  next.cities[input.cityId].gold -= input.gold;
-  next.cities[input.cityId].food -= input.food;
+  const departSource = input.passId ? next.passes![input.passId] : next.cities[input.cityId!];
+  departSource.troops -= input.troops;
+  departSource.gold -= input.gold;
+  departSource.food -= input.food;
   next.actionPoints[forceId] -= DEPLOY_AP_COST;
   next.officers[input.officerId].acted = true;
   next.officers[input.officerId].location = { kind: 'unit', unitId };
-  // 太守输送出城：出发城自动补任太守
-  if (next.cities[input.cityId].governorId === input.officerId) {
-    appointSuccessorGovernor(next, next.cities[input.cityId]);
+  // 太守输送出城：出发据点自动补任太守
+  if (departSource.governorId === input.officerId) {
+    if (input.passId) appointStrongholdSuccessor(next, departSource);
+    else appointSuccessorGovernor(next, departSource as City);
   }
   next.units[unitId] = {
-    id: unitId, kind: 'transport', forceId, leaderId: input.officerId, homeCityId: input.cityId,
+    id: unitId, kind: 'transport', forceId, leaderId: input.officerId, homeCityId: input.passId ? (source as Pass).homeCityId : input.cityId!,
     gold: input.gold, q: spawn.q, r: spawn.r, troops: input.troops, food: input.food, energy: 100,
     movementRemaining: 0, moved: true, acted: false,
   };
-  next.logs.push({ id: `transport-${unitId}`, month: next.month, forceId, message: `${officer.name}从${city.name}输送物资` });
+  next.logs.push({ id: `transport-${unitId}`, month: next.month, forceId, message: `${officer.name}从${source.name}输送物资` });
   return next;
 }

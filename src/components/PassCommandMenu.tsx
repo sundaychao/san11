@@ -11,8 +11,8 @@ interface PassCommandMenuProps {
   onAppointPosition?(): void;
   onCultivate(category: CultivateCategory, passId?: PassId): void;
   onOpenCultivatePicker?(passId?: PassId): void;
-  onDeploy(cityId: CityId): void;
-  onTransport(cityId: CityId): void;
+  onDeploy(strongholdId: CityId | PassId): void;
+  onTransport(strongholdId: CityId | PassId): void;
   onClose(): void;
 }
 

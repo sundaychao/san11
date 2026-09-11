@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>三国志11 战斗伤害模拟器</title>
+<style>
+  :root{
+    --bg:#14161b; --panel:#1b1e25; --panel2:#22262f; --line:rgba(255,255,255,.10);
+    --line2:rgba(255,255,255,.18); --tx:#e7eaf0; --tx2:#9aa3b2; --tx3:#6d7686;
+    --acc:#6aa9ff; --acc2:#3d7fd6; --warn:#f0a848; --ok:#5dc9a0; --red:#ef7b7b;
+    --purple:#a99cf0;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--tx);
+    font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    font-size:14px; line-height:1.6; padding:24px 20px 60px;
+  }
+  .wrap{max-width:1180px;margin:0 auto}
+  h1{font-size:19px;font-weight:600;margin:0 0 4px}
+  .sub{color:var(--tx2);font-size:13px;margin-bottom:18px}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+  .presets button{
+    background:var(--panel2);color:var(--tx2);border:1px solid var(--line);
+    padding:6px 12px;border-radius:8px;font-size:12.5px;cursor:pointer;font-family:inherit;
+  }
+  .presets button:hover{color:var(--tx);border-color:var(--line2)}
+
+  .tabs{display:flex;gap:4px;margin-bottom:16px;background:var(--panel);padding:4px;border-radius:10px;border:1px solid var(--line);width:fit-content}
+  .tabs button{
+    background:transparent;border:0;color:var(--tx2);padding:7px 18px;border-radius:7px;
+    font-size:13px;cursor:pointer;font-family:inherit;font-weight:500;
+  }
+  .tabs button.on{background:var(--acc2);color:#fff}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid.single{grid-template-columns:1fr}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .ex{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+  .ex:last-child{border-bottom:0;margin-bottom:0;padding-bottom:0}
+  .ex h3{font-size:13px;font-weight:500;margin:0 0 6px;color:var(--acc)}
+  .ex p{margin:0 0 6px;color:var(--tx2);font-size:12.5px}
+  .ex code{background:#101216;border:1px solid var(--line);border-radius:5px;padding:1px 5px;
+    font-family:"Cascadia Code",Consolas,monospace;font-size:11.5px;color:#9fb4d0}
+  .ex .r{color:var(--tx);font-variant-numeric:tabular-nums}
+  .ex .hl{color:var(--ok)}
+  .card h2{font-size:13.5px;font-weight:600;margin:0 0 14px;color:var(--tx);
+    display:flex;align-items:center;gap:8px}
+  .card h2::before{content:"";width:3px;height:14px;border-radius:2px;background:var(--acc)}
+  .card.atk h2::before{background:var(--acc)}
+  .card.def h2::before{background:var(--red)}
+  .card.mod h2::before{background:var(--purple)}
+  .card.tac h2::before{background:var(--warn)}
+
+  .row{display:grid;grid-template-columns:96px 1fr 62px;gap:10px;align-items:center;margin-bottom:11px}
+  .row label{color:var(--tx2);font-size:12.5px}
+  .row .val{text-align:right;font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--acc)}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;
+    background:var(--panel2);outline:none;width:100%}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+    border-radius:50%;background:var(--acc);cursor:pointer;border:0}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--acc);
+    cursor:pointer;border:0}
+  select,input[type=number]{
+    width:100%;background:var(--panel2);color:var(--tx);border:1px solid var(--line);
+    border-radius:7px;padding:6px 9px;font-size:12.5px;font-family:inherit;outline:none;
+  }
+  select:focus,input[type=number]:focus{border-color:var(--acc2)}
+  select:disabled{opacity:.4}
+  .chk{display:flex;align-items:center;gap:8px;color:var(--tx2);font-size:12.5px;
+    padding:6px 0;cursor:pointer;user-select:none}
+  .chk input{accent-color:var(--acc);width:15px;height:15px;cursor:pointer}
+  .chks{display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;margin-top:2px}
+
+  .out{margin-top:16px}
+  .out .card{background:linear-gradient(180deg,var(--panel) 0%,#1a1d24 100%)}
+  .steps{width:100%;border-collapse:collapse;font-size:12.5px}
+  .steps td{padding:7px 4px;border-bottom:1px solid var(--line);vertical-align:top}
+  .steps tr:last-child td{border-bottom:0}
+  .steps td.k{color:var(--tx2);width:44%}
+  .steps td.v{text-align:right;font-variant-numeric:tabular-nums;color:var(--tx);white-space:nowrap}
+  .steps td.f{color:var(--tx3);font-size:11.5px;font-variant-numeric:tabular-nums}
+  .steps tr.hl td{background:rgba(106,169,255,.07)}
+  .steps tr.hl td.k{color:var(--acc)}
+  .steps tr.sub td{color:var(--tx3);font-size:11.5px;padding-top:2px;padding-bottom:7px}
+  .final{
+    margin-top:16px;background:var(--panel);border:1px solid var(--line2);border-radius:12px;
+    padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;
+  }
+  .final .lbl{color:var(--tx2);font-size:13px}
+  .final .num{font-size:34px;font-weight:600;color:var(--acc);font-variant-numeric:tabular-nums;line-height:1.1}
+  .final .num small{font-size:14px;color:var(--tx2);font-weight:400;margin-left:4px}
+  .final.counter .num{color:var(--red)}
+  .final.tactic .num{color:var(--warn)}
+  .formula{
+    margin-top:12px;background:#101216;border:1px solid var(--line);border-radius:10px;
+    padding:12px 14px;font-family:"Cascadia Code",Consolas,monospace;font-size:12px;
+    color:#9fb4d0;white-space:pre-wrap;line-height:1.75;overflow-x:auto;
+  }
+  .formula b{color:var(--acc);font-weight:500}
+  .formula i{color:var(--tx3);font-style:normal}
+  .badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:5px;
+    background:rgba(106,169,255,.14);color:var(--acc);margin-left:6px}
+  .badge.off{background:rgba(255,255,255,.06);color:var(--tx3)}
+  .badge.crit{background:rgba(240,168,72,.16);color:var(--warn)}
+  .badge.shield{background:rgba(93,201,160,.16);color:var(--ok)}
+  .note{color:var(--tx3);font-size:11.5px;margin-top:10px;line-height:1.65}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>战斗伤害模拟器</h1>
+  <div class="sub">复刻当前版本 <code>legacyCore.ts → damageForRoll()</code> 与 <code>combat.ts</code> 的结算顺序。拖动参数即时查看每一步的数值变化。</div>
+
+  <div class="presets">
+    <button data-preset="cavalry">骑兵冲阵（暴击+科技4）</button>
+    <button data-preset="crossbow">弩兵远程齐射</button>
+    <button data-preset="forest">森林据守（地形减伤）</button>
+    <button data-preset="weak">弱将打强将（统率差）</button>
+    <button data-preset="remnant">残兵部队（40 兵）</button>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button data-mode="normal" class="on">普通攻击</button>
+    <button data-mode="counter">反击</button>
+    <button data-mode="joint">一齐攻击</button>
+    <button data-mode="tactic">战法</button>
+  </div>
+
+  <div class="grid">
+    <div class="card atk">
+      <h2>攻击方</h2>
+      <div class="row"><label>兵力</label><input type="range" id="aTroops" min="10" max="20000" step="10" value="10000"><span class="val" id="aTroopsV"></span></div>
+      <div class="row"><label>统率</label><input type="range" id="aLead" min="1" max="100" step="1" value="80"><span class="val" id="aLeadV"></span></div>
+      <div class="row"><label>武力</label><input type="range" id="aWar" min="1" max="100" step="1" value="80"><span class="val" id="aWarV"></span></div>
+      <div class="row"><label>兵种</label><select id="aTroopType">
+        <option value="sword">刀兵（无科技加成）</option>
+        <option value="spear">枪兵</option>
+        <option value="halberd">戟兵</option>
+        <option value="crossbow">弩兵</option>
+        <option value="cavalry" selected>骑兵</option>
+        <option value="siege">攻城兵器（无科技加成）</option>
+      </select><span></span></div>
+      <div class="row"><label>兵科科技</label><input type="range" id="aTech" min="0" max="4" step="1" value="0"><span class="val" id="aTechV"></span></div>
+      <div class="row"><label>所在地形</label><select id="aTerrain"></select><span></span></div>
+      <div class="row"><label>战线数</label><input type="range" id="aFront" min="1" max="5" step="1" value="1"><span class="val" id="aFrontV"></span></div>
+      <div class="chks">
+        <label class="chk"><input type="checkbox" id="aShip"> 在船上</label>
+        <label class="chk"><input type="checkbox" id="aAura"> 在统率光环内</label>
+        <label class="chk"><input type="checkbox" id="aDrum"> 3格内有太鼓台</label>
+        <label class="chk"><input type="checkbox" id="aCrit"> 本次暴击</label>
+      </div>
+      <div class="note">科技加成仅对枪/戟/弩/骑生效：1级+10%，4级再+10%。战线宽度由「所在地形」决定。
+      <br><b style="color:var(--acc);font-weight:500">残兵衰减：</b>投入兵力低于 1000 时，240 固定基数与 120 伤害地板按 投入兵力÷1000 等比缩小，避免残兵部队打出远超自身兵力的伤害。
+      <br><b style="color:var(--acc);font-weight:500">计略门槛：</b>兵力低于 500 不能释放计略，但普攻、战法、攻城不受影响（本模拟器只算单次攻击伤害）。</div>
+    </div>
+
+    <div class="card def">
+      <h2>防守方</h2>
+      <div class="row"><label>兵力</label><input type="range" id="dTroops" min="500" max="20000" step="500" value="8000"><span class="val" id="dTroopsV"></span></div>
+      <div class="row"><label>统率</label><input type="range" id="dLead" min="1" max="100" step="1" value="80"><span class="val" id="dLeadV"></span></div>
+      <div class="row"><label>所在地形</label><select id="dTerrain"></select><span></span></div>
+      <div class="row"><label>免伤概率</label><input type="range" id="dShield" min="0" max="60" step="5" value="0"><span class="val" id="dShieldV"></span></div>
+      <div class="row"><label>免伤判定值</label><input type="range" id="dShieldRoll" min="0" max="100" step="1" value="50"><span class="val" id="dShieldRollV"></span></div>
+      <div class="row"><label>藤甲倍率</label><select id="dTengjia">
+        <option value="1">无藤甲 ×1.0</option>
+        <option value="0.7">藤甲 ×0.7</option>
+        <option value="0.5">藤甲（强）×0.5</option>
+      </select><span></span></div>
+      <div class="chks">
+        <label class="chk"><input type="checkbox" id="dShip"> 在船上</label>
+        <label class="chk"><input type="checkbox" id="dAura"> 在统率光环内</label>
+        <label class="chk"><input type="checkbox" id="dFortress"> 3格内有城塞</label>
+      </div>
+      <div class="note">免伤概率来自特技（金刚等）或戟兵矢盾/大盾科技（各30%）。判定值 &lt; 概率则本次伤害归零。</div>
+    </div>
+  </div>
+
+  <div class="grid" id="modGrid" style="margin-top:16px">
+    <div class="card mod">
+      <h2>全局随机与修正</h2>
+      <div class="row"><label>随机值</label><input type="range" id="rnd" min="0" max="100" step="1" value="50"><span class="val" id="rndV"></span></div>
+      <div class="note" style="margin-top:0">随机修正 = 0.92 + 随机值 × 0.16，即 0.92 ~ 1.08。实际游戏中由 RNG 决定，这里可手动锁定以观察影响。</div>
+    </div>
+
+    <div class="card tac" id="tacCard">
+      <h2>战法 / 一齐攻击</h2>
+      <div id="tacticBox">
+        <div class="row"><label>战法</label><select id="tactic"></select><span></span></div>
+        <div class="row"><label>适性</label><select id="aptitude">
+          <option value="C">C（×1.0）</option>
+          <option value="B" selected>B（×1.0）</option>
+          <option value="A">A（×1.1）</option>
+          <option value="S">S（×1.2）</option>
+        </select><span></span></div>
+        <div class="row"><label>已移动格数</label><input type="range" id="moved" min="0" max="8" step="1" value="0"><span class="val" id="movedV"></span></div>
+        <div class="note" style="margin-top:0">骑兵2级「马镫」按已移动格数每格 +4%。暴击率 = 5 + max(0,武力−60)×0.35 + (S:8 / A:4)，钳制 5%~30%。</div>
+      </div>
+      <div id="jointBox" class="hidden">
+        <div class="row"><label>参战部队</label><input type="range" id="jointN" min="2" max="4" step="1" value="2"><span class="val" id="jointNV"></span></div>
+        <div class="note" style="margin-top:0">每个参战者各算一次普攻后求和。反击仅主攻者承受，并按参战数衰减 ×2/max(2,N)。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="out">
+    <div class="final" id="finalBox">
+      <div>
+        <div class="lbl" id="finalLbl">本次伤害</div>
+        <div class="note" id="finalNote" style="margin-top:4px"></div>
+      </div>
+      <div class="num" id="finalNum">0</div>
+    </div>
+
+    <div class="grid" style="margin-top:16px">
+      <div class="card">
+        <h2>结算明细</h2>
+        <table class="steps" id="steps"></table>
+      </div>
+      <div class="card">
+        <h2>代入数值</h2>
+        <div class="formula" id="formula"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2>三个例子看懂伤害差在哪</h2>
+      <div class="ex">
+        <h3>例 1 · 同为 10000 兵，统率差决定基本盘</h3>
+        <p>攻方统率 <span class="r">60</span>、守方统率 <span class="r">98</span>，统率修正被压到 <code>1+(60−98)/250 = 0.848</code>（下限 0.8）。</p>
+        <p>换成攻方统率 <span class="r">90</span>、守方 <span class="r">70</span>，修正变成 <code>1.08</code>。同一支部队，光统率差就能拉开约 <span class="hl">27%</span> 的伤害。</p>
+      </div>
+      <div class="ex">
+        <h3>例 2 · 地形是最容易被忽略的乘区</h3>
+        <p>守方站在平地受伤倍率 <span class="r">×1.0</span>，站丘陵只要 <span class="r">×0.8</span>、森林 <span class="r">×0.85</span>。</p>
+        <p>但攻击方站在森林时战线宽度从 4000 降到 3000，投入兵力直接少 1/4。所以「林战」对攻守双方都是减益——攻城方最好把敌人逼到平地再打。</p>
+      </div>
+      <div class="ex">
+        <h3>例 3 · 为什么齐攻比逐个打更划算</h3>
+        <p>两支相邻友军一齐攻击，伤害是各算一次普攻后<span class="hl">求和</span>，等于翻倍；</p>
+        <p>而反击只有主攻者承受一次，并且按参战数衰减 <code>×2/max(2,N)</code>——2 人齐攻时反击只剩 <span class="hl">100%</span>，4 人齐攻时降到 <span class="hl">50%</span>。输出翻倍、代价减半，这就是齐攻的核心价值。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TERRAIN_DEFENSE = {road:1,path:1,plank:1,plain:1,grass:1,sand:1,wasteland:.95,wetland:.9,poison:1,forest:.85,hill:.8,mountain:1,shore:1,water:.95,stream:1,river:.95,sea:.95,shallow:.95,ferry:1,pass:1,construction:1};
+const TERRAIN_LABEL = [
+  ['plain','平地 / 草地'],['road','主径'],['path','小径'],['plank','栈道'],['forest','森林'],
+  ['hill','丘陵'],['wasteland','荒地'],['wetland','湿地'],['sand','砂地'],['poison','毒泉'],
+  ['ferry','渡所'],['shallow','浅滩'],['water','水域'],['river','河川'],['sea','海'],['shore','岸边'],
+  ['mountain','山地'],['stream','川（不可通行）'],['pass','关隘'],['construction','建设地']
+];
+const TACTICS = {
+  spear:[['spear-thrust','突刺 ×1.18'],['spear-spiral','螺旋突刺 ×1.23'],['spear-double','二段突刺 ×1.27']],
+  halberd:[['halberd-hook','熊手 ×1.18'],['halberd-sweep','横扫 ×1.23'],['halberd-whirlwind','旋风 ×1.27']],
+  crossbow:[['crossbow-fire','火矢 ×1.12'],['crossbow-pierce','贯箭 ×1.18'],['crossbow-volley','乱射 ×1.22']],
+  cavalry:[['cavalry-charge','突击 ×1.40'],['cavalry-breakthrough','突破 ×1.45'],['cavalry-rush','突进 ×1.50']]
+};
+const TACTIC_POWER = {'spear-thrust':1.18,'spear-spiral':1.23,'spear-double':1.27,'halberd-hook':1.18,'halberd-sweep':1.23,'halberd-whirlwind':1.27,'crossbow-fire':1.12,'crossbow-pierce':1.18,'crossbow-volley':1.22,'cavalry-charge':1.4,'cavalry-breakthrough':1.45,'cavalry-rush':1.5};
+const APT = {C:1,B:1,A:1.1,S:1.2};
+
+const $ = id => document.getElementById(id);
+const clamp = (lo,hi,v) => Math.min(hi, Math.max(lo, v));
+
+function frontWidth(t){ if(t==='poison'||t==='forest'||t==='ferry') return 3000; if(t==='plank'||t==='path') return 2000; return 4000; }
+function techMultOf(troop, level){
+  if(troop!=='spear'&&troop!=='halberd'&&troop!=='crossbow'&&troop!=='cavalry') return 1;
+  return 1 + (level>=1?0.1:0) + (level>=4?0.1:0);
+}
+function tacticTechMult(troop, level, moved){
+  let m = techMultOf(troop, level);
+  if(troop==='cavalry' && level>=2) m *= 1 + moved*0.04;
+  return m;
+}
+function critChanceOf(war, apt){
+  const bonus = apt==='S'?8:apt==='A'?4:0;
+  return clamp(5,30,Math.round(5 + Math.max(0,war-60)*0.35 + bonus));
+}
+
+function baseRoll(o){
+  const width = frontWidth(o.terrain);
+  const committed = Math.min(o.troops / Math.max(1,o.front), width);
+  const leadMod = clamp(0.8,1.2, 1 + (o.lead - o.dLead)/250);
+  const attackScore = committed * (0.08 + o.lead/2000 + o.war/3000);
+  const scale = Math.min(1, committed / 1000);
+  const raw = 240 * scale + attackScore;
+  const randMod = 0.92 + o.rnd*0.16;
+  const drumMod = o.drum ? 1.15 : 1;
+  const atkShip = o.aShip ? 1.1 : 1;
+  const defShip = o.dShip ? 0.9 : 1;
+  const auraA = o.aAura ? 1.05 : 1;
+  const auraD = o.dAura ? 0.95 : 1;
+  const terrDef = TERRAIN_DEFENSE[o.dTerrain];
+  const counterMod = o.counter ? 0.6 : 1;
+  const before = raw*leadMod*terrDef*randMod*drumMod*atkShip*defShip*auraA*auraD*counterMod;
+  const floor = Math.round(120 * scale);
+  const value = clamp(floor, 2200, Math.round(before));
+  return {width,committed,leadMod,attackScore,scale,raw,randMod,drumMod,atkShip,defShip,auraA,auraD,terrDef,counterMod,before,floor,value};
+}
+
+function readAll(){
+  return {
+    aTroops:+$('aTroops').value, aLead:+$('aLead').value, aWar:+$('aWar').value,
+    aTroopType:$('aTroopType').value, aTech:+$('aTech').value, aTerrain:$('aTerrain').value,
+    front:+$('aFront').value, aShip:$('aShip').checked, aAura:$('aAura').checked,
+    aDrum:$('aDrum').checked, aCrit:$('aCrit').checked,
+    dTroops:+$('dTroops').value, dLead:+$('dLead').value, dTerrain:$('dTerrain').value,
+    dShield:+$('dShield').value/100, dShieldRoll:+$('dShieldRoll').value/100,
+    dTengjia:+$('dTengjia').value, dShip:$('dShip').checked, dAura:$('dAura').checked,
+    dFortress:$('dFortress').checked,
+    rnd:+$('rnd').value/100, tactic:$('tactic').value, aptitude:$('aptitude').value,
+    moved:+$('moved').value, jointN:+$('jointN').value, mode:mode
+  };
+}
+
+let mode = 'normal';
+
+function buildTerrainSelects(){
+  for(const sel of [$('aTerrain'), $('dTerrain')]){
+    sel.innerHTML = TERRAIN_LABEL.map(([v,l])=>`<option value="${v}">${l}（防御×${TERRAIN_DEFENSE[v]}）</option>`).join('');
+  }
+  $('aTerrain').value='plain'; $('dTerrain').value='plain';
+}
+function buildTactics(){
+  const t = $('aTroopType').value;
+  const list = TACTICS[t];
+  const sel = $('tactic');
+  if(!list){ sel.innerHTML='<option value="">该兵种无战法</option>'; sel.disabled=true; }
+  else { sel.disabled=false; sel.innerHTML = list.map(([v,l])=>`<option value="${v}">${l}</option>`).join(''); }
+}
+function syncLabels(){
+  const set=(id,fn)=>{$(id+'V').textContent = fn(+$(id).value);};
+  set('aTroops',v=>v.toLocaleString());
+  set('aLead',v=>v); set('aWar',v=>v);
+  set('aTech',v=>'Lv.'+v + (techMultOf($('aTroopType').value,v)>1?` （×${techMultOf($('aTroopType').value,v).toFixed(1)}）`:''));
+  set('aFront',v=>v);
+  set('dTroops',v=>v.toLocaleString());
+  set('dLead',v=>v);
+  set('dShield',v=>v+'%'); set('dShieldRoll',v=>(v/100).toFixed(2));
+  set('rnd',v=>(0.92+v/100*0.16).toFixed(3));
+  set('moved',v=>v); set('jointN',v=>v);
+}
+
+function render(){
+  syncLabels();
+  const o = readAll();
+  const r = baseRoll({troops:o.aTroops,lead:o.aLead,war:o.aWar,terrain:o.aTerrain,front:o.front,
+    dLead:o.dLead,dTerrain:o.dTerrain,rnd:o.rnd,drum:o.aDrum,aShip:o.aShip,dShip:o.dShip,
+    aAura:o.aAura,dAura:o.dAura,counter:o.mode==='counter'});
+
+  const techM = techMultOf(o.aTroopType, o.aTech);
+  const fortM = o.dFortress ? 0.7 : 1;
+  const tengjia = o.dTengjia;
+  const shieldTriggers = o.dShield > 0 && o.dShieldRoll < o.dShield;
+
+  const rows = [];
+  const push=(k,v,f,cls)=>rows.push(`<tr class="${cls||''}"><td class="k">${k}</td><td class="v">${v}</td><td class="f">${f||''}</td></tr>`);
+  const sub=(t)=>rows.push(`<tr class="sub"><td colspan="3">${t}</td></tr>`);
+
+  push('战线宽度', r.width.toLocaleString(), '由攻击方地形决定');
+  push('投入兵力', Math.round(r.committed).toLocaleString(), `min(兵力÷${o.front}, ${r.width})`);
+  if(r.scale < 1) push('残兵衰减', '×'+r.scale.toFixed(3), `投入兵力÷1000，固定基数与地板同步缩小`);
+  push('基础伤害', Math.round(r.raw).toLocaleString(), `240${r.scale<1?'×'+r.scale.toFixed(3):''} + 投入兵力×${(0.08+o.aLead/2000+o.aWar/3000).toFixed(4)}`);
+  push('× 统率差修正', '×'+r.leadMod.toFixed(3), `1+(${o.aLead}−${o.dLead})/250，钳制 0.8~1.2`);
+  push('× 地形防御', '×'+r.terrDef.toFixed(2), `${$('dTerrain').selectedOptions[0].text.split('（')[0]} 受伤倍率`);
+  push('× 随机修正', '×'+r.randMod.toFixed(3), '0.92 ~ 1.08');
+  if(r.drumMod!==1) push('× 太鼓台', '×1.15', '己方3格内有建成太鼓台');
+  if(r.atkShip!==1) push('× 攻方乘船', '×1.10', '');
+  if(r.defShip!==1) push('× 守方乘船', '×0.90', '');
+  if(r.auraA!==1) push('× 攻方光环', '×1.05', '');
+  if(r.auraD!==1) push('× 守方光环', '×0.95', '');
+  if(r.counterMod!==1) push('× 反击系数', '×0.60', '反击专用');
+  const wasClamped = r.before < r.floor || r.before > 2200;
+  push('基础伤害钳制', r.value.toLocaleString(), `clamp(${r.floor}, 2200)${wasClamped?'　※ 已触发钳制':''}`,'hl');
+
+  let dmg = r.value;
+  let finalNote = '';
+  const formulaLines = [];
+
+  if(o.mode==='normal' || o.mode==='counter'){
+    const isCounter = o.mode==='counter';
+    if(!isCounter){
+      const critM = o.aCrit ? 1.35 : 1;
+      if(techM!==1) push('× 兵科科技', '×'+techM.toFixed(1), '枪/戟/弩/骑 训练与精锐');
+      if(critM!==1) push('× 暴击', '×1.35', '特技判定，非随机','hl');
+      dmg = Math.round(r.value * techM * critM);
+      push('技能前伤害', dmg.toLocaleString(), '', 'hl');
+    } else {
+      push('反击：不吃科技与暴击', '—', '仅 ×0.6 已在基础值内结算');
+    }
+    const afterFort = Math.min(o.dTroops, Math.round(dmg * fortM));
+    if(fortM!==1) push('× 城塞减免', '×0.70', '守方3格内有建成城塞');
+    if(fortM!==1) push('城塞后伤害', afterFort.toLocaleString(), `min(守方兵力, ×0.7)`);
+    dmg = afterFort;
+    if(o.dShield>0){
+      push('免伤判定', shieldTriggers?'触发 → 归零':'未触发', `概率 ${(o.dShield*100).toFixed(0)}%，判定值 ${o.dShieldRoll.toFixed(2)}`, shieldTriggers?'hl':'');
+      if(shieldTriggers) dmg = 0;
+    }
+    if(tengjia!==1 && dmg>0){ push('× 藤甲（非火）', '×'+tengjia, '降低普攻/战法/反击伤害'); dmg = Math.round(dmg*tengjia); }
+    finalNote = isCounter ? '反击伤害：不吃暴击与兵科科技，仅乘 0.6。' : '普通攻击：暴击 ×1.35 与兵科科技在钳制之后结算。';
+    formulaLines.push('damage = round(clamp(120,2200, <i>基础值</i>) × 科技 × 暴击)');
+    formulaLines.push('       → × 城塞(0.7) → 免伤判定 → × 藤甲');
+  }
+
+  if(o.mode==='tactic'){
+    const power = TACTIC_POWER[o.tactic] || 1;
+    const aptM = APT[o.aptitude];
+    const tTech = tacticTechMult(o.aTroopType, o.aTech, o.moved);
+    const critM = o.aCrit ? 1.35 : 1;
+    const cc = critChanceOf(o.aWar, o.aptitude);
+    push('战法威力', '×'+power.toFixed(2), $('tactic').selectedOptions[0]?.text || '');
+    if(aptM!==1) push('× 适性系数', '×'+aptM.toFixed(1), o.aptitude+' 适性');
+    if(tTech!==1) push('× 兵科科技', '×'+tTech.toFixed(2), o.aTroopType==='cavalry'&&o.aTech>=2?`含马镫：已移动${o.moved}格 ×${(1+o.moved*0.04).toFixed(2)}`:'');
+    push('暴击率', cc+'%', `5 + max(0,${o.aWar}−60)×0.35 + 适性加成`);
+    if(critM!==1) push('× 暴击', '×1.35', '本次按暴击计算','hl');
+    dmg = Math.round(r.value * power * aptM * tTech * critM);
+    push('战法伤害', dmg.toLocaleString(), '', 'hl');
+    const afterFort = Math.min(o.dTroops, Math.round(dmg * fortM));
+    if(fortM!==1){ push('× 城塞减免', '×0.70', ''); push('城塞后伤害', afterFort.toLocaleString(), ''); }
+    dmg = afterFort;
+    if(o.dShield>0){
+      push('免伤判定', shieldTriggers?'触发 → 归零':'未触发', `概率 ${(o.dShield*100).toFixed(0)}%`, shieldTriggers?'hl':'');
+      if(shieldTriggers) dmg = 0;
+    }
+    if(tengjia!==1 && dmg>0){ push('× 藤甲（非火）', '×'+tengjia, ''); dmg = Math.round(dmg*tengjia); }
+    finalNote = '战法伤害 = 基础值 × 战法威力 × 适性 × 兵科科技 × 暴击，再走减免。';
+    formulaLines.push('damage = round(clamp(120,2200, <i>基础值</i>) × 威力 × 适性 × 科技 × 暴击)');
+  }
+
+  if(o.mode==='joint'){
+    const n = +o.jointN;
+    const critM = o.aCrit ? 1.35 : 1;
+    const per = Math.min(o.dTroops, Math.round(Math.round(r.value * techM * critM) * fortM));
+    push('单支部队伤害', per.toLocaleString(), '每支按普攻独立结算');
+    push('参战部队数', n+' 支', '主攻者 + 相邻友军');
+    dmg = per * n;
+    if(o.dShield>0){
+      push('免伤判定', shieldTriggers?'触发 → 归零':'未触发', `概率 ${(o.dShield*100).toFixed(0)}%`, shieldTriggers?'hl':'');
+      if(shieldTriggers) dmg = 0;
+    }
+    push('合计伤害', dmg.toLocaleString(), `${per} × ${n}`, 'hl');
+
+    const cb = baseRoll({troops:o.dTroops,lead:o.dLead,war:o.dLead,terrain:o.dTerrain,front:1,
+      dLead:o.aLead,dTerrain:o.aTerrain,rnd:o.rnd,drum:false,aShip:o.dShip,dShip:o.aShip,
+      aAura:o.dAura,dAura:o.aAura,counter:true});
+    const cbAfterFort = Math.min(o.aTroops, Math.round(cb.value * fortM));
+    const cbFinal = Math.round(cbAfterFort * 2/Math.max(2,n));
+    push('回敬反击', cbFinal.toLocaleString(), `仅主攻者承受，×2/${Math.max(2,n)} 衰减`);
+
+    finalNote = `一齐攻击：${n} 支参战者各自结算后求和；反击仅主攻者承受一次，并按参战数衰减到 ×2/${Math.max(2,n)}。`;
+    formulaLines.push('合计 = Σ( 单支普攻伤害 )');
+    formulaLines.push('回敬反击 = 单次反击 × 2/max(2,N)');
+    formulaLines.push('（铁壁特技 → 只算主攻者 1 次）');
+  }
+
+  $('steps').innerHTML = rows.join('');
+  $('finalNum').innerHTML = dmg.toLocaleString() + '<small>兵</small>';
+  $('finalNote').textContent = finalNote;
+
+  const fb = $('finalBox');
+  fb.className = 'final' + (o.mode==='counter'?' counter':o.mode==='tactic'?' tactic':'');
+
+  formulaLines.push('');
+  formulaLines.push('<i>— 代入当前参数 —</i>');
+  formulaLines.push(`攻：兵力 ${o.aTroops.toLocaleString()} / 统率 ${o.aLead} / 武力 ${o.aWar} / ${$('aTroopType').selectedOptions[0].text.split('（')[0]}`);
+  formulaLines.push(`守：兵力 ${o.dTroops.toLocaleString()} / 统率 ${o.dLead} / ${$('dTerrain').selectedOptions[0].text.split('（')[0]}`);
+  formulaLines.push(`钳制后基础值 = <b>${r.value.toLocaleString()}</b>　最终伤害 = <b>${dmg.toLocaleString()}</b>`);
+  $('formula').innerHTML = formulaLines.join('\n');
+}
+
+function setMode(m){
+  mode = m;
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.mode===m));
+  $('tacticBox').classList.toggle('hidden', m!=='tactic');
+  $('jointBox').classList.toggle('hidden', m!=='joint');
+  $('tacCard').classList.toggle('hidden', m!=='tactic' && m!=='joint');
+  $('modGrid').classList.toggle('single', m!=='tactic' && m!=='joint');
+  $('finalLbl').textContent = m==='counter'?'反击伤害':m==='tactic'?'战法伤害':m==='joint'?'一齐攻击总伤害':'本次伤害';
+  render();
+}
+
+const PRESETS = {
+  cavalry:{aTroops:12000,aLead:82,aWar:98,aTroopType:'cavalry',aTech:4,aTerrain:'plain',aFront:1,aCrit:true,aAura:true,aDrum:false,dTroops:9000,dLead:70,dTerrain:'plain',dShield:0,dShieldRoll:50,dTengjia:1,dFortress:false},
+  crossbow:{aTroops:9000,aLead:78,aWar:76,aTroopType:'crossbow',aTech:2,aTerrain:'plain',aFront:1,aCrit:false,aAura:false,aDrum:false,dTroops:10000,dLead:85,dTerrain:'plain',dShield:0,dShieldRoll:50,dTengjia:1,dFortress:false,mode:'tactic',tactic:'crossbow-volley',aptitude:'A'},
+  forest:{aTroops:10000,aLead:80,aWar:85,aTroopType:'sword',aTech:0,aTerrain:'forest',aFront:1,aCrit:false,aAura:false,aDrum:false,dTroops:10000,dLead:88,dTerrain:'forest',dShield:0,dShieldRoll:50,dTengjia:1,dFortress:false},
+  weak:{aTroops:10000,aLead:60,aWar:65,aTroopType:'spear',aTech:0,aTerrain:'plain',aFront:2,aCrit:false,aAura:false,aDrum:false,dTroops:10000,dLead:98,dTerrain:'hill',dShield:30,dShieldRoll:20,dTengjia:1,dFortress:true},
+  remnant:{aTroops:40,aLead:80,aWar:80,aTroopType:'sword',aTech:0,aTerrain:'plain',aFront:1,aCrit:false,aAura:false,aDrum:false,dTroops:8000,dLead:80,dTerrain:'plain',dShield:0,dShieldRoll:50,dTengjia:1,dFortress:false}
+};
+function applyPreset(p){
+  const d = PRESETS[p];
+  for(const [k,v] of Object.entries(d)){
+    if(k==='mode'||k==='tactic'||k==='aptitude') continue;
+    const el = $(k); if(!el) continue;
+    if(el.type==='checkbox') el.checked = v; else el.value = v;
+  }
+  buildTactics();
+  if(d.tactic) $('tactic').value = d.tactic;
+  if(d.aptitude) $('aptitude').value = d.aptitude;
+  updateTechEnabled();
+  if(d.mode) setMode(d.mode); else render();
+}
+
+function updateTechEnabled(){
+  const t = $('aTroopType').value;
+  const has = t==='spear'||t==='halberd'||t==='crossbow'||t==='cavalry';
+  $('aTech').disabled = !has;
+  $('moved').disabled = !(t==='cavalry');
+}
+
+// init
+buildTerrainSelects();
+buildTactics();
+updateTechEnabled();
+document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
+document.querySelectorAll('input,select').forEach(el=>{
+  el.addEventListener('input',()=>{
+    if(el.id==='aTroopType'){ buildTactics(); updateTechEnabled(); }
+    render();
+  });
+  el.addEventListener('change',render);
+});
+document.querySelectorAll('.presets button').forEach(b=>b.addEventListener('click',()=>applyPreset(b.dataset.preset)));
+setMode('normal');
+</script>
+</body>
+</html>

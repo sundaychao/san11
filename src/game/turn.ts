@@ -1,10 +1,10 @@
 import { clamp, rollGrainPrices, rollMerchants, appointStrongholdSuccessor, officerIsBusy } from './commands';
 import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
-import { ARMAMENT_LABELS, armamentsOf } from './armaments';
+import { ARMAMENT_LABELS, CITY_ARMAMENT_CAPS, PASS_ARMAMENT_CAPS, armamentsOf } from './armaments';
 import { MAX_TECH_LEVEL, TECH_BRANCHES, TECHP_CITY_POP_DIVISOR, TECHP_RURAL_POP_DIVISOR, techLevelOf, addTechP } from './techs';
 import { movementAllowanceForUnit, unitSupplyMultiplier } from './battle/actions';
 import { unitMaxPolitics } from './battle/legacyCore';
-import { applyGroundFireDamageToCities, applyGroundFireDamageToFacilities, applyGroundFireDamageToPlots, applyGroundFireDamageToUnits } from './battle/fire';
+import { applyGroundFireDamageToCities, applyGroundFireDamageToFacilities, applyGroundFireDamageToPasses, applyGroundFireDamageToPlots, applyGroundFireDamageToUnits } from './battle/fire';
 import { cellAt } from './battle/movementRules';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
@@ -16,7 +16,7 @@ import { appointSuccessorGovernor } from './innerAffairs';
 import { settleLoyaltyDrift } from './loyalty';
 import { settleCaptives } from './captives';
 import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
-import { settleLegionAutomation, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, cityQuarterlyFoodIncome, CITY_GOLD_CAP, CITY_FOOD_CAP, cityTroopCap, DEFAULT_OFFICER_SALARY } from './innerAffairs';
+import { settleLegionAutomation, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, cityQuarterlyFoodIncome, DEFAULT_OFFICER_SALARY } from './innerAffairs';
 import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
 import { settlePassRangedAttack } from './passes';
 import { executeDelegations, delegationMergedOfficerIds, keepDelegationMergedOfficersActed } from './battle/delegate';
@@ -24,8 +24,9 @@ import { addOfficerMerit, MERIT_PER_MONTH, positionDefinition, rankDefinition, r
 import { settleForceTurnStart } from './skills/rules/turn';
 import { cityIncomeMultiplier } from './skills/rules/city';
 import { tenDayIndex } from './diplomacy';
-import { passIncomeMultiplierByBlockade, passQuarterlyFoodIncome, passMonthlyGoldIncome, PASS_GOLD_CAP, PASS_FOOD_CAP } from './passes';
-import type { ArmyUnit, City, FacilityRepairReport, ForceId, GameState } from './types';
+import { passIncomeMultiplierByBlockade, passQuarterlyFoodIncome, passMonthlyGoldIncome } from './passes';
+import { clampStrongholdsInPlace } from './strongholdCapacity';
+import type { ArmyUnit, City, CityId, FacilityRepairReport, ForceId, GameState } from './types';
 
 interface CityEvent {
   name: string;
@@ -156,28 +157,49 @@ function settleTruces(next: GameState) {
   }
 }
 
+/** 部队退场后武将的落点：本方城池，或（本方已无城时）转为在野 */
+type RetreatLocation = { kind: 'city'; cityId: CityId } | { kind: 'unaffiliated'; cityId: CityId };
+
+/**
+ * 部队退场时武将的去向：优先本队归属据点（须仍为本方所有），
+ * 其次任意本方城池，都没有则转为在野。
+ * 不能只看归属据点是否存在 —— 据点可能已被敌方攻占，那样会把武将送进敌城。
+ */
+function retreatLocationForUnit(next: GameState, unit: ArmyUnit): RetreatLocation {
+  const home = next.cities[unit.homeCityId];
+  if (home && home.ownerId === unit.forceId) return { kind: 'city', cityId: home.id };
+  const friendly = Object.values(next.cities).find((city) => city.ownerId === unit.forceId);
+  if (friendly) return { kind: 'city', cityId: friendly.id };
+  return { kind: 'unaffiliated', cityId: unit.homeCityId };
+}
+
+/** 部队退场（援军到期 / 残兵溃散）时把编队武将送回本方据点，返回目的地名称 */
+function returnOfficersToRear(next: GameState, unit: ArmyUnit): string {
+  const destination = retreatLocationForUnit(next, unit);
+  for (const officerId of unit.officerIds ?? [unit.leaderId]) {
+    const officer = next.officers[officerId];
+    if (!officer) continue;
+    officer.location = { ...destination };
+    officer.cityId = destination.cityId;
+    officer.acted = false;
+  }
+  return next.cities[destination.cityId]?.name ?? '驻地';
+}
+
 /** 临时部队到期（援军）自动撤退 */
 function settleExpiringUnits(next: GameState) {
   const current = tenDayIndex(next.month, next.tenDay ?? 1);
   for (const unit of Object.values(next.units)) {
-    if (unit.expiresTenDay !== undefined && current >= unit.expiresTenDay) {
-      const officers = unit.officerIds ?? [unit.leaderId];
-      for (const officerId of officers) {
-        const officer = next.officers[officerId];
-        if (!officer) continue;
-        const home = next.cities[unit.homeCityId];
-        officer.location = home ? { kind: 'city', cityId: home.id } : { kind: 'unaffiliated', cityId: unit.homeCityId };
-        officer.cityId = officer.location.cityId;
-        officer.acted = false;
-      }
-      delete next.units[unit.id];
-      next.logs.push({
-        id: `reinforce-return-${next.month}-${unit.id}-${next.logs.length}`,
-        month: next.month,
-        forceId: unit.forceId,
-        message: `援军部队（${unit.leaderId}）任务结束，撤回${next.cities[unit.homeCityId]?.name ?? '驻地'}`,
-      });
-    }
+    if (unit.expiresTenDay === undefined || current < unit.expiresTenDay) continue;
+    const placeName = returnOfficersToRear(next, unit);
+    const leaderName = next.officers[unit.leaderId]?.name ?? unit.leaderId;
+    delete next.units[unit.id];
+    next.logs.push({
+      id: `reinforce-return-${next.month}-${unit.id}-${next.logs.length}`,
+      month: next.month,
+      forceId: unit.forceId,
+      message: `援军部队（${leaderName}）任务结束，撤回${placeName}`,
+    });
   }
 }
 
@@ -299,11 +321,6 @@ export function settleMonth(state: GameState): GameState {
       city.ruralPopulation += popGrowth - cityShare;
     }
     applyPossibleEvent(next, city);
-    // 应用城池金/粮/兵力容量上限
-    if (city.gold > CITY_GOLD_CAP) city.gold = CITY_GOLD_CAP;
-    if (city.food > CITY_FOOD_CAP) city.food = CITY_FOOD_CAP;
-    const troopCap = cityTroopCap(city);
-    if (city.troops > troopCap) city.troops = troopCap;
   }
   // 关隘据点：与城池一致的钱粮产出与人口自然增长（无治安值，产出不乘治安修正）
   for (const pass of Object.values(next.passes ?? {})) {
@@ -315,9 +332,9 @@ export function settleMonth(state: GameState): GameState {
       pass.food += passQuarterlyFoodIncome(pass) * incomeMultiplier;
     }
     pass.population += Math.floor(pass.population * 0.005);
-    if (pass.gold > PASS_GOLD_CAP) pass.gold = PASS_GOLD_CAP;
-    if (pass.food > PASS_FOOD_CAP) pass.food = PASS_FOOD_CAP;
   }
+  // 应用据点金/粮/兵/兵装容量上限（月结算末统一收口，见 strongholdCapacity）
+  clampStrongholdsInPlace(next);
   for (const forceId of FORCE_IDS) next.actionPoints[forceId] = BASE_TEN_DAY_ACTION_POINTS;
   // 与旬末同一口径：在途 / 执行任务 / 被俘的武将跨月也保持 acted=true（见 officerIsBusy）
   for (const officer of Object.values(next.officers)) {
@@ -600,16 +617,20 @@ function settleOfficerTasks(next: GameState) {
     const armamentBase = taskPass ?? city;
     if (task.lead !== false) {
       const current = armamentsOf(armamentBase.armaments);
+      const armamentCaps = taskPass ? PASS_ARMAMENT_CAPS : CITY_ARMAMENT_CAPS;
+      const capLimit = armamentCaps[task.armamentType];
+      // 按容纳上限截断后再算实际入库量（据点已满时不会谎报"增加了X"）
+      const applied = Math.max(0, Math.min(capLimit, current[task.armamentType] + task.amount) - current[task.armamentType]);
       armamentBase.armaments = {
         ...current,
-        [task.armamentType]: current[task.armamentType] + task.amount,
+        [task.armamentType]: current[task.armamentType] + applied,
       };
       next.cityEffectReports = [{
         id: `city-effect-${next.month}-${next.logs.length}`,
         cityId: taskPass ? taskPass.homeCityId : city.id,
         q: taskPass ? taskPass.q : city.gridQ,
         r: taskPass ? taskPass.r : city.gridR,
-        amount: task.amount,
+        amount: applied,
         label: ARMAMENT_LABELS[task.armamentType],
         kind: 'armament',
       }];
@@ -617,7 +638,7 @@ function settleOfficerTasks(next: GameState) {
         id: `armament-complete-${next.month}-${officer.id}-${next.logs.length}`,
         month: next.month,
         forceId: officer.forceId,
-        message: `${officer.name}完成${armamentBase.name}${ARMAMENT_LABELS[task.armamentType]}生产，增加了${task.amount}`,
+        message: `${officer.name}完成${armamentBase.name}${ARMAMENT_LABELS[task.armamentType]}生产，增加了${applied}`,
       });
     }
     officer.location = officerReturn;
@@ -647,6 +668,7 @@ export function settleTenDay(state: GameState): GameState {
   applyGroundFireDamageToFacilities(next);
   applyGroundFireDamageToPlots(next);
   applyGroundFireDamageToCities(next);
+  applyGroundFireDamageToPasses(next);
   settleFirePlots(next);
   settleForceTurnStart(next, state.playerForceId);
   settleOfficerTransfers(next);
@@ -675,6 +697,8 @@ export function settleTenDay(state: GameState): GameState {
     officer.rewarded = false;
   }
   next.turnForceId = next.playerForceId;
+  // 旬/月结算里兵装生产完成、部队回城并账等都会往据点里加资源，出口统一截断到容纳上限
+  clampStrongholdsInPlace(next);
   return next;
 }
 

@@ -2,7 +2,7 @@ import {
   attackableCities,
   attackableFacilities,
   attackableUnits,
-  deploymentCells,
+  deploymentCellsForStronghold,
   facilityBuildTargets,
   jointAttackableUnits,
   movementCells,
@@ -25,13 +25,15 @@ import { movementAllowanceForProfile } from './definitions';
 import type { GridCoord } from './grid';
 import { attackablePlots, attackablePasses, type PlotAttackTarget } from './targetRules';
 import { strategyEnergyCostForUnit } from './strategies';
+import { STRATEGY_MIN_TROOPS } from './catalog';
 import { formationMovementAllowanceBonus } from '../skills';
 import { troopMovementBonusForTroop } from '../techs';
 import { TROOP_LABELS } from '../armaments';
-import type { ArmyUnit, City, CityId, Facility, FacilityType, GameState, Pass, TroopType } from '../types';
+import type { ArmyUnit, City, CityId, Facility, FacilityType, GameState, Pass, PassId, TroopType } from '../types';
 
 export interface DeploymentTargetQueryInput {
-  cityId: CityId;
+  cityId?: CityId;
+  passId?: PassId;
   troopType?: TroopType;
   officerIds?: string[];
   kind?: 'combat' | 'transport';
@@ -100,12 +102,14 @@ function unavailableTacticReason(state: GameState, unitId: string, tactic: UnitT
 }
 
 export function getDeploymentTargets(state: GameState, input: DeploymentTargetQueryInput): GridCoord[] {
-  if (input.kind === 'transport') return deploymentCells(state, input.cityId, undefined, 'transport');
+  const sourceId = input.passId ?? input.cityId;
+  if (!sourceId) return [];
+  if (input.kind === 'transport') return deploymentCellsForStronghold(state, sourceId, undefined, 'transport');
   const troopType = input.troopType ?? 'sword';
   const movementAllowance = movementAllowanceForProfile(troopType) +
     formationMovementAllowanceBonus(state, input.officerIds ?? [], troopType) +
     troopMovementBonusForTroop(state, state.turnForceId, troopType);
-  return deploymentCells(state, input.cityId, movementAllowance, troopType);
+  return deploymentCellsForStronghold(state, sourceId, movementAllowance, troopType);
 }
 
 export function getMovementTargets(state: GameState, unitId: string) {
@@ -174,7 +178,8 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
   const availableTactics = tacticOptions
     .filter((option) => !option.unavailableReason)
     .map((option) => option.tactic);
-  const availableStrategies = unitStrategies().filter((strategy) => {
+  // 兵力不足的部队无法释放计略（普攻、战法、攻城不受影响），UI 层据此禁用「计略」按钮
+  const availableStrategies = unit.troops < STRATEGY_MIN_TROOPS ? [] : unitStrategies().filter((strategy) => {
     if (unit.energy < strategyEnergyCostForUnit(state, unitId, strategy.id)) return false;
     if (strategy.target === 'cell') return strategyTargetCells(state, unitId, strategy.id, origin).length > 0;
     return strategyTargetUnits(state, unitId, strategy.id, origin).length > 0;

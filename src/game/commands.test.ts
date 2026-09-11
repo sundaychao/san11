@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ARMAMENT_GOLD_COST, armamentCost, produceArmamentYield } from './armaments';
 import { COMMAND_AP, TRADE_MAX_GRAIN, executeCommand, grainPriceOf, patrolGoldCost, quoteTrade, rollGrainPrices, rollMerchants, tradeEffectPercent, transferDuration, validateCommand } from './commands';
 import type { PlotType } from './innerAffairs';
-import { armamentYieldMultiplier, barracksYieldMultiplier, cityAttackRangeCoords, recruitBaseYield } from './innerAffairs';
+import { armamentYieldMultiplier, barracksYieldMultiplier, cityAttackRangeCoords, patrolOrderGain, recruitBaseYield } from './innerAffairs';
 import { hasCityTrait } from './cityTraits';
 import { POSITIONS, forceRankOf } from './ranks';
 import { createGame } from './scenario/jingxiang208';
@@ -191,6 +191,33 @@ describe('command engine', () => {
     // 气力提升 = 【(武97+97) ÷ (13500÷2000+20)】+ 3 = 7 + 3 = 10
     expect(next.cities.jiangling.training).toBe(82);
     expect(next.cities.jiangling.food).toBe(state.cities.jiangling.food - 300);
+    expect(next.cityEffectReports).toEqual([expect.objectContaining({
+      cityId: 'jiangling',
+      amount: 10,
+      label: '气力',
+      kind: 'train',
+    })]);
+  });
+
+  it('关隘训练的效果报告指向关隘（passId + 关隘坐标）', () => {
+    const state = createGame('liu', 1);
+    const pass = state.passes!.wuguan;
+    pass.ownerId = 'liu';
+    pass.troops = 6000;
+    pass.food = 20000;
+    pass.gold = 2000;
+    state.officers['liu-bei'].location = { kind: 'pass', passId: 'wuguan' };
+    const next = executeCommand(state, 'liu', {
+      type: 'train', cityId: pass.homeCityId, passId: 'wuguan', officerIds: ['liu-bei'],
+    });
+    expect(next.cityEffectReports).toEqual([expect.objectContaining({
+      cityId: pass.homeCityId,
+      passId: 'wuguan',
+      q: pass.q,
+      r: pass.r,
+      label: '气力',
+      kind: 'train',
+    })]);
   });
 
   it('allows training only once per city per ten days and resets at the next ten-day', () => {
@@ -231,6 +258,12 @@ describe('command engine', () => {
 
     expect(next.cities.jiangling.order).toBe(100);
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - patrolGoldCost(state.cities.jiangling));
+    expect(next.cityEffectReports).toEqual([expect.objectContaining({
+      cityId: 'jiangling',
+      amount: patrolOrderGain([state.officers['liu-bei']]),
+      label: '治安',
+      kind: 'patrol',
+    })]);
   });
 
   it('charges patrol cost proportional to city population (50 gold per 100,000)', () => {

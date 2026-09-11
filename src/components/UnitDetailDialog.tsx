@@ -1,6 +1,6 @@
 import { X } from 'lucide-react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { TROOP_LABELS, VEHICLE_LABELS } from '../game/armaments';
+import { ARMAMENT_LABELS, ARMAMENT_TYPES, TROOP_LABELS, VEHICLE_LABELS } from '../game/armaments';
 import { effectiveUnitAbilities, fireStrategySuccessChance, tacticCriticalChance } from '../game/battle/actions';
 import { effectiveStat } from '../game/health';
 import type { ArmyUnit, GameState, Officer } from '../game/types';
@@ -47,6 +47,10 @@ export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps
   const aptitude = abilities.aptitude.grade;
   const criticalChance = aptitude ? `${tacticCriticalChance(abilities.war.value, aptitude)}%` : '—';
   const fireChance = `${fireStrategySuccessChance(abilities.intelligence.value)}%`;
+  // 随身兵装：出征时从据点带走、回城/进关并账时原样返还（未记录的部队不显示）
+  const carriedArmaments = ARMAMENT_TYPES
+    .map((type) => [type, unit.armaments?.[type] ?? 0] as const)
+    .filter(([, amount]) => amount > 0);
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
@@ -96,6 +100,12 @@ export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps
           <div><dt>战力</dt><dd>{unit.stamina === undefined ? '—' : Math.round(unit.stamina)}</dd></div>
           <div><dt>资金</dt><dd>{(unit.gold ?? 0).toLocaleString('en-US')}</dd></div>
           <div><dt>兵粮</dt><dd>{unit.food.toLocaleString('en-US')}</dd></div>
+          {carriedArmaments.length > 0 && (
+            <div>
+              <dt>随身兵装</dt>
+              <dd>{carriedArmaments.map(([type, amount]) => `${ARMAMENT_LABELS[type]} ${amount.toLocaleString('en-US')}`).join(' · ')}</dd>
+            </div>
+          )}
           <div><dt>行动</dt><dd>{unit.movementRemaining}</dd></div>
           <div><dt>状态</dt><dd>{unitStatus(unit)}</dd></div>
         </dl>

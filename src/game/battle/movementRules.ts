@@ -1,5 +1,5 @@
 import { unitIgnoresEnemyZocTerrain } from '../skills/rules/movement';
-import type { ArmyUnit, City, CityId, Facility, ForceId, GameState, GridCell } from '../types';
+import type { ArmyUnit, City, CityId, Facility, ForceId, GameState, GridCell, PassId } from '../types';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { isWaterTerrain, movementAllowanceForProfile, movementCostForCell, movementProfileForUnit, ZOC_FACILITY_TYPES, type MovementProfile } from './catalog';
 import { passBlockedKeys, passCenterBlockedFor } from '../passes';
@@ -273,6 +273,41 @@ export function deploymentCells(state: GameState, cityId: CityId, movement?: num
 
   return [...costs.entries()]
     .filter(([key]) => key !== gridKey(start) && !cityKeys.has(key))
+    .map(([key]) => {
+      const [q, r] = key.split(',').map(Number);
+      return { q, r };
+    })
+    .sort((a, b) => a.q - b.q || a.r - b.r);
+}
+
+/** 全部关隘锚点格集合（单格据点，落位需排除） */
+export function allPassAnchorKeys(state: Pick<GameState, 'passes'>): Set<string> {
+  return new Set(Object.values(state.passes ?? {}).map((pass) => gridKey(pass)));
+}
+
+/**
+ * 从据点（城池或关隘）计算出征/输送落位格。
+ * 关隘为单格据点：从锚点出发可达的格，排除其它城池格与全部关隘锚点/翼格。
+ */
+export function deploymentCellsForStronghold(
+  state: GameState,
+  sourceId: CityId | PassId,
+  movement?: number,
+  profile: MovementProfile = 'sword',
+  vehicle?: 'boat' | 'ship',
+): GridCoord[] {
+  const pass = state.passes?.[sourceId as PassId];
+  if (!pass) return deploymentCells(state, sourceId as CityId, movement, profile, vehicle);
+  const movementBudget = movement ?? movementAllowanceForProfile(profile);
+  const start = { q: pass.q, r: pass.r };
+  const excluded = new Set([...allCityKeys(state), ...passBlockedKeys(state), ...allPassAnchorKeys(state)]);
+  const costs = reachableCostsFrom(state, start, movementBudget, profile, {
+    allowedCityTransitKeys: new Set([gridKey(start)]),
+    movingForceId: pass.ownerId ?? undefined,
+    vehicle,
+  });
+  return [...costs.entries()]
+    .filter(([key]) => key !== gridKey(start) && !excluded.has(key))
     .map(([key]) => {
       const [q, r] = key.split(',').map(Number);
       return { q, r };

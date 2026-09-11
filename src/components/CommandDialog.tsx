@@ -2,7 +2,7 @@ import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentCost, armamentProductionIntelligence, armamentProductionTenDays, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
-import { COMMAND_AP, COMMAND_LABELS, TRADE_MAX_GRAIN, grainPriceOf, patrolGoldCost, passAvailableOfficers, quoteTrade, researchTechPCost, strongholdTransferDuration, tradeEffectMultiplier, tradeEffectPercent, validateCommand } from '../game/commands';
+import { COMMAND_AP, COMMAND_LABELS, SELL_FEE_RATIO, TRADE_MAX_GRAIN, grainPriceOf, patrolGoldCost, passAvailableOfficers, quoteTrade, researchTechPCost, strongholdTransferDuration, tradeEffectMultiplier, tradeEffectPercent, validateCommand } from '../game/commands';
 import { MAX_TECH_LEVEL, TECH_BRANCHES, TECH_COSTS, recruitMultiplier, researchTenDays, techLevelOf } from '../game/techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition, treasureEffectText } from '../game/treasures';
 import { REWARD_GOLD_COST, officerLoyalty, rewardLoyaltyGain } from '../game/loyalty';
@@ -10,7 +10,7 @@ import { ABILITY_CENTER, ABILITY_NODE_MAP, ABILITY_NODES, ABILITY_RESEARCH_GOLD,
 import { POSITIONS, forceRankOf, officerIsOnCampaign, officerMerit, positionDefinition, rankDefinition, rankIndex } from '../game/ranks';
 import { capturableByLoyalty, captivesOf, recruitCaptiveChance, CAPTIVE_RECRUIT_LOYALTY_THRESHOLD } from '../game/captives';
 import { DIPLOMACY_GOLD_MAX, GOODWILL_GOLD_COST, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, areAllies, forceDiplomacy } from '../game/diplomacy';
-import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasPlotFacility, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
+import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, CITY_FOOD_CAP, CITY_GOLD_CAP, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasPlotFacility, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
 import { hasCityTrait } from '../game/cityTraits';
 import { MARRY_TECHP_COST, relationCandidates } from '../game/relationship';
 import { POACH_GOLD_COST, RUMOR_GOLD_COST, canPoach, rumorTargets } from '../game/rumor';
@@ -18,6 +18,7 @@ import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from '../ga
 import { useGame } from '../game/store/GameProvider';
 import type { ArmamentType, CityId, ForceId, GameCommand, Officer, PassId, TechBranchId } from '../game/types';
 import { OfficerPickerDialog } from './OfficerPickerDialog';
+import { TechTreePanel } from './TechTreePanel';
 import { closePopupOnContextMenu } from './popupEvents';
 
 interface CommandDialogProps {
@@ -32,6 +33,12 @@ interface CommandDialogProps {
 
 /** 多人执行指令（勾选1~3名武将共同执行） */
 const MULTI_OFFICER_TYPES: GameCommand['type'][] = ['recruit', 'produceArmament', 'train', 'patrol', 'research', 'buildFacilityPlot'];
+
+/**
+ * 科技研究面板是否显示旧版科技表。
+ * 新版界面（TechTreePanel）按参考图只做展示、暂不接旧科技系统，旧表格与详情代码保留以便回退。
+ */
+const SHOW_LEGACY_TECH_TABLE = false;
 type ExecutorStatKey = keyof Officer['stats'];
 const EXECUTOR_STAT_LABELS: Record<ExecutorStatKey, string> = {
   leadership: '统率',
@@ -286,11 +293,18 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
   const grainPrice = grainPriceOf(garrison);
   const tradeEffect = activeOfficer ? tradeEffectMultiplier(activeOfficer.stats.politics) : 1;
   const tradePercent = activeOfficer ? tradeEffectPercent(activeOfficer.stats.politics) : 100;
-  // 滑块左卖右买、居中为0：右侧可买上限受资金限制，左侧可卖上限受兵粮限制，均不超过单次30000
+  // 滑块左卖右买、居中为0：右侧可买上限受资金与城池兵粮余量限制，
+  // 左侧可卖上限受兵粮与城池资金余量限制（两端都不得突破据点容纳上限），均不超过单次30000
   const tradeBuyMax = activeOfficer
-    ? Math.min(TRADE_MAX_GRAIN, Math.floor(garrisonGold * grainPrice * tradeEffect))
+    ? Math.min(TRADE_MAX_GRAIN, Math.floor(garrisonGold * grainPrice * tradeEffect), Math.max(0, CITY_FOOD_CAP - city.food))
     : 0;
-  const tradeSellMax = Math.min(TRADE_MAX_GRAIN, garrisonFood);
+  // 卖出上限：兵粮、单次上限，以及目标城池的资金余量（卖出的金不能超过 CITY_GOLD_CAP）
+  const sellGoldPerGrain = (tradeEffect * SELL_FEE_RATIO) / grainPrice;
+  const tradeSellMax = Math.min(
+    TRADE_MAX_GRAIN,
+    garrisonFood,
+    sellGoldPerGrain > 0 ? Math.floor(Math.max(0, CITY_GOLD_CAP - city.gold) / sellGoldPerGrain) : TRADE_MAX_GRAIN,
+  );
   const tradeValueClamped = Math.max(-tradeSellMax, Math.min(tradeValue, tradeBuyMax));
   const tradeIdle = tradeValueClamped === 0;
   const tradeMode: 'buy' | 'sell' = tradeValueClamped >= 0 ? 'buy' : 'sell';
@@ -788,15 +802,19 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
               />
             </div>
             <dl className="trade-quote">
-              <div><dt>资金</dt><dd>{garrisonGold.toLocaleString('en-US')} → {Math.max(0, garrisonGold + tradeQuote.goldDelta).toLocaleString('en-US')}</dd></div>
-              <div><dt>兵粮</dt><dd>{garrisonFood.toLocaleString('en-US')} → {Math.max(0, garrisonFood + tradeQuote.foodDelta).toLocaleString('en-US')}</dd></div>
+              <div><dt>资金</dt><dd>{garrisonGold.toLocaleString('en-US')} → {Math.min(CITY_GOLD_CAP, Math.max(0, garrisonGold + tradeQuote.goldDelta)).toLocaleString('en-US')}</dd></div>
+              <div><dt>兵粮</dt><dd>{garrisonFood.toLocaleString('en-US')} → {Math.min(CITY_FOOD_CAP, Math.max(0, garrisonFood + tradeQuote.foodDelta)).toLocaleString('en-US')}</dd></div>
             </dl>
-            <div className="command-note">向左拖动卖出兵粮（八成折价），向右拖动买入兵粮；单次最多交易{TRADE_MAX_GRAIN.toLocaleString('en-US')}兵粮</div>
+            <div className="command-note">向左拖动卖出兵粮（八成折价），向右拖动买入兵粮；单次最多交易{TRADE_MAX_GRAIN.toLocaleString('en-US')}兵粮（不得超过据点资金/兵粮容纳上限）</div>
           </section>
         )}
 
         {type === 'research' && (
           <section className="tech-research-panel" aria-label="科技研究">
+            <TechTreePanel />
+            {/* 旧版科技表：暂留代码以便回退，改 SHOW_LEGACY_TECH_TABLE 为 true 即恢复 */}
+            {SHOW_LEGACY_TECH_TABLE && (
+            <>
             <table className="tech-table">
               <thead>
                 <tr>
@@ -860,6 +878,8 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
                 </dl>
               );
             })()}
+            </>
+            )}
           </section>
         )}
 

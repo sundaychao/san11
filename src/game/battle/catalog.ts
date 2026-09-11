@@ -7,6 +7,22 @@ export const BASE_MOVEMENT = TROOP_MOVEMENT.sword;
 
 export const DEFENSE_MIN_TROOPS = 1000;
 export const DEFENSE_MAX_TROOPS = 3000;
+/**
+ * 普攻/战法的固定伤害基数与伤害地板（满编兵力下生效）。
+ * 两者配套校准：240 × 最惨乘区(≈0.503) ≈ 120。
+ */
+export const BASE_ATTACK_DAMAGE = 240;
+export const MIN_ATTACK_DAMAGE = 120;
+/**
+ * 满编兵力。部队兵力低于此值时，固定基数与伤害地板按 兵力/满编 等比衰减，
+ * 避免被打残的部队凭空打出远超自身兵力的伤害（出征下限为 1000 兵）。
+ */
+export const FULL_DAMAGE_TROOPS = 1000;
+/**
+ * 释放计略所需的最低兵力。兵力低于此值的部队不能使用计略（计略需要成建制调度），
+ * 但普攻、战法、攻城等攻击行为不受影响。
+ */
+export const STRATEGY_MIN_TROOPS = 500;
 export const DRUM_DAMAGE_MULTIPLIER = 1.15;
 export const FORTRESS_DAMAGE_MULTIPLIER = 0.7;
 export const FORTRESS_SUPPLY_MULTIPLIER = 0.7;

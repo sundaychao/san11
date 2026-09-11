@@ -42,9 +42,10 @@ export const PASS_POPULATION_SPREAD = 40_000;
 export const PASS_INITIAL_TRAINING = 100;
 /** 关隘初始治安（无治安值，仅供巡查等指令机制占位） */
 export const PASS_INITIAL_ORDER = 100;
-/** 关隘钱/粮容纳上限（同城池） */
-export const PASS_GOLD_CAP = 200_000;
-export const PASS_FOOD_CAP = 2_000_000;
+/** 关隘钱/粮/兵容纳上限（关隘容量远小于城池：兵 3 万、金 3 万、粮 30 万） */
+export const PASS_GOLD_CAP = 30_000;
+export const PASS_FOOD_CAP = 300_000;
+export const PASS_TROOP_CAP = 30_000;
 /** 关隘耐久上限（同城池） */
 export const PASS_MAX_DURABILITY = 3000;
 
@@ -133,6 +134,18 @@ export function passAt(state: Pick<GameState, 'passes'>, coord: GridCoord): Pass
     if (pass.q === coord.q && pass.r === coord.r) return pass;
   }
   return undefined;
+}
+
+/** 目标格所属的本方关隘（部队进入即回关） */
+export function ownPassAt(state: Pick<GameState, 'passes'>, forceId: ForceId, coord: GridCoord): Pass | undefined {
+  const pass = passAt(state, coord);
+  return pass && pass.ownerId === forceId ? pass : undefined;
+}
+
+/** 目标格的无守军无主关隘（部队进入即进驻占领） */
+export function unoccupiedPassAt(state: Pick<GameState, 'passes'>, coord: GridCoord): Pass | undefined {
+  const pass = passAt(state, coord);
+  return pass && pass.ownerId === null && pass.troops === 0 ? pass : undefined;
 }
 
 /** 关隘月度资金收入 = √总人口（无治安值修正，与城池基础人口税收一致） */

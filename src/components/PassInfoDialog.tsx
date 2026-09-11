@@ -1,7 +1,7 @@
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { useGame } from '../game/store/GameProvider';
-import { armamentsOf, ARMAMENT_LABELS } from '../game/armaments';
-import { passMonthlyGoldIncome, passQuarterlyFoodIncome, PASS_GOLD_CAP, PASS_FOOD_CAP } from '../game/passes';
+import { armamentsOf, ARMAMENT_LABELS, ARMAMENT_TYPES, PASS_ARMAMENT_CAPS } from '../game/armaments';
+import { passMonthlyGoldIncome, passQuarterlyFoodIncome, PASS_FOOD_CAP, PASS_GOLD_CAP, PASS_TROOP_CAP } from '../game/passes';
 import type { PassId } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -49,7 +49,7 @@ export function PassInfoDialog({ passId, onClose }: PassInfoDialogProps) {
             <dl className="city-info-dialog-grid city-info-dialog-grid-cols-3">
               <div><dt>资金</dt><dd>{formatNumber(pass.gold)} / {formatNumber(PASS_GOLD_CAP)}</dd></div>
               <div><dt>兵粮</dt><dd>{formatNumber(pass.food)} / {formatNumber(PASS_FOOD_CAP)}</dd></div>
-              <div><dt>兵力</dt><dd>{formatNumber(pass.troops)}</dd></div>
+              <div><dt>兵力</dt><dd>{formatNumber(pass.troops)} / {formatNumber(PASS_TROOP_CAP)}</dd></div>
             </dl>
           </section>
 
@@ -75,11 +75,13 @@ export function PassInfoDialog({ passId, onClose }: PassInfoDialogProps) {
 
           <section aria-label="兵装">
             <h3>兵装</h3>
-            <dl className="city-info-dialog-grid city-info-dialog-grid-cols-2">
-              <div><dt>{ARMAMENT_LABELS.spear}</dt><dd>{formatNumber(armaments.spear)}</dd></div>
-              <div><dt>{ARMAMENT_LABELS.halberd}</dt><dd>{formatNumber(armaments.halberd)}</dd></div>
-              <div><dt>{ARMAMENT_LABELS.crossbow}</dt><dd>{formatNumber(armaments.crossbow)}</dd></div>
-              <div><dt>{ARMAMENT_LABELS.cavalry}</dt><dd>{formatNumber(armaments.cavalry)}</dd></div>
+            <dl className="city-info-dialog-grid city-info-dialog-grid-cols-3">
+              {ARMAMENT_TYPES.map((type) => (
+                <div key={type}>
+                  <dt>{ARMAMENT_LABELS[type]}</dt>
+                  <dd>{formatNumber(armaments[type])} / {formatNumber(PASS_ARMAMENT_CAPS[type])}</dd>
+                </div>
+              ))}
             </dl>
           </section>
         </div>

@@ -2285,3 +2285,177 @@ describe('占领空城后武将状态', () => {
     expect(within(dialog).queryAllByText('待命')).toHaveLength(0);
   });
 });
+
+describe('空城可攻击', () => {
+  it('选中与无主空城相邻的部队时，「攻击」命令可用', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['liu-bei'],
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units)[0];
+    const city = state.cities.xinye;
+    expect(city.ownerId).toBeNull();
+    expect(city.troops).toBe(0);
+    const footprint = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR });
+    const footprintKeys = new Set(footprint.map(gridKey));
+    const spawn = footprint
+      .flatMap((coord) => neighborsOf(coord.q, coord.r))
+      .find((coord) => !footprintKeys.has(gridKey(coord)) && passableNonCityCell(state, coord))!;
+    Object.assign(unit, { q: spawn.q, r: spawn.r, moved: false, acted: false, movementRemaining: 22 });
+
+    renderState(state);
+    panMapTo(unit.q, unit.r);
+    // 第一次点选部队，第二次才弹出命令菜单
+    fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1 });
+    fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1 });
+
+    const unitMenu = screen.getByTestId('unit-command-menu');
+    expect(within(unitMenu).getByRole('button', { name: '攻击' })).toBeEnabled();
+  });
+});
+
+describe('点击无主关隘进驻', () => {
+  it('选中部队后点击相邻的无主关隘：弹出进驻确认框，确认后部队进驻、关隘易主', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['liu-bei', 'guan-yu'],
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units)[0];
+    const pass = state.passes!.wuguan;
+    expect(pass.ownerId).toBeNull();
+    expect(pass.troops).toBe(0);
+
+    // 站到关隘锚点旁边一格（排除关隘地形/山/深水/城池格，保证锚点确实在可移动范围内）
+    const spawn = neighborsOf(pass.q, pass.r).find((coord) => {
+      const cell = state.grid.find((candidate) => candidate.q === coord.q && candidate.r === coord.r);
+      return Boolean(
+        cell
+        && cell.terrain !== 'pass'
+        && !['mountain', 'deepWater'].includes(cell.terrain)
+        && !cityKeys(state).has(gridKey(coord)),
+      );
+    })!;
+    Object.assign(unit, { q: spawn.q, r: spawn.r, moved: false, acted: false, movementRemaining: 22 });
+    state.officers['liu-bei'].acted = false;
+    state.officers['guan-yu'].acted = false;
+
+    // GameProvider 会克隆 initialState，因此通过探针读取运行中的真实状态
+    function PassProbe() {
+      const { state: current } = useGame();
+      const target = current?.passes?.[pass.id];
+      if (!target || !current) return <span data-testid="probe-pass">gone</span>;
+      return (
+        <span data-testid="probe-pass">
+          {`${target.ownerId ?? 'none'}|${target.troops}|${Object.keys(current.units).length}|${current.officers['liu-bei'].location.kind}`}
+        </span>
+      );
+    }
+
+    render(
+      <GameProvider initialState={state}>
+        <GameShell />
+        <PassProbe />
+      </GameProvider>,
+    );
+    panMapTo(pass.q, pass.r);
+    fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1 });
+
+    // 真实命中区域是关隘 footprint 色块：关隘标记（pass-marker）与关隘格都是 pointer-events:none，
+    // 只有 footprint 能接到点击。之前点 pass-marker 是假阳性（fireEvent 绕过命中检测）。
+    const passFootprint = screen.getByTestId(`pass-footprint-${pass.id}`);
+    expect(passFootprint.style.pointerEvents).not.toBe('none');
+    fireEvent.pointerDown(passFootprint, { button: 0, buttons: 1 });
+
+    // 无主关隘 → 进驻确认（措辞区别于本方关隘的「进入」）
+    const confirmMenu = screen.getByTestId('return-city-confirm-menu');
+    expect(within(confirmMenu).getByText(`是否进驻${pass.name}？`)).toBeVisible();
+    await user.click(screen.getByTestId('return-city-confirm-yes'));
+
+    // 进驻后关隘易主、兵力归关、部队消失、武将驻关
+    expect(screen.getByTestId('probe-pass')).toHaveTextContent('liu|4000|0|pass');
+  });
+});
+
+describe('关隘可攻击', () => {
+  it('选中与无主关隘相邻的部队后点「攻击」再点关隘：一击攻破、关隘易主、主力进关接管', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['liu-bei'],
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units)[0];
+    const pass = state.passes!.wuguan;
+    expect(pass.ownerId).toBeNull();
+    expect(pass.troops).toBe(0);
+
+    const spawn = neighborsOf(pass.q, pass.r).find((coord) => passableNonCityCell(state, coord))!;
+    Object.assign(unit, { q: spawn.q, r: spawn.r, moved: false, acted: false, movementRemaining: 22 });
+    state.officers['liu-bei'].acted = false;
+
+    function PassAttackProbe() {
+      const { state: current } = useGame();
+      const target = current?.passes?.[pass.id];
+      if (!target || !current) return <span data-testid="probe-pass-attack">gone</span>;
+      return (
+        <span data-testid="probe-pass-attack">
+          {`${target.ownerId ?? 'none'}|${Object.keys(current.units).length}`}
+        </span>
+      );
+    }
+
+    render(
+      <GameProvider initialState={state}>
+        <GameShell />
+        <PassAttackProbe />
+      </GameProvider>,
+    );
+    panMapTo(unit.q, unit.r);
+    // 第一次点选部队，第二次才弹出命令菜单
+    fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1 });
+    fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1 });
+
+    const unitMenu = screen.getByTestId('unit-command-menu');
+    await user.click(within(unitMenu).getByRole('button', { name: '攻击' }));
+
+    // 攻击目标选择阶段：点关隘 footprint 即确认攻击（这是关隘唯一的命中区域）
+    fireEvent.pointerDown(screen.getByTestId(`pass-footprint-${pass.id}`), { button: 0, buttons: 1 });
+
+    // 无守军关隘守军本就是 0，一次攻击即攻破占领；攻方主力直接进关接管 → 部队从 state.units 消失
+    expect(screen.getByTestId('probe-pass-attack')).toHaveTextContent('liu|0');
+  });
+});
+
+describe('点击非己方关隘', () => {
+  it('点击无主关隘：弹出关隘情报，而不是毫无反应', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['liu-bei'],
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units)[0];
+    const pass = state.passes!.wuguan;
+    // 部署后部队即为已移动，没有移动范围；此时点关隘走 selectPassFromMap
+    expect(neighborsOf(pass.q, pass.r).some((c) => c.q === unit.q && c.r === unit.r)).toBe(false);
+
+    render(
+      <GameProvider initialState={state}>
+        <GameShell />
+      </GameProvider>,
+    );
+    panMapTo(pass.q, pass.r);
+    fireEvent.pointerDown(screen.getByTestId('battle-unit-marker'), { button: 0, buttons: 1 });
+
+    fireEvent.pointerDown(screen.getByTestId(`pass-footprint-${pass.id}`), { button: 0, buttons: 1 });
+
+    // 以前非己方关隘在这里静默返回，玩家以为关隘不可点
+    expect(screen.getByTestId('pass-info-menu')).toBeVisible();
+  });
+});

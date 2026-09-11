@@ -2,7 +2,7 @@ import { nextRandom } from './random';
 import { cityCanBuildFacility, hasCityTrait, forceMaxTraining } from './cityTraits';
 import { REWARD_AP_COST, REWARD_GOLD_COST, REWARD_LOYALTY_GAIN, officerLoyalty, recruitmentInitialLoyalty, setOfficerLoyalty } from './loyalty';
 import { addOfficerMerit, applyPositionStatDelta, MERIT_PER_COMMAND, officerIsOnCampaign, officerMerit, positionDefinition, forceRankOf, rankDefinition, rankIndex } from './ranks';
-import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentCost, armamentsOf, armamentProductionTenDays, isDelayedArmament, produceArmamentYield } from './armaments';
+import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, CITY_ARMAMENT_CAPS, armamentCost, armamentsOf, armamentProductionTenDays, clampArmamentsTo, isDelayedArmament, produceArmamentYield } from './armaments';
 import { ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, CULTIVATE_TEN_DAYS, abilityCultivateRemaining, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
 import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from './skills/rules/city';
 import { effectsOfKind, officerSkillNames, resolveCommandSkills, resolveOfficerSkills } from './skills';
@@ -15,7 +15,9 @@ import { MARRY_TECHP_COST, RELATIONSHIP_LABELS, areRelated, enterRelationship, r
 import { isPassBlocked } from './passes';
 import { createDebate } from './debate';
 import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, COMMAND_OFFICER_MAX,
-                             appointSuccessorGovernor, hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
+                             appointSuccessorGovernor, CITY_FOOD_CAP, CITY_GOLD_CAP, hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
+import { appointStrongholdSuccessor, isPassGarrison } from './strongholds';
+import { clampStrongholdsInPlace } from './strongholdCapacity';
 import type { City, CityId, ForceId, GameCommand, GameState, Legion, Officer, Pass, PassId, TechBranchId } from './types';
 
 export const COMMAND_AP = {
@@ -82,7 +84,7 @@ export const GRAIN_PRICE_MIN = 3;
 export const GRAIN_PRICE_MAX = 7;
 export const DEFAULT_GRAIN_PRICE = 5;
 // 卖出兵粮需扣除两成手续费
-const SELL_FEE_RATIO = 0.8;
+export const SELL_FEE_RATIO = 0.8;
 // 单次交易上限（兵粮）
 export const TRADE_MAX_GRAIN = 30000;
 // 每旬各城商人到访概率
@@ -179,20 +181,7 @@ export function strongholdTransferDuration(source: City | Pass, target: City | P
   return Math.max(1, Math.ceil(strongholdTransferDistance(source, target) / 10));
 }
 
-/** 据点补任太守（城池/关隘通用）：无主则清空，否则在驻扎武将中选政治最高者 */
-export function appointStrongholdSuccessor(state: GameState, stronghold: City | Pass): void {
-  if (!stronghold.ownerId) {
-    stronghold.governorId = null;
-    return;
-  }
-  const candidates = Object.values(state.officers).filter((officer) =>
-    officer.forceId === stronghold.ownerId &&
-    (isPassGarrison(stronghold)
-      ? officer.location.kind === 'pass' && officer.location.passId === stronghold.id
-      : officer.location.kind === 'city' && officer.location.cityId === stronghold.id));
-  const best = candidates.sort((a, b) => b.stats.politics - a.stats.politics || a.id.localeCompare(b.id))[0];
-  stronghold.governorId = best ? best.id : null;
-}
+export { appointStrongholdSuccessor, isPassGarrison } from './strongholds';
 
 /** 巡查费用：每 100,000 人口 50 金 */
 export function patrolGoldCost(stronghold: City | Pass): number {
@@ -384,11 +373,6 @@ export function commandGarrison<T extends GameCommand>(state: GameState, command
     if (pass) return pass;
   }
   return state.cities[command.cityId];
-}
-
-/** 资源宿主是否为关隘（用于区分关隘与城池：关隘无都市设施/商人/地格） */
-export function isPassGarrison(g: City | Pass): g is Pass {
-  return 'flankKeys' in g;
 }
 
 /** 依赖都市设施/内政建设的命令：关隘不提供（视为「无都市选项」） */
@@ -738,9 +722,21 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     } else if (command.mode === 'sell' && command.amount > city.food) {
       errors.push('兵粮不足');
     } else if (command.mode === 'buy') {
+      // 粮食不能超过城池容纳上限：已满/余量不足时直接拦下，避免花金买入后被上限丢弃
+      if (city.food + command.amount > CITY_FOOD_CAP) {
+        errors.push(`兵粮容纳上限${CITY_FOOD_CAP.toLocaleString('en-US')}，最多还能买入${Math.max(0, CITY_FOOD_CAP - city.food).toLocaleString('en-US')}`);
+      } else {
+        const officer = localOfficer(state, forceId, command);
+        const goldCost = Math.ceil(command.amount / (grainPriceOf(city) * tradeEffectMultiplier(officer?.stats.politics ?? 50)));
+        if (goldCost > city.gold) errors.push('资金不足');
+      }
+    } else {
+      // 卖出同理：资金满了就卖不进去，避免白送兵粮
       const officer = localOfficer(state, forceId, command);
-      const goldCost = Math.ceil(command.amount / (grainPriceOf(city) * tradeEffectMultiplier(officer?.stats.politics ?? 50)));
-      if (goldCost > city.gold) errors.push('资金不足');
+      const goldGain = quoteTrade(city, officer?.stats.politics ?? 50, 'sell', command.amount).goldDelta;
+      if (city.gold + goldGain > CITY_GOLD_CAP) {
+        errors.push(`资金容纳上限${CITY_GOLD_CAP.toLocaleString('en-US')}，卖出所得会溢出`);
+      }
     }
   }
   if (command.type === 'research') {
@@ -1016,14 +1012,17 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
           ...current,
           [command.armamentType]: current[command.armamentType] + gain,
         };
+        // 按容纳上限截断后再算实际入库量：满了就只报实际增加的部分，不谎报产量
+        clampArmamentsTo(city.armaments, CITY_ARMAMENT_CAPS);
+        const applied = city.armaments[command.armamentType] - current[command.armamentType];
         addTechP(next, forceId, TECHP_PER_PRODUCE_ARMAMENT);
-        message = `${names}生产${city.name}${ARMAMENT_LABELS[command.armamentType]}，增加了${gain.toLocaleString('en-US')}`;
+        message = `${names}生产${city.name}${ARMAMENT_LABELS[command.armamentType]}，增加了${applied.toLocaleString('en-US')}`;
         next.cityEffectReports = [{
           id: `city-effect-${next.month}-${next.logs.length}`,
           cityId: city.id,
           q: city.gridQ,
           r: city.gridR,
-          amount: gain,
+          amount: applied,
           label: ARMAMENT_LABELS[command.armamentType],
           kind: 'armament',
         }];
@@ -1043,6 +1042,17 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       stronghold.training = clamp(stronghold.training + gain, 0, 100);
       addTechP(next, forceId, TECHP_PER_TRAIN);
       message = `${names}训练${garrisonName}守军，气力+${gain}`;
+      const passGarrison = isPassGarrison(stronghold) ? stronghold : undefined;
+      next.cityEffectReports = [{
+        id: `city-effect-${next.month}-${next.logs.length}`,
+        cityId: command.cityId,
+        ...(passGarrison ? { passId: passGarrison.id } : {}),
+        q: passGarrison ? passGarrison.q : city.gridQ,
+        r: passGarrison ? passGarrison.r : city.gridR,
+        amount: gain,
+        label: '气力',
+        kind: 'train',
+      }];
       for (const officer of officers) officer.acted = true;
       break;
     }
@@ -1056,6 +1066,17 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       stronghold.order = clamp(stronghold.order + gain, 0, 100);
       addTechP(next, forceId, TECHP_PER_PATROL);
       message = `${names}巡察${garrisonName}，治安+${gain}`;
+      const patrolPassGarrison = isPassGarrison(stronghold) ? stronghold : undefined;
+      next.cityEffectReports = [{
+        id: `city-effect-${next.month}-${next.logs.length}`,
+        cityId: command.cityId,
+        ...(patrolPassGarrison ? { passId: patrolPassGarrison.id } : {}),
+        q: patrolPassGarrison ? patrolPassGarrison.q : city.gridQ,
+        r: patrolPassGarrison ? patrolPassGarrison.r : city.gridR,
+        amount: gain,
+        label: '治安',
+        kind: 'patrol',
+      }];
       for (const officer of officers) officer.acted = true;
       break;
     }
@@ -1176,7 +1197,11 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     }
     case 'trade': {
       const officer = next.officers[command.officerId];
-      const quote = quoteTrade(city, officer.stats.politics, command.mode, command.amount);
+      // 买入时按容纳余量收敛（validateCommand 已拦，这里是兜底）：绝不出现「花了全额金却不进粮」
+      const amount = command.mode === 'buy'
+        ? Math.min(command.amount, Math.max(0, CITY_FOOD_CAP - city.food))
+        : command.amount;
+      const quote = quoteTrade(city, officer.stats.politics, command.mode, amount);
       city.gold += quote.goldDelta;
       city.food += quote.foodDelta;
       city.merchantTradedThisTenDay = true;
@@ -1184,7 +1209,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       const price = grainPriceOf(city);
       message = command.mode === 'buy'
         ? `${officer.name}在${city.name}以1金${price}粮的价格购入${quote.foodDelta.toLocaleString('en-US')}兵粮，耗金${(-quote.goldDelta).toLocaleString('en-US')}`
-        : `${officer.name}在${city.name}以1金${price}粮的价格卖出${command.amount.toLocaleString('en-US')}兵粮，得金${quote.goldDelta.toLocaleString('en-US')}`;
+        : `${officer.name}在${city.name}以1金${price}粮的价格卖出${amount.toLocaleString('en-US')}兵粮，得金${quote.goldDelta.toLocaleString('en-US')}`;
       officer.acted = true;
       break;
     }
@@ -1468,5 +1493,8 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     forceId,
     message,
   });
+  // 据点资源容纳上限的收口之一：AI 直接调用 executeCommand（runAiTurn）不经 intentReducer，
+  // 在这里统一截断，保证任何来源的指令都不会把钱财/兵粮/兵装/兵力顶爆。
+  clampStrongholdsInPlace(next);
   return next;
 }

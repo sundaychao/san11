@@ -116,8 +116,8 @@ interface CityCommandMenuProps {
   onAppointPosition?(): void;
   onCultivate(category: CultivateCategory, passId?: PassId): void;
   onOpenCultivatePicker?(passId?: PassId): void;
-  onDeploy(cityId: CityId): void;
-  onTransport(cityId: CityId): void;
+  onDeploy(strongholdId: CityId | PassId): void;
+  onTransport(strongholdId: CityId | PassId): void;
   onClose(): void;
 }
 
@@ -157,8 +157,6 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
     if (item.command === 'transfer' && noOfficers) return true;
     // 出征/输送同样需要本城武将带队
     if ((item.action === 'deploy' || item.action === 'transport') && noOfficers) return true;
-    // 关隘暂未开放出征/输送（战斗层尚不支持从关隘出阵），需从所属城池出征
-    if ((item.action === 'deploy' || item.action === 'transport') && passId) return true;
     if ('cultivate' in item && item.cultivate) {
       if (state) return !hasCultivationAvailable(state, item.cultivate);
       return true;
@@ -207,7 +205,7 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
       && ((item.command && OFFICER_COMMANDS.has(item.command)) || item.command === 'transfer' || item.action === 'deploy' || item.action === 'transport')) {
       return passId ? '关内没有可行动的武将' : '城中没有可行动的武将';
     }
-    if ((item.action === 'deploy' || item.action === 'transport') && passId) return '关隘暂不能出阵，请从所属城池出征';
+    if ((item.action === 'deploy' || item.action === 'transport') && passId && availableOfficers.length === 0) return '关内没有可行动的武将';
     if (item.command === 'transfer' && state && menuCity && isCityBlocked(state, menuCity)) return '城池被敌方封锁，无法调动武将';
     if (item.command === 'buildFacilityPlot' && state && menuCity && isCityBlocked(state, menuCity)) return '城池被敌方封锁，无法开发建设';
     if (item.command && actionPoints < COMMAND_AP[item.command]) return `行动力不足 ${COMMAND_AP[item.command]}`;
@@ -239,8 +237,8 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
       onClose();
       return;
     }
-    if (item.action === 'deploy') onDeploy(cityId);
-    if (item.action === 'transport') onTransport(cityId);
+    if (item.action === 'deploy') onDeploy(passId ?? cityId);
+    if (item.action === 'transport') onTransport(passId ?? cityId);
     if (item.command === 'appointPosition' && onAppointPosition) {
       onAppointPosition();
     } else if (item.command) {

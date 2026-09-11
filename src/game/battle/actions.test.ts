@@ -9,6 +9,7 @@ import type { TroopType } from '../types';
 import * as skillHandlers from '../skills/handlers';
 import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackPlot, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
 import { attackablePlots } from './targetRules';
+import { applyGroundFireDamageToCities, applyImmediateFireDamageToCityAndPlot, GROUND_FIRE_CITY_DURABILITY } from './fire';
 import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 import { damageRoll } from './shared';
@@ -1269,6 +1270,31 @@ describe('battle deployment and movement actions', () => {
     expect(highDamage).toBeLessThan(lowDamage);
   });
 
+  it('scales the flat base damage down for under-strength units', () => {
+    // 出征下限为 1000 兵，但部队被打残后仍可继续攻击。
+    // 固定基数与伤害地板必须随兵力等比衰减，否则残兵会打出远超自身兵力的伤害。
+    const damageAt = (troops: number) => {
+      const state = deployUnit(createGame('liu', 77), 'liu', {
+        cityId: 'jiangling', officerId: 'guan-yu', troops: 4000, food: 5000,
+      });
+      const attacker = Object.values(state.units)[0];
+      readyUnitAt(state, attacker.id, { q: 10, r: 10 });
+      attacker.troops = troops;
+      addEnemyUnit(state, 'enemy-remnant', { q: 11, r: 10 }, 10_000);
+      return attackUnit(state, 'liu', attacker.id, 'enemy-remnant').battleDamageReports![0].amount;
+    };
+
+    const remnant = damageAt(200);
+    const full = damageAt(1000);
+
+    // 200 兵打出的伤害必须低于自身兵力（旧公式约为 270，会超过自身兵力）
+    expect(remnant).toBeLessThan(200);
+    // 满编兵力下固定基数完整生效
+    expect(full).toBeGreaterThan(240);
+    // 兵力回到满编后恢复正常量级
+    expect(full).toBeGreaterThan(remnant);
+  });
+
   it('uses the highest-war deputy without changing leader leadership', () => {
     const base = deployUnit(createGame('liu', 91), 'liu', {
       cityId: 'jiangling', officerIds: ['jian-yong', 'guan-yu'], troops: 4000, food: 5000,
@@ -1783,6 +1809,30 @@ describe('battle deployment and movement actions', () => {
     ));
     expect(linkedFirePlots).toHaveLength(3);
     expect(neighborsOf(12, 11).some((coord) => firePlotKeys.has(gridKey(coord)))).toBe(true);
+  });
+
+  it('rejects strategies below the troop threshold while normal attacks still work', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 3000,
+      food: 3000,
+    });
+    setUniformTerrain(state, 'plain');
+    const unit = Object.values(state.units)[0];
+    readyUnitAt(state, unit.id, { q: 10, r: 10 });
+    state.units[unit.id].energy = 50;
+    state.units[unit.id].stamina = 50;
+    state.firePlots = [{ q: 11, r: 10 }];
+    addEnemyUnit(state, 'enemy-low-troops', { q: 11, r: 10 }, 3000);
+
+    state.units[unit.id].troops = 499;
+    expect(() => useUnitStrategy(state, 'liu', unit.id, 'fire', { coord: { q: 11, r: 10 } }))
+      .toThrow(/兵力不足/);
+
+    // 兵力不足只封锁计略，普攻照常可用
+    const next = attackUnit(state, 'liu', unit.id, 'enemy-low-troops');
+    expect(next.battleDamageReports![0].amount).toBeGreaterThan(0);
   });
 
   it('lists plot strategies and applies fire, extinguish, false report, disturb, calm, and inspire', () => {
@@ -2782,8 +2832,11 @@ describe('battle deployment and movement actions', () => {
     expect(next.cities.xiangyang.ownerId).toBe('liu');
     expect(next.cities.xiangyang.governorId).toBeNull();
     expect(next.cities.xiangyang.troops).toBeGreaterThan(0);
-    expect(next.units[attacker.id].troops).toBeLessThan(6000);
-    expect(next.units[attacker.id].acted).toBe(true);
+    // 破城后主力直接进城接管：部队解散，其兵力全部并入城池
+    expect(next.units[attacker.id]).toBeUndefined();
+    expect(next.cities.xiangyang.troops).toBe(attacker.troops);
+    expect(next.officers['guan-yu'].location).toEqual({ kind: 'city', cityId: 'xiangyang' });
+    expect(next.officers['guan-yu'].acted).toBe(true);
   });
 
   it('lists enemy cities in attack range and lets siege attack from two cells away', () => {
@@ -2842,7 +2895,7 @@ describe('battle deployment and movement actions', () => {
     expect(siegeDurabilityLoss).toBeGreaterThan(swordDurabilityLoss * 3);
   });
 
-  it('excludes unowned garrison-less cities from attack targets but allows entering by movement', () => {
+  it('treats unowned garrison-less cities as attack targets while still allowing entering by movement', () => {
     const deployed = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -2851,7 +2904,7 @@ describe('battle deployment and movement actions', () => {
       food: 6000,
     });
     const attacker = Object.values(deployed.units)[0];
-    // 新剧本无主城无守军：不可攻击，只能进驻
+    // 新剧本无主城无守军：既可攻击（打下来），也可直接进驻（兵不血刃）
     const target = deployed.cities.nanpi;
     expect(target.ownerId).toBeNull();
     expect(target.troops).toBe(0);
@@ -2861,11 +2914,40 @@ describe('battle deployment and movement actions', () => {
       .find((coord) => !blockedKeys.has(gridKey(coord)))!;
     readyUnitAt(deployed, attacker.id, attackCell, 'sword');
 
-    expect(attackableCities(deployed, attacker.id).map((city) => city.id)).not.toContain('nanpi');
+    expect(attackableCities(deployed, attacker.id).map((city) => city.id)).toContain('nanpi');
     // 空城可直达进驻：城池格在可移动范围内
     const cityCell = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR })[0];
     expect(movementCells(deployed, attacker.id).some((coord) => coord.q === cityCell.q && coord.r === cityCell.r)).toBe(true);
-    expect(() => attackCity(deployed, 'liu', attacker.id, 'nanpi')).toThrow(/可直接进驻/);
+
+    // 攻击空城：守军本就是 0，按「守军或耐久任一归零即破城」一次即攻破。
+    // 与进驻的区别只在结算：资源减半、耐久重置为 20%，部队同样整体进城（兵力/军粮/金钱与武将并入）。
+    const unitTroops = deployed.units[attacker.id].troops;
+    const carriedGold = attacker.gold ?? 0;
+    const carriedFood = attacker.food;
+    const attacked = attackCity(deployed, 'liu', attacker.id, 'nanpi');
+    expect(attacked.cities.nanpi.ownerId).toBe('liu');
+    expect(attacked.cities.nanpi.gold).toBe(Math.floor(target.gold / 2) + carriedGold);
+    expect(attacked.cities.nanpi.food).toBe(Math.floor(target.food / 2) + carriedFood);
+    expect(attacked.cities.nanpi.durability).toBe(Math.ceil(target.maxDurability * 0.2));
+    expect(attacked.units[attacker.id]).toBeUndefined();
+    expect(attacked.cities.nanpi.troops).toBe(unitTroops);
+    expect(attacked.officers['guan-yu'].location).toEqual({ kind: 'city', cityId: 'nanpi' });
+  });
+
+  it('lets fire damage unowned garrison-less cities (immediate ignition and per-ten-day burn)', () => {
+    const state = createGame('liu', 1);
+    const target = state.cities.nanpi;
+    expect(target.ownerId).toBeNull();
+    const before = target.durability;
+
+    // 点火即时伤害：目标格落在 7 格 footprint 内即掉耐久
+    applyImmediateFireDamageToCityAndPlot(state, { q: target.gridQ, r: target.gridR });
+    expect(state.cities.nanpi.durability).toBe(before - GROUND_FIRE_CITY_DURABILITY);
+
+    // 每旬火焰结算：footprint 内着火格数 × 基础值
+    state.firePlots = [{ q: target.gridQ, r: target.gridR, remainingTenDays: 3 }];
+    applyGroundFireDamageToCities(state);
+    expect(state.cities.nanpi.durability).toBe(before - GROUND_FIRE_CITY_DURABILITY * 2);
   });
 
   it('appoints the highest-politics resident officer as successor governor when the governor deploys', () => {
@@ -3000,12 +3082,12 @@ describe('battle deployment and movement actions', () => {
 
     const next = attackCity(deployed, 'liu', attacker.id, 'nanpi');
 
-    // 守军清零 → 无主城被刘备占领
+    // 守军清零 → 无主城被刘备占领，主力直接进城接管
     expect(next.cities.nanpi.ownerId).toBe('liu');
     expect(next.cities.nanpi.governorId).toBeNull();
-    // 留守军来自攻击部队，耐久重置为满值20%
     expect(next.cities.nanpi.troops).toBeGreaterThan(0);
-    expect(next.units[attacker.id].troops).toBeLessThan(6000);
+    expect(next.units[attacker.id]).toBeUndefined();
+    expect(next.cities.nanpi.troops).toBe(deployed.units[attacker.id].troops);
     expect(next.cities.nanpi.durability).toBe(Math.ceil(next.cities.nanpi.maxDurability * 0.2));
   });
 

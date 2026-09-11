@@ -78,6 +78,20 @@ describe('battle queries', () => {
     });
   });
 
+  it('disables strategies but keeps attacks for units below the troop threshold', () => {
+    const { state, attacker } = combatState();
+    attacker.troops = 499;
+
+    const query = getUnitActionQuery(state, attacker.id);
+
+    expect(query.commandAvailability.strategy).toBe(false);
+    expect(query.commandAvailability.attack).toBe(true);
+
+    // 阈值本身（500 兵）仍可释放计略
+    attacker.troops = 500;
+    expect(getUnitActionQuery(state, attacker.id).commandAvailability.strategy).toBe(true);
+  });
+
   it('returns tactic reasons and disables tactic command when stamina is insufficient', () => {
     const { state, attacker } = combatState();
     attacker.stamina = 0;

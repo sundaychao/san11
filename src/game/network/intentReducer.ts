@@ -22,6 +22,7 @@ import type { GridCoord } from '../battle/grid';
 import { executeCommand } from '../commands';
 import { dismissDebate, resolveDebateAbandon, resolveDebateRethink, resolveDebateRound } from '../debate';
 import { executeDuel } from '../duel';
+import { clampStrongholdResources } from '../strongholdCapacity';
 import type { ForceId, GameState } from '../types';
 import type { GameIntent } from './intents';
 
@@ -55,6 +56,16 @@ function debateOwnedByForce(state: GameState, forceId: ForceId): boolean {
 }
 
 export function reduceGameIntent(
+  state: GameState,
+  forceId: ForceId,
+  intent: ActionGameIntent,
+): GameState {
+  // 所有指令（玩家点击 / AI / 联网）都从这里出去，统一在出口把据点资源截断到容纳上限，
+  // 避免逐条指令去记「这条会不会把金钱/粮食/兵装顶爆」。
+  return clampStrongholdResources(reduceIntent(state, forceId, intent));
+}
+
+function reduceIntent(
   state: GameState,
   forceId: ForceId,
   intent: ActionGameIntent,

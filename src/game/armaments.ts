@@ -91,6 +91,47 @@ export function emptyArmaments(): CityArmaments {
   };
 }
 
+/**
+ * 城池兵装容纳上限：枪/戟/弩各 10 万，军马 5 万，冲车/井阑/楼船各 20。
+ * 楼船/冲车/井阑按「艘/辆」计数（出征消耗 1），故上限是 20 而非 20 万。
+ */
+export const CITY_ARMAMENT_CAPS: CityArmaments = {
+  spear: 100_000,
+  halberd: 100_000,
+  crossbow: 100_000,
+  cavalry: 50_000,
+  ram: 20,
+  tower: 20,
+  ship: 20,
+};
+
+/** 关隘兵装容纳上限：枪/戟/弩各 3 万，军马 1 万，冲车/井阑/楼船各 5 */
+export const PASS_ARMAMENT_CAPS: CityArmaments = {
+  spear: 30_000,
+  halberd: 30_000,
+  crossbow: 30_000,
+  cavalry: 10_000,
+  ram: 5,
+  tower: 5,
+  ship: 5,
+};
+
+/** 按上限截断兵装（**就地修改** value，调用方需保证对象已克隆） */
+export function clampArmamentsTo(value: CityArmaments, caps: CityArmaments): CityArmaments {
+  for (const type of ARMAMENT_TYPES) {
+    const current = value[type] ?? 0;
+    const capped = Math.min(caps[type] ?? 0, current);
+    value[type] = capped < 0 ? 0 : capped;
+  }
+  return value;
+}
+
+/** 兵装是否已超出给定上限（用于判断能否跳过克隆） */
+export function armamentsExceedCap(value: Partial<CityArmaments> | undefined, caps: CityArmaments): boolean {
+  if (!value) return false;
+  return ARMAMENT_TYPES.some((type) => (value[type] ?? 0) > (caps[type] ?? 0));
+}
+
 export function initialArmaments(): CityArmaments {
   return {
     spear: 4000,
@@ -105,6 +146,46 @@ export function initialArmaments(): CityArmaments {
 
 export function armamentsOf(value: Partial<CityArmaments> | undefined): CityArmaments {
   return { ...emptyArmaments(), ...value };
+}
+
+/**
+ * 按兵力 1:1 计的兵装（枪/戟/弩/军马）——出征时随兵力从据点带走，
+ * 回城/进关并账时也只按「实际并入据点的兵力」返还（伤亡带走装备）。
+ * 冲车/井阑/楼船按「辆/艘」计，出征消耗 1、并账返还 1，不随兵力缩放。
+ */
+export const TROOP_SCALED_ARMAMENT_TYPES: ArmamentType[] = ['spear', 'halberd', 'crossbow', 'cavalry'];
+
+/**
+ * 一支部队出征时从据点带走的兵装（**唯一口径**：出征扣减与并账返还共用本函数）。
+ * 枪戟弩马按兵力 1:1，楼船 1 艘、冲车/井阑 1 辆；剑兵/输送队没有对应兵装 → 空对象。
+ */
+export function armamentsCarriedByDeploy(
+  troopType: TroopType,
+  troops: number,
+  vehicle?: VehicleType,
+  siegeWeapon?: 'ram' | 'tower' | undefined,
+): Partial<CityArmaments> {
+  const carried: Partial<CityArmaments> = {};
+  const armamentType = TROOP_ARMAMENT[troopType];
+  if (armamentType && troops > 0) carried[armamentType] = Math.max(0, Math.floor(troops));
+  if (vehicle === 'ship') carried.ship = (carried.ship ?? 0) + 1;
+  if (troopType === 'siege' && siegeWeapon) carried[siegeWeapon] = (carried[siegeWeapon] ?? 0) + 1;
+  return carried;
+}
+
+/**
+ * 从据点的兵装里扣除 carried 指定的数量，返回新对象（不修改入参）。
+ * 与 `armamentsCarriedByDeploy` 配对使用，替代逐项 `{ ...snapshot, x: n }` 的写法 ——
+ * 后者在「兵种兵装 + 楼船/兵器」同时成立时会互相覆盖，导致有一项没被真正扣除。
+ */
+export function takeArmaments(source: Partial<CityArmaments> | undefined, carried: Partial<CityArmaments>): CityArmaments {
+  const base = armamentsOf(source);
+  const next = { ...base };
+  for (const type of ARMAMENT_TYPES) {
+    const amount = carried[type] ?? 0;
+    if (amount > 0) next[type] = base[type] - amount;
+  }
+  return next;
 }
 
 export function isDelayedArmament(armamentType: ArmamentType) {

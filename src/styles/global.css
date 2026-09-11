@@ -484,6 +484,8 @@ button { color: inherit; }
 .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 42%, transparent); stroke: rgba(255, 244, 205, 0.58); stroke-width: 1.3; vector-effect: non-scaling-stroke; pointer-events: auto; cursor: pointer; }
 /* 空城池/空关隘：无主时显示纯白（不透明更明显） */
 .city-footprint-cell.is-neutral { fill: rgba(255, 255, 255, 0.78); stroke: rgba(255, 255, 255, 0.74); }
+/* 关隘被选为攻击目标：与设施/建设用地目标同一套金色高亮 */
+.city-footprint-cell.is-attack-target { stroke: #ffd842; stroke-width: 2.2; filter: drop-shadow(0 0 3px rgba(255, 216, 66, 0.75)); }
 .battle-grid-overlay.is-editing .city-footprint-cell { fill: color-mix(in srgb, var(--force-color) 78%, rgba(255, 231, 145, 0.62)); stroke: rgba(255, 250, 188, 1); stroke-width: 2.3; pointer-events: none; cursor: crosshair; }
 /* 编辑器模式：关隘标记深棕色独立样式，只占单格 */
 .pass-footprint-cell { fill: #6b3a1f; stroke: #d4a06a; stroke-width: 2.4; vector-effect: non-scaling-stroke; pointer-events: none; }
@@ -505,8 +507,10 @@ button { color: inherit; }
 .strategy-result-label { pointer-events: none; fill: #e1e4e1; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 13px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(25, 31, 29, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .facility-repair-number { pointer-events: none; fill: #8ff0ae; font-family: Consolas, "Courier New", monospace; font-size: 14px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(8, 45, 24, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .facility-repair-number.is-build { fill: #ffe37a; }
-.city-effect-number { position: absolute; left: 50%; bottom: calc(50% + 64px); z-index: 2; min-width: max-content; transform: translateX(-50%); pointer-events: none; color: #f7ef83; font-family: Consolas, "Microsoft YaHei", sans-serif; font-size: max(13px, calc(16px * var(--map-scale, 1))); font-weight: 900; line-height: 1; text-shadow: 0 2px 0 rgba(17, 24, 21, 0.98), 2px 0 0 rgba(17, 24, 21, 0.98), -2px 0 0 rgba(17, 24, 21, 0.98), 0 -2px 0 rgba(17, 24, 21, 0.98), 0 0 7px rgba(0, 0, 0, 0.9); white-space: nowrap; }
+.city-effect-number { position: absolute; left: 50%; bottom: calc(50% + 64px); z-index: 2; min-width: max-content; transform: translateX(-50%); pointer-events: none; color: #f7ef83; font-family: Consolas, "Microsoft YaHei", sans-serif; font-size: max(11px, calc(var(--cell-px, 5.6px) * 0.7)); font-weight: 900; line-height: 1; text-shadow: 0 2px 0 rgba(17, 24, 21, 0.98), 2px 0 0 rgba(17, 24, 21, 0.98), -2px 0 0 rgba(17, 24, 21, 0.98), 0 -2px 0 rgba(17, 24, 21, 0.98), 0 0 7px rgba(0, 0, 0, 0.9); white-space: nowrap; }
 .city-effect-number.is-armament { color: #9de7ff; }
+.city-effect-number.is-train { color: #ffb36b; }
+.city-effect-number.is-patrol { color: #8ff0ae; }
 .troop-sword { --troop-tone: #cfc6a5; }
 .troop-spear { --troop-tone: #7fab72; }
 .troop-halberd { --troop-tone: #9a7a4d; }
@@ -1063,6 +1067,12 @@ button { color: inherit; }
 .event-log ol { margin: 9px 0 0; flex: 1 1 auto; min-height: 0; padding: 0 6px 2px 0; list-style: none; overflow-y: auto; }
 .event-log li { display: grid; grid-template-columns: 7px 1fr; gap: 8px; align-items: start; margin: 6px 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .event-log li i { width: 7px; height: 7px; margin-top: 5px; }
+/* 信息栏表头：标题在左，我方/他方页签在右 */
+.event-log-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.event-log-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.event-log-tabs button { min-width: 54px; min-height: 26px; padding: 0 10px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.06); color: var(--muted); font-size: 12px; cursor: pointer; }
+.event-log-tabs button:hover, .event-log-tabs button:focus-visible, .event-log-tabs button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.2); color: #fff6d6; outline: none; }
+.event-log li.event-log-blank { display: block; padding: 16px 4px; color: var(--muted); font-size: 11px; text-align: center; }
 .modal-backdrop, .result-backdrop { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(10, 15, 13, 0.72); }
 .command-dialog { width: min(500px, 100%); max-height: min(720px, calc(100dvh - 32px)); padding: 18px; overflow: auto; }
 .deploy-dialog { pointer-events: auto; width: min(760px, calc(100vw - 376px)); max-height: min(760px, calc(100dvh - 98px)); display: grid; grid-template-columns: minmax(320px, 1.15fr) minmax(240px, 0.85fr); gap: 16px 18px; padding: 18px; overflow: auto; background: rgba(18, 43, 45, 0.95); }
@@ -1128,6 +1138,7 @@ button { color: inherit; }
 .deploy-stock { display: grid; gap: 6px; margin: 0; }
 .deploy-stock > div { display: grid; grid-template-columns: 48px 1fr; align-items: center; gap: 10px; min-height: 34px; padding: 0 8px; border: 1px solid rgba(146, 136, 115, 0.55); }
 .deploy-stock dd { margin: 0; color: #fff6d6; text-align: right; font-variant-numeric: tabular-nums; }
+.deploy-note { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .deploy-errors { grid-column: 1 / -1; margin-top: 0; }
 .deploy-dialog footer { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 0; }
 .field-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 12px; margin-top: 15px; }
@@ -1174,6 +1185,10 @@ button { color: inherit; }
 .research-levels li.is-locked { opacity: 0.55; }
 /* —— 技巧研究表格（参照原版研究技巧界面） —— */
 .tech-research-panel { margin-top: 15px; }
+/* 新版科技树（展示用图表）：深色底与游戏 UI 同系，紧凑排布力争一屏可见 */
+.tech-tree-panel { margin-top: 8px; border: 1px solid rgba(146, 136, 115, 0.6); border-radius: 3px; background: rgba(13, 21, 19, 0.62); overflow: auto; }
+.tech-tree-svg { display: block; width: 100%; min-width: 900px; height: auto; max-height: min(74vh, 720px); }
+.command-dialog:has(.tech-tree-panel) { width: min(1180px, calc(100vw - 48px)); max-height: min(920px, calc(100dvh - 40px)); padding: 14px 18px; }
 .tech-table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1px solid rgba(146, 136, 115, 0.6); background: rgba(15, 30, 29, 0.72); }
 .tech-table th, .tech-table td { border: 1px solid rgba(146, 136, 115, 0.45); text-align: center; vertical-align: middle; padding: 0; }
 .tech-table thead tr:first-child th { position: relative; height: 38px; color: #e8d9ac; background: rgba(197, 173, 111, 0.14); font-family: STKaiti, KaiTi, serif; font-size: 17px; font-weight: 700; }

@@ -195,8 +195,17 @@ function validGridCell(value: unknown): value is GridCell {
     TERRAIN_VALUES.includes(cell.terrain!);
 }
 
-function validUnit(value: unknown, custom?: boolean): value is ArmyUnit {
+/** 部队随身兵装（可缺省，旧存档没有该字段）：只校验出现过的键与取值 */
+function validCarriedArmaments(value: unknown): boolean {
+  if (value === undefined) return true;
   if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return Object.entries(record).every(([type, amount]) => (
+    ARMAMENT_TYPES.includes(type as ArmamentType) && validResource(amount)
+  ));
+}
+
+function validUnit(value: unknown, custom?: boolean): value is ArmyUnit {  if (!value || typeof value !== 'object') return false;
   const unit = value as Partial<ArmyUnit>;
   const validStatus = (status: unknown) => status === undefined || (Number.isInteger(status) && Number(status) > 0);
   return typeof unit.id === 'string' &&
@@ -208,6 +217,7 @@ function validUnit(value: unknown, custom?: boolean): value is ArmyUnit {
     (unit.vehicle === undefined || unit.vehicle === 'boat' || unit.vehicle === 'ship') &&
     (unit.siegeWeapon === undefined || unit.siegeWeapon === 'ram' || unit.siegeWeapon === 'tower') &&
     (unit.gold === undefined || validResource(unit.gold)) &&
+    validCarriedArmaments(unit.armaments) &&
     Number.isInteger(unit.q) &&
     Number.isInteger(unit.r) &&
     validResource(unit.troops) &&
@@ -242,13 +252,14 @@ function validCityEffectReport(value: unknown): value is CityEffectReport {
   const report = value as Partial<CityEffectReport>;
   return typeof report.id === 'string' &&
     CITY_IDS.includes(report.cityId!) &&
+    (report.passId === undefined || typeof report.passId === 'string') &&
     Number.isInteger(report.q) &&
     Number.isInteger(report.r) &&
     typeof report.amount === 'number' &&
     Number.isInteger(report.amount) &&
     report.amount >= 0 &&
     typeof report.label === 'string' &&
-    (report.kind === 'recruit' || report.kind === 'armament');
+    (report.kind === 'recruit' || report.kind === 'armament' || report.kind === 'train' || report.kind === 'patrol');
 }
 
 function validFacilityRepairReport(value: unknown): value is FacilityRepairReport {

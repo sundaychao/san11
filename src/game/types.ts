@@ -331,11 +331,13 @@ export interface BattleDamageReport {
 export interface CityEffectReport {
   id: string;
   cityId: CityId;
+  /** 效果发生在关隘时为该关隘 id（渲染在关隘标记上） */
+  passId?: PassId;
   q: number;
   r: number;
   amount: number;
   label: string;
-  kind: 'recruit' | 'armament';
+  kind: 'recruit' | 'armament' | 'train' | 'patrol';
 }
 
 export interface FacilityRepairReport {
@@ -507,6 +509,12 @@ export interface ArmyUnit {
   vehicle?: VehicleType;
   siegeWeapon?: 'ram' | 'tower';
   gold?: number;
+  /**
+   * 出征时从据点带走的兵装（枪戟弩马按兵力 1:1，楼船/冲车/井阑各 1）。
+   * 部队回城/进关并账时按实际并入兵力返还（枪戟弩马）或整件返还（楼船/冲车/井阑），
+   * 见 `mergeUnitIntoStronghold`。未记录该字段的部队（疆域防御队、输送队、旧存档）不返还。
+   */
+  armaments?: Partial<CityArmaments>;
   q: number;
   r: number;
   troops: number;

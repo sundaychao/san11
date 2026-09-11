@@ -895,10 +895,62 @@ describe('game interface shell', () => {
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
     const eventLog = screen.getByRole('region', { name: '军情与政务' });
     const aiForceColors = ['#2088ff', '#e23d34', '#30b45a', 'rgb(32, 136, 255)', 'rgb(226, 61, 52)', 'rgb(48, 180, 90)'];
+    // 默认页签只放我方军情，AI 势力的记录收在「他方」页签里
+    await user.click(within(eventLog).getByRole('button', { name: '他方' }));
     expect(within(eventLog).getAllByRole('listitem').some((item) => {
       const swatch = item.querySelector('i') as HTMLElement | null;
       return swatch ? aiForceColors.includes(swatch.style.backgroundColor) || aiForceColors.includes(swatch.style.backgroundColor.toLowerCase()) : false;
     })).toBe(true);
+  });
+
+  it('splits the 军情与政务 info bar into 我方 / 他方 tabs and defaults to 我方', async () => {
+    const user = userEvent.setup();
+    const initialState = createGame('liu', 1);
+    initialState.logs = [
+      { id: 'own-log', month: 1, forceId: 'liu', message: '我方军情：江陵完成巡察' },
+      { id: 'other-log', month: 1, forceId: 'cao', message: '他方军情：宛城出兵' },
+      { id: 'global-log', month: 1, forceId: null, message: '全局通告：进入上旬' },
+    ];
+
+    render(
+      <GameProvider initialState={initialState} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const eventLog = screen.getByRole('region', { name: '军情与政务' });
+    const ownTab = within(eventLog).getByTestId('event-log-tab-own');
+    const othersTab = within(eventLog).getByTestId('event-log-tab-others');
+
+    // 默认停在「我方」：本方记录 + 全局通告可见，其他势力的记录不出现
+    expect(ownTab).toHaveAttribute('aria-pressed', 'true');
+    expect(within(eventLog).getByText('我方军情：江陵完成巡察')).toBeVisible();
+    expect(within(eventLog).getByText('全局通告：进入上旬')).toBeVisible();
+    expect(within(eventLog).queryByText('他方军情：宛城出兵')).not.toBeInTheDocument();
+
+    await user.click(othersTab);
+
+    expect(othersTab).toHaveAttribute('aria-pressed', 'true');
+    expect(within(eventLog).getByText('他方军情：宛城出兵')).toBeVisible();
+    expect(within(eventLog).queryByText('我方军情：江陵完成巡察')).not.toBeInTheDocument();
+    expect(within(eventLog).queryByText('全局通告：进入上旬')).not.toBeInTheDocument();
+  });
+
+  it('shows an empty hint in the 他方 tab when no other force has reported', async () => {
+    const user = userEvent.setup();
+    const initialState = createGame('liu', 1);
+    initialState.logs = [{ id: 'own-log', month: 1, forceId: 'liu', message: '我方军情：江陵完成巡察' }];
+
+    render(
+      <GameProvider initialState={initialState} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const eventLog = screen.getByRole('region', { name: '军情与政务' });
+    await user.click(within(eventLog).getByTestId('event-log-tab-others'));
+
+    expect(within(eventLog).getByText('暂无其他势力的军情')).toBeVisible();
   });
 
   it('closes the map context menu when right clicking empty map space again', () => {

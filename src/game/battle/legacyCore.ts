@@ -1,4 +1,4 @@
-import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, StrategyResultReport, TerrainType, TroopType } from '../types';
+import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, PassId, StrategyResultReport, TerrainType, TroopType } from '../types';
 import { BLOCKED_TERRAINS, isWaterTerrain } from './catalog';
 import { nextRandom } from '../random';
 import { TECHP_PER_BREAK_UNIT, techLevelOf, troopDamageMultiplier, addTechP } from '../techs';
@@ -32,9 +32,12 @@ import { areAdjacent, attackableCities, attackableFacilities, attackableUnits, g
 import { effectiveNavyAptitude, effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance } from './officerAbilities';
 import {
   ARROW_TOWER_DAMAGE,
+  BASE_ATTACK_DAMAGE,
   DEFENSE_MAX_TROOPS,
   DEFENSE_MIN_TROOPS,
   DRUM_DAMAGE_MULTIPLIER,
+  FULL_DAMAGE_TROOPS,
+  MIN_ATTACK_DAMAGE,
   movementAllowanceForUnit,
   FACILITIES,
   FACILITY_BUILD_COSTS,
@@ -52,6 +55,7 @@ import {
   SHIP_WATER_ATTACK_MULTIPLIER,
   SHIP_WATER_DEFENSE_MULTIPLIER,
   STRATEGIES,
+  STRATEGY_MIN_TROOPS,
   TACTIC_APTITUDE_DAMAGE,
   TACTIC_REQUIRED_APTITUDE,
   TACTICS,
@@ -73,7 +77,10 @@ export { deploymentCells, movementCells, reachableCosts, spawnCellFor, unitIsInc
 export { areAdjacent, attackableCities, attackableFacilities, attackableUnits, gridDistanceWithin, isCityInAttackRange, jointAttackableUnits } from './targetRules';
 
 export interface DeployInput {
-  cityId: CityId;
+  /** 出发城池 id（从城池出征时必填） */
+  cityId?: CityId;
+  /** 出发关隘 id（从关隘出征时必填；与 cityId 二选一） */
+  passId?: PassId;
   officerId?: string;
   officerIds?: string[];
   targetCityId?: CityId;
@@ -87,7 +94,10 @@ export interface DeployInput {
 }
 
 export interface TransportInput {
-  cityId: CityId;
+  /** 出发城池 id（从城池输送时必填） */
+  cityId?: CityId;
+  /** 出发关隘 id（从关隘输送时必填；与 cityId 二选一） */
+  passId?: PassId;
   officerId: string;
   destination?: GridCoord;
   troops: number;
@@ -310,10 +320,14 @@ function damageForRoll(
     0.8,
     1 + (attack.leadership.value - defenseLeadership) / 250,
   ));
-  const attackScore = committedTroops(state, attacker, defender) * (
+  const committed = committedTroops(state, attacker, defender);
+  // 残兵衰减：兵力低于满编时，固定基数与伤害地板同步等比缩小。
+  // 否则固定基数会与兵力脱钩，导致极小兵力部队打出远超自身兵力的伤害。
+  const commitmentScale = Math.min(1, committed / FULL_DAMAGE_TROOPS);
+  const attackScore = committed * (
     0.08 + attack.leadership.value / 2000 + attack.war.value / 3000
   );
-  const rawDamage = 240 + attackScore;
+  const rawDamage = BASE_ATTACK_DAMAGE * commitmentScale + attackScore;
   const randomModifier = 0.92 + rollValue * 0.16;
   const attackerOnWater = isWaterTerrain(unitTerrain(state, attacker));
   const attackerShipModifier = attacker.vehicle === 'ship' && attackerOnWater ? SHIP_WATER_ATTACK_MULTIPLIER : 1;
@@ -335,7 +349,8 @@ function damageForRoll(
     auraDefenseModifier *
     (counter ? 0.6 : 1),
   );
-  return Math.min(2200, Math.max(120, damage));
+  const damageFloor = Math.round(MIN_ATTACK_DAMAGE * commitmentScale);
+  return Math.min(2200, Math.max(damageFloor, damage));
 }
 
 export function damageRoll(
@@ -1163,6 +1178,8 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
   const strategy = STRATEGIES[strategyId];
   if (!strategy) throw new Error('部队不能使用该计略');
   if (unit.kind === 'transport') throw new Error('运输队不能使用计略');
+  // 兵力不足时无法释放计略（普攻、战法、攻城不受影响）
+  if (unit.troops < STRATEGY_MIN_TROOPS) throw new Error(`兵力不足 ${STRATEGY_MIN_TROOPS}，无法释放计略`);
   const staminaCost = strategyEnergyCostForUnit(state, unitId, strategyId);
   if ((unit.stamina ?? 0) < staminaCost) throw new Error('战力不足');
 

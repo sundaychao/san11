@@ -4,11 +4,14 @@ import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { effectiveStat, officerHealthSummary } from '../game/health';
 import { useGame } from '../game/store/GameProvider';
-import type { CityId, Officer } from '../game/types';
+import type { CityId, Officer, PassId } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
 export interface TransportConfirmInput {
-  cityId: CityId;
+  /** 出发城池 id（从城池输送时） */
+  cityId?: CityId;
+  /** 出发关隘 id（从关隘输送时；与 cityId 二选一） */
+  passId?: PassId;
   officerId: string;
   troops: number;
   gold: number;
@@ -16,7 +19,8 @@ export interface TransportConfirmInput {
 }
 
 interface TransportDialogProps {
-  cityId: CityId;
+  cityId?: CityId;
+  passId?: PassId;
   onConfirm(input: TransportConfirmInput): void;
   onClose(): void;
 }
@@ -33,7 +37,7 @@ function transportOfficerLabel(officer: Officer) {
   return `${officer.name} · 统${effectiveStat(officer, 'leadership')} 政${effectiveStat(officer, 'politics')}${injured}`;
 }
 
-export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogProps) {
+export function TransportDialog({ cityId, passId, onClose, onConfirm }: TransportDialogProps) {
   const { state } = useGame();
   const audio = useAudioEventAdapter();
   const [officerId, setOfficerId] = useState('');
@@ -48,17 +52,20 @@ export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogP
   }, []);
 
   if (!state) return null;
-  const city = state.cities[cityId];
+  const pass = passId ? state.passes?.[passId] : undefined;
+  const source = pass ?? (cityId ? state.cities[cityId] : undefined);
+  if (!source) return null;
   const officers = Object.values(state.officers).filter((officer) => (
     officer.forceId === state.playerForceId &&
-    officer.location.kind === 'city' &&
-    officer.location.cityId === cityId
+    (pass
+      ? officer.location.kind === 'pass' && officer.location.passId === passId
+      : officer.location.kind === 'city' && officer.location.cityId === cityId)
   ));
   const availableOfficers = officers.filter((officer) => !officer.acted);
   const activeOfficerId = officerId || availableOfficers[0]?.id || '';
-  const activeTroops = troops ?? String(Math.min(1000, Math.max(0, city.troops - 500)));
-  const activeGold = gold ?? String(Math.min(1000, city.gold));
-  const activeFood = food ?? String(Math.min(3000, city.food));
+  const activeTroops = troops ?? String(Math.min(1000, Math.max(0, source.troops - 500)));
+  const activeGold = gold ?? String(Math.min(1000, source.gold));
+  const activeFood = food ?? String(Math.min(3000, source.food));
   const troopAmount = toAmount(activeTroops);
   const goldAmount = toAmount(activeGold);
   const foodAmount = toAmount(activeFood);
@@ -66,9 +73,9 @@ export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogP
     state.actionPoints[state.playerForceId] < DEPLOY_AP_COST ? `行动力不足 ${DEPLOY_AP_COST}` : '',
     !activeOfficerId ? '没有可执行输送的武将' : '',
     !Number.isInteger(troopAmount) || troopAmount < 0 || troopAmount > 10000 ? '输送士兵必须为 0-10000' : '',
-    city.troops - troopAmount < 500 ? '城市至少保留 500 兵力' : '',
-    !Number.isInteger(goldAmount) || goldAmount < 0 || goldAmount > city.gold ? '资金不足' : '',
-    !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > city.food ? '兵粮不足' : '',
+    source.troops - troopAmount < 500 ? '城市至少保留 500 兵力' : '',
+    !Number.isInteger(goldAmount) || goldAmount < 0 || goldAmount > source.gold ? '资金不足' : '',
+    !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > source.food ? '兵粮不足' : '',
     troopAmount === 0 && goldAmount === 0 && foodAmount === 0 ? '至少输送一种资源' : '',
   ].filter(Boolean);
 
@@ -77,7 +84,7 @@ export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogP
     if (errors.length > 0) return;
     try {
       onConfirm({
-        cityId,
+        ...(passId ? { passId } : { cityId }),
         officerId: activeOfficerId,
         troops: troopAmount,
         gold: goldAmount,
@@ -94,7 +101,7 @@ export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogP
       <form ref={dialogRef} className="deploy-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="transport-title" onSubmit={submit}>
         <header>
           <div>
-            <p>{city.name} · 行动力 20</p>
+            <p>{source.name} · 行动力 20</p>
             <h2 id="transport-title">输送编制</h2>
           </div>
           <button type="button" className="icon-button" aria-label="关闭输送编制" title="关闭" onClick={onClose}><X /></button>
@@ -121,9 +128,9 @@ export function TransportDialog({ cityId, onClose, onConfirm }: TransportDialogP
         <aside className="deploy-right" aria-label="输送库存">
           <h3>据点库存</h3>
           <dl className="deploy-stock">
-            <div><dt>士兵</dt><dd>{city.troops.toLocaleString('en-US')} → {Math.max(0, city.troops - Math.max(0, troopAmount)).toLocaleString('en-US')}</dd></div>
-            <div><dt>资金</dt><dd>{city.gold.toLocaleString('en-US')} → {Math.max(0, city.gold - Math.max(0, goldAmount)).toLocaleString('en-US')}</dd></div>
-            <div><dt>兵粮</dt><dd>{city.food.toLocaleString('en-US')} → {Math.max(0, city.food - Math.max(0, foodAmount)).toLocaleString('en-US')}</dd></div>
+            <div><dt>士兵</dt><dd>{source.troops.toLocaleString('en-US')} → {Math.max(0, source.troops - Math.max(0, troopAmount)).toLocaleString('en-US')}</dd></div>
+            <div><dt>资金</dt><dd>{source.gold.toLocaleString('en-US')} → {Math.max(0, source.gold - Math.max(0, goldAmount)).toLocaleString('en-US')}</dd></div>
+            <div><dt>兵粮</dt><dd>{source.food.toLocaleString('en-US')} → {Math.max(0, source.food - Math.max(0, foodAmount)).toLocaleString('en-US')}</dd></div>
           </dl>
         </aside>
 

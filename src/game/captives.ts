@@ -5,6 +5,7 @@ import { compatDifference } from './diplomacy';
 import { treasureDefinition } from './treasures';
 import { applyDefeatInjuries, applyDeathConsequences, DEFEAT_DEATH_CHANCE, rollDeath } from './health';
 import { addTechP, TECHP_PER_CITY_CAPTURE } from './techs';
+import { mergeUnitIntoStronghold } from './strongholds';
 import type { ArmyUnit, City, CityId, ForceId, GameState, Officer, Pass, PassId } from './types';
 
 /**
@@ -134,12 +135,20 @@ function cityTravelDistance(a: City, b: City): number {
 /**
  * 攻破城池（耐久或守军清零）后的城市易主与守将处置：
  * - 破城方占领城池（获得技巧P、守军并入、耐久重置为满值 20%）。
+ * - **近战/兵器攻破时主力直接进城**（`options.mergeAttacker`）：兵粮金钱与随军武将整体并入，
+ *   部队本身消失（与「移动进驻」同口径，见 `mergeUnitIntoStronghold`）。
+ * - 火攻等远程手段破城时主力不在城下，只从攻方部队拨一支守备队进城（`min(1000, 兵力 20%)`），主力留在野外。
  * - 城内的敌方武将按捕获率独立判定，部分被俘（进入破城方归所城）；强运/名马不受俘。
  * - 其余守将逃跑：默认前往君主（原势力 leaderId）所在的本方城池；若君主所在城即被破，
  *   或君主已被俘/不在任何城，则退往离本城最近的本方城池，并按移动距离折抵转移旬数，
  *   未到达前为迁移中（transfer）状态。
  */
-export function captureCityOnCapture(state: GameState, attacker: ArmyUnit, cityId: CityId): void {
+export function captureCityOnCapture(
+  state: GameState,
+  attacker: ArmyUnit,
+  cityId: CityId,
+  options: { mergeAttacker?: boolean } = {},
+): void {
   const city = state.cities[cityId];
   if (!city) return;
   // 无主城（ownerId=null）同样可占领：仅跳过己方城
@@ -154,11 +163,19 @@ export function captureCityOnCapture(state: GameState, attacker: ArmyUnit, cityI
   city.gold = Math.floor(city.gold / 2);
   city.food = Math.floor(city.food / 2);
   city.governorId = null;
-  const garrison = Math.min(1000, Math.floor(attacker.troops * 0.2));
-  const transferTroops = Math.min(garrison, Math.max(0, attacker.troops - 1));
-  city.troops = transferTroops;
-  attacker.troops -= transferTroops;
   city.durability = Math.ceil(city.maxDurability * 0.2);
+  if (options.mergeAttacker) {
+    // 城破守军溃散，由入城主力接管（与「移动进驻」同口径：兵/粮/金 + 武将整体并入）
+    city.troops = 0;
+    mergeUnitIntoStronghold(state, attacker, city);
+    delete state.units[attacker.id];
+  } else {
+    // 远程手段破城（火攻等）：主力不在城下，只留一支守备队
+    const garrison = Math.min(1000, Math.floor(attacker.troops * 0.2));
+    const transferTroops = Math.min(garrison, Math.max(0, attacker.troops - 1));
+    city.troops = transferTroops;
+    attacker.troops -= transferTroops;
+  }
 
   // 无主城没有守将，跳过俘获/撤退结算
   if (!oldOwner) return;
@@ -210,9 +227,15 @@ export function captureCityOnCapture(state: GameState, attacker: ArmyUnit, cityI
 /**
  * 攻破关隘（耐久或守军清零）后的关隘易主与守将处置：
  * - 破关方占领关隘（获得技巧P、守军并入、耐久重置为满值 20%）。
+ * - **近战/兵器攻破时主力直接进关**（`options.mergeAttacker`）；火攻等远程手段破关时只拨守备队进关。
  * - 关隘内敌方武将按捕获率独立判定被俘（进入破关方归所城）；其余退往离本关隘最近的本方城池。
  */
-export function capturePassOnCapture(state: GameState, attacker: ArmyUnit, passId: PassId): void {
+export function capturePassOnCapture(
+  state: GameState,
+  attacker: ArmyUnit,
+  passId: PassId,
+  options: { mergeAttacker?: boolean } = {},
+): void {
   const pass = state.passes?.[passId];
   if (!pass) return;
   if (!attacker.forceId || pass.ownerId === attacker.forceId) return;
@@ -224,11 +247,18 @@ export function capturePassOnCapture(state: GameState, attacker: ArmyUnit, passI
   pass.gold = Math.floor(pass.gold / 2);
   pass.food = Math.floor(pass.food / 2);
   pass.governorId = null;
-  const garrison = Math.min(1000, Math.floor(attacker.troops * 0.2));
-  const transferTroops = Math.min(garrison, Math.max(0, attacker.troops - 1));
-  pass.troops = transferTroops;
-  attacker.troops -= transferTroops;
   pass.durability = Math.ceil(pass.maxDurability * 0.2);
+  if (options.mergeAttacker) {
+    // 关破守军溃散，由入关主力接管（与「移动进关」同口径）
+    pass.troops = 0;
+    mergeUnitIntoStronghold(state, attacker, pass);
+    delete state.units[attacker.id];
+  } else {
+    const garrison = Math.min(1000, Math.floor(attacker.troops * 0.2));
+    const transferTroops = Math.min(garrison, Math.max(0, attacker.troops - 1));
+    pass.troops = transferTroops;
+    attacker.troops -= transferTroops;
+  }
 
   if (!oldOwner) return;
 

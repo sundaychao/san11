@@ -101,8 +101,9 @@ export function attackableCities(state: GameState, attackerId: string, origin?: 
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
   const range = unitAttackRange(state, attackerAtOrigin);
   return Object.values(state.cities)
-    // 有守军的无主城仍可攻击（消灭守军后占领）；无守军无主城直接进驻即可，不列为攻击目标
-    .filter((city) => city.ownerId !== attacker.forceId && (city.ownerId !== null || city.troops > 0) && isCityInAttackRange(state, attackerAtOrigin, city))
+    // 非己方城池一律可攻击，无主无守军城同样可打（守军为 0，只有耐久会掉；耐久归零即攻破占领）。
+    // 想保住城内资源应改用「移动进驻」：兵不血刃、资源保留、耐久不减。
+    .filter((city) => city.ownerId !== attacker.forceId && isCityInAttackRange(state, attackerAtOrigin, city))
     .sort((a, b) => (
       Math.min(...sevenCellCityFootprint(cityCenter(a)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, range))) -
       Math.min(...sevenCellCityFootprint(cityCenter(b)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, range))) ||
@@ -121,8 +122,8 @@ export function attackablePasses(state: GameState, attackerId: string, origin?: 
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
   const range = unitAttackRange(state, attackerAtOrigin);
   return Object.values(state.passes ?? {})
-    // 有守军的无主关隘仍可攻击（消灭守军后占领）；无守军无主关隘直接进驻即可，不列为攻击目标
-    .filter((pass) => pass.ownerId !== attacker.forceId && (pass.ownerId !== null || pass.troops > 0) && isPassInAttackRange(state, attackerAtOrigin, pass))
+    // 同城池：非己方关隘一律可攻击，无主无守军关隘也可打（耐久归零即攻破占领）
+    .filter((pass) => pass.ownerId !== attacker.forceId && isPassInAttackRange(state, attackerAtOrigin, pass))
     .sort((a, b) => (
       gridDistanceWithin(attackerAtOrigin, { q: a.q, r: a.r }, range) - gridDistanceWithin(attackerAtOrigin, { q: b.q, r: b.r }, range) ||
       a.id.localeCompare(b.id)

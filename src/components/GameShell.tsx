@@ -10,6 +10,8 @@ import { chooseDelegateSpawnCell } from '../game/battle/deployment';
 import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { canBuildPlotAtCoord, hasEnemyUnitsNear, isPlotOccupiedByOtherCity, PLOT_GOLD_COST, PLOT_LABELS, startBuildCityPlot, type PlotType } from '../game/innerAffairs';
 import { cityCenter, ownCityAt, unoccupiedCityAt } from '../game/battle/movementRules';
+import { ownPassAt, passAt, passBlockedKeys, unoccupiedPassAt } from '../game/passes';
+import { allPassAnchorKeys } from '../game/battle/movementRules';
 import { useGame } from '../game/store/GameProvider';
 import { territoryForceAt } from '../game/territory';
 import type { MapCamera } from '../game/saveSlots';
@@ -84,7 +86,7 @@ type DeployDelegateMenuState = {
 };
 
 export function GameShell() {
-  const { attackCity, attackFacility, attackPlot, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, deployUnitDelegate, dismantleFacility, duelUnit, endTenDay, executeDelegatedUnits, clearPendingCamera, issueCommand, moveUnit, online, pendingCamera, repairFacility, setBuildDelegate, setMoveDelegate, setRepairDelegate, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
+  const { attackCity, attackFacility, attackPass, attackPlot, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, deployUnitDelegate, dismantleFacility, duelUnit, endTenDay, executeDelegatedUnits, clearPendingCamera, issueCommand, moveUnit, online, pendingCamera, repairFacility, setBuildDelegate, setMoveDelegate, setRepairDelegate, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
   const { emit: emitAudioEvent } = useAudioEventAdapter();
   /** 储存 / 载入对话框：null 表示关闭 */
   const [saveDialogMode, setSaveDialogMode] = useState<SaveLoadDialogMode | null>(null);
@@ -102,8 +104,8 @@ export function GameShell() {
   const [cultivatePickerOpen, setCultivatePickerOpen] = useState(false);
   const [positionPanelOpen, setPositionPanelOpen] = useState(false);
   const [positionPanelLockForceId, setPositionPanelLockForceId] = useState<ForceId | undefined>(undefined);
-  const [deployCityId, setDeployCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
-  const [transportCityId, setTransportCityId] = useState<NonNullable<typeof selectedCityId> | null>(null);
+  const [deployCityId, setDeployCityId] = useState<CityId | PassId | null>(null);
+  const [transportCityId, setTransportCityId] = useState<CityId | PassId | null>(null);
   const [pendingDeploy, setPendingDeploy] = useState<DeployConfirmInput | null>(null);
   const [pendingTransport, setPendingTransport] = useState<TransportConfirmInput | null>(null);
   const [pendingDeployCommand, setPendingDeployCommand] = useState<{ input: DeployConfirmInput; destination: GridCoord } | null>(null);
@@ -175,9 +177,9 @@ export function GameShell() {
     | { kind: 'facility'; facilityId: string; label: string; position: { x: number; y: number } }
     | null
   >(null);
-  /** 回城确认弹窗（部队点击本方城池后弹出） */
+  /** 回城/进驻确认弹窗（部队点击本方城池 → 回城；点击无守军无主城池/关隘 → 进驻占领） */
   const [returnCityConfirm, setReturnCityConfirm] = useState<
-    | { unitId: string; coord: GridCoord; label: string; position: { x: number; y: number } }
+    | { unitId: string; coord: GridCoord; label: string; position: { x: number; y: number }; occupying?: boolean }
     | null
   >(null);
   /** 委任修补确认弹窗（移动模式下点击未完成的己方设施后弹出） */
@@ -308,8 +310,8 @@ export function GameShell() {
     setPlotContextMenu(null);
   }, []);
 
-  const openDeployDialog = useCallback((cityId: NonNullable<typeof selectedCityId>) => {
-    setDeployCityId(cityId);
+  const openDeployDialog = useCallback((strongholdId: CityId | PassId) => {
+    setDeployCityId(strongholdId);
     setTransportCityId(null);
     setPendingDeploy(null);
     setPendingTransport(null);
@@ -334,8 +336,8 @@ export function GameShell() {
     setPlotContextMenu(null);
   }, []);
 
-  const openTransportDialog = useCallback((cityId: NonNullable<typeof selectedCityId>) => {
-    setTransportCityId(cityId);
+  const openTransportDialog = useCallback((strongholdId: CityId | PassId) => {
+    setTransportCityId(strongholdId);
     setDeployCityId(null);
     setPendingDeploy(null);
     setPendingTransport(null);
@@ -364,18 +366,20 @@ export function GameShell() {
   const deployTargets = useMemo(() => {
     if (!state || !pendingTransport) return [];
     if (targetingFacility || targetingFirePlot || targetingRepair) return [];
-    return getDeploymentTargets(state, { cityId: pendingTransport.cityId, kind: 'transport' });
+    return getDeploymentTargets(state, { cityId: pendingTransport.cityId, passId: pendingTransport.passId, kind: 'transport' });
   }, [pendingTransport, state, targetingFacility, targetingFirePlot, targetingRepair]);
   const isPendingDeployCommandMenu = unitCommandMenu?.unitId === PENDING_DEPLOY_UNIT_ID;
-  // 出征落位前：在城中心创建临时部队，展示与移动范围都复用普通部队的渲染与 movementCells。
+  // 出征落位前：在据点中心创建临时部队，展示与移动范围都复用普通部队的渲染与 movementCells。
   const placingDeployPreview = useMemo(() => {
     if (!state || !pendingDeploy) return null;
-    const city = state.cities[pendingDeploy.cityId];
-    if (!city) return null;
+    const deployPass = pendingDeploy.passId ? state.passes?.[pendingDeploy.passId] : undefined;
+    const deployCity = deployPass ? undefined : pendingDeploy.cityId ? state.cities[pendingDeploy.cityId] : undefined;
+    if (!deployPass && !deployCity) return null;
+    const origin = deployPass ? { q: deployPass.q, r: deployPass.r } : cityCenter(deployCity!);
     try {
       const preview = deployUnitPreviewWithId(state, state.playerForceId, {
         ...pendingDeploy,
-        destination: cityCenter(city),
+        destination: origin,
       });
       const previewUnit = preview.state.units[preview.unitId];
       if (!previewUnit) return null;
@@ -397,12 +401,13 @@ export function GameShell() {
     if (targetingAttack || targetingTactic || targetingFirePlot || targetingUnitStrategy || targetingFacility || targetingRepair) return [];
     const cells = getMovementTargets(moveControlState, moveControlUnitId);
     if (!placingDeployPreview) return cells;
-    // 出征落位：排除所有城池 footprint（普通移动可进入本方城格，但出征落点不能是城格）
+    // 出征落位：排除所有城池 footprint 与关隘锚点/翼格（普通移动可进入本方城格，但出征落点不能是据点格）
     const cityKeys = new Set<string>();
     for (const city of Object.values(moveControlState.cities)) {
       for (const coord of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) cityKeys.add(gridKey(coord));
     }
-    return cells.filter((coord) => !cityKeys.has(gridKey(coord)));
+    const excluded = new Set([...cityKeys, ...allPassAnchorKeys(moveControlState), ...passBlockedKeys(moveControlState)]);
+    return cells.filter((coord) => !excluded.has(gridKey(coord)));
   }, [moveControlState, moveControlUnitId, placingDeployPreview, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingTactic, targetingUnitStrategy]);
   const pendingDeployPreview = useMemo(() => {
     if (!state || !pendingDeployCommand || !isPendingDeployCommandMenu) return null;
@@ -540,6 +545,7 @@ export function GameShell() {
     // 否则退化为 preferredSpawnCell 固定取第一个部署格，部队会停在城边不动）。
     const deployCells = getDeploymentTargets(state, {
       cityId: pendingDeploy.cityId,
+      passId: pendingDeploy.passId,
       troopType: pendingDeploy.troopType,
       officerIds: pendingDeploy.officerIds,
     });
@@ -653,6 +659,14 @@ export function GameShell() {
     setUnitIntelMenu(null);
   }, [emitAudioEvent, unitIntelMenu]);
 
+  const openPassInfoMenu = useCallback((passId: PassId, position: { x: number; y: number }) => {
+    emitAudioEvent({ type: 'menu-click-on' });
+    setMapContextMenu(null);
+    setShowMapIntelOptions(false);
+    setPassMenu(null);
+    setPassInfoMenu({ passId, position });
+  }, [emitAudioEvent]);
+
   const selectMoveTarget = useCallback((coord: GridCoord, position: { x: number; y: number }) => {
     if (!canOperateCurrentTurn) return;
     if (!selectedUnitId) return;
@@ -678,11 +692,25 @@ export function GameShell() {
         setPendingDeployAction(null);
         return;
       }
-      // 目标为本方城池格 → 弹出「是/否」回城确认框；无守军无主城 → 弹出「进入/占领」确认框
+      // 目标为本方城池格 → 弹出「是/否」回城确认框；无守军无主城 → 弹出「进入/进驻」确认框
       if (state) {
-        const city = ownCityAt(state, state.playerForceId, coord) ?? unoccupiedCityAt(state, coord);
+        const ownCity = ownCityAt(state, state.playerForceId, coord);
+        const freeCity = ownCity ? undefined : unoccupiedCityAt(state, coord);
+        const city = ownCity ?? freeCity;
         if (city) {
-          setReturnCityConfirm({ unitId: selectedUnitId, coord, label: city.name, position });
+          setReturnCityConfirm({
+            unitId: selectedUnitId, coord, label: city.name, position, occupying: Boolean(freeCity),
+          });
+          return;
+        }
+        // 目标为本方关隘 / 无守军无主关隘 → 与进城一致，弹出进入确认框
+        const ownPass = ownPassAt(state, state.playerForceId, coord);
+        const freePass = ownPass ? undefined : unoccupiedPassAt(state, coord);
+        const pass = ownPass ?? freePass;
+        if (pass) {
+          setReturnCityConfirm({
+            unitId: selectedUnitId, coord, label: pass.name, position, occupying: Boolean(freePass),
+          });
           return;
         }
       }
@@ -695,6 +723,7 @@ export function GameShell() {
       // 避免固定第一个部署格导致先反向绕路）；预演与实际部署使用同一 destination。
       const deployCells = getDeploymentTargets(state!, {
         cityId: pendingDeploy!.cityId,
+        passId: pendingDeploy!.passId,
         troopType: pendingDeploy!.troopType,
         officerIds: pendingDeploy!.officerIds,
       });
@@ -711,13 +740,20 @@ export function GameShell() {
       return;
     }
     const unit = state?.units[selectedUnitId];
-    if (!unit || unit.acted || unit.moved || unitIsIncapacitated(unit)) return;
-    const path = computeDelegatePath(state!, selectedUnitId, coord);
-    if (!path || path.length <= 1) return;
+    // 部队无法再行动（已行动/已移动/混乱）时算不出委任路径，同样走下面的关隘兜底
+    const canDelegate = Boolean(unit) && !unit!.acted && !unit!.moved && !unitIsIncapacitated(unit!);
+    const path = canDelegate ? computeDelegatePath(state!, selectedUnitId, coord) : null;
+    if (!path || path.length <= 1) {
+      // 走不到这个格子：若它正好是关隘锚点，至少把关隘情报弹出来。
+      // 否则「选中部队 → 点敌方/远处的关隘」会完全没反应，玩家会以为关隘不可点。
+      const unreachablePass = state ? passAt(state, coord) : undefined;
+      if (unreachablePass) openPassInfoMenu(unreachablePass.id, position);
+      return;
+    }
     setDelegatePath(path);
     setDelegateMenu({ unitId: selectedUnitId, target: coord, position });
     setDelegateFacilityMenu(null);
-  }, [canOperateCurrentTurn, moveTargets, pendingDeploy, placingDeployPreview, selectedUnitId, state]);
+  }, [canOperateCurrentTurn, moveTargets, openPassInfoMenu, pendingDeploy, placingDeployPreview, selectedUnitId, state]);
 
   const beginPendingDeployAction = useCallback(() => {
     if (!pendingDeployCommand || !pendingDeployPreview) return null;
@@ -1111,6 +1147,27 @@ export function GameShell() {
     setUnitTacticMenu(null);
     setUnitStrategyMenu(null);
   }, [attackCity, attackTargetCityIds, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, targetingAttack]);
+
+  /** 关隘与城池同构：攻击目标阶段点关隘即确认攻击（此前漏接回调，导致点关隘攻击无反应） */
+  const selectAttackPassTarget = useCallback((passId: PassId) => {
+    if (!canOperateCurrentTurn) return;
+    if (!targetingAttack || !attackTargetPassIds.includes(passId)) return;
+    if (pendingDeployAction?.unitId === targetingAttack.unitId) {
+      finishPendingDeployAction({ type: 'attackPass', passId });
+    } else {
+      attackPass(targetingAttack.unitId, passId, targetingAttack.origin);
+    }
+    setTargetingAttack(null);
+    setTargetingTactic(null);
+    setTargetingFirePlot(null);
+    setTargetingUnitStrategy(null);
+    setTargetingFacility(null);
+    setTargetingRepair(null);
+    setSelectedUnitId(null);
+    setUnitCommandMenu(null);
+    setUnitTacticMenu(null);
+    setUnitStrategyMenu(null);
+  }, [attackPass, attackTargetPassIds, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, targetingAttack]);
 
   const openFacilityContextMenu = useCallback((facilityId: string, position: { x: number; y: number }) => {
     if (!state || !canOperateCurrentTurn) return;
@@ -1514,14 +1571,6 @@ export function GameShell() {
     event.stopPropagation();
     emitAudioEvent({ type: 'menu-right-click' });
     setCityInfoMenu(null);
-  }, [emitAudioEvent]);
-
-  const openPassInfoMenu = useCallback((passId: PassId, position: { x: number; y: number }) => {
-    emitAudioEvent({ type: 'menu-click-on' });
-    setMapContextMenu(null);
-    setShowMapIntelOptions(false);
-    setPassMenu(null);
-    setPassInfoMenu({ passId, position });
   }, [emitAudioEvent]);
 
   const closePassInfoFromRightClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
@@ -1932,6 +1981,7 @@ export function GameShell() {
         onCityLeave={() => setHoveredCity(null)}
         onAttackTargetSelect={selectAttackTarget}
         onAttackCityTargetSelect={selectAttackCityTarget}
+        onAttackPassTargetSelect={selectAttackPassTarget}
         onFacilityTargetSelect={selectFacilityTarget}
         onFacilityContextMenu={openFacilityContextMenu}
         onFacilityRepairPrompt={promptRepairConfirm}
@@ -2252,7 +2302,7 @@ export function GameShell() {
             className="city-command-menu tool-panel"
             data-testid="return-city-confirm-menu"
             style={style}
-            aria-label="回城确认"
+            aria-label={returnCityConfirm.occupying ? '进驻确认' : '回城确认'}
             onContextMenu={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -2261,7 +2311,9 @@ export function GameShell() {
             }}
           >
             <div className="city-command-secondary">
-              <div className="city-command-menu-title">是否进入{returnCityConfirm.label}？</div>
+              <div className="city-command-menu-title">
+                {returnCityConfirm.occupying ? '是否进驻' : '是否进入'}{returnCityConfirm.label}？
+              </div>
               <button type="button" data-testid="return-city-confirm-yes" onClick={confirmReturnCity}>是</button>
               <button type="button" data-testid="return-city-confirm-no" onClick={dismissReturnCityConfirm}>否</button>
             </div>
@@ -2596,20 +2648,32 @@ export function GameShell() {
       {cultivatePickerOpen && activeHostCityId && (
         <CultivatePickerDialog onSelect={(category) => launchCultivate(category, activeCommandPassId)} onClose={closeCultivatePicker} />
       )}
-      {deployCityId && (
+      {deployCityId && (state?.passes?.[deployCityId as PassId] ? (
         <DeployDialog
-          cityId={deployCityId}
+          passId={deployCityId as PassId}
           onConfirm={confirmDeploySetup}
           onClose={closeDeployDialog}
         />
-      )}
-      {transportCityId && (
+      ) : (
+        <DeployDialog
+          cityId={deployCityId as CityId}
+          onConfirm={confirmDeploySetup}
+          onClose={closeDeployDialog}
+        />
+      ))}
+      {transportCityId && (state?.passes?.[transportCityId as PassId] ? (
         <TransportDialog
-          cityId={transportCityId}
+          passId={transportCityId as PassId}
           onConfirm={confirmTransportSetup}
           onClose={closeTransportDialog}
         />
-      )}
+      ) : (
+        <TransportDialog
+          cityId={transportCityId as CityId}
+          onConfirm={confirmTransportSetup}
+          onClose={closeTransportDialog}
+        />
+      ))}
       {saveDialogMode && (
         <SaveLoadDialog
           mode={saveDialogMode}

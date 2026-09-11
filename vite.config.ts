@@ -22,6 +22,8 @@ export default defineConfig({
   test: {
     // vmThreads: threads/forks 池在 Node 24 + Vitest 4.1 下 worker 全局状态
     // （__vitest_worker__）注入失败，导致所有 vi API 报 "failed to find the runner"。
+    // 注意：Vitest 4 的 projects 不会继承顶层 test.pool / testTimeout，必须同时在每个 project 内声明。
+    // 漏配 testTimeout 会让 project 回退到默认 5000ms，满载并发时重 UI 用例随机超时。
     pool: 'vmThreads',
     testTimeout: 30000,
     // 客户端与服务端测试需要不同的运行环境：
@@ -37,6 +39,9 @@ export default defineConfig({
           environment: 'jsdom',
           setupFiles: './src/test/setup.ts',
           css: true,
+          pool: 'vmThreads',
+          testTimeout: 30000,
+          hookTimeout: 30000,
         },
       },
       {
@@ -44,6 +49,9 @@ export default defineConfig({
           name: 'server',
           include: ['server/**/*.test.ts'],
           environment: 'node',
+          pool: 'vmThreads',
+          testTimeout: 30000,
+          hookTimeout: 30000,
         },
       },
     ],

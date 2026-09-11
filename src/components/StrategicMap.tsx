@@ -824,7 +824,7 @@ export function StrategicMap({
       onCityMenu?.(cityId, position);
     }
   };
-  /** 点击关隘中心锚点：攻击目标优先，否则打开关隘命令菜单（无都市段；仅归属方可见菜单） */
+  /** 点击关隘中心锚点：攻击目标优先，其次本方关隘命令菜单，最后非己方关隘弹情报 */
   const selectPassFromMap = (passId: PassId, position: { x: number; y: number }) => {
     const pass = state.passes?.[passId];
     if (!pass) return;
@@ -835,7 +835,11 @@ export function StrategicMap({
     }
     if (pass.ownerId === state.playerForceId) {
       onPassMenu?.(passId, position);
+      return;
     }
+    // 非己方关隘：弹出关隘情报。城池点击会选中并显示城池面板，关隘没有对应的「选中」态，
+    // 若不在这里给反馈，点敌方/无主关隘就完全没反应（玩家会以为关隘不可点）。
+    onPassInfoMenu?.(passId, position);
   };
   const renderUnitMarker = (unit: ArmyUnit, preview = false) => {
     const position = displayCellPosition(unit.q, unit.r);
@@ -1301,20 +1305,70 @@ export function StrategicMap({
               );
             }).filter((x): x is NonNullable<typeof x> => x !== null)
           )}
-          {/* 关隘单格色块：与城池 footprint 同色（无主=中性灰），使空关隘与空城池观感一致 */}
+          {/* 关隘单格色块：与城池 footprint 同色（无主=中性灰），使空关隘与空城池观感一致。
+              必须与城池 footprint 一样可点击（className 自带 pointer-events:auto）：
+              关隘标记是 pointer-events:none 的装饰层，锚点格又会被 moveMode 分支提前吞掉，
+              所以这里就是关隘唯一的命中区域，少了它点击关隘会完全没反应。 */}
           {!editorMode && gridWidth === 200 && gridHeight === 200 && Object.values(state.passes ?? {}).map((pass) => {
             const force = pass.ownerId ? state.forces[pass.ownerId] : undefined;
             const position = displayCellPosition(pass.q, pass.r);
+            const anchorKey = `${pass.q},${pass.r}`;
+            const isAttackTarget = attackTargetPassIdSet.has(pass.id);
             return (
               <rect
                 key={`pass-footprint-${pass.id}`}
                 data-testid={`pass-footprint-${pass.id}`}
+                data-pass-id={pass.id}
                 x={position.x + 2}
                 y={position.y + 2}
                 width={CELL_SIZE - 4}
                 height={CELL_SIZE - 4}
-                className={`city-footprint-cell${force ? '' : ' is-neutral'}`}
-                style={{ '--force-color': force?.color ?? NEUTRAL_CITY_COLOR, pointerEvents: 'none' } as CSSProperties}
+                className={`city-footprint-cell${force ? '' : ' is-neutral'}${isAttackTarget ? ' is-attack-target' : ''}`}
+                style={{ '--force-color': force?.color ?? NEUTRAL_CITY_COLOR } as CSSProperties}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.stopPropagation();
+                  // 火计目标优先（否则覆盖层吞掉对关隘格放火计的点击）
+                  if (firePlotTargetKeys.has(anchorKey)) {
+                    onFirePlotTargetSelect?.({ q: pass.q, r: pass.r });
+                    return;
+                  }
+                  // 选中部队后进入攻击目标选择：点关隘即确认攻击
+                  if (isAttackTarget) {
+                    onAttackPassTargetSelect?.(pass.id);
+                    return;
+                  }
+                  // 选中部队时点击可达的锚点格 → 回关/进驻
+                  if (selectedUnitId && moveTargetKeys.has(anchorKey)) {
+                    onMoveTargetSelect?.({ q: pass.q, r: pass.r }, { x: event.clientX + 12, y: event.clientY + 4 });
+                    return;
+                  }
+                  // 选中部队时点击可达范围外的关隘 → 超距移动委任（与城池 footprint 一致）
+                  if (selectedUnitId && moveMode) {
+                    onMoveTargetSelect?.({ q: pass.q, r: pass.r }, { x: event.clientX + 12, y: event.clientY + 4 });
+                    return;
+                  }
+                  // 出征部署中点击关隘格 → 超距出征委任
+                  if (deployDelegateMode) {
+                    onDeployTargetSelect?.({ q: pass.q, r: pass.r }, { x: event.clientX + 12, y: event.clientY + 4 });
+                    return;
+                  }
+                  selectPassFromMap(pass.id, { x: event.clientX + 12, y: event.clientY });
+                }}
+                onContextMenu={(event) => {
+                  dismissPassHover();
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onPassInfoMenu?.(pass.id, { x: event.clientX + 12, y: event.clientY });
+                }}
+                onPointerEnter={(event) => {
+                  setHoveredPassId(pass.id);
+                  onPassHover?.(pass.id, { x: event.clientX + 57, y: event.clientY + 47 });
+                }}
+                onPointerLeave={() => {
+                  setHoveredPassId(null);
+                  onPassLeave?.();
+                }}
               />
             );
           })}
@@ -1578,6 +1632,7 @@ export function StrategicMap({
             const force = pass.ownerId ? state.forces[pass.ownerId] : undefined;
             const isAttackTarget = attackTargetPassIdSet.has(pass.id);
             const markerPosition = displayCellCenterPercent(pass.q, pass.r);
+            const passEffect = cityEffectReports.find((report) => report.passId === pass.id);
             return (
               <button
                 key={pass.id}
@@ -1597,6 +1652,12 @@ export function StrategicMap({
                   onPassInfoMenu?.(pass.id, { x: event.clientX + 12, y: event.clientY });
                 }}
                 onClick={(event) => {
+                  // 选中部队时点关隘：锚点格可达则优先回关/进驻（与城池标记一致）。
+                  // 敌方关隘锚点不在 moveTargets 内，仍走 selectPassFromMap。
+                  if (selectedUnitId && moveTargetKeys.has(`${pass.q},${pass.r}`)) {
+                    onMoveTargetSelect?.({ q: pass.q, r: pass.r }, { x: event.clientX + 12, y: event.clientY + 4 });
+                    return;
+                  }
                   selectPassFromMap(pass.id, { x: event.clientX + 12, y: event.clientY });
                 }}
                 onPointerEnter={(event) => {
@@ -1616,6 +1677,11 @@ export function StrategicMap({
                   onPassLeave?.();
                 }}
               >
+                {passEffect && (
+                  <span className={`city-effect-number is-${passEffect.kind}`} data-testid="pass-effect-number">
+                    {passEffect.label} +{passEffect.amount.toLocaleString('en-US')}
+                  </span>
+                )}
                 <span className="city-marker-copy">
                   {isAttackTarget && <span className="city-attack-target-arrow" data-testid="attack-pass-target-arrow">▼</span>}
                   <strong>{pass.name}</strong>
@@ -1633,7 +1699,7 @@ export function StrategicMap({
             const selected = selectedCityId === city.id;
             const isAttackTarget = attackTargetCityIdSet.has(city.id);
             const markerPosition = displayCellCenterPercent(city.gridQ, city.gridR);
-            const cityEffect = cityEffectReports.find((report) => report.cityId === city.id);
+            const cityEffect = cityEffectReports.find((report) => report.cityId === city.id && !report.passId);
             return (
               <button
                 key={city.id}

@@ -14,6 +14,7 @@ import {
   citySizeOf,
 } from '../game/innerAffairs';
 import { CITY_TRAIT_LABELS, CITY_TRAIT_DESCRIPTIONS, hasCityTrait, type CityTrait } from '../game/cityTraits';
+import { ARMAMENT_LABELS, ARMAMENT_TYPES, CITY_ARMAMENT_CAPS, armamentsOf } from '../game/armaments';
 import type { CityId } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -51,6 +52,7 @@ export function CityInfoDialog({ cityId, onClose }: CityInfoDialogProps) {
 
   const troopCap = cityTroopCap(city);
   const citySize = citySizeOf(city);
+  const armaments = armamentsOf(city.armaments);
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
@@ -83,6 +85,19 @@ export function CityInfoDialog({ cityId, onClose }: CityInfoDialogProps) {
               <div><dt>资金</dt><dd>{formatNumber(city.gold)} / {formatNumber(CITY_GOLD_CAP)}</dd></div>
               <div><dt>兵粮</dt><dd>{formatNumber(city.food)} / {formatNumber(CITY_FOOD_CAP)}</dd></div>
               <div><dt>兵力</dt><dd>{formatNumber(city.troops)} / {formatNumber(troopCap)}</dd></div>
+            </dl>
+          </section>
+
+          {/* 兵装（含容纳上限） */}
+          <section aria-label="兵装">
+            <h3>兵装</h3>
+            <dl className="city-info-dialog-grid city-info-dialog-grid-cols-3">
+              {ARMAMENT_TYPES.map((type) => (
+                <div key={type}>
+                  <dt>{ARMAMENT_LABELS[type]}</dt>
+                  <dd>{formatNumber(armaments[type])} / {formatNumber(CITY_ARMAMENT_CAPS[type])}</dd>
+                </div>
+              ))}
             </dl>
           </section>
 

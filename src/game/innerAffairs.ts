@@ -150,9 +150,9 @@ export const PLOT_COUNT_BY_SIZE: Record<CitySize, number> = {
 };
 
 /** 城池金币容纳上限 */
-export const CITY_GOLD_CAP = 200_000;
+export const CITY_GOLD_CAP = 100_000;
 /** 城池兵粮容纳上限 */
-export const CITY_FOOD_CAP = 2_000_000;
+export const CITY_FOOD_CAP = 1_000_000;
 /** 城池兵力容纳上限（按规模：小城8万、中城10万、大城15万） */
 export const CITY_TROOP_CAP_BY_SIZE: Record<CitySize, number> = {
   small: 80_000,
