@@ -20,6 +20,8 @@
   .wrap{max-width:1180px;margin:0 auto}
   h1{font-size:19px;font-weight:600;margin:0 0 4px}
   .sub{color:var(--tx2);font-size:13px;margin-bottom:18px}
+  .sub code{background:#101216;border:1px solid var(--line);border-radius:5px;padding:1px 5px;
+    font-family:"Cascadia Code",Consolas,monospace;font-size:11.5px;color:#9fb4d0}
   .presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
   .presets button{
     background:var(--panel2);color:var(--tx2);border:1px solid var(--line);
@@ -57,12 +59,14 @@
   .row{display:grid;grid-template-columns:96px 1fr 62px;gap:10px;align-items:center;margin-bottom:11px}
   .row label{color:var(--tx2);font-size:12.5px}
   .row .val{text-align:right;font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--acc)}
+  .row.wide{grid-template-columns:96px 1fr}
   input[type=range]{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;
     background:var(--panel2);outline:none;width:100%}
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
     border-radius:50%;background:var(--acc);cursor:pointer;border:0}
   input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--acc);
     cursor:pointer;border:0}
+  input[type=range]:disabled::-webkit-slider-thumb{background:var(--tx3)}
   select,input[type=number]{
     width:100%;background:var(--panel2);color:var(--tx);border:1px solid var(--line);
     border-radius:7px;padding:6px 9px;font-size:12.5px;font-family:inherit;outline:none;
@@ -72,18 +76,26 @@
   .chk{display:flex;align-items:center;gap:8px;color:var(--tx2);font-size:12.5px;
     padding:6px 0;cursor:pointer;user-select:none}
   .chk input{accent-color:var(--acc);width:15px;height:15px;cursor:pointer}
+  .chk input:disabled{cursor:not-allowed}
+  .chk.off{opacity:.42;cursor:not-allowed}
   .chks{display:grid;grid-template-columns:1fr 1fr;gap:2px 14px;margin-top:2px}
+  .sec{color:var(--tx3);font-size:11.5px;letter-spacing:.04em;margin:14px 0 8px;
+    padding-top:12px;border-top:1px solid var(--line)}
 
   .out{margin-top:16px}
   .out .card{background:linear-gradient(180deg,var(--panel) 0%,#1a1d24 100%)}
   .steps{width:100%;border-collapse:collapse;font-size:12.5px}
   .steps td{padding:7px 4px;border-bottom:1px solid var(--line);vertical-align:top}
   .steps tr:last-child td{border-bottom:0}
-  .steps td.k{color:var(--tx2);width:44%}
+  .steps td.k{color:var(--tx2);width:42%}
   .steps td.v{text-align:right;font-variant-numeric:tabular-nums;color:var(--tx);white-space:nowrap}
   .steps td.f{color:var(--tx3);font-size:11.5px;font-variant-numeric:tabular-nums}
   .steps tr.hl td{background:rgba(106,169,255,.07)}
   .steps tr.hl td.k{color:var(--acc)}
+  .steps tr.total td{background:rgba(93,201,160,.08)}
+  .steps tr.total td.k{color:var(--ok)}
+  .steps tr.zero td.v{color:var(--red)}
+  .steps tr.zero td.k{color:var(--red)}
   .steps tr.sub td{color:var(--tx3);font-size:11.5px;padding-top:2px;padding-bottom:7px}
   .final{
     margin-top:16px;background:var(--panel);border:1px solid var(--line2);border-radius:12px;
@@ -107,20 +119,23 @@
   .badge.crit{background:rgba(240,168,72,.16);color:var(--warn)}
   .badge.shield{background:rgba(93,201,160,.16);color:var(--ok)}
   .note{color:var(--tx3);font-size:11.5px;margin-top:10px;line-height:1.65}
+  .note b{color:var(--acc);font-weight:500}
+  .note.warn b{color:var(--warn)}
   .hidden{display:none}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>战斗伤害模拟器</h1>
-  <div class="sub">复刻当前版本 <code>legacyCore.ts → damageForRoll()</code> 与 <code>combat.ts</code> 的结算顺序。拖动参数即时查看每一步的数值变化。</div>
+  <div class="sub">对齐当前版本 <code>legacyCore.ts → damageForRoll()</code>、<code>combat.ts</code> 与 <code>skills/rules/combat.ts</code> 的结算顺序。拖动参数即时查看每一步数值变化。</div>
 
   <div class="presets">
-    <button data-preset="cavalry">骑兵冲阵（暴击+科技4）</button>
-    <button data-preset="crossbow">弩兵远程齐射</button>
+    <button data-preset="cavalry">骑兵突击（马镫+暴击）</button>
+    <button data-preset="crossbow">弩兵乱射（适性A·距离2）</button>
     <button data-preset="forest">森林据守（地形减伤）</button>
-    <button data-preset="weak">弱将打强将（统率差）</button>
+    <button data-preset="weak">弱将打强将（统率差+阵）</button>
     <button data-preset="remnant">残兵部队（40 兵）</button>
+    <button data-preset="joint">三队齐攻（铁壁对照）</button>
   </div>
 
   <div class="tabs" id="tabs">
@@ -137,32 +152,38 @@
       <div class="row"><label>统率</label><input type="range" id="aLead" min="1" max="100" step="1" value="80"><span class="val" id="aLeadV"></span></div>
       <div class="row"><label>武力</label><input type="range" id="aWar" min="1" max="100" step="1" value="80"><span class="val" id="aWarV"></span></div>
       <div class="row"><label>兵种</label><select id="aTroopType">
-        <option value="sword">刀兵（无科技加成）</option>
+        <option value="sword">剑兵（无适性）</option>
         <option value="spear">枪兵</option>
         <option value="halberd">戟兵</option>
         <option value="crossbow">弩兵</option>
         <option value="cavalry" selected>骑兵</option>
-        <option value="siege">攻城兵器（无科技加成）</option>
+        <option value="siege">兵器（无适性）</option>
       </select><span></span></div>
-      <div class="row"><label>兵科科技</label><input type="range" id="aTech" min="0" max="4" step="1" value="0"><span class="val" id="aTechV"></span></div>
       <div class="row"><label>所在地形</label><select id="aTerrain"></select><span></span></div>
       <div class="row"><label>战线数</label><input type="range" id="aFront" min="1" max="5" step="1" value="1"><span class="val" id="aFrontV"></span></div>
       <div class="chks">
+        <label class="chk" id="wuqiWrap"><input type="checkbox" id="wuqi"> 武器精造（攻+10）</label>
+        <label class="chk" id="aFangjuWrap"><input type="checkbox" id="aFangju"> 防具精造（防+10）</label>
         <label class="chk"><input type="checkbox" id="aShip"> 在船上</label>
         <label class="chk"><input type="checkbox" id="aAura"> 在统率光环内</label>
-        <label class="chk"><input type="checkbox" id="aDrum"> 3格内有太鼓台</label>
-        <label class="chk"><input type="checkbox" id="aCrit"> 本次暴击</label>
+        <label class="chk"><input type="checkbox" id="aDrum"> 3格内有鼓楼</label>
       </div>
-      <div class="note">科技加成仅对枪/戟/弩/骑生效：1级+10%，4级再+10%。战线宽度由「所在地形」决定。
-      <br><b style="color:var(--acc);font-weight:500">残兵衰减：</b>投入兵力低于 1000 时，240 固定基数与 120 伤害地板按 投入兵力÷1000 等比缩小，避免残兵部队打出远超自身兵力的伤害。
-      <br><b style="color:var(--acc);font-weight:500">计略门槛：</b>兵力低于 500 不能释放计略，但普攻、战法、攻城不受影响（本模拟器只算单次攻击伤害）。</div>
+      <div class="note"><b>武器精造</b>（水军为「装甲」）给枪/戟/弩/骑 +10 攻击，<b>折算进武力</b>，不是倍率。
+      <br><b>适性不参与普攻</b>——剑兵与兵器也没有适性。</div>
     </div>
 
     <div class="card def">
       <h2>防守方</h2>
-      <div class="row"><label>兵力</label><input type="range" id="dTroops" min="500" max="20000" step="500" value="8000"><span class="val" id="dTroopsV"></span></div>
+      <div class="row"><label>兵力</label><input type="range" id="dTroops" min="10" max="20000" step="10" value="8000"><span class="val" id="dTroopsV"></span></div>
       <div class="row"><label>统率</label><input type="range" id="dLead" min="1" max="100" step="1" value="80"><span class="val" id="dLeadV"></span></div>
+      <div class="row"><label>武力</label><input type="range" id="dWar" min="1" max="100" step="1" value="80"><span class="val" id="dWarV"></span></div>
       <div class="row"><label>所在地形</label><select id="dTerrain"></select><span></span></div>
+      <div class="row"><label>据点防护</label><select id="dFort">
+        <option value="none">无</option>
+        <option value="formation">阵（1格内 ×0.9）</option>
+        <option value="fort">砦（2格内 ×0.8）</option>
+        <option value="fortress">城塞（3格内 ×0.7）</option>
+      </select><span></span></div>
       <div class="row"><label>免伤概率</label><input type="range" id="dShield" min="0" max="60" step="5" value="0"><span class="val" id="dShieldV"></span></div>
       <div class="row"><label>免伤判定值</label><input type="range" id="dShieldRoll" min="0" max="100" step="1" value="50"><span class="val" id="dShieldRollV"></span></div>
       <div class="row"><label>藤甲倍率</label><select id="dTengjia">
@@ -171,11 +192,14 @@
         <option value="0.5">藤甲（强）×0.5</option>
       </select><span></span></div>
       <div class="chks">
+        <label class="chk" id="dWuqiWrap"><input type="checkbox" id="dWuqi"> 武器精造（攻+10）</label>
+        <label class="chk" id="dFangjuWrap"><input type="checkbox" id="dFangju"> 防具精造（防+10）</label>
         <label class="chk"><input type="checkbox" id="dShip"> 在船上</label>
         <label class="chk"><input type="checkbox" id="dAura"> 在统率光环内</label>
-        <label class="chk"><input type="checkbox" id="dFortress"> 3格内有城塞</label>
       </div>
-      <div class="note">免伤概率来自特技（金刚等）或戟兵矢盾/大盾科技（各30%）。判定值 &lt; 概率则本次伤害归零。</div>
+      <div class="note"><b>防具精造</b>给枪/戟/弩/骑 +10 防御，<b>折算进守方统率</b>，直接影响统率差乘区。
+      <br>据点防护多重覆盖时取减伤最强的一档。免伤概率来自「金刚」或戟兵矢盾/连锁防御（1/3）。判定值 &lt; 概率则本次伤害归零。
+      <br>守方的<b>武力与武器精造只在「反击」页签用到</b>——那时守方是反击的发起者。</div>
     </div>
   </div>
 
@@ -183,7 +207,7 @@
     <div class="card mod">
       <h2>全局随机与修正</h2>
       <div class="row"><label>随机值</label><input type="range" id="rnd" min="0" max="100" step="1" value="50"><span class="val" id="rndV"></span></div>
-      <div class="note" style="margin-top:0">随机修正 = 0.92 + 随机值 × 0.16，即 0.92 ~ 1.08。实际游戏中由 RNG 决定，这里可手动锁定以观察影响。</div>
+      <div class="note" style="margin-top:0">随机修正 = 0.92 + 随机值 × 0.16，即 0.92 ~ 1.08。实际游戏中由 xorshift32 哈希决定，这里可手动锁定以观察影响。</div>
     </div>
 
     <div class="card tac" id="tacCard">
@@ -191,18 +215,55 @@
       <div id="tacticBox">
         <div class="row"><label>战法</label><select id="tactic"></select><span></span></div>
         <div class="row"><label>适性</label><select id="aptitude">
-          <option value="C">C（×1.0）</option>
+          <option value="C">C（不可用）</option>
           <option value="B" selected>B（×1.0）</option>
           <option value="A">A（×1.1）</option>
           <option value="S">S（×1.2）</option>
         </select><span></span></div>
         <div class="row"><label>已移动格数</label><input type="range" id="moved" min="0" max="8" step="1" value="0"><span class="val" id="movedV"></span></div>
-        <div class="note" style="margin-top:0">骑兵2级「马镫」按已移动格数每格 +4%。暴击率 = 5 + max(0,武力−60)×0.35 + (S:8 / A:4)，钳制 5%~30%。</div>
+        <div class="chks">
+          <label class="chk"><input type="checkbox" id="train"> 兵科训练（战法+10%）</label>
+          <label class="chk" id="madengWrap"><input type="checkbox" id="madeng"> 马镫（骑兵每格+4%）</label>
+          <label class="chk"><input type="checkbox" id="elite"> 兵科专精（战法+25%）</label>
+          <label class="chk"><input type="checkbox" id="aCrit"> 本次暴击（×1.35）</label>
+        </div>
+        <div class="note" id="tacticNote" style="margin-top:10px"></div>
       </div>
       <div id="jointBox" class="hidden">
         <div class="row"><label>参战部队</label><input type="range" id="jointN" min="2" max="4" step="1" value="2"><span class="val" id="jointNV"></span></div>
-        <div class="note" style="margin-top:0">每个参战者各算一次普攻后求和。反击仅主攻者承受，并按参战数衰减 ×2/max(2,N)。</div>
+        <div class="chks">
+          <label class="chk"><input type="checkbox" id="aCritJ"> 本次暴击（×1.35）</label>
+          <label class="chk"><input type="checkbox" id="tiebi"> 目标有「铁壁」</label>
+        </div>
+        <div class="note" style="margin-top:10px">每个参战者各算一次普攻后求和。反击仅主攻者承受，并按参战数衰减 ×2/max(2,N)。
+        「铁壁」使齐攻退化为单人一次普攻。</div>
       </div>
+    </div>
+  </div>
+
+  <div class="grid" id="rangedGrid" style="margin-top:16px">
+    <div class="card" id="rangedCard">
+      <h2>远程衰减（普攻 / 齐攻）</h2>
+      <div class="row"><label>攻击距离</label><input type="range" id="distance" min="1" max="5" step="1" value="1"><span class="val" id="distanceV"></span></div>
+      <label class="chk"><input type="checkbox" id="banzhi"> 扳指科技（衰减减半为每格 −5%）</label>
+      <div class="note" style="margin-top:8px">距离 ≥2 时每多 1 格 −10%，最低衰减到 50%（扳指 −5%，同样下限 50%）。距离 1 不衰减。</div>
+    </div>
+    <div class="card" id="counterDefCard">
+      <h2>反击时，攻方作为受击方</h2>
+      <div class="row"><label>据点防护</label><select id="aFort">
+        <option value="none">无</option>
+        <option value="formation">阵（×0.9）</option>
+        <option value="fort">砦（×0.8）</option>
+        <option value="fortress">城塞（×0.7）</option>
+      </select><span></span></div>
+      <div class="row"><label>免伤概率</label><input type="range" id="aShield" min="0" max="60" step="5" value="0"><span class="val" id="aShieldV"></span></div>
+      <div class="row"><label>免伤判定值</label><input type="range" id="aShieldRoll" min="0" max="100" step="1" value="50"><span class="val" id="aShieldRollV"></span></div>
+      <div class="row"><label>藤甲倍率</label><select id="aTengjia">
+        <option value="1">无藤甲 ×1.0</option>
+        <option value="0.7">藤甲 ×0.7</option>
+        <option value="0.5">藤甲（强）×0.5</option>
+      </select><span></span></div>
+      <div class="note" style="margin-top:8px">反击由守方发起，受击方变成攻方。代码里据点防护与免伤判定取的是<b>攻方</b>的设置，所以单独放在这里。</div>
     </div>
   </div>
 
@@ -227,21 +288,33 @@
     </div>
 
     <div class="card" style="margin-top:16px">
-      <h2>三个例子看懂伤害差在哪</h2>
+      <h2>几个例子看懂伤害差在哪</h2>
       <div class="ex">
-        <h3>例 1 · 同为 10000 兵，统率差决定基本盘</h3>
-        <p>攻方统率 <span class="r">60</span>、守方统率 <span class="r">98</span>，统率修正被压到 <code>1+(60−98)/250 = 0.848</code>（下限 0.8）。</p>
-        <p>换成攻方统率 <span class="r">90</span>、守方 <span class="r">70</span>，修正变成 <code>1.08</code>。同一支部队，光统率差就能拉开约 <span class="hl">27%</span> 的伤害。</p>
+        <h3>例 1 · 统率差是幅度最大的乘区</h3>
+        <p>攻方统率 <span class="r">60</span>、守方统率 <span class="r">98</span>，修正 = <code>1+(60−98)/250 = 0.848</code>。</p>
+        <p>攻方 <span class="r">90</span> 打守方 <span class="r">70</span>，修正 = <code>1.08</code>。同一支部队光统率差就能拉开约 <span class="hl">27%</span>。</p>
+        <p>但差距超过 ±50 点后被钳制吃掉——<code>clamp(1+差/250, 0.8, 1.2)</code>，再堆也没用。</p>
       </div>
       <div class="ex">
-        <h3>例 2 · 地形是最容易被忽略的乘区</h3>
-        <p>守方站在平地受伤倍率 <span class="r">×1.0</span>，站丘陵只要 <span class="r">×0.8</span>、森林 <span class="r">×0.85</span>。</p>
-        <p>但攻击方站在森林时战线宽度从 4000 降到 3000，投入兵力直接少 1/4。所以「林战」对攻守双方都是减益——攻城方最好把敌人逼到平地再打。</p>
+        <h3>例 2 · 240 基数让兵力收益递减</h3>
+        <p>投入兵力 1000 → 伤害 385；4000 → 820。兵力翻 4 倍，伤害只涨 <span class="hl">2.13 倍</span>。</p>
+        <p>去掉 240 基数就变成完全线性（4 倍兵力 = 4 倍伤害）。240 的作用就是抑制兵力碾压，让武将能力更重要。</p>
+        <p>而残兵衰减 <code>α = min(1, 投入兵力/1000)</code> 让 240 和地板 120 同步缩小——40 兵时基础伤害从 246 掉到 <span class="hl">15</span>。</p>
       </div>
       <div class="ex">
         <h3>例 3 · 为什么齐攻比逐个打更划算</h3>
         <p>两支相邻友军一齐攻击，伤害是各算一次普攻后<span class="hl">求和</span>，等于翻倍；</p>
-        <p>而反击只有主攻者承受一次，并且按参战数衰减 <code>×2/max(2,N)</code>——2 人齐攻时反击只剩 <span class="hl">100%</span>，4 人齐攻时降到 <span class="hl">50%</span>。输出翻倍、代价减半，这就是齐攻的核心价值。</p>
+        <p>而反击只有主攻者承受一次，并且按参战数衰减 <code>×2/max(2,N)</code>——2 人齐攻时反击 <span class="hl">100%</span>，4 人齐攻时降到 <span class="hl">50%</span>。输出翻倍、代价减半。</p>
+      </div>
+      <div class="ex">
+        <h3>例 4 · 适性只影响战法，不影响普攻</h3>
+        <p>适性决定三件事：能用几级战法（B→1级 / A→2级 / S→3级 / C 不可用）、战法伤害倍率（1.0/1.1/1.2）、战法暴击率（+0/+4/+8）。</p>
+        <p>因为高级战法威力本身更高（枪 1.18/1.23/1.27），所以 <span class="hl">S 比 B 的战法伤害高约 1.29 倍</span>。普攻、反击、一齐攻击完全不吃适性。</p>
+      </div>
+      <div class="ex">
+        <h3>例 5 · 普攻暴击由特技决定，不是概率</h3>
+        <p>普攻的 <code>normalAttackIsCritical</code> 只查特技（如「勇将」）的条件是否匹配，匹配就<span class="hl">必定暴击</span>，不掷骰。</p>
+        <p>概率暴击只存在于战法：<code>clamp(5 + max(0,武力−60)×0.35 + (S:+8/A:+4), 5, 30)</code>，武力约 130 以上就顶到 30% 不再涨。</p>
       </div>
     </div>
   </div>
@@ -255,6 +328,12 @@ const TERRAIN_LABEL = [
   ['ferry','渡所'],['shallow','浅滩'],['water','水域'],['river','河川'],['sea','海'],['shore','岸边'],
   ['mountain','山地'],['stream','川（不可通行）'],['pass','关隘'],['construction','建设地']
 ];
+const FORT_PROTECTION = {
+  none:{label:'无',mult:1},
+  formation:{label:'阵',mult:0.9},
+  fort:{label:'砦',mult:0.8},
+  fortress:{label:'城塞',mult:0.7},
+};
 const TACTICS = {
   spear:[['spear-thrust','突刺 ×1.18'],['spear-spiral','螺旋突刺 ×1.23'],['spear-double','二段突刺 ×1.27']],
   halberd:[['halberd-hook','熊手 ×1.18'],['halberd-sweep','横扫 ×1.23'],['halberd-whirlwind','旋风 ×1.27']],
@@ -262,32 +341,55 @@ const TACTICS = {
   cavalry:[['cavalry-charge','突击 ×1.40'],['cavalry-breakthrough','突破 ×1.45'],['cavalry-rush','突进 ×1.50']]
 };
 const TACTIC_POWER = {'spear-thrust':1.18,'spear-spiral':1.23,'spear-double':1.27,'halberd-hook':1.18,'halberd-sweep':1.23,'halberd-whirlwind':1.27,'crossbow-fire':1.12,'crossbow-pierce':1.18,'crossbow-volley':1.22,'cavalry-charge':1.4,'cavalry-breakthrough':1.45,'cavalry-rush':1.5};
+const TACTIC_TIER = {'spear-thrust':1,'spear-spiral':2,'spear-double':3,'halberd-hook':1,'halberd-sweep':2,'halberd-whirlwind':3,'crossbow-fire':1,'crossbow-pierce':2,'crossbow-volley':3,'cavalry-charge':1,'cavalry-breakthrough':2,'cavalry-rush':3};
 const APT = {C:1,B:1,A:1.1,S:1.2};
+const APT_RANK = {C:0,B:1,A:2,S:3};
+const TACTIC_REQUIRED_APTITUDE = {1:'B',2:'A',3:'S'};
+const TACTIC_APTITUDE_DAMAGE = {C:1,B:1,A:1.1,S:1.2};
 
 const $ = id => document.getElementById(id);
-const clamp = (lo,hi,v) => Math.min(hi, Math.max(lo, v));
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const pct = v => (v*100).toFixed(0)+'%';
+const withSign = v => (v>0?'+':'')+v;
 
 function frontWidth(t){ if(t==='poison'||t==='forest'||t==='ferry') return 3000; if(t==='plank'||t==='path') return 2000; return 4000; }
-function techMultOf(troop, level){
-  if(troop!=='spear'&&troop!=='halberd'&&troop!=='crossbow'&&troop!=='cavalry') return 1;
-  return 1 + (level>=1?0.1:0) + (level>=4?0.1:0);
-}
-function tacticTechMult(troop, level, moved){
-  let m = techMultOf(troop, level);
-  if(troop==='cavalry' && level>=2) m *= 1 + moved*0.04;
+function hasTroopTech(t){ return t==='spear'||t==='halberd'||t==='crossbow'||t==='cavalry'; }
+function techAttackBonus(t, on){ return (on && hasTroopTech(t)) ? 10 : 0; }
+function techDefenseBonus(t, on){ return (on && hasTroopTech(t)) ? 10 : 0; }
+function tacticTechMult(troop, train, elite, madeng, moved){
+  let m = 1;
+  if(hasTroopTech(troop)){
+    if(train) m += 0.1;
+    if(elite) m += 0.25;
+  }
+  if(troop==='cavalry' && madeng) m *= 1 + moved*0.04;
   return m;
 }
 function critChanceOf(war, apt){
   const bonus = apt==='S'?8:apt==='A'?4:0;
-  return clamp(5,30,Math.round(5 + Math.max(0,war-60)*0.35 + bonus));
+  return clamp(Math.round(5 + Math.max(0,war-60)*0.35 + bonus), 5, 30);
+}
+function rangedDecay(distance, banzhi){
+  if(distance < 2) return 1;
+  const per = banzhi ? 0.05 : 0.1;
+  return Math.max(0.5, 1 - (distance-1)*per);
+}
+function reduceByFortress(damage, fortKey, targetTroops){
+  const mult = FORT_PROTECTION[fortKey].mult;
+  return Math.min(targetTroops, Math.max(0, Math.round(damage * mult)));
 }
 
-function baseRoll(o){
-  const width = frontWidth(o.terrain);
-  const committed = Math.min(o.troops / Math.max(1,o.front), width);
-  const leadMod = clamp(0.8,1.2, 1 + (o.lead - o.dLead)/250);
-  const attackScore = committed * (0.08 + o.lead/2000 + o.war/3000);
+/** damageForRoll()：全伤害共用的前五步 */
+function coreRoll(o){
+  const width = frontWidth(o.aTerrain);
+  const frontCount = o.aTroopType === 'cavalry' ? 1 : Math.max(1, o.aFront);
+  const committed = Math.min(o.aTroops / frontCount, width);
   const scale = Math.min(1, committed / 1000);
+  const techAtk = o.aTechAtk || 0;
+  const techDef = o.dTechDef || 0;
+  const leadMod = clamp(1 + (o.aLead - (o.dLead + techDef)) / 250, 0.8, 1.2);
+  const coefficient = 0.08 + o.aLead/2000 + (o.aWar + techAtk)/3000;
+  const attackScore = committed * coefficient;
   const raw = 240 * scale + attackScore;
   const randMod = 0.92 + o.rnd*0.16;
   const drumMod = o.drum ? 1.15 : 1;
@@ -299,22 +401,33 @@ function baseRoll(o){
   const counterMod = o.counter ? 0.6 : 1;
   const before = raw*leadMod*terrDef*randMod*drumMod*atkShip*defShip*auraA*auraD*counterMod;
   const floor = Math.round(120 * scale);
-  const value = clamp(floor, 2200, Math.round(before));
-  return {width,committed,leadMod,attackScore,scale,raw,randMod,drumMod,atkShip,defShip,auraA,auraD,terrDef,counterMod,before,floor,value};
+  const value = clamp(Math.round(before), floor, 2200);
+  return {width,frontCount,committed,scale,techAtk,techDef,leadMod,coefficient,attackScore,raw,
+    randMod,drumMod,atkShip,defShip,auraA,auraD,terrDef,counterMod,before,floor,value};
 }
 
 function readAll(){
   return {
     aTroops:+$('aTroops').value, aLead:+$('aLead').value, aWar:+$('aWar').value,
-    aTroopType:$('aTroopType').value, aTech:+$('aTech').value, aTerrain:$('aTerrain').value,
-    front:+$('aFront').value, aShip:$('aShip').checked, aAura:$('aAura').checked,
-    aDrum:$('aDrum').checked, aCrit:$('aCrit').checked,
-    dTroops:+$('dTroops').value, dLead:+$('dLead').value, dTerrain:$('dTerrain').value,
+    aTroopType:$('aTroopType').value, aTerrain:$('aTerrain').value,
+    aFront:+$('aFront').value, wuqi:$('wuqi').checked, aFangju:$('aFangju').checked,
+    aShip:$('aShip').checked, aAura:$('aAura').checked, aDrum:$('aDrum').checked,
+    dTroops:+$('dTroops').value, dLead:+$('dLead').value, dWar:+$('dWar').value,
+    dTerrain:$('dTerrain').value,
+    dFort:$('dFort').value, dWuqi:$('dWuqi').checked, dFangju:$('dFangju').checked,
     dShield:+$('dShield').value/100, dShieldRoll:+$('dShieldRoll').value/100,
     dTengjia:+$('dTengjia').value, dShip:$('dShip').checked, dAura:$('dAura').checked,
-    dFortress:$('dFortress').checked,
-    rnd:+$('rnd').value/100, tactic:$('tactic').value, aptitude:$('aptitude').value,
-    moved:+$('moved').value, jointN:+$('jointN').value, mode:mode
+    aFort:$('aFort').value,
+    aShield:+$('aShield').value/100, aShieldRoll:+$('aShieldRoll').value/100,
+    aTengjia:+$('aTengjia').value,
+    rnd:+$('rnd').value/100,
+    distance:+$('distance').value, banzhi:$('banzhi').checked,
+    tactic:$('tactic').value, aptitude:$('aptitude').value,
+    train:$('train').checked, elite:$('elite').checked,
+    madeng:$('madeng').checked, moved:+$('moved').value,
+    aCrit:$('aCrit').checked, aCritJ:$('aCritJ').checked, tiebi:$('tiebi').checked,
+    jointN:+$('jointN').value,
+    mode:mode
   };
 }
 
@@ -336,126 +449,189 @@ function buildTactics(){
 function syncLabels(){
   const set=(id,fn)=>{$(id+'V').textContent = fn(+$(id).value);};
   set('aTroops',v=>v.toLocaleString());
-  set('aLead',v=>v); set('aWar',v=>v);
-  set('aTech',v=>'Lv.'+v + (techMultOf($('aTroopType').value,v)>1?` （×${techMultOf($('aTroopType').value,v).toFixed(1)}）`:''));
-  set('aFront',v=>v);
+  set('aLead',v=>v); set('aWar',v=>v); set('aFront',v=>v);
   set('dTroops',v=>v.toLocaleString());
-  set('dLead',v=>v);
+  set('dLead',v=>v); set('dWar',v=>v);
   set('dShield',v=>v+'%'); set('dShieldRoll',v=>(v/100).toFixed(2));
+  set('aShield',v=>v+'%'); set('aShieldRoll',v=>(v/100).toFixed(2));
   set('rnd',v=>(0.92+v/100*0.16).toFixed(3));
-  set('moved',v=>v); set('jointN',v=>v);
+  set('distance',v=>v+' 格');
+  set('moved',v=>v); set('jointN',v=>v+' 支');
 }
 
 function render(){
   syncLabels();
   const o = readAll();
-  const r = baseRoll({troops:o.aTroops,lead:o.aLead,war:o.aWar,terrain:o.aTerrain,front:o.front,
-    dLead:o.dLead,dTerrain:o.dTerrain,rnd:o.rnd,drum:o.aDrum,aShip:o.aShip,dShip:o.dShip,
-    aAura:o.aAura,dAura:o.dAura,counter:o.mode==='counter'});
 
-  const techM = techMultOf(o.aTroopType, o.aTech);
-  const fortM = o.dFortress ? 0.7 : 1;
+  o.aTechAtk = techAttackBonus(o.aTroopType, o.wuqi);
+  o.dTechDef = o.dFangju ? 10 : 0;
+  o.dTechAtk = techAttackBonus(o.aTroopType, o.dWuqi);
+
+  // 反击由「守方」发起打「攻方」，所以角色互换
+  const isCounter = o.mode === 'counter';
+  const r = isCounter ? coreRoll({
+    aTroops:o.dTroops, aLead:o.dLead, aWar:o.dWar, aTroopType:o.aTroopType,
+    aTerrain:o.dTerrain, aFront:1,
+    dLead:o.aLead, dTerrain:o.aTerrain,
+    rnd:o.rnd, drum:false, aShip:o.dShip, dShip:o.aShip,
+    aAura:o.dAura, dAura:o.aAura, counter:true,
+    aTechAtk:o.dTechAtk, dTechDef:o.aFangju ? 10 : 0
+  }) : coreRoll({
+    aTroops:o.aTroops, aLead:o.aLead, aWar:o.aWar, aTroopType:o.aTroopType,
+    aTerrain:o.aTerrain, aFront:o.aFront, dLead:o.dLead, dTerrain:o.dTerrain,
+    rnd:o.rnd, drum:o.aDrum, aShip:o.aShip, dShip:o.dShip,
+    aAura:o.aAura, dAura:o.dAura, counter:false,
+    aTechAtk:o.aTechAtk, dTechDef:o.dTechDef
+  });
+
+  const fort = FORT_PROTECTION[o.dFort];
   const tengjia = o.dTengjia;
   const shieldTriggers = o.dShield > 0 && o.dShieldRoll < o.dShield;
+  const decay = rangedDecay(o.distance, o.banzhi);
+  const critM = o.aCrit ? 1.35 : 1;
 
   const rows = [];
   const push=(k,v,f,cls)=>rows.push(`<tr class="${cls||''}"><td class="k">${k}</td><td class="v">${v}</td><td class="f">${f||''}</td></tr>`);
   const sub=(t)=>rows.push(`<tr class="sub"><td colspan="3">${t}</td></tr>`);
 
-  push('战线宽度', r.width.toLocaleString(), '由攻击方地形决定');
-  push('投入兵力', Math.round(r.committed).toLocaleString(), `min(兵力÷${o.front}, ${r.width})`);
-  if(r.scale < 1) push('残兵衰减', '×'+r.scale.toFixed(3), `投入兵力÷1000，固定基数与地板同步缩小`);
-  push('基础伤害', Math.round(r.raw).toLocaleString(), `240${r.scale<1?'×'+r.scale.toFixed(3):''} + 投入兵力×${(0.08+o.aLead/2000+o.aWar/3000).toFixed(4)}`);
-  push('× 统率差修正', '×'+r.leadMod.toFixed(3), `1+(${o.aLead}−${o.dLead})/250，钳制 0.8~1.2`);
-  push('× 地形防御', '×'+r.terrDef.toFixed(2), `${$('dTerrain').selectedOptions[0].text.split('（')[0]} 受伤倍率`);
-  push('× 随机修正', '×'+r.randMod.toFixed(3), '0.92 ~ 1.08');
-  if(r.drumMod!==1) push('× 太鼓台', '×1.15', '己方3格内有建成太鼓台');
-  if(r.atkShip!==1) push('× 攻方乘船', '×1.10', '');
-  if(r.defShip!==1) push('× 守方乘船', '×0.90', '');
-  if(r.auraA!==1) push('× 攻方光环', '×1.05', '');
-  if(r.auraD!==1) push('× 守方光环', '×0.95', '');
-  if(r.counterMod!==1) push('× 反击系数', '×0.60', '反击专用');
+  // ── 前五步（全伤害共用）──
+  if(isCounter) sub('以下数值由「守方」面板提供 —— 反击由守方发起，攻方是受击方');
+  push('战线宽度', r.width.toLocaleString(), isCounter ? '由守方地形决定' : '由攻击方地形决定');
+  push('投入兵力 committed', Math.round(r.committed).toLocaleString(),
+    `min(兵力÷${r.frontCount}, ${r.width})${!isCounter && o.aTroopType==='cavalry'?'　骑兵不分摊战线':''}`);
+  if(r.scale < 1) push('残兵衰减 α', '×'+r.scale.toFixed(3), `min(1, ${Math.round(r.committed)}÷1000)，240 基数与 120 地板同步缩小`);
+  push('基础伤害 raw', Math.round(r.raw).toLocaleString(),
+    `240${r.scale<1?'×'+r.scale.toFixed(3):''} + ${Math.round(r.committed)}×${r.coefficient.toFixed(4)}`);
+  if(r.techAtk) push('武器精造', '+'+r.techAtk+' 武力',
+    isCounter ? `守方武力 ${o.dWar} → ${o.dWar+r.techAtk}，折算进系数` : `武力 ${o.aWar} → ${o.aWar+r.techAtk}，折算进系数`);
+  push('× 统率差修正', '×'+r.leadMod.toFixed(3), isCounter
+    ? `clamp(1+(${o.dLead}−${o.aLead}${r.techDef?'−'+r.techDef:''})/250, 0.8, 1.2)　守方统率 − 攻方统率`
+    : `clamp(1+(${o.aLead}−${o.dLead}${r.techDef?'−'+r.techDef:''})/250, 0.8, 1.2)`);
+  push('× 地形防御', '×'+r.terrDef.toFixed(2),
+    `${$(isCounter?'aTerrain':'dTerrain').selectedOptions[0].text.split('（')[0]} 受伤倍率${isCounter?'（攻方所在地形）':''}`);
+  push('× 随机修正', '×'+r.randMod.toFixed(3), '0.92 + 随机值×0.16');
+  if(r.drumMod!==1) push('× 鼓楼', '×1.15', '己方3格内有建成鼓楼');
+  if(r.atkShip!==1) push('× 发起方乘船', '×1.10', '');
+  if(r.defShip!==1) push('× 受击方乘船', '×0.90', '');
+  if(r.auraA!==1) push('× 发起方光环', '×1.05', '');
+  if(r.auraD!==1) push('× 受击方光环', '×0.95', '');
+  if(r.counterMod!==1) push('× 反击系数', '×0.60', '反击专用，已在核心值内');
   const wasClamped = r.before < r.floor || r.before > 2200;
-  push('基础伤害钳制', r.value.toLocaleString(), `clamp(${r.floor}, 2200)${wasClamped?'　※ 已触发钳制':''}`,'hl');
+  push('钳制后核心值', r.value.toLocaleString(),
+    `clamp(${Math.round(r.before)}, ${r.floor}, 2200)${wasClamped?'　※ 已触发钳制':''}`, 'hl');
 
   let dmg = r.value;
   let finalNote = '';
   const formulaLines = [];
 
-  if(o.mode==='normal' || o.mode==='counter'){
-    const isCounter = o.mode==='counter';
-    if(!isCounter){
-      const critM = o.aCrit ? 1.35 : 1;
-      if(techM!==1) push('× 兵科科技', '×'+techM.toFixed(1), '枪/戟/弩/骑 训练与精锐');
-      if(critM!==1) push('× 暴击', '×1.35', '特技判定，非随机','hl');
-      dmg = Math.round(r.value * techM * critM);
-      push('技能前伤害', dmg.toLocaleString(), '', 'hl');
-    } else {
-      push('反击：不吃科技与暴击', '—', '仅 ×0.6 已在基础值内结算');
-    }
-    const afterFort = Math.min(o.dTroops, Math.round(dmg * fortM));
-    if(fortM!==1) push('× 城塞减免', '×0.70', '守方3格内有建成城塞');
-    if(fortM!==1) push('城塞后伤害', afterFort.toLocaleString(), `min(守方兵力, ×0.7)`);
-    dmg = afterFort;
+  // ── 分支 ──
+  if(o.mode==='normal'){
+    if(decay!==1) push('× 远程衰减', '×'+decay.toFixed(2), `距离 ${o.distance} 格，每格 −${o.banzhi?'5':'10'}%（下限 50%）`);
+    if(critM!==1) push('× 暴击', '×1.35', '特技条件匹配即必暴，非随机', 'hl');
+    dmg = Math.round(r.value * critM * decay);
+    push('加成后伤害', dmg.toLocaleString(), '暴击与远程衰减一次乘完再取整', 'hl');
+    if(fort.mult!==1){ push('× 据点防护', '×'+fort.mult.toFixed(1), `${fort.label}，取覆盖范围内最强一档`); }
+    dmg = reduceByFortress(dmg, o.dFort, o.dTroops);
+    if(fort.mult!==1) push('据点后伤害', dmg.toLocaleString(), `min(守方兵力, ×${fort.mult.toFixed(1)})`);
     if(o.dShield>0){
-      push('免伤判定', shieldTriggers?'触发 → 归零':'未触发', `概率 ${(o.dShield*100).toFixed(0)}%，判定值 ${o.dShieldRoll.toFixed(2)}`, shieldTriggers?'hl':'');
+      push('免伤判定', shieldTriggers?'触发 → 归零':'未触发',
+        `概率 ${pct(o.dShield)}，判定值 ${o.dShieldRoll.toFixed(2)}`, shieldTriggers?'zero':'');
       if(shieldTriggers) dmg = 0;
     }
     if(tengjia!==1 && dmg>0){ push('× 藤甲（非火）', '×'+tengjia, '降低普攻/战法/反击伤害'); dmg = Math.round(dmg*tengjia); }
-    finalNote = isCounter ? '反击伤害：不吃暴击与兵科科技，仅乘 0.6。' : '普通攻击：暴击 ×1.35 与兵科科技在钳制之后结算。';
-    formulaLines.push('damage = round(clamp(120,2200, <i>基础值</i>) × 科技 × 暴击)');
-    formulaLines.push('       → × 城塞(0.7) → 免伤判定 → × 藤甲');
+    finalNote = '普通攻击：钳制后 × 暴击 × 远程衰减 → 据点防护 → 免伤判定 → 藤甲。兵科科技不参与普攻。';
+    formulaLines.push('<i>普攻（combat.ts → computeNormalAttackDamage）</i>');
+    formulaLines.push('round( 核心值 × 暴击 × 远程衰减 )');
+    formulaLines.push('  → 据点防护 → 免伤判定 → × 藤甲');
+  }
+
+  if(o.mode==='counter'){
+    push('反击：不吃暴击与远程衰减', '—', '仅 ×0.6，已在核心值内结算');
+    dmg = r.value;
+    if(o.aFort!== 'none') push('× 攻方据点防护', '×'+FORT_PROTECTION[o.aFort].mult.toFixed(1), `受击方是攻方 → 取攻方的 ${FORT_PROTECTION[o.aFort].label}`);
+    dmg = reduceByFortress(dmg, o.aFort, o.aTroops);
+    if(o.aShield>0){
+      const trig = o.aShieldRoll < o.aShield;
+      push('免伤判定（攻方）', trig?'触发 → 归零':'未触发', `概率 ${pct(o.aShield)}，判定值 ${o.aShieldRoll.toFixed(2)}`, trig?'zero':'');
+      if(trig) dmg = 0;
+    }
+    if(o.aTengjia!==1 && dmg>0){ push('× 攻方藤甲', '×'+o.aTengjia, ''); dmg = Math.round(dmg*o.aTengjia); }
+    finalNote = '反击：守方发起，用守方的统率/武力打攻方。不吃暴击与远程衰减，减免取攻方的据点与免伤设置。';
+    formulaLines.push('<i>反击（combat.ts → attackUnit 尾部）</i>');
+    formulaLines.push('damageRoll(守方为攻击者, 攻方地形, counter=true, 攻方为守方)');
+    formulaLines.push('  → 攻方据点防护 → 攻方免伤判定 → × 攻方藤甲');
   }
 
   if(o.mode==='tactic'){
     const power = TACTIC_POWER[o.tactic] || 1;
-    const aptM = APT[o.aptitude];
-    const tTech = tacticTechMult(o.aTroopType, o.aTech, o.moved);
-    const critM = o.aCrit ? 1.35 : 1;
+    const aptM = TACTIC_APTITUDE_DAMAGE[o.aptitude];
+    const tTech = tacticTechMult(o.aTroopType, o.train, o.elite, o.madeng, o.moved);
     const cc = critChanceOf(o.aWar, o.aptitude);
+    const tier = TACTIC_TIER[o.tactic] || 1;
+    const need = TACTIC_REQUIRED_APTITUDE[tier];
+    const usable = APT_RANK[o.aptitude] >= APT_RANK[need];
+
     push('战法威力', '×'+power.toFixed(2), $('tactic').selectedOptions[0]?.text || '');
-    if(aptM!==1) push('× 适性系数', '×'+aptM.toFixed(1), o.aptitude+' 适性');
-    if(tTech!==1) push('× 兵科科技', '×'+tTech.toFixed(2), o.aTroopType==='cavalry'&&o.aTech>=2?`含马镫：已移动${o.moved}格 ×${(1+o.moved*0.04).toFixed(2)}`:'');
-    push('暴击率', cc+'%', `5 + max(0,${o.aWar}−60)×0.35 + 适性加成`);
-    if(critM!==1) push('× 暴击', '×1.35', '本次按暴击计算','hl');
+    if(aptM!==1) push('× 适性系数', '×'+aptM.toFixed(1), `${o.aptitude} 适性`);
+    if(tTech!==1) push('× 兵科科技', '×'+tTech.toFixed(3),
+      o.madeng&&o.aTroopType==='cavalry' ? `训练/专精 + 马镫（已移动 ${o.moved} 格 ×${(1+o.moved*0.04).toFixed(2)}）` : '训练 +10% / 专精 +25%');
+    push('战法暴击率', cc+'%', `clamp(5 + max(0,${o.aWar}−60)×0.35 + 适性, 5, 30)`);
+    if(critM!==1) push('× 暴击', '×1.35', '本次按暴击计算', 'hl');
     dmg = Math.round(r.value * power * aptM * tTech * critM);
     push('战法伤害', dmg.toLocaleString(), '', 'hl');
-    const afterFort = Math.min(o.dTroops, Math.round(dmg * fortM));
-    if(fortM!==1){ push('× 城塞减免', '×0.70', ''); push('城塞后伤害', afterFort.toLocaleString(), ''); }
-    dmg = afterFort;
+    if(fort.mult!==1) push('× 据点防护', '×'+fort.mult.toFixed(1), fort.label);
+    dmg = reduceByFortress(dmg, o.dFort, o.dTroops);
     if(o.dShield>0){
-      push('免伤判定', shieldTriggers?'触发 → 归零':'未触发', `概率 ${(o.dShield*100).toFixed(0)}%`, shieldTriggers?'hl':'');
+      push('免伤判定', shieldTriggers?'触发 → 归零':'未触发', `概率 ${pct(o.dShield)}`, shieldTriggers?'zero':'');
       if(shieldTriggers) dmg = 0;
     }
     if(tengjia!==1 && dmg>0){ push('× 藤甲（非火）', '×'+tengjia, ''); dmg = Math.round(dmg*tengjia); }
-    finalNote = '战法伤害 = 基础值 × 战法威力 × 适性 × 兵科科技 × 暴击，再走减免。';
-    formulaLines.push('damage = round(clamp(120,2200, <i>基础值</i>) × 威力 × 适性 × 科技 × 暴击)');
+    finalNote = usable
+      ? '战法伤害 = 核心值 × 威力 × 适性 × 兵科科技 × 暴击，再走据点/免伤/藤甲。'
+      : `※ 该战法需要 ${need} 适性，当前 ${o.aptitude} 无法发动（游戏里会直接报错）。`;
+    formulaLines.push('<i>战法（legacyCore.ts → applyTacticDamage）</i>');
+    formulaLines.push('round( 核心值 × 威力 × 适性 × 兵科科技 × 暴击 )');
+    formulaLines.push('  → 据点防护 → 免伤判定 → × 藤甲');
+    formulaLines.push('');
+    formulaLines.push(`适性门槛：${tier} 级战法需 ${need} 适性　当前 ${o.aptitude}　${usable?'<b>可发动</b>':'<i>不可发动</i>'}`);
   }
 
   if(o.mode==='joint'){
-    const n = +o.jointN;
-    const critM = o.aCrit ? 1.35 : 1;
-    const per = Math.min(o.dTroops, Math.round(Math.round(r.value * techM * critM) * fortM));
-    push('单支部队伤害', per.toLocaleString(), '每支按普攻独立结算');
-    push('参战部队数', n+' 支', '主攻者 + 相邻友军');
+    const n = o.tiebi ? 1 : +o.jointN;
+    const critJ = o.aCritJ ? 1.35 : 1;
+    let per = Math.round(r.value * critJ * decay);
+    if(decay!==1) push('× 远程衰减', '×'+decay.toFixed(2), `距离 ${o.distance} 格`);
+    if(critJ!==1) push('× 暴击', '×1.35', '各参战者独立判定', 'hl');
+    per = reduceByFortress(per, o.dFort, o.dTroops);
+    if(o.dShield>0 && shieldTriggers) per = 0;
+    if(tengjia!==1 && per>0) per = Math.round(per*tengjia);
+    push('单支部队伤害', per.toLocaleString(), '每支按普攻独立结算', 'hl');
+    push('参战部队数', (o.tiebi?`1（铁壁，原 ${o.jointN}）`:`${o.jointN}`), o.tiebi?'目标有铁壁 → 只算主攻者':'主攻者 + 相邻友军');
     dmg = per * n;
     if(o.dShield>0){
-      push('免伤判定', shieldTriggers?'触发 → 归零':'未触发', `概率 ${(o.dShield*100).toFixed(0)}%`, shieldTriggers?'hl':'');
+      push('免伤判定', shieldTriggers?'触发 → 归零':'未触发', `概率 ${pct(o.dShield)}`, shieldTriggers?'zero':'');
       if(shieldTriggers) dmg = 0;
     }
-    push('合计伤害', dmg.toLocaleString(), `${per} × ${n}`, 'hl');
+    push('合计伤害', dmg.toLocaleString(), `${per} × ${n}`, 'total');
 
-    const cb = baseRoll({troops:o.dTroops,lead:o.dLead,war:o.dLead,terrain:o.dTerrain,front:1,
-      dLead:o.aLead,dTerrain:o.aTerrain,rnd:o.rnd,drum:false,aShip:o.dShip,dShip:o.aShip,
-      aAura:o.dAura,dAura:o.aAura,counter:true});
-    const cbAfterFort = Math.min(o.aTroops, Math.round(cb.value * fortM));
-    const cbFinal = Math.round(cbAfterFort * 2/Math.max(2,n));
-    push('回敬反击', cbFinal.toLocaleString(), `仅主攻者承受，×2/${Math.max(2,n)} 衰减`);
+    // 回敬反击：守方打攻方
+    const cb = coreRoll({
+      aTroops:o.dTroops, aLead:o.dLead, aWar:o.dWar, aTroopType:o.aTroopType,
+      aTerrain:o.dTerrain, aFront:1, dLead:o.aLead, dTerrain:o.aTerrain,
+      rnd:o.rnd, drum:false, aShip:o.dShip, dShip:o.aShip,
+      aAura:o.dAura, dAura:o.aAura, counter:true, aTechAtk:o.dTechAtk, dTechDef:0
+    });
+    let cbDmg = reduceByFortress(cb.value, o.aFort, o.aTroops);
+    if(o.aShield>0 && o.aShieldRoll < o.aShield) cbDmg = 0;
+    if(o.aTengjia!==1 && cbDmg>0) cbDmg = Math.round(cbDmg*o.aTengjia);
+    const cbFinal = Math.round(cbDmg * 2/Math.max(2, +o.jointN));
+    push('回敬反击', cbFinal.toLocaleString(), `仅主攻者承受，×2/max(2,${o.jointN}) 衰减`);
 
-    finalNote = `一齐攻击：${n} 支参战者各自结算后求和；反击仅主攻者承受一次，并按参战数衰减到 ×2/${Math.max(2,n)}。`;
+    finalNote = `一齐攻击：${o.tiebi?'目标有铁壁，退化为单人一次普攻':`${o.jointN} 支参战者各自结算后求和`}；反击仅主攻者承受一次，并按参战数衰减到 ×2/${Math.max(2,+o.jointN)}。`;
+    formulaLines.push('<i>一齐攻击（combat.ts → jointAttackUnit）</i>');
     formulaLines.push('合计 = Σ( 单支普攻伤害 )');
-    formulaLines.push('回敬反击 = 单次反击 × 2/max(2,N)');
-    formulaLines.push('（铁壁特技 → 只算主攻者 1 次）');
+    formulaLines.push(`回敬反击 = 单次反击 × 2/max(2,${o.jointN})`);
+    if(o.tiebi) formulaLines.push('<i>铁壁 → 只算主攻者 1 次</i>');
   }
 
   $('steps').innerHTML = rows.join('');
@@ -469,8 +645,18 @@ function render(){
   formulaLines.push('<i>— 代入当前参数 —</i>');
   formulaLines.push(`攻：兵力 ${o.aTroops.toLocaleString()} / 统率 ${o.aLead} / 武力 ${o.aWar} / ${$('aTroopType').selectedOptions[0].text.split('（')[0]}`);
   formulaLines.push(`守：兵力 ${o.dTroops.toLocaleString()} / 统率 ${o.dLead} / ${$('dTerrain').selectedOptions[0].text.split('（')[0]}`);
-  formulaLines.push(`钳制后基础值 = <b>${r.value.toLocaleString()}</b>　最终伤害 = <b>${dmg.toLocaleString()}</b>`);
+  formulaLines.push(`钳制后核心值 = <b>${r.value.toLocaleString()}</b>　最终伤害 = <b>${dmg.toLocaleString()}</b>`);
   $('formula').innerHTML = formulaLines.join('\n');
+
+  // 适性提示
+  if(o.mode==='tactic'){
+    const tier = TACTIC_TIER[o.tactic] || 1;
+    const need = TACTIC_REQUIRED_APTITUDE[tier];
+    const usable = APT_RANK[o.aptitude] >= APT_RANK[need];
+    $('tacticNote').innerHTML = `适性决定三件事：<b>可用战法等级</b>（B→1级 / A→2级 / S→3级 / C 完全不可用）、
+      <b>战法伤害倍率</b>（1.0 / 1.1 / 1.2）、<b>战法暴击率</b>（+0 / +4 / +8）。
+      <br>${tier} 级战法需要 ${need} 适性，当前选 ${o.aptitude} —— ${usable?'<b>可发动</b>':'<b style="color:var(--red)">不可发动</b>'}。`;
+  }
 }
 
 function setMode(m){
@@ -480,36 +666,62 @@ function setMode(m){
   $('jointBox').classList.toggle('hidden', m!=='joint');
   $('tacCard').classList.toggle('hidden', m!=='tactic' && m!=='joint');
   $('modGrid').classList.toggle('single', m!=='tactic' && m!=='joint');
+  $('rangedGrid').classList.toggle('hidden', m==='tactic');
+  $('rangedGrid').classList.toggle('single', m==='counter');
+  $('rangedCard').classList.toggle('hidden', m==='counter');
+  $('counterDefCard').classList.toggle('hidden', m!=='counter' && m!=='joint');
   $('finalLbl').textContent = m==='counter'?'反击伤害':m==='tactic'?'战法伤害':m==='joint'?'一齐攻击总伤害':'本次伤害';
   render();
 }
 
 const PRESETS = {
-  cavalry:{aTroops:12000,aLead:82,aWar:98,aTroopType:'cavalry',aTech:4,aTerrain:'plain',aFront:1,aCrit:true,aAura:true,aDrum:false,dTroops:9000,dLead:70,dTerrain:'plain',dShield:0,dShieldRoll:50,dTengjia:1,dFortress:false},
-  crossbow:{aTroops:9000,aLead:78,aWar:76,aTroopType:'crossbow',aTech:2,aTerrain:'plain',aFront:1,aCrit:false,aAura:false,aDrum:false,dTroops:10000,dLead:85,dTerrain:'plain',dShield:0,dShieldRoll:50,dTengjia:1,dFortress:false,mode:'tactic',tactic:'crossbow-volley',aptitude:'A'},
-  forest:{aTroops:10000,aLead:80,aWar:85,aTroopType:'sword',aTech:0,aTerrain:'forest',aFront:1,aCrit:false,aAura:false,aDrum:false,dTroops:10000,dLead:88,dTerrain:'forest',dShield:0,dShieldRoll:50,dTengjia:1,dFortress:false},
-  weak:{aTroops:10000,aLead:60,aWar:65,aTroopType:'spear',aTech:0,aTerrain:'plain',aFront:2,aCrit:false,aAura:false,aDrum:false,dTroops:10000,dLead:98,dTerrain:'hill',dShield:30,dShieldRoll:20,dTengjia:1,dFortress:true},
-  remnant:{aTroops:40,aLead:80,aWar:80,aTroopType:'sword',aTech:0,aTerrain:'plain',aFront:1,aCrit:false,aAura:false,aDrum:false,dTroops:8000,dLead:80,dTerrain:'plain',dShield:0,dShieldRoll:50,dTengjia:1,dFortress:false}
+  cavalry:{aTroops:12000,aLead:82,aWar:98,aTroopType:'cavalry',aTerrain:'plain',aFront:1,aAura:true,aDrum:false,wuqi:true,aFangju:false,
+    dTroops:9000,dLead:70,dWar:80,dTerrain:'plain',dFort:'none',dWuqi:false,dFangju:false,dShield:0,dShieldRoll:50,dTengjia:1,
+    rnd:50,distance:1,banzhi:false,aCrit:true,aCritJ:false,tiebi:false,jointN:2,moved:0,train:false,elite:false,madeng:false,aptitude:'B',mode:'normal'},
+  crossbow:{aTroops:9000,aLead:78,aWar:76,aTroopType:'crossbow',aTerrain:'plain',aFront:1,aAura:false,aDrum:false,wuqi:false,aFangju:false,
+    dTroops:10000,dLead:85,dWar:80,dTerrain:'plain',dFort:'none',dWuqi:false,dFangju:false,dShield:0,dShieldRoll:50,dTengjia:1,
+    rnd:50,distance:2,banzhi:false,aCrit:false,aCritJ:false,tiebi:false,jointN:2,moved:0,train:true,elite:false,madeng:false,aptitude:'A',
+    tactic:'crossbow-volley',mode:'tactic'},
+  forest:{aTroops:10000,aLead:80,aWar:85,aTroopType:'sword',aTerrain:'forest',aFront:1,aAura:false,aDrum:false,wuqi:false,aFangju:false,
+    dTroops:10000,dLead:88,dWar:80,dTerrain:'forest',dFort:'none',dWuqi:false,dFangju:false,dShield:0,dShieldRoll:50,dTengjia:1,
+    rnd:50,distance:1,banzhi:false,aCrit:false,aCritJ:false,tiebi:false,jointN:2,moved:0,train:false,elite:false,madeng:false,aptitude:'B',mode:'normal'},
+  weak:{aTroops:10000,aLead:60,aWar:65,aTroopType:'spear',aTerrain:'plain',aFront:2,aAura:false,aDrum:false,wuqi:false,aFangju:false,
+    dTroops:10000,dLead:98,dWar:90,dTerrain:'hill',dFort:'formation',dWuqi:false,dFangju:true,dShield:30,dShieldRoll:60,dTengjia:1,
+    rnd:50,distance:1,banzhi:false,aCrit:false,aCritJ:false,tiebi:false,jointN:2,moved:0,train:false,elite:false,madeng:false,aptitude:'B',mode:'normal'},
+  remnant:{aTroops:40,aLead:80,aWar:80,aTroopType:'sword',aTerrain:'plain',aFront:1,aAura:false,aDrum:false,wuqi:false,aFangju:false,
+    dTroops:8000,dLead:80,dWar:80,dTerrain:'plain',dFort:'none',dWuqi:false,dFangju:false,dShield:0,dShieldRoll:50,dTengjia:1,
+    rnd:50,distance:1,banzhi:false,aCrit:false,aCritJ:false,tiebi:false,jointN:2,moved:0,train:false,elite:false,madeng:false,aptitude:'B',mode:'normal'},
+  joint:{aTroops:9000,aLead:80,aWar:85,aTroopType:'spear',aTerrain:'plain',aFront:1,aAura:false,aDrum:false,wuqi:false,aFangju:false,
+    dTroops:12000,dLead:80,dWar:82,dTerrain:'plain',dFort:'fort',dWuqi:false,dFangju:false,dShield:0,dShieldRoll:50,dTengjia:1,
+    rnd:50,distance:1,banzhi:false,aCrit:false,aCritJ:false,tiebi:false,jointN:3,moved:0,train:false,elite:false,madeng:false,aptitude:'B',mode:'joint'},
 };
 function applyPreset(p){
   const d = PRESETS[p];
   for(const [k,v] of Object.entries(d)){
-    if(k==='mode'||k==='tactic'||k==='aptitude') continue;
+    if(k==='mode') continue;
     const el = $(k); if(!el) continue;
     if(el.type==='checkbox') el.checked = v; else el.value = v;
   }
   buildTactics();
   if(d.tactic) $('tactic').value = d.tactic;
-  if(d.aptitude) $('aptitude').value = d.aptitude;
   updateTechEnabled();
   if(d.mode) setMode(d.mode); else render();
 }
 
 function updateTechEnabled(){
   const t = $('aTroopType').value;
-  const has = t==='spear'||t==='halberd'||t==='crossbow'||t==='cavalry';
-  $('aTech').disabled = !has;
+  const has = hasTroopTech(t);
+  $('wuqi').disabled = !has;
+  $('wuqiWrap').classList.toggle('off', !has);
+  $('train').disabled = !has;
+  $('elite').disabled = !has;
+  $('madeng').disabled = !(t==='cavalry');
+  $('madengWrap').classList.toggle('off', t!=='cavalry');
   $('moved').disabled = !(t==='cavalry');
+  if(!has){ $('wuqi').checked = false; $('train').checked = false; $('elite').checked = false; }
+  if(t!=='cavalry') $('madeng').checked = false;
+  $('aFront').disabled = (t==='cavalry');
+  if(t==='cavalry') $('aFront').value = 1;
 }
 
 // init

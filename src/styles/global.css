@@ -1210,9 +1210,11 @@ button { color: inherit; }
 .tech-research-panel { margin-top: 10px; }
 /* 新版科技树（展示用图表）：深色底与游戏 UI 同系，紧凑排布力争一屏可见 */
 .tech-tree-panel { margin-top: 6px; border: 1px solid rgba(146, 136, 115, 0.6); border-radius: 3px; background: rgba(13, 21, 19, 0.62); overflow: auto; }
-/* 科技树高度按视口自适应：356px 是头部+执行武将行+信息表+页脚的固定开销（实测），
-   矮屏下让整棵树缩到一屏可见，而不是把容器撑出滚动条。560px 是宽屏下的上限。 */
-.tech-tree-svg { display: block; width: 100%; min-width: 620px; height: auto; max-height: min(calc(100dvh - 356px), 560px); }
+/* 科技树高度按视口自适应。375px 是弹窗内边距+头部+执行武将行+信息表+页脚的固定开销
+   （实测 334px，留约 40px 余量），矮屏下让整棵树缩到一屏可见，而不是把容器撑出滚动条。
+   下限 220px 是给极矮视口（手机横屏 844×390）留的：没有下限时会被压成几十像素的细条，
+   反而完全不可读；到这一步就让它和弹窗一起滚动，页脚吸底兜住确认键。上限 560px 是宽屏封顶。 */
+.tech-tree-svg { display: block; width: 100%; min-width: 620px; height: auto; max-height: clamp(220px, calc(100dvh - 375px), 560px); }
 /* 画布 750 + 左右各 14 内边距 + 边框 = 780，比原来的 1180 窄约 1/3。
    弹窗内容偏高（科技树 522 + 信息表 + 执行武将行），1366×768 这类矮屏下
    底部确认键会被推出视野，所以用纵向 flex 把头部/页脚固定住，
@@ -1227,6 +1229,19 @@ button { color: inherit; }
 .command-dialog:has(.tech-tree-panel) .tech-research-panel { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 .command-dialog:has(.tech-tree-panel) .tech-tree-panel { flex: 1 1 auto; min-height: 140px; }
 .command-dialog:has(.tech-tree-panel) .tech-info { flex: 0 0 auto; }
+/* 极矮视口（如手机横屏 844×390：宽度 >700 不触发移动端布局，高度却只有 390）
+   下即使科技树缩到 140px 下限也装不下，弹窗会整体滚动。
+   此时把页脚吸在底部，保证「决定·科技研究」永远够得着。
+   左右负外边距让底色铺满弹窗内边距，滚动内容不会从两侧透出来。 */
+.command-dialog:has(.tech-tree-panel) footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 16px -14px 0;
+  padding: 10px 14px;
+  background: var(--panel);
+  backdrop-filter: blur(6px);
+}
 .tech-table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1px solid rgba(146, 136, 115, 0.6); background: rgba(15, 30, 29, 0.72); }
 .tech-table th, .tech-table td { border: 1px solid rgba(146, 136, 115, 0.45); text-align: center; vertical-align: middle; padding: 0; }
 .tech-table thead tr:first-child th { position: relative; height: 38px; color: #e8d9ac; background: rgba(197, 173, 111, 0.14); font-family: STKaiti, KaiTi, serif; font-size: 17px; font-weight: 700; }

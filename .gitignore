@@ -3,6 +3,9 @@
 .codex/
 .agents/
 .workbuddy/
+# 代理工作目录（记忆/截图等）与一次性调试产物
+.workbuddy-ai/
+.pw-*/
 node_modules/
 dist/
 playwright-report/
