@@ -6,13 +6,15 @@ export {
   facilityBuildTargets,
   facilityIsCompleted,
   facilityProtectionForUnit,
+  reconcileFacilityUpgrades,
   repairableFacilities,
   repairFacility,
+  resolveFacilityUpgrade,
   settleBattleFacilities,
   unitFacilities,
+  unitFacilityMenuOptions,
   unitIsProtectedByFortress,
   unitSupplyMultiplier,
-  upgradeFacilitiesForTech,
 } from './legacyCore';
 export type { FacilityProtection, UnitFacility } from './legacyCore';
 export { applyCatapultSplash } from './legacyCore';

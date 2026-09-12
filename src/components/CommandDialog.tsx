@@ -10,7 +10,7 @@ import { ABILITY_CENTER, ABILITY_NODE_MAP, ABILITY_NODES, ABILITY_RESEARCH_GOLD,
 import { POSITIONS, forceRankOf, officerIsOnCampaign, officerMerit, positionDefinition, rankDefinition, rankIndex } from '../game/ranks';
 import { capturableByLoyalty, captivesOf, recruitCaptiveChance, CAPTIVE_RECRUIT_LOYALTY_THRESHOLD } from '../game/captives';
 import { DIPLOMACY_GOLD_MAX, GOODWILL_GOLD_COST, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, areAllies, forceDiplomacy } from '../game/diplomacy';
-import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasPlotFacility, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
+import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasPlotFacility, patrolOrderGain, plotBuiltCount, plotConstructingCount, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
 import { cityResourceCaps } from '../game/strongholdCapacity';
 import { hasCityTrait } from '../game/cityTraits';
 import { MARRY_TECHP_COST, relationCandidates } from '../game/relationship';
@@ -475,7 +475,7 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
   const productionTenDays = type === 'produceArmament' && isDelayedArmament(armamentType) && hasExecutors
     ? armamentProductionTenDays(activeExecutors, armamentProductionSpeedMultiplier(state, command as Extract<GameCommand, { type: 'produceArmament' }>))
     : 0;
-  // 训练：气力 +【(武力总和 + 武力最大值) ÷ 基数】+ 3（封顶为据点士气上限），据点建有兵部时效果翻倍
+  // 训练：士气 +【(武力总和 + 武力最大值) ÷ 基数】+ 3（封顶为据点士气上限），据点建有兵部时效果翻倍
   const trainEstimate = type === 'train' && hasExecutors
     ? Math.min(trainMoraleGain(activeExecutors, garrisonTroops) * (hasPlotFacility(garrison, 'bingbu') ? 2 : 1), moraleCapOf(state, garrison.ownerId) - garrisonTraining)
     : 0;
@@ -542,7 +542,7 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
     : type === 'recruit'
       ? `资金 800 · 兵粮 500 · 士兵 +${recruitEstimate.toLocaleString('en-US')}`
       : type === 'train'
-        ? `兵粮 300 · 气力 +${trainEstimate}`
+        ? `兵粮 300 · 士气 +${trainEstimate}`
         : type === 'produceArmament'
           ? `资金 ${armamentCost(garrison, armamentType)} · ${armamentLabelFor(state, state.playerForceId, armamentType)} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType) ? `${productionTenDays}旬` : '即时'}`
           : type === 'patrol'
@@ -1250,9 +1250,9 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
             ALL_FACILITIES.map((f) => [f, plotCountIncludingConstructing(city, f)])
           ) as Record<PlotType, number>;
           const isUniqueBuilt = (f: PlotType) => UNIQUE_FACILITIES.includes(f) && facilityCounts[f] > 0;
-          // 城池特性限制：水港才能建造船厂，学术才能建太学
+          // 城池特性限制：水港才能建造造船厂，学术才能建太学
           const traitBlockedReason = (f: PlotType): string | undefined => {
-            if (f === 'shipyard' && !hasCityTrait(city.id, 'waterPort')) return '只有水港城市可以建造船厂';
+            if (f === 'shipyard' && !hasCityTrait(city.id, 'waterPort')) return '只有水港城市可以建造造船厂';
             if (f === 'taixue' && !hasCityTrait(city.id, 'academy')) return '只有学术城市可以建造太学';
             return undefined;
           };
@@ -1271,7 +1271,11 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
                   const traitReason = traitBlockedReason(f);
                   const techReason = techLockedReason(f);
                   const disabled = isUniqueBuilt(f) || !!traitReason || !!techReason;
-                  const level = facilityCounts[f];
+                  // 名称右侧只显示一个合计数量（如「市场(2)」）= 已建成 + 建设中；
+                  // 只要还有地格在施工，这个数字就用淡蓝色，提示「其中含在建的」。
+                  const builtCount = plotBuiltCount(city, f);
+                  const buildingCount = plotConstructingCount(city, f);
+                  const totalCount = builtCount + buildingCount;
                   return (
                     <button
                       key={f}
@@ -1279,14 +1283,26 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
                       className={`plot-facility-card${selected ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
                       onClick={() => !disabled && setPlotFacility(f)}
                       disabled={disabled}
-                      title={traitReason ?? techReason}
+                      title={
+                        (traitReason ?? techReason) ??
+                        (totalCount === 0
+                          ? undefined
+                          : buildingCount > 0
+                            ? `共 ${totalCount} 座：已建成 ${builtCount} 座，${buildingCount} 座建设中`
+                            : `已建成 ${totalCount} 座`)
+                      }
                     >
                       <div className="plot-facility-card-title">
-                        <span>{PLOT_LABELS[f]}</span>
+                        <span className="plot-facility-card-name">
+                          {PLOT_LABELS[f]}
+                          {totalCount > 0 && (
+                            <span className={`plot-facility-count${buildingCount > 0 ? ' is-building' : ''}`}>
+                              ({totalCount})
+                            </span>
+                          )}
+                        </span>
                         {disabled ? (
                           <span className="plot-facility-card-level">{traitReason ? '特性不符' : techReason ? '未解锁' : '已建'}</span>
-                        ) : level > 0 ? (
-                          <span className="plot-facility-card-level">Lv.{level}</span>
                         ) : null}
                       </div>
                       <div className="plot-facility-card-cost">{plotCost(f)} 金</div>

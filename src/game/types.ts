@@ -186,6 +186,7 @@ export interface City {
   commerce: number;
   agriculture: number;
   order: number;
+  /** 据点士气（训练指令提升；与部队 `energy` 是同一资源，上限同为 techs.moraleCapOf：基础 100，职业化后 120） */
   training: number;
   mapX: number;
   mapY: number;
@@ -237,7 +238,7 @@ export interface Pass {
   /** 关隘人口（开局 4万~8万 随机） */
   population: number;
   troops: number;
-  /** 关隘守军气力（0~100，训练指令提升；无治安值故巡查不作用于城市治安） */
+  /** 关隘守军士气（与城池 `training` 同一资源、同一上限；训练指令提升；无治安值故巡查不作用于城市治安） */
   training: number;
   /** 关隘治安（供巡查指令等机制复用；因无需治安值，开局按 100 无特殊修正） */
   order: number;
@@ -423,6 +424,11 @@ export interface FirePlot {
  * - 攻击型：arrowTower 箭楼（无门槛）→ crossbowTower 连弩楼（建筑学）→ catapultTower 投石台（弹道，射程 2~3 格）；
  * - 辅助型：drum 太鼓台 / musicTower 军乐台；
  * - 陷阱型：fireSeed 火焰种 / fireBall 火焰球（火药）→ hellfireSeed 业火种 / hellfireBall 业火球（化学）。
+ *
+ * **升级链（catalog.FACILITY_UPGRADE_CHAIN）**：阵→砦、砦→城塞、土垒→石墙、箭楼→连弩楼 是「同一设施的档位」，
+ * 高档不作为独立建造选项（建造菜单只列基础档这个入口，按科技解析成当前档），且研究完科技后场上已建成的
+ * 低档设施会自动升级改名为高档（`facilityIsCompleted` 的才升）。
+ * 投石台与陷阱的高低档不是升级关系，各自是独立选项。
  */
 export type FacilityType =
   | 'drum'
@@ -559,6 +565,7 @@ export interface ArmyUnit {
   r: number;
   troops: number;
   food: number;
+  /** 士气：与据点 `training` 是同一资源（出征时由出发据点带入、回城时按兵力加权稀释并入），上限 techs.moraleCapOf */
   energy: number;
   /** 战力（战术/计略的能量来源，0~100）。仅战斗部队拥有，运输队无此属性。 */
   stamina?: number;

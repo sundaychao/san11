@@ -39,7 +39,7 @@ const PASS_INITIAL_ARMAMENTS: CityArmaments = { spear: 500, halberd: 500, crossb
 /** 关隘人口随机范围 4 万 ~ 8 万 */
 export const PASS_POPULATION_MIN = 40_000;
 export const PASS_POPULATION_SPREAD = 40_000;
-/** 关隘守军初始气力（训练指令提升/出征，无治安值故巡查不作用于城市治安） */
+/** 关隘守军初始士气（训练指令提升/出征，与城池 training 同一资源；无治安值故巡查不作用于城市治安） */
 export const PASS_INITIAL_TRAINING = 100;
 /** 关隘初始治安（无治安值，仅供巡查等指令机制占位） */
 export const PASS_INITIAL_ORDER = 100;

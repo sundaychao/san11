@@ -51,13 +51,13 @@ describe('city traits and specialties', () => {
     // 武陵非水港非学术：两种设施均被特性拒绝
     const shipyard: GameCommand = { type: 'buildFacilityPlot', cityId: 'wuling', officerIds: ['zhang-fei'], plotIndex: wulingPlot, facility: 'shipyard' };
     const taixue: GameCommand = { type: 'buildFacilityPlot', cityId: 'wuling', officerIds: ['zhang-fei'], plotIndex: wulingPlot, facility: 'taixue' };
-    expect(validateCommand(state, 'liu', shipyard)).toContain('只有水港城市可以建造船厂');
+    expect(validateCommand(state, 'liu', shipyard)).toContain('只有水港城市可以建造造船厂');
     expect(validateCommand(state, 'liu', taixue)).toContain('只有学术城市可以建造太学');
 
     // 江陵为水港+学术城：不报特性错误
     const okShipyard: GameCommand = { type: 'buildFacilityPlot', cityId: 'jiangling', officerIds: ['liu-bei'], plotIndex: jianglingPlot, facility: 'shipyard' };
     const okTaixue: GameCommand = { type: 'buildFacilityPlot', cityId: 'jiangling', officerIds: ['liu-bei'], plotIndex: jianglingPlot, facility: 'taixue' };
-    expect(validateCommand(state, 'liu', okShipyard)).not.toContain('只有水港城市可以建造船厂');
+    expect(validateCommand(state, 'liu', okShipyard)).not.toContain('只有水港城市可以建造造船厂');
     expect(validateCommand(state, 'liu', okTaixue)).not.toContain('只有学术城市可以建造太学');
 
     expect(cityCanBuildFacility('wuling', 'shipyard')).toBe(false);

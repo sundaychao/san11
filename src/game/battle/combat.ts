@@ -125,7 +125,7 @@ export function attackUnit(state: GameState, forceId: ForceId, attackerId: strin
   const target = state.units[targetId];
   if (!target) throw new Error('目标部队不存在');
   if (target.forceId === forceId) throw new Error('不能攻击己方部队');
-  if (attacker.energy < 10) throw new Error('气力不足');
+  if (attacker.energy < 10) throw new Error('士气不足');
   if (!attackableUnits(state, attackerId).some((unit) => unit.id === targetId)) throw new Error('目标不在攻击范围');
 
   const next = structuredClone(state);
@@ -186,7 +186,7 @@ export function jointAttackUnit(state: GameState, forceId: ForceId, attackerId: 
   const target = state.units[targetId];
   if (!target) throw new Error('目标部队不存在');
   if (target.forceId === forceId) throw new Error('不能攻击己方部队');
-  if (attacker.energy < 10) throw new Error('气力不足');
+  if (attacker.energy < 10) throw new Error('士气不足');
   if (!jointAttackableUnits(state, attackerId).some((unit) => unit.id === targetId)) throw new Error('目标不在齐攻范围');
 
   const next = structuredClone(state);
@@ -272,7 +272,7 @@ export function attackFacility(state: GameState, forceId: ForceId, attackerId: s
   const facility = state.facilities?.[facilityId];
   if (!facility) throw new Error('设施不存在');
   if (facility.forceId === forceId) throw new Error('不能攻击己方设施');
-  if (attacker.energy < 10) throw new Error('气力不足');
+  if (attacker.energy < 10) throw new Error('士气不足');
   if (!attackableFacilities(state, attackerId).some((target) => target.id === facilityId)) throw new Error('设施不在攻击范围');
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];
@@ -298,7 +298,7 @@ export function attackPlot(state: GameState, forceId: ForceId, attackerId: strin
   if (!city || !plot) throw new Error('目标设施不存在');
   if (plot.q == null || plot.r == null) throw new Error('目标设施不在地图上');
   if (city.ownerId === forceId) throw new Error('不能攻击己方势力设施');
-  if (attacker.energy < 10) throw new Error('气力不足');
+  if (attacker.energy < 10) throw new Error('士气不足');
   if (!attackablePlots(state, attackerId).some((target) => target.cityId === cityId && target.plotIndex === plotIndex)) throw new Error('目标不在攻击范围');
 
   const next = structuredClone(state);
@@ -331,7 +331,7 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   if (city.ownerId === forceId) throw new Error('不能攻击己方城市');
   // 无主无守军城同样可打：守军已是 0，只会掉耐久；耐久归零即攻破占领（资源减半、耐久重置 20%）。
   // 想兵不血刃并保住资源，应改用 moveUnit 进驻。
-  if (attacker.energy < 10) throw new Error('气力不足');
+  if (attacker.energy < 10) throw new Error('士气不足');
   if (!isCityInAttackRange(state, attacker, city)) throw new Error('城市不在攻击范围');
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];
@@ -361,7 +361,7 @@ export function attackPass(state: GameState, forceId: ForceId, attackerId: strin
   if (!pass) throw new Error('关隘不存在');
   if (pass.ownerId === forceId) throw new Error('不能攻击己方关隘');
   // 无主无守军关隘同样可打（与城池同口径）：耐久归零即攻破占领
-  if (attacker.energy < 10) throw new Error('气力不足');
+  if (attacker.energy < 10) throw new Error('士气不足');
   if (!isPassInAttackRange(state, attacker, pass)) throw new Error('关隘不在攻击范围');
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];

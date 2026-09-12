@@ -194,7 +194,7 @@ describe('command engine', () => {
     expect(next.cityEffectReports).toEqual([expect.objectContaining({
       cityId: 'jiangling',
       amount: 10,
-      label: '气力',
+      label: '士气',
       kind: 'train',
     })]);
   });
@@ -215,7 +215,7 @@ describe('command engine', () => {
       passId: 'wuguan',
       q: pass.q,
       r: pass.r,
-      label: '气力',
+      label: '士气',
       kind: 'train',
     })]);
   });

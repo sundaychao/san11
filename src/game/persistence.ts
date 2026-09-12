@@ -22,8 +22,10 @@ const FACILITY_TYPES = [
 const APTITUDE_GRADES = ['S', 'A', 'B', 'C'];
 const STRATEGY_IDS = ['fire', 'extinguish', 'false-report', 'disturb', 'calm', 'inspire', 'discord'];
 const MOBILE_DUEL_CITY_IDS = ['xiangyang', 'jiangling'];
-/** 部队士气（气力）上限：基础 100 + 科技「职业化」20（见 game/techs.ts 的 energyCapOf） */
+/** 部队士气上限：基础 100 + 科技「职业化」20（见 game/techs.ts 的 energyCapOf） */
 const MAX_UNIT_ENERGY = 120;
+/** 据点士气（训练度）上限：与部队士气同口径，基础 100 + 科技「职业化」20（见 game/techs.ts 的 moraleCapOf） */
+const MAX_STRONGHOLD_MORALE = 120;
 /** 全部合法地形值（含原版 20 值细分地形 + 旧手绘地图兼容值） */
 const TERRAIN_VALUES = [
   'road', 'path', 'plank', 'plain', 'grass', 'sand', 'wasteland', 'wetland', 'poison',
@@ -53,6 +55,11 @@ function validPercentage(value: unknown) {
   return finite(value) && value >= 0 && value <= 100;
 }
 
+/** 据点士气（0 ~ MAX_STRONGHOLD_MORALE）：科技「职业化」会把上限抬到 120，不能用 validPercentage 卡 100 */
+function validMorale(value: unknown) {
+  return finite(value) && value >= 0 && value <= MAX_STRONGHOLD_MORALE;
+}
+
 function validResource(value: unknown) {
   return finite(value) && value >= 0;
 }
@@ -78,7 +85,7 @@ function validCity(value: unknown): value is City {
     validPercentage(city.commerce) &&
     validPercentage(city.agriculture) &&
     validPercentage(city.order) &&
-    validPercentage(city.training) &&
+    validMorale(city.training) &&
     finite(city.mapX) && city.mapX >= 0 && city.mapX <= 1 &&
     finite(city.mapY) && city.mapY >= 0 && city.mapY <= 1 &&
     Number.isInteger(city.gridQ) && city.gridQ! >= 0 &&
@@ -107,7 +114,7 @@ function validPass(value: unknown, custom?: boolean): value is Pass {
     validResource(pass.food) &&
     validResource(pass.population) &&
     validResource(pass.troops) &&
-    validPercentage(pass.training) &&
+    validMorale(pass.training) &&
     validPercentage(pass.order) &&
     (pass.durability === undefined || (
       validResource(pass.durability) &&

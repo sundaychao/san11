@@ -69,7 +69,7 @@ export const TECH_NODES = [
   { id: 'mubingzhidu', name: '募兵制度', system: 'military', level: 3, prev: 'yaoyizhidu', stat: 'politics', description: '可以建造3级兵舍' },
   { id: 'jiedushi', name: '节度使', system: 'military', level: 5, prev: 'mubingzhidu', stat: 'politics', description: '部队带兵上限＋3000' },
   // 军制系·行军
-  { id: 'suijuncanmou', name: '随军参谋', system: 'military', level: 2, prev: 'zhiyehua', stat: 'politics', description: '部队出征的初始气力值增加20%×相关属性' },
+  { id: 'suijuncanmou', name: '随军参谋', system: 'military', level: 2, prev: 'zhiyehua', stat: 'politics', description: '部队出征的初始士气值增加20%×相关属性' },
   { id: 'kailujun', name: '开路军', system: 'military', level: 3, prev: 'suijuncanmou', stat: 'politics', description: '部队可以进入小径、浅滩和川地形' },
   { id: 'jixingjun', name: '急行军', system: 'military', level: 4, prev: 'kailujun', stat: 'politics', description: '步兵移动＋6，骑兵移动＋4' },
   { id: 'houqintixi', name: '后勤体系', system: 'military', level: 6, prev: 'jixingjun', stat: 'politics', description: '运输队移动＋8，粮道提供的粮食损耗－50%' },
@@ -313,13 +313,13 @@ export function movementTechBonus(
   }
 }
 
-/** 士气（气力）上限：职业化＋20 */
+/** 部队士气上限：职业化＋20 */
 export function energyCapOf(state: GameState, forceId: ForceId | null | undefined): number {
   return 100 + (hasTech(state, forceId, 'zhiyehua') ? 20 : 0);
 }
 
 /**
- * 据点士气（训练度）上限：与部队气力上限同口径（基础 100，科技「职业化」＋20）。
+ * 据点士气（训练度）上限：与部队士气上限同口径（基础 100，科技「职业化」＋20）。
  *
  * 虽然数值口径相同，但两者是**不同的字段**（`City/Pass.training` vs `ArmyUnit.energy`），
  * 单独成函数是为了将来二者可能分化（如只提升其中之一）。
@@ -329,7 +329,7 @@ export function moraleCapOf(state: GameState, forceId: ForceId | null | undefine
   return energyCapOf(state, forceId);
 }
 
-/** 随军参谋：出征初始气力增加「相关属性×20%」 */
+/** 随军参谋：出征初始士气增加「相关属性×20%」 */
 export function initialEnergyBonus(state: GameState, forceId: ForceId | null | undefined, stat: number): number {
   return hasTech(state, forceId, 'suijuncanmou') ? Math.round(stat * 0.2) : 0;
 }

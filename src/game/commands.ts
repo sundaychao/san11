@@ -653,9 +653,9 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     else if (plot.q != null && plot.r != null && isPlotOccupiedByOtherCity(state, city.id, plot.q, plot.r)) {
       errors.push('该地块已被其他城市占用');
     }
-    // 城池特性限制：水港才能建造船厂，学术才能建太学
+    // 城池特性限制：水港才能建造造船厂，学术才能建太学
     if (!cityCanBuildFacility(city.id, command.facility)) {
-      errors.push(command.facility === 'shipyard' ? '只有水港城市可以建造船厂' : '只有学术城市可以建造太学');
+      errors.push(command.facility === 'shipyard' ? '只有水港城市可以建造造船厂' : '只有学术城市可以建造太学');
     }
     // 科技门槛：未研究出对应科技的设施不可建造（鱼市/军屯农/六部衙门默认全城不可建）
     if (!canBuildFacility(state, forceId, command.facility)) {
@@ -1046,13 +1046,16 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       const names = officers.map((officer) => officer.name).join('、');
       stronghold.food -= 300;
       stronghold.trainedThisTenDay = true;
-      // 气力提升 = 【(武力总和 + 武力最大值) ÷ 基数】+ 3，基数 = 士兵数÷2000 + 20
+      // 士气提升 = 【(武力总和 + 武力最大值) ÷ 基数】+ 3，基数 = 士兵数÷2000 + 20
       // 兵部：城池建有兵部时训练效果翻倍（关隘无都市设施不生效）
+      const trainedBefore = stronghold.training;
       let gain = trainMoraleGain(officers, stronghold.troops);
       if (!isPass && hasPlotFacility(city, 'bingbu')) gain *= 2;
       stronghold.training = clamp(stronghold.training + gain, 0, moraleCapOf(next, stronghold.ownerId));
+      // 战报只报实际增量：士气满时不再显示「+10」却一点没涨
+      const appliedTrainGain = stronghold.training - trainedBefore;
       addTechP(next, forceId, TECHP_PER_TRAIN);
-      message = `${names}训练${garrisonName}守军，气力+${gain}`;
+      message = `${names}训练${garrisonName}守军，士气+${appliedTrainGain}`;
       const passGarrison = isPassGarrison(stronghold) ? stronghold : undefined;
       next.cityEffectReports = [{
         id: `city-effect-${next.month}-${next.logs.length}`,
@@ -1060,8 +1063,8 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         ...(passGarrison ? { passId: passGarrison.id } : {}),
         q: passGarrison ? passGarrison.q : city.gridQ,
         r: passGarrison ? passGarrison.r : city.gridR,
-        amount: gain,
-        label: '气力',
+        amount: appliedTrainGain,
+        label: '士气',
         kind: 'train',
       }];
       for (const officer of officers) officer.acted = true;

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { initialArmaments } from '../game/armaments';
-import { deployTransportUnit, deployUnit, deployUnitPreviewWithId, movementCells } from '../game/battle/actions';
+import { deployTransportUnit, deployUnit, deployUnitPreviewWithId, facilityBuildTargets, movementCells } from '../game/battle/actions';
 import { movementAllowanceForProfile } from '../game/battle/definitions';
 import { deploymentCells, chooseDelegateSpawnCell } from '../game/battle/deployment';
 import { getDeploymentTargets } from '../game/battle/queries';
@@ -1045,6 +1045,68 @@ describe('command interface', { timeout: 30000 }, () => {
 
     fireEvent.pointerEnter(screen.getByTestId('battle-unit-marker'), { clientX: 300, clientY: 180 });
     expect(screen.getByTestId('unit-info-panel')).toHaveTextContent('300');
+  });
+
+  /**
+   * 部队设置菜单里的设施升级链：高档（砦/城塞/连弩楼）不作为独立条目，只出现「当前档位」那一个入口。
+   * 落点不写死坐标（(10,10) 一带可能是山/水或落在城池攻击范围内，导致没有任何可建设格），
+   * 直接扫全图找一个「确实能设置阵」的格子。
+   */
+  function deployedUnitAtBuildableCell(state: ReturnType<typeof createGame>) {
+    const deployed = deployUnit(state, 'liu', {
+      cityId: 'jiangling', officerId: 'liu-bei', troops: 3000, food: 3000, gold: 3000,
+    });
+    const unit = Object.values(deployed.units)[0];
+    for (const cell of deployed.grid) {
+      Object.assign(unit, { q: cell.q, r: cell.r, moved: false, acted: false, movementRemaining: 22 });
+      if (facilityBuildTargets(deployed, unit.id, undefined, 'formation').length > 0) return { deployed, unit };
+    }
+    throw new Error('找不到可以设置设施的格子');
+  }
+
+  async function openUnitFacilityMenu(state: ReturnType<typeof createGame>) {
+    const user = userEvent.setup();
+    const { deployed, unit } = deployedUnitAtBuildableCell(state);
+    renderState(deployed);
+    panMapTo(unit.q, unit.r);
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r}`)!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '设置' }));
+    return screen.getByTestId('unit-facility-menu');
+  }
+
+  function facilityLabels(menu: HTMLElement) {
+    return within(menu).getAllByRole('button').map((button) => button.textContent ?? '');
+  }
+
+  it('lists only the base tier of each facility upgrade chain in the 部队设置 menu', async () => {
+    const labels = facilityLabels(await openUnitFacilityMenu(createGame('liu', 1)));
+
+    expect(labels.some((label) => label.startsWith('阵（'))).toBe(true);
+    expect(labels.some((label) => label.startsWith('土垒（'))).toBe(true);
+    expect(labels.some((label) => label.startsWith('箭楼（'))).toBe(true);
+    for (const upgraded of ['砦（', '城塞（', '连弩楼（']) {
+      expect(labels.some((label) => label.startsWith(upgraded))).toBe(false);
+    }
+    // 投石台与陷阱型不是升级链，仍然是独立条目
+    expect(labels.some((label) => label.startsWith('投石台（'))).toBe(true);
+  });
+
+  it('renames each upgrade-chain entry to the tier unlocked by 石工术/建筑学', async () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.techNodes = ['shigongshu', 'jianzhuxue'];
+    const labels = facilityLabels(await openUnitFacilityMenu(state));
+
+    expect(labels.some((label) => label.startsWith('城塞（'))).toBe(true);
+    expect(labels.some((label) => label.startsWith('石墙（'))).toBe(true);
+    expect(labels.some((label) => label.startsWith('连弩楼（'))).toBe(true);
+    for (const replaced of ['阵（', '砦（', '土垒（', '箭楼（']) {
+      expect(labels.some((label) => label.startsWith(replaced))).toBe(false);
+    }
+    // 升级后的条目用高档造价
+    expect(labels.some((label) => label.startsWith('城塞（900）'))).toBe(true);
   });
 
   it('caps weapon troop slider at available armament stock and disables it below 1000', async () => {

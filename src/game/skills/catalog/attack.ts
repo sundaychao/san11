@@ -16,9 +16,9 @@ function activeAttackSkill(name: string, description: string, effects: SkillEffe
 }
 
 export const ATTACK_SKILLS: SkillDefinition[] = [
-  activeAttackSkill('扫讨', '攻击时降低敌方少量气力(5)', [{ kind: 'attackDrainEnergy', amount: 5 }]),
-  activeAttackSkill('威风', '攻击时降低敌方大量气力(20)', [{ kind: 'attackDrainEnergy', amount: 20 }]),
-  activeAttackSkill('昂扬', '击破敌军后恢复气力(10)', [{ kind: 'breakUnitEnergy', amount: 10 }]),
+  activeAttackSkill('扫讨', '攻击时降低敌方少量士气(5)', [{ kind: 'attackDrainEnergy', amount: 5 }]),
+  activeAttackSkill('威风', '攻击时降低敌方大量士气(20)', [{ kind: 'attackDrainEnergy', amount: 20 }]),
+  activeAttackSkill('昂扬', '击破敌军后恢复士气(10)', [{ kind: 'breakUnitEnergy', amount: 10 }]),
   activeAttackSkill('连击', '普通攻击有50%概率连续攻击两次', [{ kind: 'repeatNormalAttack', chance: 0.5 }]),
   activeAttackSkill('急袭', '陆地普通攻击时有50%概率不受反击伤害', [
     { kind: 'noCounterAttack', chance: 0.5, terrain: 'land' },

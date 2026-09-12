@@ -13,7 +13,7 @@ import {
   tacticTargetFacilities,
   tacticTargetUnits,
   unitCanUseTactic,
-  unitFacilities,
+  unitFacilityMenuOptions,
   unitIsIncapacitated,
   unitStrategies,
   unitTactics,
@@ -188,7 +188,8 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
     if (strategy.target === 'cell') return strategyTargetCells(state, unitId, strategy.id, origin).length > 0;
     return strategyTargetUnits(state, unitId, strategy.id, origin).length > 0;
   });
-  const availableFacilities = unitFacilities().filter((facility) => (
+  // 设施升级链按势力科技解析成当前档位（阵/砦/城塞 只出现一个入口），再按可建位置过滤
+  const availableFacilities = unitFacilityMenuOptions(state, unit.forceId).filter((facility) => (
     facilityBuildTargets(state, unitId, origin, facility.type).length > 0
   ));
   const hasActed = unit.acted;

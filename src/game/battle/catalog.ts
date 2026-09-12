@@ -322,6 +322,25 @@ export const FACILITIES: Partial<Record<FacilityType, UnitFacility>> = {
   fortress: { type: 'fortress', name: '城塞', durability: 1200 },
 };
 
+/**
+ * 野外设施升级链（低档 → 高档）：研究对应科技后，**建造选项与场上已建成的设施一并升级为该档**。
+ * 阵 → 砦（石工术）→ 城塞（建筑学）；土垒 → 石墙（石工术）；箭楼 → 连弩楼（建筑学）。
+ *
+ * 这里只登记「谁升级成谁」，升级门槛不重复写死 —— 高档设施的门槛已经在 `techs.TECH_FACILITY_GATES`
+ * 里（fort/stoneWall = 石工术，fortress/crossbowTower = 建筑学），判定统一走 `techs.canBuildFacility`。
+ */
+export const FACILITY_UPGRADE_CHAIN: Partial<Record<FacilityType, FacilityType>> = {
+  formation: 'fort',
+  fort: 'fortress',
+  earthwork: 'stoneWall',
+  arrowTower: 'crossbowTower',
+};
+
+/** 升级链里的高档设施：不作为独立建造选项出现（玩家只看到「当前档位」那一个入口） */
+export const UPGRADED_FACILITY_TYPES: ReadonlySet<FacilityType> = new Set(
+  Object.values(FACILITY_UPGRADE_CHAIN).filter((type): type is FacilityType => Boolean(type)),
+);
+
 /** 占用间距的设施（彼此需间隔 2 格以上）：据点型与攻击型设施，与箭楼/城塞同口径 */
 export const SPACING_LIMITED_FACILITY_TYPES = new Set<FacilityType>([
   'formation', 'fort', 'fortress', 'arrowTower', 'crossbowTower', 'catapultTower', 'drum', 'musicTower',

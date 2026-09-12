@@ -10,7 +10,7 @@ import { territoryCityAt, territoryForceAt } from '../territory';
 import { settleTenDay } from '../turn';
 import type { FacilityType, TroopType } from '../types';
 import * as skillHandlers from '../skills/handlers';
-import { applyCatapultSplash, attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackPlot, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, repairableFacilities, repairFacility, settleBattleFacilities, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, upgradeFacilitiesForTech, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
+import { applyCatapultSplash, attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackPlot, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, reconcileFacilityUpgrades, repairableFacilities, repairFacility, resolveFacilityUpgrade, settleBattleFacilities, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitFacilityMenuOptions, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
 import { attackablePlots } from './targetRules';
 import { applyGroundFireDamageToCities, applyImmediateFireDamageToCityAndPlot, GROUND_FIRE_CITY_DURABILITY } from './fire';
 import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
@@ -277,7 +277,8 @@ describe('battle deployment and movement actions', () => {
       homeCityId: 'jiangling',
       troops: 4000,
       food: 6000,
-      energy: 100,
+      // 部队士气 = 出发城池士气（两者是同一资源）
+      energy: beforeCity.training,
       movementRemaining: movementAllowanceForProfile('sword'),
       moved: true,
       acted: false,
@@ -1164,32 +1165,60 @@ describe('battle deployment and movement actions', () => {
     expect(lossWith('fortress', 14, 10)).toBe(Math.round(normalLoss * 0.7));
   });
 
-  it('upgrades 土垒/箭楼 to 石墙/连弩楼 when 建筑学 completes', () => {
+  it('upgrades 阵/土垒/箭楼 along the chain when 石工术/建筑学 completes', () => {
     const state = createGame('liu', 1);
     state.facilities = {
       wall: { id: 'wall', type: 'earthwork', forceId: 'liu', q: 11, r: 10, durability: 120 },
       tower: { id: 'tower', type: 'arrowTower', forceId: 'liu', q: 13, r: 10, durability: 200 },
       enemyWall: { id: 'enemyWall', type: 'earthwork', forceId: 'cao', q: 15, r: 10, durability: 90 },
-      fort: { id: 'fort', type: 'fort', forceId: 'liu', q: 17, r: 10, durability: 300 },
+      formation: { id: 'formation', type: 'formation', forceId: 'liu', q: 17, r: 10, durability: 300 },
       building: { id: 'building', type: 'earthwork', forceId: 'liu', q: 19, r: 10, durability: 100, completed: false },
     };
 
-    // 石工术不触发升级（砦是新建设施，不是升级而来）
-    expect(upgradeFacilitiesForTech(state, 'liu', 'shigongshu')).toBe(0);
-    expect(upgradeFacilitiesForTech(state, 'liu', 'jianzhuxue')).toBe(2);
-
+    // 石工术：阵 → 砦、土垒 → 石墙；箭楼与敌方/施工中的设施不受影响
+    state.forces.liu.techNodes = ['shigongshu'];
+    expect(reconcileFacilityUpgrades(state, 'liu')).toBe(2);
+    expect(state.facilities.formation).toMatchObject({ id: 'formation', forceId: 'liu', type: 'fort', durability: 900 });
     expect(state.facilities.wall).toMatchObject({
       id: 'wall', type: 'stoneWall', forceId: 'liu', q: 11, r: 10, durability: 600, completed: true,
     });
-    expect(state.facilities.tower).toMatchObject({
-      id: 'tower', type: 'crossbowTower', forceId: 'liu', q: 13, r: 10, durability: 900, completed: true,
-    });
-    // 敌方土垒、未建成的土垒与其它设施不受影响
+    expect(state.facilities.tower).toMatchObject({ type: 'arrowTower', durability: 200 });
     expect(state.facilities.enemyWall).toMatchObject({ type: 'earthwork', durability: 90 });
     expect(state.facilities.building).toMatchObject({ type: 'earthwork', durability: 100, completed: false });
-    expect(state.facilities.fort).toMatchObject({ type: 'fort', durability: 300 });
-    // 已在升级后的设施不会重复升级
-    expect(upgradeFacilitiesForTech(state, 'liu', 'jianzhuxue')).toBe(0);
+    // 幂等：已收敛的设施不会重复升级
+    expect(reconcileFacilityUpgrades(state, 'liu')).toBe(0);
+
+    // 建筑学：砦 → 城塞、箭楼 → 连弩楼
+    state.forces.liu.techNodes = ['shigongshu', 'jianzhuxue'];
+    expect(reconcileFacilityUpgrades(state, 'liu')).toBe(2);
+    expect(state.facilities.formation).toMatchObject({ type: 'fortress', durability: 1200 });
+    expect(state.facilities.tower).toMatchObject({ type: 'crossbowTower', durability: 900 });
+    expect(reconcileFacilityUpgrades(state, 'liu')).toBe(0);
+  });
+
+  it('keeps 砦/城塞/连弩楼 out of the build menu and renames the entry as techs land', () => {
+    const state = createGame('liu', 1);
+    const menuNames = () => unitFacilityMenuOptions(state, 'liu').map((facility) => facility.name);
+
+    // 默认：只列基础档（阵/土垒/箭楼），高档作独立选项一律不出现
+    expect(menuNames()).toEqual(expect.arrayContaining(['阵', '土垒', '箭楼']));
+    for (const hidden of ['砦', '城塞', '连弩楼']) expect(menuNames()).not.toContain(hidden);
+
+    // 石工术：阵 → 砦、土垒 → 石墙
+    state.forces.liu.techNodes = ['shigongshu'];
+    expect(menuNames()).toEqual(expect.arrayContaining(['砦', '石墙', '箭楼']));
+    expect(menuNames()).not.toContain('阵');
+    expect(menuNames()).not.toContain('土垒');
+
+    // 建筑学：砦 → 城塞、箭楼 → 连弩楼
+    state.forces.liu.techNodes = ['shigongshu', 'jianzhuxue'];
+    expect(menuNames()).toEqual(expect.arrayContaining(['城塞', '石墙', '连弩楼']));
+    expect(menuNames()).not.toContain('砦');
+    expect(menuNames()).not.toContain('箭楼');
+    // 投石台与陷阱型不是升级链，始终保留自己的条目
+    expect(menuNames()).toEqual(expect.arrayContaining(['投石台', '火焰种', '火焰球', '业火种', '业火球']));
+    // 升级链入口升级后仍用高档的造价
+    expect(FACILITY_BUILD_COSTS[resolveFacilityUpgrade(state, 'liu', 'formation')]).toBe(900);
   });
 
   it('doubles stronghold capacity with 修筑要塞 for cities and passes', () => {
@@ -2718,7 +2747,7 @@ describe('battle deployment and movement actions', () => {
 
     expect(next.units[enemyId].troops).toBeLessThan(3500);
     expect(next.units[attacker.id].troops).toBeLessThan(4000);
-    expect(next.units[attacker.id].energy).toBe(90);
+    expect(next.units[attacker.id].energy).toBe(deployed.cities.jiangling.training - 10);
     expect(next.units[attacker.id].acted).toBe(true);
     expect(next.units[enemyId].acted).toBe(false);
   });
@@ -3014,11 +3043,12 @@ describe('battle deployment and movement actions', () => {
     expect(jointReport).toBeDefined();
     expect(jointReport!.amount).toBe(3000 - next.units['joint-target'].troops);
     expect(next.units['joint-target'].troops).toBeLessThan(3000);
-    // 主攻者与友军都本旬行动、各消耗 10 气力
+    // 主攻者与友军都本旬行动、各消耗 10 士气
     expect(next.units[attacker.id].acted).toBe(true);
     expect(next.units[ally.id].acted).toBe(true);
-    expect(next.units[attacker.id].energy).toBe(90);
-    expect(next.units[ally.id].energy).toBe(90);
+    expect(next.units[attacker.id].energy).toBe(second.cities.jiangling.training - 10);
+    // 友军自武陵出征，士气取自武陵（各据点士气独立）
+    expect(next.units[ally.id].energy).toBe(second.cities.wuling.training - 10);
   });
 
   it('rejects a joint attack when no actionable ally is adjacent to the target', () => {

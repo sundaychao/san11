@@ -1,5 +1,5 @@
-import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, PassId, StrategyResultReport, TechNodeId, TerrainType, TroopType } from '../types';
-import { BLOCKED_TERRAINS, isWaterTerrain } from './catalog';
+import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, PassId, StrategyResultReport, TerrainType, TroopType } from '../types';
+import { BLOCKED_TERRAINS, FACILITY_UPGRADE_CHAIN, UPGRADED_FACILITY_TYPES, isWaterTerrain } from './catalog';
 import { isBattleShip } from '../armaments';
 import { nextRandom } from '../random';
 import { TECHP_PER_BREAK_UNIT, addTechP, canBuildFacility, catapultSplash, cavalryRaidMove, cavalryStirrupBonus, energyCapOf, fireDamageMultiplier, fireRangeBonus, moraleCapOf, spearSeizesFood, tacticPowerMultiplier, troopAttackTechBonus, troopDefenseTechBonus } from '../techs';
@@ -598,13 +598,50 @@ export function unitFacilities(): UnitFacility[] {
   return Object.values(FACILITIES).filter((facility): facility is UnitFacility => Boolean(facility));
 }
 
-/** 该部队当前可建造的设施清单（科技门槛 TECH_FACILITY_GATES + 部队资金双过滤），供建造菜单使用 */
+/**
+ * 设施升级链的档位判定：从低档出发逐级检查下一档的科技门槛，返回该势力当前应处的档位。
+ * 阵 → 砦（石工术）→ 城塞（建筑学）；土垒 → 石墙（石工术）；箭楼 → 连弩楼（建筑学）。
+ *
+ * 高档设施没有自己的建造入口，所以「已解锁的最高档」既是新建时的选项，也是既有设施应收敛到的形态。
+ * 未研究前置科技时停在当前档（只研究建筑学而没研究石工术，阵依旧是阵）。
+ */
+export function resolveFacilityUpgrade(
+  state: GameState,
+  forceId: ForceId | null | undefined,
+  type: FacilityType,
+): FacilityType {
+  let current = type;
+  // 步数上限保护：将来把链加长也不会打转
+  for (let step = 0; step < 8; step += 1) {
+    const next = FACILITY_UPGRADE_CHAIN[current];
+    if (!next || !canBuildFacility(state, forceId, next)) return current;
+    current = next;
+  }
+  return current;
+}
+
+/**
+ * 部队建造菜单的可见选项：升级链只保留最低档作为入口，按势力科技解析成当前档位。
+ * 因此玩家看到的是「阵 / 弩楼…」这些会在研究后改名的入口，而不是同时列出 阵·砦·城塞 三档。
+ */
+export function unitFacilityMenuOptions(
+  state: GameState | null | undefined,
+  forceId: ForceId | null | undefined,
+): UnitFacility[] {
+  return unitFacilities()
+    .filter((facility) => !UPGRADED_FACILITY_TYPES.has(facility.type))
+    .map((facility) => {
+      if (!state) return facility;
+      return FACILITIES[resolveFacilityUpgrade(state, forceId, facility.type)] ?? facility;
+    });
+}
+
+/** 该部队当前可建造的设施清单（升级档位 + 部队资金双过滤），供建造菜单使用 */
 export function buildableFacilitiesForUnit(state: GameState, unitId: string): UnitFacility[] {
   const unit = state.units[unitId];
   if (!unit || unit.kind === 'transport') return [];
-  return unitFacilities().filter((facility) => (
-    canBuildFacility(state, unit.forceId, facility.type)
-    && (unit.gold ?? 0) >= FACILITY_BUILD_COSTS[facility.type]
+  return unitFacilityMenuOptions(state, unit.forceId).filter((facility) => (
+    (unit.gold ?? 0) >= FACILITY_BUILD_COSTS[facility.type]
   ));
 }
 
@@ -1516,27 +1553,23 @@ export function dismantleFacility(state: GameState, forceId: ForceId, facilityId
   return next;
 }
 
-/** 科技完成时的既有设施自动升级表：建筑学 → 土垒升石墙、箭楼升连弩楼 */
-const FACILITY_TECH_UPGRADES: Partial<Record<TechNodeId, readonly (readonly [FacilityType, FacilityType])[]>> = {
-  jianzhuxue: [['earthwork', 'stoneWall'], ['arrowTower', 'crossbowTower']],
-};
-
 /**
- * 建筑学：已建成的土垒自动升级为石墙、箭楼自动升级为连弩楼（返回升级数量）。
- * 保留设施 id、坐标与归属，耐久按新类型的满耐久重置；未建成（completed:false）的设施与
- * 其它势力的设施不受影响。
+ * 设施升级链的**幂等收口**：把已建成设施升到其归属势力科技允许的最高档（返回升级数量）。
+ * 石工术 → 阵升砦、土垒升石墙；建筑学 → 砦升城塞、箭楼升连弩楼。
+ *
+ * 保留设施 id、坐标与归属，耐久按新档满耐久重置；未建成（completed:false）的设施不动。
+ * 只传 forceId 时只处理该势力；不传则处理全部势力（每旬收口用）。
  * **就地修改** state（与 addTechP 同口径，调用方需保证 state 已克隆）。
  */
-export function upgradeFacilitiesForTech(state: GameState, forceId: ForceId, nodeId: TechNodeId): number {
-  const upgrades = FACILITY_TECH_UPGRADES[nodeId];
-  if (!upgrades || !state.facilities) return 0;
-  const replacement = new Map<FacilityType, FacilityType>(upgrades);
+export function reconcileFacilityUpgrades(state: GameState, forceId?: ForceId): number {
+  if (!state.facilities) return 0;
   let upgraded = 0;
   for (const facility of Object.values(state.facilities)) {
-    if (facility.forceId !== forceId || !facilityIsCompleted(facility)) continue;
-    const upgradedType = replacement.get(facility.type);
-    const definition = upgradedType ? FACILITIES[upgradedType] : undefined;
-    if (!upgradedType || !definition) continue;
+    if ((forceId && facility.forceId !== forceId) || !facilityIsCompleted(facility)) continue;
+    const upgradedType = resolveFacilityUpgrade(state, facility.forceId, facility.type);
+    if (upgradedType === facility.type) continue;
+    const definition = FACILITIES[upgradedType];
+    if (!definition) continue;
     facility.type = upgradedType;
     facility.durability = definition.durability;
     facility.completed = true;

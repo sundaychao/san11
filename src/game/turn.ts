@@ -2,7 +2,7 @@ import { clamp, rollGrainPrices, rollMerchants, appointStrongholdSuccessor, offi
 import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
 import { TECHP_CITY_POP_DIVISOR, TECHP_RURAL_POP_DIVISOR, addTechP, completeTechResearch, energyCapOf, maxDurabilityBonus, movementTechBonus, orderDropResist, populationGrowthMultiplier } from './techs';
-import { movementAllowanceForUnit, unitSupplyMultiplier, upgradeFacilitiesForTech } from './battle/actions';
+import { movementAllowanceForUnit, reconcileFacilityUpgrades, unitSupplyMultiplier } from './battle/actions';
 import { unitMaxPolitics } from './battle/legacyCore';
 import { applyGroundFireDamageToCities, applyGroundFireDamageToFacilities, applyGroundFireDamageToPasses, applyGroundFireDamageToPlots, applyGroundFireDamageToUnits } from './battle/fire';
 import { cellAt } from './battle/movementRules';
@@ -26,7 +26,7 @@ import { cityIncomeMultiplier } from './skills/rules/city';
 import { tenDayIndex } from './diplomacy';
 import { passIncomeMultiplierByBlockade, passQuarterlyFoodIncome, passMonthlyGoldIncome } from './passes';
 import { cityResourceCaps, clampStrongholdsInPlace, passResourceCaps } from './strongholdCapacity';
-import type { ArmyUnit, City, CityId, FacilityRepairReport, ForceId, GameState, Pass, TechNodeId } from './types';
+import type { ArmyUnit, City, CityId, FacilityRepairReport, ForceId, GameState, Pass } from './types';
 
 interface CityEvent {
   name: string;
@@ -552,12 +552,12 @@ function settleAbilityResearch(next: GameState) {
   }
 }
 
-/** 科技研究完成时的连锁效果：已建成的内政设施自动升级、建筑学升级土垒/箭楼。
+/** 科技研究完成时的连锁效果：已建成的内政设施自动升级、野外设施按升级链改名升级（阵→砦、箭楼→连弩楼…）。
  *  工程学「据点最大耐久＋3000」不在这里结算，改为每旬由 settleTechDurabilityBonuses 幂等收口，
  *  这样研究完成当旬起、以及此后新占领/易主的据点都能拿到这份上限。 */
-function applyTechCompletionSideEffects(next: GameState, forceId: ForceId, nodeId: TechNodeId) {
+function applyTechCompletionSideEffects(next: GameState, forceId: ForceId) {
   applyFacilityLevelTech(next, forceId);
-  upgradeFacilitiesForTech(next, forceId, nodeId);
+  reconcileFacilityUpgrades(next, forceId);
 }
 
 /**
@@ -603,7 +603,7 @@ function settleOfficerTasks(next: GameState) {
         const force = next.forces[officer.forceId];
         const nodeDef = completeTechResearch(next, officer.forceId, task.nodeId);
         if (force && nodeDef) {
-          applyTechCompletionSideEffects(next, officer.forceId, task.nodeId);
+          applyTechCompletionSideEffects(next, officer.forceId);
           next.logs.push({
             id: `research-complete-${next.month}-${officer.id}-${next.logs.length}`,
             month: next.month,
@@ -719,6 +719,9 @@ export function settleTenDay(state: GameState): GameState {
   settleDurabilityRecovery(next);
   // 工程学「据点最大耐久＋3000」：按当前归属势力逐旬补齐（新占/易主的据点也能拿到，不重复叠加）
   settleTechDurabilityBonuses(next);
+  // 野外设施升级链逐旬收口：补齐旧存档里「科技早已研究完」的设施，以及研究完成时还在施工、
+  // 之后才落成（落成当刻已经是低档）的设施。幂等，只升不降。
+  reconcileFacilityUpgrades(next);
 
   if (next.tenDay === 3) {
     next = settleMonth(next);

@@ -1,7 +1,7 @@
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { effectiveUnitAbilities, harmfulStrategySuccessChance, deployUnitPreviewWithId, FACILITY_BUILD_COSTS, unitFacilities, unitIsIncapacitated, unitStrategies, type StrategyId, type TacticId } from '../game/battle/actions';
+import { effectiveUnitAbilities, harmfulStrategySuccessChance, deployUnitPreviewWithId, FACILITY_BUILD_COSTS, unitFacilities, unitFacilityMenuOptions, unitIsIncapacitated, unitStrategies, type StrategyId, type TacticId } from '../game/battle/actions';
 import type { CSSProperties } from 'react';
 import { gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticFacilityTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
@@ -437,6 +437,17 @@ export function GameShell() {
   ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
   const unitMenuStrategies = unitMenuQuery?.availableStrategies ?? [];
   const unitMenuFacilities = unitMenuQuery?.availableFacilities ?? [];
+  // 部队建造菜单的可见项：升级链（阵→砦→城塞 / 土垒→石墙 / 箭楼→连弩楼）只保留当前档位那一个入口，
+  // 高档设施不单独列条目（研究完科技后入口自己改名并升级）。
+  const facilityMenuForceId = (
+    unitFacilityMenu?.unitId ? unitMenuState?.units[unitFacilityMenu.unitId]?.forceId : undefined
+  ) ?? (
+    delegateFacilityMenu?.unitId ? state?.units[delegateFacilityMenu.unitId]?.forceId : undefined
+  ) ?? state?.playerForceId;
+  const facilityMenuOptions = useMemo(
+    () => unitFacilityMenuOptions(unitMenuState ?? state, facilityMenuForceId),
+    [facilityMenuForceId, state, unitMenuState],
+  );
   const tacticMenuState = pendingDeployActionPreview?.state ?? state;
   const tacticMenuOptions = (
     tacticMenuState && unitTacticMenu
@@ -2439,7 +2450,7 @@ export function GameShell() {
             setUnitFacilityMenu(null);
           }}
         >
-          {UNIT_FACILITIES.map((facility) => {
+          {facilityMenuOptions.map((facility) => {
             const enabled = unitMenuFacilities.some((candidate) => candidate.type === facility.type);
             return (
               <button
@@ -2488,11 +2499,9 @@ export function GameShell() {
             setDelegateFacilityMenu(null);
           }}
         >
-          {UNIT_FACILITIES.map((facility) => {
+          {facilityMenuOptions.map((facility) => {
             // 科技未解锁的设施在委任菜单里同样置灰（与部队设置菜单、validateCommand 同一口径）
-            const forceId = (delegateFacilityMenu.unitId ? state?.units[delegateFacilityMenu.unitId]?.forceId : undefined)
-              ?? state?.playerForceId;
-            const enabled = !state || canBuildFacility(state, forceId, facility.type);
+            const enabled = !state || canBuildFacility(state, facilityMenuForceId, facility.type);
             return (
               <button
                 key={facility.type}

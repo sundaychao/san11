@@ -30,10 +30,10 @@ export const PLOT_LABELS: Record<string, string> = {
   farm: '农场',
   barracks: '兵舍',
   smithy: '工房',
-  forge: '锻冶',
+  forge: '锻冶厂',
   stable: '厩舍',
-  shipyard: '造船',
-  mint: '造币',
+  shipyard: '造船厂',
+  mint: '造币厂',
   granary: '谷仓',
   blackmarket: '黑市',
   grandmarket: '大市场',
@@ -480,7 +480,7 @@ export function recruitBaseYield(officers: Officer[], city: City | Pass): number
   return 1000 + (charismaSum * (city.order + 20) * 5) / 100;
 }
 
-/** 训练气力提升 = 【(武力总和 + 武力最大值) ÷ 基数】+ 3，基数 = 士兵数÷2000 + 20 */
+/** 训练士气提升 = 【(武力总和 + 武力最大值) ÷ 基数】+ 3，基数 = 士兵数÷2000 + 20 */
 export function trainMoraleGain(officers: Officer[], troops: number): number {
   const warSum = officers.reduce((sum, officer) => sum + officer.stats.war, 0);
   const warMax = officers.reduce((max, officer) => Math.max(max, officer.stats.war), 0);
@@ -712,10 +712,26 @@ export function plotTotalLevel(city: City | Pass, type: PlotType): number {
   return (city.plots ?? []).reduce((sum, plot) => sum + (plot.type === type ? plot.level : 0), 0);
 }
 
-/** 城市中指定设施的数量（含建设中），用于「一城限一」判断：建设中也占用名额，撤销建设后释放 */
-export function plotCountIncludingConstructing(city: City, type: PlotType): number {
-  return (city.plots ?? []).reduce(
+/** 据点中指定设施的数量（含建设中），用于「一城限一」判断：建设中也占用名额，撤销建设后释放 */
+export function plotCountIncludingConstructing(stronghold: City | Pass, type: PlotType): number {
+  return (stronghold.plots ?? []).reduce(
     (count, plot) => count + (plot.type === type || plot.constructing?.facility === type ? 1 : 0),
+    0,
+  );
+}
+
+/** 据点中指定设施**已建成**的数量（不含建设中）。
+ *  开发界面用它渲染「市场(3)」——只统计真正落成的设施，正在施工的不算已建成。 */
+export function plotBuiltCount(stronghold: City | Pass, type: PlotType): number {
+  return (stronghold.plots ?? []).reduce((count, plot) => count + (plot.type === type ? 1 : 0), 0);
+}
+
+/** 据点中指定设施**正在建设**的数量（不含已建成）。
+ *  开发界面用它判断名称右侧的合计数量（已建成 + 在建，如「市场(2)」）
+ *  是否改用淡蓝色：> 0 即说明其中还有地格在施工。 */
+export function plotConstructingCount(stronghold: City | Pass, type: PlotType): number {
+  return (stronghold.plots ?? []).reduce(
+    (count, plot) => count + (plot.constructing?.facility === type ? 1 : 0),
     0,
   );
 }

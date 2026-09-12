@@ -1333,15 +1333,33 @@ button { color: inherit; }
   justify-content: space-between;
   align-items: center;
   gap: 6px;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: #ffe8a8;
-  white-space: nowrap;
+}
+/* 设施名 + 已建成数量（如「市场(3)」）：数量跟在名字右边，过长时整体换行而不是溢出卡片 */
+.plot-facility-card-name {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+/* 已建成计数：与设施名同色系、略小一号 */
+.plot-facility-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e6cd8f;
+  font-variant-numeric: tabular-nums;
+}
+/* 其中还有地格在建设中：数量整串改用淡蓝色，提示「这个数字包含在建的」 */
+.plot-facility-count.is-building {
+  color: #8ecbff;
 }
 .plot-facility-card-level {
   font-size: 12px;
   color: #d4b06a;
   font-weight: 500;
+  white-space: nowrap;
 }
 .plot-facility-card-cost {
   color: #c9b78e;

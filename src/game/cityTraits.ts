@@ -2,7 +2,7 @@ import type { CityId } from './types';
 
 /** 城池特性（一城可多个）：影响内政/军事规则 */
 export type CityTrait =
-  | 'waterPort' // 水港：可建造船厂
+  | 'waterPort' // 水港：可建造造船厂
   | 'commerce' // 商贸：商人100%到访
   | 'craftsman' // 匠造：锻冶产量+50%
   | 'ranch' // 畜牧：厩舍产量+200%
@@ -57,9 +57,9 @@ export const CITY_SPECIALTY_DESCRIPTIONS: Record<CitySpecialty, string> = {
 };
 
 export const CITY_TRAIT_DESCRIPTIONS: Record<CityTrait, string> = {
-  waterPort: '水港：可以建造船厂以生产大型舰船',
+  waterPort: '水港：可以建造造船厂以生产大型舰船',
   commerce: '商贸：商人100%到访（非商贸城25%概率）',
-  craftsman: '匠造：锻造厂产量+50%',
+  craftsman: '匠造：锻冶厂产量+50%',
   ranch: '畜牧：厩舍产量+200%',
   academy: '学术：可以建造太学，人口产生的技巧值+50%',
   valor: '劲勇：新征士兵的士气以势力最大士气值计算',
