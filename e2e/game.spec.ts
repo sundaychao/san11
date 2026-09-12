@@ -18,13 +18,6 @@ test('plays, restores, and completes the Jingxiang scenario', async ({ page }, t
   expect(await page.getByTestId('city-marker').count()).toBe(42);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(await page.evaluate(() => document.documentElement.clientWidth));
 
-  if (testInfo.project.name === 'mobile-390') {
-    await page.getByRole('button', { name: '收起城市面板' }).click();
-    await page.getByRole('button', { name: /零陵.*刘表/ }).click();
-    await expect(page.getByRole('heading', { name: '零陵' })).toBeVisible();
-    await page.getByRole('button', { name: '展开城市面板' }).click();
-  }
-
   const mapBox = (await page.getByTestId('map-viewport').boundingBox())!;
   // china42 全图 42 座城，初始镜头只覆盖江陵周边，绝大多数城本来就在视口外，
   // 所以不能再断言「所有标记都在视口内」。这里校验的是标记定位正常：
@@ -51,6 +44,17 @@ test('plays, restores, and completes the Jingxiang scenario', async ({ page }, t
   // 城池名牌（city-marker）是 pointer-events:none 的装饰层，真正接收点击的是 footprint 色块，
   // 直接点名牌会被 Playwright 的可命中性检查拦下（footprint rect intercepts pointer events）。
   await page.locator('[data-testid^="city-footprint-jiangling-"]').first().click();
+
+  if (testInfo.project.name === 'mobile-390') {
+    // 旧版的「收起／展开城市面板」按钮已随底部面板改版移除。
+    // 移动端改为校验城市状态面板：选中本方城池后才渲染，手机布局下通栏停靠在底部。
+    const statusPanel = page.getByTestId('city-status-panel');
+    await expect(statusPanel).toBeVisible();
+    await expect(statusPanel.getByRole('heading', { name: '江陵' })).toBeVisible();
+    const statusBox = (await statusPanel.boundingBox())!;
+    expect(statusBox.width).toBeGreaterThan(350);
+  }
+
   // 城市指令菜单里该指令写作「巡查」，但指令弹窗标题沿用 COMMAND_LABELS 的「巡察」，
   // 确认按钮是「决定·巡察」。巡查属于多人执行指令，默认已自动推荐武将，
   // 不再有单人的「执行武将」下拉框，因此直接确认即可。

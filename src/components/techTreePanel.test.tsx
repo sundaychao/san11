@@ -29,7 +29,8 @@ describe('TechTreePanel（新版科技树界面）', () => {
     render(<TechTreePanel />);
 
     expect(TECH_TREE_NODES).toHaveLength(64);
-    const columnX = [40, 220, 400, 579, 759, 938];
+    // 六列列位（紧凑版：节点框 96 宽 + 24 走线间距 = 列间距 120）
+    const columnX = [34, 154, 274, 394, 514, 634];
     for (const node of TECH_TREE_NODES) {
       expect(screen.getByText(node.name)).toBeInTheDocument();
       const group = screen.getByTestId(`tech-node-${node.id}`);

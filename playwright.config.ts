@@ -2,7 +2,9 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 45_000,
+  // 荆襄剧本全流程（建安13年四月 → 建安15年四月，72 旬）本身就要 45s 上下，
+  // 1440 视口勉强压线、1920 视口必超时。整条链路是同一个用例，给足时间。
+  timeout: 120_000,
   fullyParallel: false,
   reporter: 'line',
   webServer: {

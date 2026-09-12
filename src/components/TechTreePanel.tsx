@@ -40,20 +40,25 @@ const LOCKED_OPACITY = 0.42;
 /** 未研究科技的统一底色（深灰）——只有一个已研究的节点才显示系统配色 */
 const UNRESEARCHED_FILL = '#3a3a36';
 
-/** 六列的左上角 x 坐标（与参考图列位一致） */
-const COLUMN_X = [40, 220, 400, 579, 759, 938];
-const BOX_W = 139;
+/** 六列的左上角 x 坐标：列间距 120 = 节点框 96 + 24 的箭头走线空间 */
+const COLUMN_X = [34, 154, 274, 394, 514, 634];
+/** 节点框宽度：科技名最长 4 字（12.5px ≈ 50px），96 足够放下名字与右上角状态角标 */
+const BOX_W = 96;
 const BOX_H = 23;
 /** 第 1 行节点框顶部 y */
 const FIRST_ROW_TOP = 56;
 const ROW_PITCH = 29;
-const CANVAS_W = 1129;
+/** 画布宽度 = 左右各留一点边距后刚好包住六列，比原来的 1129 窄约 1/3 */
+const CANVAS_W = 750;
 const CANVAS_H = 522;
 
 const HEADER_TOP = 4;
 const HEADER_H = 28;
-const HEADER_W = 148;
-const HEADER_NOTCH = 18;
+/** 层级标题条宽度取「列间距 - 4」，六条首尾相接成一条绶带 */
+const HEADER_W = 116;
+const HEADER_NOTCH = 12;
+/** 标题条相对节点框左边缘的偏移：让标题条居中在本列的列位上 */
+const HEADER_LEFT_OFFSET = (BOX_W - HEADER_W) / 2;
 const COST_TEXT_Y = HEADER_TOP + HEADER_H + 14;
 
 /** 连线／箭头：深色底上取暖灰，与面板描边同系 */
@@ -246,7 +251,7 @@ export function TechTreePanel({ nodeStatus, selectedNodeId, onSelectNode }: Tech
         {/* 层级标题与各层费用 */}
         <g className="tech-tree-headers">
           {TECH_TREE_LEVELS.map((item, index) => {
-            const left = COLUMN_X[index] - 34;
+            const left = COLUMN_X[index] + HEADER_LEFT_OFFSET;
             const midY = HEADER_TOP + HEADER_H / 2;
             const right = left + HEADER_W;
             const bottom = HEADER_TOP + HEADER_H;
@@ -280,7 +285,7 @@ export function TechTreePanel({ nodeStatus, selectedNodeId, onSelectNode }: Tech
                   textAnchor="middle"
                   dominantBaseline="central"
                   fill="#cdc2a0"
-                  fontSize={12}
+                  fontSize={11}
                   fontWeight={700}
                   style={UI_TEXT_STYLE}
                 >

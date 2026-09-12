@@ -5,6 +5,10 @@ import { expect, test } from '@playwright/test';
 // 这里断言关隘所在屏幕坐标的最上层元素就是关隘 footprint 本身。
 // 曾经 footprint 带内联 pointer-events:none、标记又是 pointer-events:none，
 // 导致关隘可点区域为零，点关隘完全没反应。
+// 窄视口（≤700px）会隐藏小地图，而本用例靠小地图把关隘移进视口；
+// 关隘可点性与视口宽度无关，桌面端覆盖即可。
+test.skip(({ viewport }) => (viewport?.width ?? 0) <= 700, '窄视口隐藏小地图，无法用它把关隘移进视口');
+
 test('pass footprint is the real hit target', async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem('jingxiang-208-auth-session-v1', JSON.stringify({
