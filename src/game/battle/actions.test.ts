@@ -2,12 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { initialArmaments } from '../armaments';
 import { runAiTurn } from '../ai';
 import { nextRandom } from '../random';
+import { CITY_GOLD_CAP, cityTroopCap } from '../innerAffairs';
+import { PASS_TROOP_CAP } from '../passes';
+import { cityResourceCaps, strongholdsExceedCaps } from '../strongholdCapacity';
 import { createGame } from '../scenario/jingxiang208';
 import { territoryCityAt, territoryForceAt } from '../territory';
 import { settleTenDay } from '../turn';
-import type { TroopType } from '../types';
+import type { FacilityType, TroopType } from '../types';
 import * as skillHandlers from '../skills/handlers';
-import { attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackPlot, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, repairableFacilities, repairFacility, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
+import { applyCatapultSplash, attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackPlot, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, repairableFacilities, repairFacility, settleBattleFacilities, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitStrategies, tacticTargetUnits, unitTactics, upgradeFacilitiesForTech, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
 import { attackablePlots } from './targetRules';
 import { applyGroundFireDamageToCities, applyImmediateFireDamageToCityAndPlot, GROUND_FIRE_CITY_DURABILITY } from './fire';
 import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
@@ -1008,6 +1011,210 @@ describe('battle deployment and movement actions', () => {
     expect(next.units['arrow-target'].troops).toBeLessThan(3000);
   });
 
+  it('gates the new field facilities behind their tech nodes while 阵/土垒/箭楼 stay free', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 4000,
+      food: 6000,
+      gold: 2000,
+    });
+    const unit = Object.values(state.units)[0];
+    setUniformTerrain(state, 'plain');
+    readyUnitAt(state, unit.id, { q: 10, r: 12 }, 'sword');
+
+    // 无科技：阵 / 土垒 / 箭楼 / 太鼓台等默认可建
+    for (const facility of ['formation', 'earthwork', 'arrowTower'] as const) {
+      expect(facilityBuildTargets(state, unit.id, undefined, facility).length).toBeGreaterThan(0);
+    }
+    // 需科技：砦/石墙（石工术）、连弩楼（建筑学）、投石台（弹道）、陷阱（火药/化学）
+    for (const facility of [
+      'fort', 'stoneWall', 'crossbowTower', 'catapultTower',
+      'fireSeed', 'fireBall', 'hellfireSeed', 'hellfireBall',
+    ] as const) {
+      expect(facilityBuildTargets(state, unit.id, undefined, facility)).toEqual([]);
+      expect(() => buildFacility(state, 'liu', unit.id, facility, { q: 10, r: 11 })).toThrow();
+    }
+
+    const researched = structuredClone(state);
+    researched.forces.liu.techNodes = ['shigongshu', 'jianzhuxue', 'dandao', 'huaxue'];
+    for (const facility of ['fort', 'stoneWall', 'crossbowTower', 'catapultTower', 'hellfireSeed', 'hellfireBall'] as const) {
+      expect(facilityBuildTargets(researched, unit.id, undefined, facility).length).toBeGreaterThan(0);
+    }
+    // 化学不覆盖火药：火焰种/火焰球仍需「火药」
+    expect(facilityBuildTargets(researched, unit.id, undefined, 'fireSeed')).toEqual([]);
+    expect(facilityBuildTargets(researched, unit.id, undefined, 'fireBall')).toEqual([]);
+    researched.forces.liu.techNodes = [...researched.forces.liu.techNodes, 'huoyao'];
+    expect(facilityBuildTargets(researched, unit.id, undefined, 'fireSeed').length).toBeGreaterThan(0);
+    expect(facilityBuildTargets(researched, unit.id, undefined, 'fireBall').length).toBeGreaterThan(0);
+  });
+
+  it('settles 连弩楼 harder than 箭楼 and keeps 投石台 on the 2~3 ring only', () => {
+    const towerState = (type: FacilityType, targets: Array<[string, { q: number; r: number }]>) => {
+      const state = createGame('liu', 1);
+      state.facilities = { tower: { id: 'tower', type, forceId: 'liu', q: 12, r: 10, durability: 900 } };
+      targets.forEach(([id, coord]) => addEnemyUnit(state, id, coord, 5000));
+      return state;
+    };
+    const loss = (state: ReturnType<typeof createGame>, id: string) => 5000 - state.units[id].troops;
+
+    // 箭楼 300：射程 1~2 格
+    const arrow = towerState('arrowTower', [['adjacent', { q: 13, r: 10 }], ['two-away', { q: 14, r: 10 }]]);
+    settleBattleFacilities(arrow);
+    expect(loss(arrow, 'adjacent')).toBe(300);
+    expect(loss(arrow, 'two-away')).toBe(300);
+
+    // 连弩楼 500：同样吃 1~2 格，但伤害更高
+    const crossbow = towerState('crossbowTower', [['adjacent', { q: 13, r: 10 }], ['two-away', { q: 14, r: 10 }]]);
+    settleBattleFacilities(crossbow);
+    expect(loss(crossbow, 'adjacent')).toBe(500);
+    expect(loss(crossbow, 'two-away')).toBe(500);
+
+    // 投石台 700：只打距其 2~3 格，相邻第 1 格（与 2 格）不挨打
+    const catapult = towerState('catapultTower', [
+      ['adjacent', { q: 13, r: 10 }],
+      ['two-away', { q: 14, r: 10 }],
+      ['three-away', { q: 15, r: 10 }],
+      ['four-away', { q: 16, r: 10 }],
+    ]);
+    settleBattleFacilities(catapult);
+    expect(loss(catapult, 'adjacent')).toBe(0);
+    expect(loss(catapult, 'two-away')).toBe(700);
+    expect(loss(catapult, 'three-away')).toBe(700);
+    expect(loss(catapult, 'four-away')).toBe(0);
+  });
+
+  it('lets 投石台 splash onto the surrounding ring with 霹雳 but not without it', () => {
+    const staged = (techNodes: string[]) => {
+      const state = createGame('liu', 1);
+      state.forces.liu.techNodes = techNodes;
+      state.facilities = { tower: { id: 'tower', type: 'catapultTower', forceId: 'liu', q: 12, r: 10, durability: 800 } };
+      addEnemyUnit(state, 'center-target', { q: 14, r: 10 }, 5000);
+      // 距投石台 1 格 → 不在 2~3 格直射圈内，只会吃到溅射
+      addEnemyUnit(state, 'splash-target', { q: 13, r: 10 }, 5000);
+      return state;
+    };
+
+    const withoutPili = staged(['dandao']);
+    settleBattleFacilities(withoutPili);
+    expect(5000 - withoutPili.units['center-target'].troops).toBe(700);
+    expect(withoutPili.units['splash-target'].troops).toBe(5000);
+
+    const withPili = staged(['dandao', 'pili']);
+    settleBattleFacilities(withPili);
+    // 中心格 700（不重复结算溅射），相邻 1 格溅射 350（中心伤害的 50%）
+    expect(5000 - withPili.units['center-target'].troops).toBe(700);
+    expect(5000 - withPili.units['splash-target'].troops).toBe(350);
+  });
+
+  it('applies 霹雳 splash to all six neighbouring cells regardless of force', () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.techNodes = ['pili'];
+    addEnemyUnit(state, 'center', { q: 14, r: 10 }, 5000);
+    addEnemyUnit(state, 'neighbour', { q: 13, r: 10 }, 5000);
+    addEnemyUnit(state, 'friendly-neighbour', { q: 14, r: 11 }, 5000);
+    addEnemyUnit(state, 'far-away', { q: 16, r: 10 }, 5000);
+    state.units['friendly-neighbour'].forceId = 'liu';
+
+    const next = structuredClone(state);
+    const hits = applyCatapultSplash(next, 'catapultTower', 'liu', { q: 14, r: 10 }, 700, { centerUnitId: 'center' });
+
+    expect(hits.map((hit) => hit.unitId).sort()).toEqual(['friendly-neighbour', 'neighbour']);
+    expect(next.units.center.troops).toBe(5000);
+    expect(next.units.neighbour.troops).toBe(4650);
+    expect(next.units['friendly-neighbour'].troops).toBe(4650);
+    expect(next.units['far-away'].troops).toBe(5000);
+
+    const withoutPili = structuredClone(state);
+    withoutPili.forces.liu.techNodes = [];
+    expect(applyCatapultSplash(withoutPili, 'catapultTower', 'liu', { q: 14, r: 10 }, 700, { centerUnitId: 'center' })).toEqual([]);
+    expect(withoutPili.units.neighbour.troops).toBe(5000);
+  });
+
+  it('applies the 阵→砦→城塞 protection gradient by range', () => {
+    const base = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 5000,
+      food: 6000,
+    });
+    setUniformTerrain(base, 'plain');
+    const defender = Object.values(base.units)[0];
+    readyUnitAt(base, defender.id, { q: 11, r: 10 }, 'sword');
+    base.units[defender.id].troops = 5000;
+    addEnemyUnit(base, 'gradient-attacker', { q: 10, r: 10 }, 5000);
+
+    const normal = attackUnit(base, 'cao', 'gradient-attacker', defender.id);
+    const normalLoss = base.units[defender.id].troops - normal.units[defender.id].troops;
+
+    const lossWith = (type: FacilityType, q: number, r: number) => {
+      const state = structuredClone(base);
+      state.facilities = { guard: { id: 'guard', type, forceId: 'liu', q, r, durability: 1200 } };
+      const hit = attackUnit(state, 'cao', 'gradient-attacker', defender.id);
+      return state.units[defender.id].troops - hit.units[defender.id].troops;
+    };
+
+    // 阵：1 格内 0.9，超过 1 格不生效
+    expect(lossWith('formation', 12, 10)).toBe(Math.round(normalLoss * 0.9));
+    expect(lossWith('formation', 13, 10)).toBe(normalLoss);
+    // 砦：2 格内 0.8
+    expect(lossWith('fort', 13, 10)).toBe(Math.round(normalLoss * 0.8));
+    expect(lossWith('fort', 14, 10)).toBe(normalLoss);
+    // 城塞：3 格内 0.7（既有数值不变）
+    expect(lossWith('fortress', 14, 10)).toBe(Math.round(normalLoss * 0.7));
+  });
+
+  it('upgrades 土垒/箭楼 to 石墙/连弩楼 when 建筑学 completes', () => {
+    const state = createGame('liu', 1);
+    state.facilities = {
+      wall: { id: 'wall', type: 'earthwork', forceId: 'liu', q: 11, r: 10, durability: 120 },
+      tower: { id: 'tower', type: 'arrowTower', forceId: 'liu', q: 13, r: 10, durability: 200 },
+      enemyWall: { id: 'enemyWall', type: 'earthwork', forceId: 'cao', q: 15, r: 10, durability: 90 },
+      fort: { id: 'fort', type: 'fort', forceId: 'liu', q: 17, r: 10, durability: 300 },
+      building: { id: 'building', type: 'earthwork', forceId: 'liu', q: 19, r: 10, durability: 100, completed: false },
+    };
+
+    // 石工术不触发升级（砦是新建设施，不是升级而来）
+    expect(upgradeFacilitiesForTech(state, 'liu', 'shigongshu')).toBe(0);
+    expect(upgradeFacilitiesForTech(state, 'liu', 'jianzhuxue')).toBe(2);
+
+    expect(state.facilities.wall).toMatchObject({
+      id: 'wall', type: 'stoneWall', forceId: 'liu', q: 11, r: 10, durability: 600, completed: true,
+    });
+    expect(state.facilities.tower).toMatchObject({
+      id: 'tower', type: 'crossbowTower', forceId: 'liu', q: 13, r: 10, durability: 900, completed: true,
+    });
+    // 敌方土垒、未建成的土垒与其它设施不受影响
+    expect(state.facilities.enemyWall).toMatchObject({ type: 'earthwork', durability: 90 });
+    expect(state.facilities.building).toMatchObject({ type: 'earthwork', durability: 100, completed: false });
+    expect(state.facilities.fort).toMatchObject({ type: 'fort', durability: 300 });
+    // 已在升级后的设施不会重复升级
+    expect(upgradeFacilitiesForTech(state, 'liu', 'jianzhuxue')).toBe(0);
+  });
+
+  it('doubles stronghold capacity with 修筑要塞 for cities and passes', () => {
+    const state = createGame('liu', 1);
+    const city = state.cities.jiangling;
+    city.gold = CITY_GOLD_CAP + 1;
+    expect(strongholdsExceedCaps(state)).toBe(true);
+
+    const researched = structuredClone(state);
+    researched.forces.liu.techNodes = ['xiuzhuyaosai'];
+    expect(strongholdsExceedCaps(researched)).toBe(false);
+    expect(cityResourceCaps(researched, researched.cities.jiangling)).toMatchObject({
+      gold: CITY_GOLD_CAP * 2,
+      troops: Math.round(cityTroopCap(researched.cities.jiangling) * 2),
+    });
+
+    // 港关容量同样＋100%：关隘兵力超过基准上限但未超过翻倍上限时不算超限
+    const pass = Object.values(researched.passes!)[0]!;
+    pass.ownerId = 'liu';
+    pass.troops = PASS_TROOP_CAP + 1;
+    expect(strongholdsExceedCaps(researched)).toBe(false);
+    researched.forces.liu.techNodes = [];
+    expect(strongholdsExceedCaps(researched)).toBe(true);
+  });
+
   it('ignites fire seed and fire ball traps with fire strategy', () => {
     const seedState = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -1067,6 +1274,58 @@ describe('battle deployment and movement actions', () => {
       { q: 12, r: 11 },
       { q: 13, r: 11 },
     ]);
+  });
+
+  it('ignites 业火种 and 业火球 for higher damage and longer burning ground', () => {
+    const seedState = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 4000,
+      food: 6000,
+    });
+    const seedUnit = Object.values(seedState.units)[0];
+    readyUnitAt(seedState, seedUnit.id, { q: 10, r: 10 }, 'sword');
+    addEnemyUnit(seedState, 'hellfire-seed-target', { q: 11, r: 11 }, 5000);
+    seedState.facilities = {
+      seed: { id: 'seed', type: 'hellfireSeed', forceId: 'liu', q: 11, r: 10, durability: 250 },
+    };
+
+    const seedResult = useUnitStrategy(seedState, 'liu', seedUnit.id, 'fire', { coord: { q: 11, r: 10 } });
+    expect(seedResult.units['hellfire-seed-target'].troops).toBe(5000 - 1200);
+    expect(seedResult.facilities?.seed).toBeUndefined();
+    expect(seedResult.firePlots).toHaveLength(7);
+    for (const plot of seedResult.firePlots ?? []) {
+      // 业火持续 2~4 旬（普通火焰种为 1~3 旬）
+      expect(plot.remainingTenDays).toBeGreaterThanOrEqual(2);
+      expect(plot.remainingTenDays).toBeLessThanOrEqual(4);
+    }
+
+    const ballState = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 4000,
+      food: 6000,
+    });
+    const ballUnit = Object.values(ballState.units)[0];
+    readyUnitAt(ballState, ballUnit.id, { q: 10, r: 10 }, 'sword');
+    addEnemyUnit(ballState, 'hellfire-ball-target', { q: 12, r: 11 }, 5000);
+    ballState.facilities = {
+      ball: { id: 'ball', type: 'hellfireBall', forceId: 'liu', q: 11, r: 10, durability: 250 },
+    };
+
+    const ballResult = useUnitStrategy(ballState, 'liu', ballUnit.id, 'fire', { coord: { q: 11, r: 10 } });
+    // 业火球沿用 fireBallCells 的贯通 3 格，伤害 1200
+    expect(ballResult.units['hellfire-ball-target'].troops).toBe(5000 - 1200);
+    expect(ballResult.facilities?.ball).toBeUndefined();
+    expect(ballResult.firePlots?.map(({ q, r }) => ({ q, r }))).toEqual([
+      { q: 11, r: 10 },
+      { q: 12, r: 11 },
+      { q: 13, r: 11 },
+    ]);
+    for (const plot of ballResult.firePlots ?? []) {
+      expect(plot.remainingTenDays).toBeGreaterThanOrEqual(2);
+      expect(plot.remainingTenDays).toBeLessThanOrEqual(4);
+    }
   });
 
   it('ignites ordinary facilities with fire strategy and damages their durability', () => {

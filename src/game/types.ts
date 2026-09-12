@@ -13,8 +13,20 @@ export type RankId =
   | 'wang'
   | 'huangdi';
 
-/** 科技方向：枪兵/戟兵/弩兵/骑兵/军制/内政 */
-export type TechBranchId = 'spear' | 'halberd' | 'crossbow' | 'cavalry' | 'military' | 'civil';
+/** 科技系统：步战/射击/军制/骑牧/航行/理工/经济/文教/化工 */
+export type TechSystemId =
+  | 'infantry'
+  | 'archery'
+  | 'military'
+  | 'cavalry'
+  | 'navy'
+  | 'engineering'
+  | 'economy'
+  | 'culture'
+  | 'chemistry';
+
+/** 科技节点 id（64 个，具体清单见 game/techs.ts 的 TECH_NODES） */
+export type TechNodeId = string;
 
 export type CityId =
   // 剧本开局有主的 8 城（荆襄）
@@ -152,7 +164,7 @@ export type OfficerLocation =
   | { kind: 'unaffiliated'; cityId: CityId }
   | { kind: 'transfer'; fromCityId: CityId; fromPassId?: PassId; targetCityId: CityId; targetPassId?: PassId; remainingTenDays: number }
   | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'armament'; armamentType: ArmamentType; amount: number; remainingTenDays: number; lead?: boolean }
-  | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'research'; branch: TechBranchId; remainingTenDays: number; lead?: boolean }
+  | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'research'; nodeId: TechNodeId; remainingTenDays: number; lead?: boolean }
   | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'cultivate'; nodeId: string; remainingTenDays: number }
   | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'construction'; facility: string; plotIndex: number; remainingTenDays: number }
   | { kind: 'captive'; cityId: CityId; captorForceId: ForceId; capturedTenDays: number };
@@ -181,6 +193,9 @@ export interface City {
   gridR: number;
   durability: number;
   maxDurability: number;
+  /** 已因科技提升的耐久额度（工程学「据点最大耐久＋3000」的幂等标记）。
+   *  旬结算按归属势力补齐到应得额度；易主后由新主补上，已吃过的份额不会重复叠加。 */
+  techDurabilityBonus?: number;
   armaments?: CityArmaments;
   grainPrice?: number;
   /** 商人本旬是否到访（每旬独立 1/4 概率） */
@@ -229,6 +244,8 @@ export interface Pass {
   /** 关隘耐久（与城池同款属性；当前关隘不可被攻击，仅作据点基础属性展示） */
   durability: number;
   maxDurability: number;
+  /** 已因科技提升的耐久额度（工程学「据点最大耐久＋3000」的幂等标记，语义同 City.techDurabilityBonus） */
+  techDurabilityBonus?: number;
   armaments?: CityArmaments;
   /** 本旬是否已训练过守军（每旬每据点仅一次） */
   trainedThisTenDay?: boolean;
@@ -253,8 +270,8 @@ export interface Force {
   xing?: number;
   /** 技巧P（研究科技用） */
   techP?: number;
-  /** 各科技方向已研究等级 0-4 */
-  techs?: Partial<Record<TechBranchId, number>>;
+  /** 已研究的科技节点 id（9 系统 × 6 级共 64 个节点，见 game/techs.ts） */
+  techNodes?: TechNodeId[];
   /** 能力研究（PK版研究能力树）状态 */
   abilityResearch?: AbilityResearchState;
   /** 当前爵位（随城市数量每月自动晋升） */
@@ -392,13 +409,36 @@ export interface DuelReport {
   defenderUnitLoss: number;
 }
 
+/** 着火格：remainingTenDays 为剩余旬数（普通火焰 1~3 旬；业火种/业火球点燃的业火 2~4 旬） */
 export interface FirePlot {
   q: number;
   r: number;
   remainingTenDays?: number;
 }
 
-export type FacilityType = 'drum' | 'arrowTower' | 'musicTower' | 'fortress' | 'earthwork' | 'fireSeed' | 'fireBall';
+/**
+ * 野外设施类型（科技解锁见 game/techs.ts 的 TECH_FACILITY_GATES）：
+ * - 据点型：formation 阵（无门槛）→ fort 砦（石工术）→ fortress 城塞（建筑学），提供 ZOC、移动阻挡与逐级增强的防护/补给；
+ * - 阻挡型：earthwork 土垒（无门槛）→ stoneWall 石墙（石工术），只阻挡移动、可被任意势力修补；
+ * - 攻击型：arrowTower 箭楼（无门槛）→ crossbowTower 连弩楼（建筑学）→ catapultTower 投石台（弹道，射程 2~3 格）；
+ * - 辅助型：drum 太鼓台 / musicTower 军乐台；
+ * - 陷阱型：fireSeed 火焰种 / fireBall 火焰球（火药）→ hellfireSeed 业火种 / hellfireBall 业火球（化学）。
+ */
+export type FacilityType =
+  | 'drum'
+  | 'arrowTower'
+  | 'crossbowTower'
+  | 'catapultTower'
+  | 'musicTower'
+  | 'formation'
+  | 'fort'
+  | 'fortress'
+  | 'earthwork'
+  | 'stoneWall'
+  | 'fireSeed'
+  | 'fireBall'
+  | 'hellfireSeed'
+  | 'hellfireBall';
 
 /** 部队委任（自动行动，点击「进行」时对未手动操作且有委任的部队自动执行）：
  * - move：沿最优路径向目标移动，到达后结束；
@@ -542,7 +582,7 @@ export type GameCommand =
   | { type: 'talent'; cityId: CityId; passId?: PassId; officerId: string }
   | { type: 'explore'; cityId: CityId; passId?: PassId; officerIds: string[] }
   | { type: 'grantTreasure'; cityId: CityId; passId?: PassId; treasureId: string; officerId: string | null }
-  | { type: 'research'; cityId: CityId; passId?: PassId; officerIds: string[]; branch: TechBranchId }
+  | { type: 'research'; cityId: CityId; passId?: PassId; officerIds: string[]; nodeId: TechNodeId }
   | { type: 'abilityResearch'; cityId: CityId; passId?: PassId; nodeId: string }
   | { type: 'cultivate'; cityId: CityId; passId?: PassId; officerId: string; nodeId: string }
   | { type: 'transfer';

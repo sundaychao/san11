@@ -1,8 +1,10 @@
 import { unitIgnoresEnemyZocTerrain } from '../skills/rules/movement';
-import type { ArmyUnit, City, CityId, Facility, ForceId, GameState, GridCell, PassId } from '../types';
+import type { ArmyUnit, City, CityId, Facility, ForceId, GameState, GridCell, PassId, TerrainType } from '../types';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
 import { isWaterTerrain, movementAllowanceForProfile, movementCostForCell, movementProfileForUnit, ZOC_FACILITY_TYPES, type MovementProfile } from './catalog';
 import { passBlockedKeys, passCenterBlockedFor } from '../passes';
+import { canCrossRoughTerrain, enemyTerritoryMoveCostBonus } from '../techs';
+import { territoryForceAt } from '../territory';
 
 /**
  * grid 坐标索引缓存：state.grid 是长度数万的数组，cellAt 原先是 O(n) 线性扫描，
@@ -92,9 +94,49 @@ function movementCost(state: GameState, coord: GridCoord, profile: MovementProfi
   return movementCostForCell(cellAt(state, coord), profile, vehicle);
 }
 
+/**
+ * 科技「开路军」：小径、浅滩、川地形默认不可进入，研究后才能通行（山崖始终不可通行）。
+ * 栈道不额外扣兵（开路军的「经过栈道不损失士兵」体现在这里）。
+ */
+const ROUGH_TERRAINS: readonly TerrainType[] = ['path', 'shallow', 'stream'];
+
+function terrainBlockedByTech(state: GameState, coord: GridCoord, forceId?: ForceId): boolean {
+  const terrain = cellAt(state, coord)?.terrain;
+  if (!terrain || !ROUGH_TERRAINS.includes(terrain)) return false;
+  return !canCrossRoughTerrain(state, forceId);
+}
+
+/**
+ * 科技「修筑要塞」：敌军在我方领地内移动时，每种地形的消耗 +1。
+ * 领地按 territoryForceAt 判定；己方/无主领地不受影响。
+ */
+function enemyTerritoryMoveCost(state: GameState, coord: GridCoord, movingForceId?: ForceId): number {
+  if (!movingForceId) return 0;
+  const owner = territoryForceAt(state, coord);
+  if (!owner || owner === movingForceId) return 0;
+  return enemyTerritoryMoveCostBonus(state, owner);
+}
+
+/** 开路军研究后，川（stream）按可涉渡的浅水处理：可通行（消耗 5）且不再触发水域边界规则 */
+function streamFordableByForce(state: GameState, coord: GridCoord, forceId?: ForceId): boolean {
+  return cellAt(state, coord)?.terrain === 'stream' && canCrossRoughTerrain(state, forceId);
+}
+
+function movementCostForForce(
+  state: GameState,
+  coord: GridCoord,
+  profile: MovementProfile,
+  vehicle: 'boat' | 'ship' | undefined,
+  forceId?: ForceId,
+): number {
+  if (streamFordableByForce(state, coord, forceId)) return 5;
+  return movementCost(state, coord, profile, vehicle);
+}
+
 export function isLegalUnitCell(state: GameState, coord: GridCoord, ignoredUnitId?: string, profile: MovementProfile = 'sword', forceId?: ForceId) {
   const key = gridKey(coord);
-  return Number.isFinite(movementCost(state, coord, profile)) &&
+  return Number.isFinite(movementCostForForce(state, coord, profile, undefined, forceId)) &&
+    !terrainBlockedByTech(state, coord, forceId) &&
     !allCityKeys(state).has(key) &&
     !passBlockedKeys(state).has(key) &&
     // 敌方关隘中心格不可通行（己方/无主关隘可通行）
@@ -155,8 +197,12 @@ function reachableCostsFrom(
     for (const neighbor of neighborsOf(current.q, current.r)) {
       const key = gridKey(neighbor);
       const canTransitCity = options.allowedCityTransitKeys?.has(key) ?? false;
-      const terrainCost = movementCost(state, neighbor, profile, options.vehicle);
+      const terrainCost = movementCostForForce(state, neighbor, profile, options.vehicle, options.movingForceId);
       if (!Number.isFinite(terrainCost)) continue;
+      // 科技「开路军」：未研究时小径／浅滩／川不可通行
+      if (terrainBlockedByTech(state, neighbor, options.movingForceId)) continue;
+      // 科技「修筑要塞」：敌军在我方领地内每种地形的移动消耗 +1
+      const intrusionCost = enemyTerritoryMoveCost(state, neighbor, options.movingForceId);
       if (!canTransitCity && cityKeys.has(key)) continue;
       if (unitKeys.has(key)) continue;
       if (facilityKeys.has(key)) continue;
@@ -167,7 +213,9 @@ function reachableCostsFrom(
 
       // 横跨水域边界：陆地<->水域（河/海/川；浅滩/渡所是地面不算水面）。
       const currentIsWater = isWaterTerrain(currentTerrain);
-      const neighborIsWater = isWaterTerrain(neighborTerrain);
+      const neighborIsWater = streamFordableByForce(state, neighbor, options.movingForceId)
+        ? false
+        : isWaterTerrain(neighborTerrain);
       const crossesWaterBoundary = currentIsWater !== neighborIsWater;
       // 经渡口横跨允许继续（渡口桥接），不受"需停留边界"限制
       const viaFerry = crossesWaterBoundary && (currentTerrain === 'ferry' || neighborTerrain === 'ferry' || ferryChain.has(currentKey));
@@ -179,7 +227,7 @@ function reachableCostsFrom(
       let nextCost: number;
       let isTerminal = false;
       if (viaFerry) {
-        nextCost = currentCost + terrainCost;
+        nextCost = currentCost + terrainCost + intrusionCost;
       } else if (crossesWaterBoundary) {
         // 非渡口跨界：只有当部队本回合从该边界格出发时才能跨一步入水/登岸
         // （即前一回合必须已停留在边界格）。否则本回合最多到达边界、不能越界；
@@ -188,7 +236,7 @@ function reachableCostsFrom(
         nextCost = movementBudget;
         isTerminal = true;
       } else {
-        nextCost = currentCost + terrainCost;
+        nextCost = currentCost + terrainCost + intrusionCost;
       }
 
       if (nextCost > movementBudget) continue;

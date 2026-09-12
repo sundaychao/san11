@@ -1,7 +1,8 @@
-import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, PassId, StrategyResultReport, TerrainType, TroopType } from '../types';
+import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, PassId, StrategyResultReport, TechNodeId, TerrainType, TroopType } from '../types';
 import { BLOCKED_TERRAINS, isWaterTerrain } from './catalog';
+import { isBattleShip } from '../armaments';
 import { nextRandom } from '../random';
-import { TECHP_PER_BREAK_UNIT, techLevelOf, troopDamageMultiplier, addTechP } from '../techs';
+import { TECHP_PER_BREAK_UNIT, addTechP, canBuildFacility, catapultSplash, cavalryRaidMove, cavalryStirrupBonus, energyCapOf, fireDamageMultiplier, fireRangeBonus, moraleCapOf, spearSeizesFood, tacticPowerMultiplier, troopAttackTechBonus, troopDefenseTechBonus } from '../techs';
 import { complexHandlerById } from '../skills/handlers';
 import { effectsOfKind, resolveOfficerSkills, resolveUnitSkills } from '../skills';
 import {
@@ -33,9 +34,22 @@ import { effectiveNavyAptitude, effectiveUnitAbilities, fireStrategySuccessChanc
 import {
   ARROW_TOWER_DAMAGE,
   BASE_ATTACK_DAMAGE,
+  BATTLESHIP_WATER_ATTACK_MULTIPLIER,
+  BATTLESHIP_WATER_DEFENSE_MULTIPLIER,
+  CATAPULT_SPLASH_MULTIPLIER,
+  CATAPULT_TOWER_DAMAGE,
+  CATAPULT_TOWER_MAX_RANGE,
+  CATAPULT_TOWER_MIN_RANGE,
+  CROSSBOW_TOWER_DAMAGE,
   DEFENSE_MAX_TROOPS,
   DEFENSE_MIN_TROOPS,
   DRUM_DAMAGE_MULTIPLIER,
+  FORMATION_DAMAGE_MULTIPLIER,
+  FORMATION_RANGE,
+  FORMATION_SUPPLY_MULTIPLIER,
+  FORT_DAMAGE_MULTIPLIER,
+  FORT_RANGE,
+  FORT_SUPPLY_MULTIPLIER,
   FULL_DAMAGE_TROOPS,
   MIN_ATTACK_DAMAGE,
   movementAllowanceForUnit,
@@ -45,10 +59,16 @@ import {
   FIRE_BALL_DAMAGE,
   FIRE_FACILITY_DAMAGE,
   FIRE_PLOT_DAMAGE,
+  FIRE_PLOT_MAX_TEN_DAYS,
+  FIRE_PLOT_MIN_TEN_DAYS,
   FIRE_SEED_DAMAGE,
   FORTRESS_DAMAGE_MULTIPLIER,
   FORTRESS_RANGE,
   FORTRESS_SUPPLY_MULTIPLIER,
+  HELLFIRE_BALL_DAMAGE,
+  HELLFIRE_PLOT_MAX_TEN_DAYS,
+  HELLFIRE_PLOT_MIN_TEN_DAYS,
+  HELLFIRE_SEED_DAMAGE,
   NAVAL_TACTIC_IDS,
   PUBLIC_REPAIRABLE_FACILITY_TYPES,
   SPACING_LIMITED_FACILITY_TYPES,
@@ -249,7 +269,8 @@ export function dispatchTerritoryDefenseForForce(state: GameState, forceId: Forc
       r: spawn.r,
       troops,
       food: troops * 2,
-      energy: 100,
+      // 与出征同口径：防御队士气 = 出发城池士气
+      energy: Math.min(moraleCapOf(state, forceId), territoryCity.training),
       movementRemaining: 0,
       moved: true,
       acted: false,
@@ -286,21 +307,44 @@ function facilityDamageMultiplier(state: GameState, attacker: ArmyUnit) {
   return boosted ? DRUM_DAMAGE_MULTIPLIER : 1;
 }
 
+/** 据点型设施提供的防护档位：阵（1 格 / 0.9）→ 砦（2 格 / 0.8）→ 城塞（3 格 / 0.7，既有数值不变） */
+export interface FacilityProtection {
+  /** 生效半径（格） */
+  range: number;
+  /** 范围内本方部队受到的伤害倍率 */
+  damageMultiplier: number;
+  /** 范围内本方部队的粮草消耗倍率 */
+  supplyMultiplier: number;
+}
+
+const FACILITY_PROTECTIONS: Partial<Record<FacilityType, FacilityProtection>> = {
+  formation: { range: FORMATION_RANGE, damageMultiplier: FORMATION_DAMAGE_MULTIPLIER, supplyMultiplier: FORMATION_SUPPLY_MULTIPLIER },
+  fort: { range: FORT_RANGE, damageMultiplier: FORT_DAMAGE_MULTIPLIER, supplyMultiplier: FORT_SUPPLY_MULTIPLIER },
+  fortress: { range: FORTRESS_RANGE, damageMultiplier: FORTRESS_DAMAGE_MULTIPLIER, supplyMultiplier: FORTRESS_SUPPLY_MULTIPLIER },
+};
+
+/** 覆盖该部队的最强据点防护（阵/砦/城塞，无则 undefined）；多重覆盖时取减伤最强的一档 */
+export function facilityProtectionForUnit(state: GameState, unit: ArmyUnit): FacilityProtection | undefined {
+  let best: FacilityProtection | undefined;
+  for (const facility of Object.values(state.facilities ?? {})) {
+    const protection = FACILITY_PROTECTIONS[facility.type];
+    if (!protection || !facilityIsCompleted(facility) || facility.forceId !== unit.forceId) continue;
+    if (gridDistanceWithin(facility, unit, protection.range) > protection.range) continue;
+    if (!best || protection.damageMultiplier < best.damageMultiplier) best = protection;
+  }
+  return best;
+}
+
 export function unitIsProtectedByFortress(state: GameState, unit: ArmyUnit) {
-  return Object.values(state.facilities ?? {}).some((facility) => (
-    facility.type === 'fortress' &&
-    facilityIsCompleted(facility) &&
-    facility.forceId === unit.forceId &&
-    gridDistanceWithin(facility, unit, FORTRESS_RANGE) <= FORTRESS_RANGE
-  ));
+  return facilityProtectionForUnit(state, unit) !== undefined;
 }
 
 export function unitSupplyMultiplier(state: GameState, unit: ArmyUnit) {
-  return unitIsProtectedByFortress(state, unit) ? FORTRESS_SUPPLY_MULTIPLIER : 1;
+  return facilityProtectionForUnit(state, unit)?.supplyMultiplier ?? 1;
 }
 
 export function reduceUnitDamageByFortress(state: GameState, target: ArmyUnit, damage: number) {
-  const multiplier = unitIsProtectedByFortress(state, target) ? FORTRESS_DAMAGE_MULTIPLIER : 1;
+  const multiplier = facilityProtectionForUnit(state, target)?.damageMultiplier ?? 1;
   return Math.min(target.troops, Math.max(0, Math.round(damage * multiplier)));
 }
 
@@ -313,9 +357,11 @@ function damageForRoll(
   defender?: ArmyUnit,
 ) {
   const attack = effectiveUnitAbilities(state, attacker);
-  const defenseLeadership = defender
-    ? effectiveUnitAbilities(state, defender).leadership.value
-    : attack.leadership.value;
+  const defenderAbilities = defender ? effectiveUnitAbilities(state, defender) : undefined;
+  // 科技「武器精造 / 防具精造 / 装甲」：攻击＋10、防御＋10（攻击折算到武力、防御折算到统率）
+  const techAttack = troopAttackTechBonus(state, attacker.forceId, attacker);
+  const techDefense = defender ? troopDefenseTechBonus(state, defender.forceId, defender) : 0;
+  const defenseLeadership = (defenderAbilities ? defenderAbilities.leadership.value : attack.leadership.value) + techDefense;
   const leadershipModifier = Math.min(1.2, Math.max(
     0.8,
     1 + (attack.leadership.value - defenseLeadership) / 250,
@@ -325,14 +371,18 @@ function damageForRoll(
   // 否则固定基数会与兵力脱钩，导致极小兵力部队打出远超自身兵力的伤害。
   const commitmentScale = Math.min(1, committed / FULL_DAMAGE_TROOPS);
   const attackScore = committed * (
-    0.08 + attack.leadership.value / 2000 + attack.war.value / 3000
+    0.08 + attack.leadership.value / 2000 + (attack.war.value + techAttack) / 3000
   );
   const rawDamage = BASE_ATTACK_DAMAGE * commitmentScale + attackScore;
   const randomModifier = 0.92 + rollValue * 0.16;
   const attackerOnWater = isWaterTerrain(unitTerrain(state, attacker));
-  const attackerShipModifier = attacker.vehicle === 'ship' && attackerOnWater ? SHIP_WATER_ATTACK_MULTIPLIER : 1;
-  const defenderShipModifier = defender && defender.vehicle === 'ship' && isWaterTerrain(unitTerrain(state, defender))
-    ? SHIP_WATER_DEFENSE_MULTIPLIER
+  // 造船术：同样的楼船船体升级为斗舰，水上攻击与防护都更强
+  const attackerShipModifier = attacker.vehicle === 'ship' && attackerOnWater
+    ? (isBattleShip(state, attacker) ? BATTLESHIP_WATER_ATTACK_MULTIPLIER : SHIP_WATER_ATTACK_MULTIPLIER)
+    : 1;
+  const defenderOnWater = Boolean(defender) && isWaterTerrain(unitTerrain(state, defender!));
+  const defenderShipModifier = defender && defender.vehicle === 'ship' && defenderOnWater
+    ? (isBattleShip(state, defender) ? BATTLESHIP_WATER_DEFENSE_MULTIPLIER : SHIP_WATER_DEFENSE_MULTIPLIER)
     : 1;
   // 武将光环：统率90+/96+/100+ 的主将为周围（含自身）提供攻防加成
   const auraAttackModifier = unitUnderAura(state, attacker) ? AURA_ATTACK_MULTIPLIER : 1;
@@ -521,7 +571,8 @@ export function tacticTargetFacilities(state: GameState, attackerId: string, tac
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
   return Object.values(state.facilities ?? {})
     .filter((facility) => (
-      facility.type === 'fireBall' &&
+      // 火矢可引燃球类陷阱：火焰球与业火球同口径
+      (facility.type === 'fireBall' || facility.type === 'hellfireBall') &&
       facilityIsCompleted(facility) &&
       gridDistanceWithin(attackerAtOrigin, facility, tactic.range) === tactic.range
     ))
@@ -535,8 +586,9 @@ export function firePlotCells(state: GameState, unitId: string, origin?: GridCoo
   const unit = state.units[unitId];
   if (!unit) return [];
   const source = origin ?? unit;
-  // 鬼谋：火计范围 +1
-  const range = 1 + resolveStrategySkillRules(state, unit, undefined, 'fire', STRATEGIES.fire.cost).rangeBonus;
+  // 鬼谋：火计范围 +1；科技「硝石」：火计范围 +2
+  const range = 1 + fireRangeBonus(state, unit.forceId)
+    + resolveStrategySkillRules(state, unit, undefined, 'fire', STRATEGIES.fire.cost).rangeBonus;
   return state.grid
     .filter((cell) => gridDistanceWithin(source, cell, range) <= range)
     .sort((a, b) => a.q - b.q || a.r - b.r);
@@ -546,9 +598,21 @@ export function unitFacilities(): UnitFacility[] {
   return Object.values(FACILITIES).filter((facility): facility is UnitFacility => Boolean(facility));
 }
 
+/** 该部队当前可建造的设施清单（科技门槛 TECH_FACILITY_GATES + 部队资金双过滤），供建造菜单使用 */
+export function buildableFacilitiesForUnit(state: GameState, unitId: string): UnitFacility[] {
+  const unit = state.units[unitId];
+  if (!unit || unit.kind === 'transport') return [];
+  return unitFacilities().filter((facility) => (
+    canBuildFacility(state, unit.forceId, facility.type)
+    && (unit.gold ?? 0) >= FACILITY_BUILD_COSTS[facility.type]
+  ));
+}
+
 export function facilityBuildTargets(state: GameState, unitId: string, origin?: GridCoord, facilityType?: FacilityType): GridCoord[] {
   const unit = state.units[unitId];
   if (!unit) return [];
+  // 科技门槛：砦/石墙（石工术）、城塞/连弩楼（建筑学）、投石台（弹道）、火焰种/火焰球（火药）、业火种/业火球（化学）
+  if (facilityType && !canBuildFacility(state, unit.forceId, facilityType)) return [];
   if (facilityType && (unit.gold ?? 0) < FACILITY_BUILD_COSTS[facilityType]) return [];
   const source = origin ?? unit;
   return neighborsOf(source.q, source.r)
@@ -725,13 +789,11 @@ function tacticAffectedUnits(next: GameState, attacker: ArmyUnit, target: ArmyUn
   return [target];
 }
 
-// 科技：战法兵科伤害加成（枪/戟/弩/骑的训练与精锐）+ 骑兵2级马镫（按本旬已移动格数每格+4%）
+// 科技：战法威力加成（训练+10%、专精+25%）+ 马镫（骑兵按本旬已移动格数每格+4%）
 function troopDamageMultiplierOfTactic(state: GameState, attacker: ArmyUnit, tactic: UnitTactic): number {
   if (!attacker.forceId) return 1;
-  const troop = tactic.troopType;
-  if (troop !== 'spear' && troop !== 'halberd' && troop !== 'crossbow' && troop !== 'cavalry') return 1;
-  let multiplier = troopDamageMultiplier(state, attacker.forceId, troop);
-  if (troop === 'cavalry' && techLevelOf(state, attacker.forceId, 'cavalry') >= 2) {
+  let multiplier = tacticPowerMultiplier(state, attacker.forceId, attacker);
+  if (tactic.troopType === 'cavalry' && cavalryStirrupBonus(state, attacker.forceId)) {
     const allowance = movementAllowanceForUnit(attacker);
     const movedCells = Math.max(0, allowance - (attacker.movementRemaining ?? 0));
     multiplier *= 1 + movedCells * 0.04;
@@ -875,8 +937,8 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
     next.units[targetId].confusedTenDays = 1;
   }
   if (next.units[attackerId]) {
-    // 科技：枪兵2级兵粮袭击——战法击中敌军时夺取其兵粮
-    if (tactic.troopType === 'spear' && techLevelOf(next, forceId, 'spear') >= 2) {
+    // 科技：兵粮袭击——枪兵战法击中敌军时夺取其兵粮
+    if (tactic.troopType === 'spear' && spearSeizesFood(next, forceId)) {
       const lootTarget = next.units[targetId];
       if (lootTarget) {
         const loot = Math.min(lootTarget.food, Math.floor(lootTarget.food * 0.15) + 200);
@@ -887,8 +949,8 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
     if (next.units[attackerId].stamina !== undefined) {
       next.units[attackerId].stamina = Math.max(0, next.units[attackerId].stamina - tactic.cost);
     }
-    // 科技：骑兵3级游击——攻击后可再次行动（二动）
-    if (!(tactic.troopType === 'cavalry' && techLevelOf(next, forceId, 'cavalry') >= 3)) {
+    // 科技：游击——骑兵战法后可利用剩余移动力再次移动
+    if (!(tactic.troopType === 'cavalry' && cavalryRaidMove(next, forceId))) {
       next.units[attackerId].acted = true;
     }
   }
@@ -999,7 +1061,7 @@ function applySuccessfulUnitStrategy(
     delete target.confusedTenDays;
     delete target.falseReportedTenDays;
   } else if (strategyId === 'inspire') {
-    target.energy = Math.min(100, target.energy + 20);
+    target.energy = Math.min(energyCapOf(next, target.forceId), target.energy + 20);
   } else if (strategyId === 'discord') {
     const victim = discordVictim(next, target);
     if (!victim) throw new Error('目标不在计略范围');
@@ -1110,16 +1172,26 @@ function fireBallPreviousCell(state: GameState, source: GridCoord, trap: GridCoo
     .sort((a, b) => gridDistanceWithin(source, a, 99) - gridDistanceWithin(source, b, 99) || a.q - b.q || a.r - b.r)[0] ?? source;
 }
 
-function addFirePlots(next: GameState, coords: GridCoord[]) {
+/** 着火格的持续旬数区间：普通陷阱火 1~3 旬，业火 2~4 旬（共用同一次掷骰方式，保证回放/联网一致） */
+interface FirePlotDuration {
+  min: number;
+  max: number;
+}
+
+const ORDINARY_FIRE_DURATION: FirePlotDuration = { min: FIRE_PLOT_MIN_TEN_DAYS, max: FIRE_PLOT_MAX_TEN_DAYS };
+const HELLFIRE_DURATION: FirePlotDuration = { min: HELLFIRE_PLOT_MIN_TEN_DAYS, max: HELLFIRE_PLOT_MAX_TEN_DAYS };
+
+function addFirePlots(next: GameState, coords: GridCoord[], duration: FirePlotDuration = ORDINARY_FIRE_DURATION) {
   const gridKeys = new Set(next.grid.map(gridKey));
   next.firePlots ??= [];
   const existing = new Set(next.firePlots.map(gridKey));
+  const span = Math.max(1, duration.max - duration.min + 1);
   for (const coord of coords) {
     const key = gridKey(coord);
     if (!gridKeys.has(key) || existing.has(key)) continue;
     const durationRoll = nextRandom(next.seed, next.rngCursor);
     next.rngCursor = durationRoll.cursor;
-    next.firePlots.push({ q: coord.q, r: coord.r, remainingTenDays: Math.floor(durationRoll.value * 3) + 1 });
+    next.firePlots.push({ q: coord.q, r: coord.r, remainingTenDays: Math.floor(durationRoll.value * span) + duration.min });
     existing.add(key);
   }
 }
@@ -1127,6 +1199,16 @@ function addFirePlots(next: GameState, coords: GridCoord[]) {
 function igniteGroundFire(next: GameState, coords: GridCoord[], looter?: ArmyUnit) {
   addFirePlots(next, coords);
   damageUnitsAt(next, coords, FIRE_PLOT_DAMAGE, 'fire-plot', looter);
+}
+
+/**
+ * 木兽（机械解锁的冲车升级版）：命中后让「被攻击的地点」着火。
+ * 与火计/陷阱共用 `addFirePlots` —— 同样的 `nextRandom(seed, rngCursor)` 掷骰与 1~3 旬火势，
+ * 因此新增的随机数同样可回放/联网；已在燃烧的格子不会重复点火，也不额外消耗游标。
+ * **就地修改** next（调用方需保证 state 已克隆）。
+ */
+export function igniteWoodenBeastAttack(next: GameState, coord: GridCoord) {
+  addFirePlots(next, [coord]);
 }
 
 function igniteOrdinaryFacility(next: GameState, facility: Facility, looter?: ArmyUnit) {
@@ -1152,20 +1234,35 @@ function igniteFacility(
   fireStrategyCaster?: ArmyUnit,
 ) {
   if (!facilityIsCompleted(facility)) return false;
-  if (facility.type === 'fireSeed') {
+  // 科技「猛火油」：释放者势力的基础火伤害＋100%
+  const casterForceId = fireStrategyCaster?.forceId ?? looter?.forceId;
+  const fireMultiplier = fireDamageMultiplier(next, casterForceId);
+  // 火焰种 / 业火种：本体 + 周围一圈共 7 格；业火伤害更高、留下的火持续 2~4 旬
+  const seedProfile = facility.type === 'fireSeed'
+    ? { damage: FIRE_SEED_DAMAGE, duration: ORDINARY_FIRE_DURATION, prefix: 'fire-seed' }
+    : facility.type === 'hellfireSeed'
+      ? { damage: HELLFIRE_SEED_DAMAGE, duration: HELLFIRE_DURATION, prefix: 'hellfire-seed' }
+      : undefined;
+  if (seedProfile) {
     const cells = [facility, ...neighborsOf(facility.q, facility.r)];
     const affectedCells = fireStrategyAffectedCells(next, cells, fireStrategyCaster);
-    addFirePlots(next, affectedCells);
-    damageUnitsAt(next, affectedCells, FIRE_SEED_DAMAGE, 'fire-seed', looter);
+    addFirePlots(next, affectedCells, seedProfile.duration);
+    damageUnitsAt(next, affectedCells, Math.round(seedProfile.damage * fireMultiplier), seedProfile.prefix, looter);
     damageFacilitiesAt(next, cells, FIRE_FACILITY_DAMAGE);
     delete next.facilities?.[facility.id];
     return true;
   }
-  if (facility.type === 'fireBall') {
+  // 火焰球 / 业火球：沿施放方向贯通 3 格（fireBallCells 对两者同样适用）
+  const ballProfile = facility.type === 'fireBall'
+    ? { damage: FIRE_BALL_DAMAGE, duration: ORDINARY_FIRE_DURATION, prefix: 'fire-ball' }
+    : facility.type === 'hellfireBall'
+      ? { damage: HELLFIRE_BALL_DAMAGE, duration: HELLFIRE_DURATION, prefix: 'hellfire-ball' }
+      : undefined;
+  if (ballProfile) {
     const cells = fireBallCells(next, source, facility);
     const affectedCells = fireStrategyAffectedCells(next, cells, fireStrategyCaster);
-    addFirePlots(next, affectedCells);
-    damageUnitsAt(next, affectedCells, FIRE_BALL_DAMAGE, 'fire-ball', looter);
+    addFirePlots(next, affectedCells, ballProfile.duration);
+    damageUnitsAt(next, affectedCells, Math.round(ballProfile.damage * fireMultiplier), ballProfile.prefix, looter);
     damageFacilitiesAt(next, cells, FIRE_FACILITY_DAMAGE);
     delete next.facilities?.[facility.id];
     return true;
@@ -1419,6 +1516,109 @@ export function dismantleFacility(state: GameState, forceId: ForceId, facilityId
   return next;
 }
 
+/** 科技完成时的既有设施自动升级表：建筑学 → 土垒升石墙、箭楼升连弩楼 */
+const FACILITY_TECH_UPGRADES: Partial<Record<TechNodeId, readonly (readonly [FacilityType, FacilityType])[]>> = {
+  jianzhuxue: [['earthwork', 'stoneWall'], ['arrowTower', 'crossbowTower']],
+};
+
+/**
+ * 建筑学：已建成的土垒自动升级为石墙、箭楼自动升级为连弩楼（返回升级数量）。
+ * 保留设施 id、坐标与归属，耐久按新类型的满耐久重置；未建成（completed:false）的设施与
+ * 其它势力的设施不受影响。
+ * **就地修改** state（与 addTechP 同口径，调用方需保证 state 已克隆）。
+ */
+export function upgradeFacilitiesForTech(state: GameState, forceId: ForceId, nodeId: TechNodeId): number {
+  const upgrades = FACILITY_TECH_UPGRADES[nodeId];
+  if (!upgrades || !state.facilities) return 0;
+  const replacement = new Map<FacilityType, FacilityType>(upgrades);
+  let upgraded = 0;
+  for (const facility of Object.values(state.facilities)) {
+    if (facility.forceId !== forceId || !facilityIsCompleted(facility)) continue;
+    const upgradedType = replacement.get(facility.type);
+    const definition = upgradedType ? FACILITIES[upgradedType] : undefined;
+    if (!upgradedType || !definition) continue;
+    facility.type = upgradedType;
+    facility.durability = definition.durability;
+    facility.completed = true;
+    upgraded += 1;
+  }
+  return upgraded;
+}
+
+/** 每旬自动攻击的设施档位：箭楼（1~2 格 300）→ 连弩楼（1~2 格 500）→ 投石台（2~3 格 700） */
+interface TowerProfile {
+  damage: number;
+  minRange: number;
+  maxRange: number;
+  reportPrefix: string;
+}
+
+const TOWER_PROFILES: Partial<Record<FacilityType, TowerProfile>> = {
+  arrowTower: { damage: ARROW_TOWER_DAMAGE, minRange: 1, maxRange: 2, reportPrefix: 'arrow-tower' },
+  crossbowTower: { damage: CROSSBOW_TOWER_DAMAGE, minRange: 1, maxRange: 2, reportPrefix: 'crossbow-tower' },
+  catapultTower: {
+    damage: CATAPULT_TOWER_DAMAGE,
+    minRange: CATAPULT_TOWER_MIN_RANGE,
+    maxRange: CATAPULT_TOWER_MAX_RANGE,
+    reportPrefix: 'catapult-tower',
+  },
+};
+
+/** 投石溅射来源：投石车等兵器部队，或设施投石台（斗舰投石后续可复用同一入口） */
+export type CatapultSplashSource = 'catapultUnit' | 'catapultTower';
+
+export interface CatapultSplashHit {
+  unitId: string;
+  q: number;
+  r: number;
+  amount: number;
+}
+
+export interface CatapultSplashOptions {
+  /** 中心格被命中的部队 id（溅射不对中心格重复结算，中心格上的任何部队都会被排除） */
+  centerUnitId?: string;
+  /** 击破溅射目标的部队（用于俘获/战死结算；缺省按无主击破处理） */
+  looter?: ArmyUnit;
+  /** 溅射倍率，缺省 CATAPULT_SPLASH_MULTIPLIER（中心伤害的 50%） */
+  multiplier?: number;
+}
+
+/**
+ * 霹雳：投石攻击（投石车/投石台/斗舰投石）命中后，对目标周围 6 格内的部队追加溅射伤害
+ * （不分敌我，伤害低于中心格）。需要攻击方势力拥有科技「霹雳」，否则原样返回空数组。
+ * **就地修改** next（调用方需保证 state 已克隆），返回实际溅射命中列表。
+ */
+export function applyCatapultSplash(
+  next: GameState,
+  source: CatapultSplashSource,
+  attackerForceId: ForceId | null | undefined,
+  center: GridCoord,
+  centerDamage: number,
+  options: CatapultSplashOptions = {},
+): CatapultSplashHit[] {
+  // 科技「霹雳」：投石攻击带溅射
+  if (!catapultSplash(next, attackerForceId)) return [];
+  const multiplier = options.multiplier ?? CATAPULT_SPLASH_MULTIPLIER;
+  const splashDamage = Math.max(0, Math.round(centerDamage * multiplier));
+  if (splashDamage <= 0) return [];
+
+  const hits: CatapultSplashHit[] = [];
+  for (const unit of [...Object.values(next.units)]) {
+    // 中心格不重复结算（含中心部队被击破、已从 units 移除的情况）
+    if (unit.id === options.centerUnitId || isSameCoord(unit, center)) continue;
+    if (gridDistanceWithin(center, unit, 1) > 1) continue;
+    const target = next.units[unit.id];
+    if (!target) continue;
+    // 溅射不分敌我；据点防护（阵/砦/城塞）照常减伤
+    const damage = reduceUnitDamageByFortress(next, target, splashDamage);
+    target.troops -= damage;
+    addDamageReport(next, target, damage, `${source}-splash`);
+    hits.push({ unitId: target.id, q: target.q, r: target.r, amount: damage });
+    if (target.troops <= 0) removeUnit(next, target, options.looter);
+  }
+  return hits;
+}
+
 export function settleBattleFacilities(next: GameState, activeForceId?: ForceId) {
   for (const facility of Object.values(next.facilities ?? {})) {
     if (!facilityIsCompleted(facility)) continue;
@@ -1436,18 +1636,26 @@ export function settleBattleFacilities(next: GameState, activeForceId?: ForceId)
           unit.stamina = Math.min(100, unit.stamina + 6 * musicMultiplier);
         }
       }
-    } else if (facility.type === 'arrowTower') {
+    } else if (TOWER_PROFILES[facility.type]) {
+      const profile = TOWER_PROFILES[facility.type]!;
       if (activeForceId && facility.forceId !== activeForceId) continue;
-      // 要塞城：本方工事伤害+50%（箭楼所在领地为要塞特性城且归属同势力时生效）
+      // 要塞城：本方工事伤害+50%（箭楼/连弩楼/投石台所在领地为要塞特性城且归属同势力时生效）
       const towerTerritory = territoryCityAt(next, facility);
       const fortressMultiplier = towerTerritory.ownerId === facility.forceId && hasCityTrait(towerTerritory.id, 'fortress') ? 1.5 : 1;
       for (const unit of [...Object.values(next.units)]) {
-        if (unit.forceId === facility.forceId || gridDistanceWithin(facility, unit, 2) > 2) continue;
+        if (unit.forceId === facility.forceId) continue;
+        // 连弩楼沿用箭楼射程（1~2 圈）；投石台只打 2~3 格（不含相邻第 1 格）
+        const distance = gridDistanceWithin(facility, unit, profile.maxRange);
+        if (distance < profile.minRange || distance > profile.maxRange) continue;
         const target = next.units[unit.id];
         if (!target) continue;
-        const damage = reduceUnitDamageByFortress(next, target, ARROW_TOWER_DAMAGE * fortressMultiplier);
+        const damage = reduceUnitDamageByFortress(next, target, profile.damage * fortressMultiplier);
         target.troops -= damage;
-        addDamageReport(next, target, damage, 'arrow-tower');
+        addDamageReport(next, target, damage, profile.reportPrefix);
+        // 科技「霹雳」：投石台命中后对目标周围 6 格追加溅射（不分敌我，不重复结算中心格）
+        if (facility.type === 'catapultTower') {
+          applyCatapultSplash(next, 'catapultTower', facility.forceId, target, damage, { centerUnitId: target.id });
+        }
         if (target.troops <= 0) removeUnit(next, target);
       }
     }

@@ -11,6 +11,8 @@ import { gridKey, neighborsOf, sevenCellCityFootprint } from '../game/battle/gri
 import { computeDelegatePath, setMoveDelegate } from '../game/battle/delegate';
 import { deployUnitWithId } from '../game/battle/deployment';
 import { executeCommand } from '../game/commands';
+import { cityPlots, PLOT_BASE_VALUE } from '../game/innerAffairs';
+import { completeTechResearch } from '../game/techs';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider, useGame } from '../game/store/GameProvider';
 import { settleTenDay } from '../game/turn';
@@ -105,6 +107,25 @@ function cityKeys(state: ReturnType<typeof createGame>) {
   return new Set(Object.values(state.cities).flatMap((city) => (
     sevenCellCityFootprint({ q: city.gridQ, r: city.gridR }).map(gridKey)
   )));
+}
+
+/** 为城中预置一座已建成的指定设施（生产兵装需锻冶/工房/厩舍/造船，冲车/井阑另需兵器工房） */
+function seedCityFacility(state: ReturnType<typeof createGame>, cityId: keyof ReturnType<typeof createGame>['cities'], type: 'forge' | 'smithy') {
+  const city = state.cities[cityId];
+  const plots = cityPlots(city);
+  if (plots.some((plot) => plot.type === type)) return;
+  const emptyPlot = plots.find((plot) => plot.type === 'empty' && !plot.constructing);
+  if (emptyPlot) {
+    emptyPlot.type = type;
+    emptyPlot.level = 1;
+    return;
+  }
+  plots.push({ id: `${cityId}-${type}`, type, level: 1, value: PLOT_BASE_VALUE, q: city.gridQ, r: city.gridR });
+}
+
+/** 给势力授科技：走引擎自带的 completeTechResearch，避免测试里手写 techNodes 数组 */
+function grantTech(state: ReturnType<typeof createGame>, forceId: string, nodeId: string) {
+  completeTechResearch(state, forceId as Parameters<typeof completeTechResearch>[1], nodeId as Parameters<typeof completeTechResearch>[2]);
 }
 
 function passableNonCityCell(state: ReturnType<typeof createGame>, coord: { q: number; r: number }) {
@@ -680,6 +701,73 @@ describe('command interface', { timeout: 30000 }, () => {
     const unitMarker = screen.getByTestId('battle-unit-marker');
     expect(within(unitMarker).getByText('冲')).toBeVisible();
     expect(unitMarker).toHaveAttribute('data-troop-type', 'siege');
+  });
+
+  it('攻城器械显示名吃科技：研究「机械」前出征面板显示「冲车」，研究后显示「木兽」', async () => {
+    const user = userEvent.setup();
+
+    // 对照：未研究 jixie → 仍是「冲车」，弹道也未研究 → 仍是「井阑」
+    const before = createGame('liu', 1);
+    before.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5, tower: 5 };
+    const first = renderState(before);
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    let menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-military'));
+    await user.click(within(menu).getByTestId('city-command-action-deploy'));
+    let dialog = screen.getByRole('dialog', { name: '出征编制' });
+    expect(within(dialog).getByRole('button', { name: '冲车' })).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: '井阑' })).toBeVisible();
+    expect(within(dialog).queryByRole('button', { name: '木兽' })).not.toBeInTheDocument();
+    first.unmount();
+
+    // 同一势力研究「机械」「弹道」后重开面板 → 冲车升格为木兽、井阑升格为投石车
+    const after = createGame('liu', 1);
+    after.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5, tower: 5 };
+    grantTech(after, 'liu', 'jixie');
+    grantTech(after, 'liu', 'dandao');
+    renderState(after);
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-military'));
+    await user.click(within(menu).getByTestId('city-command-action-deploy'));
+    dialog = screen.getByRole('dialog', { name: '出征编制' });
+    expect(within(dialog).getByRole('button', { name: '木兽' })).toBeVisible();
+    expect(within(dialog).getByRole('button', { name: '投石车' })).toBeVisible();
+    expect(within(dialog).queryByRole('button', { name: '冲车' })).not.toBeInTheDocument();
+  });
+
+  it('生产兵装面板显示名吃科技：研究「机械」后冲车卡片显示为「木兽」，库存数值不变', async () => {
+    const user = userEvent.setup();
+
+    const before = createGame('liu', 3);
+    seedCityFacility(before, 'jiangling', 'forge');
+    seedCityFacility(before, 'jiangling', 'smithy');
+    before.cities['jiangling'].armaments = { ...initialArmaments(), ram: 4, tower: 2 };
+    const first = renderState(before);
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    let menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    await user.click(within(menu).getByTestId('city-command-command-produceArmament'));
+    let panel = screen.getByRole('region', { name: '生产兵装选择' });
+    const ramCardBefore = within(panel).getByRole('button', { name: '冲车' });
+    expect(ramCardBefore).toHaveTextContent('4');
+    first.unmount();
+
+    const after = createGame('liu', 3);
+    seedCityFacility(after, 'jiangling', 'forge');
+    seedCityFacility(after, 'jiangling', 'smithy');
+    after.cities['jiangling'].armaments = { ...initialArmaments(), ram: 4, tower: 2 };
+    grantTech(after, 'liu', 'jixie');
+    renderState(after);
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    await user.click(within(menu).getByTestId('city-command-command-produceArmament'));
+    panel = screen.getByRole('region', { name: '生产兵装选择' });
+    const ramCardAfter = within(panel).getByRole('button', { name: '木兽' });
+    // 只换显示名：库存口径不变（仍是冲车字段的 4 辆），未研究弹道故井阑不变
+    expect(ramCardAfter).toHaveTextContent('4');
+    expect(within(panel).getByRole('button', { name: '井阑' })).toBeVisible();
   });
 
   it('opens the strategy menu for Ma Su during the first deployment action', async () => {

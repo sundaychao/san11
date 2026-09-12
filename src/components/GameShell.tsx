@@ -10,6 +10,7 @@ import { chooseDelegateSpawnCell } from '../game/battle/deployment';
 import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { canBuildPlotAtCoord, hasEnemyUnitsNear, isPlotOccupiedByOtherCity, PLOT_GOLD_COST, PLOT_LABELS, startBuildCityPlot, type PlotType } from '../game/innerAffairs';
 import { cityCenter, ownCityAt, unoccupiedCityAt } from '../game/battle/movementRules';
+import { canBuildFacility } from '../game/techs';
 import { ownPassAt, passAt, passBlockedKeys, unoccupiedPassAt } from '../game/passes';
 import { allPassAnchorKeys } from '../game/battle/movementRules';
 import { useGame } from '../game/store/GameProvider';
@@ -2487,15 +2488,23 @@ export function GameShell() {
             setDelegateFacilityMenu(null);
           }}
         >
-          {UNIT_FACILITIES.map((facility) => (
-            <button
-              key={facility.type}
-              type="button"
-              onClick={() => executeDelegateFacilitySelect(facility.type)}
-            >
-              {facility.name}（{FACILITY_BUILD_COSTS[facility.type]}）
-            </button>
-          ))}
+          {UNIT_FACILITIES.map((facility) => {
+            // 科技未解锁的设施在委任菜单里同样置灰（与部队设置菜单、validateCommand 同一口径）
+            const forceId = (delegateFacilityMenu.unitId ? state?.units[delegateFacilityMenu.unitId]?.forceId : undefined)
+              ?? state?.playerForceId;
+            const enabled = !state || canBuildFacility(state, forceId, facility.type);
+            return (
+              <button
+                key={facility.type}
+                type="button"
+                disabled={!enabled}
+                title={enabled ? undefined : '尚未研究出建造该设施的科技'}
+                onClick={() => executeDelegateFacilitySelect(facility.type)}
+              >
+                {facility.name}（{FACILITY_BUILD_COSTS[facility.type]}）
+              </button>
+            );
+          })}
         </nav>
       )}
       {unitStrategyMenu && unitMenuState && (

@@ -1,7 +1,8 @@
 import { Landmark } from 'lucide-react';
-import { ARMAMENT_LABELS, armamentsOf } from '../game/armaments';
+import { armamentLabelFor, armamentsOf } from '../game/armaments';
 import { grainPriceOf } from '../game/commands';
 import { cityPlotCount, cityPopulationOf, ruralPopulationOf } from '../game/innerAffairs';
+import { moraleCapOf } from '../game/techs';
 import type { City, GameState } from '../game/types';
 
 interface CityStatusPanelProps {
@@ -62,26 +63,26 @@ export function CityStatusPanel({ city, state }: CityStatusPanelProps) {
 
       <div className="csp-group">
         <StatusRow label="士兵" value={formatNumber(city.troops)} />
-        <StatusRow label="士气" value={`${city.training}/100`} />
+        <StatusRow label="士气" value={`${city.training}/${moraleCapOf(state, city.ownerId)}`} />
       </div>
 
       <div className="csp-group csp-armaments">
-        <span className="csp-label">{ARMAMENT_LABELS.spear}</span>
+        <span className="csp-label">{armamentLabelFor(state, city.ownerId, 'spear')}</span>
         <span className="csp-value">{formatNumber(armaments.spear)}</span>
-        <span className="csp-label">{ARMAMENT_LABELS.ram}</span>
+        <span className="csp-label">{armamentLabelFor(state, city.ownerId, 'ram')}</span>
         <span className="csp-value">{formatNumber(armaments.ram)}</span>
 
-        <span className="csp-label">{ARMAMENT_LABELS.halberd}</span>
+        <span className="csp-label">{armamentLabelFor(state, city.ownerId, 'halberd')}</span>
         <span className="csp-value">{formatNumber(armaments.halberd)}</span>
-        <span className="csp-label">{ARMAMENT_LABELS.tower}</span>
+        <span className="csp-label">{armamentLabelFor(state, city.ownerId, 'tower')}</span>
         <span className="csp-value">{formatNumber(armaments.tower)}</span>
 
-        <span className="csp-label">{ARMAMENT_LABELS.crossbow}</span>
+        <span className="csp-label">{armamentLabelFor(state, city.ownerId, 'crossbow')}</span>
         <span className="csp-value">{formatNumber(armaments.crossbow)}</span>
-        <span className="csp-label">{ARMAMENT_LABELS.ship}</span>
+        <span className="csp-label">{armamentLabelFor(state, city.ownerId, 'ship')}</span>
         <span className="csp-value">{formatNumber(armaments.ship)}</span>
 
-        <span className="csp-label">{ARMAMENT_LABELS.cavalry}</span>
+        <span className="csp-label">{armamentLabelFor(state, city.ownerId, 'cavalry')}</span>
         <span className="csp-value">{formatNumber(armaments.cavalry)}</span>
         <span className="csp-blank" />
         <span className="csp-blank" />

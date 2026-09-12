@@ -1,11 +1,11 @@
-import { ARMAMENT_LABELS, armamentsCarriedByDeploy, armamentsOf, takeArmaments, TROOP_ARMAMENT, TROOP_LABELS } from '../armaments';
-import { energyCapOf, techLevelOf, troopMovementBonusForTroop } from '../techs';
+import { armamentLabelFor, armamentsCarriedByDeploy, armamentsOf, takeArmaments, TROOP_ARMAMENT, TROOP_LABELS } from '../armaments';
+import { deployTroopCapOf, initialEnergyBonus, moraleCapOf, movementTechBonus } from '../techs';
 import { unitTroopCapOf } from '../ranks';
 import { appointSuccessorGovernor, hasPlotFacility } from '../innerAffairs';
 import { appointStrongholdSuccessor } from '../strongholds';
 import { formationMovementAllowanceBonus } from '../skills/rules/movement';
-import type { City, CityId, ForceId, GameState, Pass, PassId } from '../types';
-import { isWaterTerrain } from './catalog';
+import type { City, CityId, ForceId, GameState, Pass, PassId, TroopType } from '../types';
+import { battleShipMovementBonus, isWaterTerrain } from './catalog';
 import {
   DEPLOY_AP_COST,
   movementAllowanceForProfile,
@@ -20,6 +20,28 @@ export type { DeployInput, TransportInput } from './legacyCore';
 /** 解析出征/输送出发据点：passId 优先（关隘），否则按 cityId 取城池 */
 function deploySourceOf(state: GameState, input: { cityId?: CityId; passId?: PassId }): City | Pass | undefined {
   return input.passId ? state.passes?.[input.passId] : input.cityId ? state.cities[input.cityId] : undefined;
+}
+
+/**
+ * 出征移动力预算（出征与出征预览共用同一口径）：
+ * 兵种基础 + 阵型特技 + 科技（兵科对应节点）+ 舰船加成。
+ * 楼船/斗舰按水军口径取「罗盘」+6（与每旬重置 turn.ts 的 movementTechBonus 一致），
+ * 斗舰再额外 +4（造船术，`battleShipMovementBonus`）——罗盘的 +6 不重复给。
+ */
+function deploymentMovementAllowance(
+  state: GameState,
+  forceId: ForceId,
+  officerIds: string[],
+  troopType: TroopType,
+  vehicle: 'boat' | 'ship',
+) {
+  const techProfile = vehicle === 'ship'
+    ? { kind: 'combat' as const, troopType, vehicle: 'ship' as const }
+    : { kind: 'combat' as const, troopType };
+  return movementAllowanceForProfile(troopType)
+    + formationMovementAllowanceBonus(state, officerIds, troopType)
+    + movementTechBonus(state, forceId, techProfile)
+    + battleShipMovementBonus(state, { forceId, vehicle });
 }
 
 function preferredSpawnCell(state: GameState, source: City | Pass, movement: number, troopType: Parameters<typeof deploymentCellsForStronghold>[3], vehicle?: 'boat' | 'ship') {
@@ -77,7 +99,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   const gold = input.gold ?? 0;
   const armamentType = TROOP_ARMAMENT[troopType];
   const sourceArmaments = armamentsOf(source?.armaments);
-  const movementAllowance = movementAllowanceForProfile(troopType) + formationMovementAllowanceBonus(state, officerIds, troopType) + troopMovementBonusForTroop(state, forceId, troopType);
+  const movementAllowance = deploymentMovementAllowance(state, forceId, officerIds, troopType, vehicle);
   if (state.phase !== 'playing') throw new Error('游戏已经结束');
   if (state.turnForceId !== forceId) throw new Error('不是当前势力旬');
   if (!source || source.ownerId !== forceId) throw new Error('只能从己方据点出征');
@@ -100,9 +122,14 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   if (!Number.isInteger(input.food) || input.food < 0 || input.food > source.food) throw new Error('粮草不足');
   if (source.troops - input.troops < 500) throw new Error('据点至少保留 500 兵力');
   if (armamentType && sourceArmaments[armamentType] < input.troops) throw new Error(`${TROOP_LABELS[troopType]}兵装不足`);
-  if (vehicle === 'ship' && sourceArmaments.ship < 1) throw new Error('楼船兵装不足');
-  if (troopType === 'siege' && !input.siegeWeapon) throw new Error('需要选择冲车或井阑');
-  if (troopType === 'siege' && sourceArmaments[input.siegeWeapon!] < 1) throw new Error(`${ARMAMENT_LABELS[input.siegeWeapon!]}不足`);
+  // 兵装存储口径不变（冲车/井阑/楼船），但提示按科技口径显示（木兽/投石车/斗舰）
+  if (vehicle === 'ship' && sourceArmaments.ship < 1) throw new Error(`${armamentLabelFor(state, forceId, 'ship')}兵装不足`);
+  if (troopType === 'siege' && !input.siegeWeapon) {
+    throw new Error(`需要选择${armamentLabelFor(state, forceId, 'ram')}或${armamentLabelFor(state, forceId, 'tower')}`);
+  }
+  if (troopType === 'siege' && sourceArmaments[input.siegeWeapon!] < 1) {
+    throw new Error(`${armamentLabelFor(state, forceId, input.siegeWeapon!)}不足`);
+  }
 
   const spawn = input.destination ?? (target
     ? (input.passId
@@ -138,12 +165,11 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
     if (input.passId) appointStrongholdSuccessor(next, departSource);
     else appointSuccessorGovernor(next, departSource as City);
   }
-  // 科技：军制1级熟练兵气力上限+20；2级随军参谋初始气力+政治×20%
-  const energyCap = energyCapOf(state, forceId);
-  const staffOfficerBonus = techLevelOf(state, forceId, 'military') >= 2
-    ? Math.floor((officer?.stats.politics ?? 0) * 0.2)
-    : 0;
-  const initialEnergy = Math.min(energyCap, 100 + staffOfficerBonus);
+  // 部队士气 ＝ 出发据点的士气（两者是同一资源、同一上限）：据点士气多少，出阵部队就带多少；
+  // 科技「随军参谋」再额外 +相关属性×20%。战力另算（见下方 initialStamina）。
+  const moraleCap = moraleCapOf(state, forceId);
+  const staffOfficerBonus = initialEnergyBonus(state, forceId, officer?.stats.politics ?? 0);
+  const initialEnergy = Math.min(moraleCap, source.training + staffOfficerBonus);
   // 战力：出城战力 = 城中士气×25% + 部队最高政治×(基础20% + 科技加成0 + 兵部加成20%)
   const maxPolitics = officers.reduce((max, candidate) => Math.max(max, candidate.stats.politics), 0);
   const bingbuBonus = hasPlotFacility(source, 'bingbu') ? 0.2 : 0;
@@ -174,7 +200,7 @@ export function deployUnitPreviewWithId(state: GameState, forceId: ForceId, inpu
   const troopType = input.troopType ?? 'sword';
   const vehicle = input.vehicle ?? 'boat';
   const gold = input.gold ?? 0;
-  const movementAllowance = movementAllowanceForProfile(troopType) + formationMovementAllowanceBonus(state, officerIds, troopType) + troopMovementBonusForTroop(state, forceId, troopType);
+  const movementAllowance = deploymentMovementAllowance(state, forceId, officerIds, troopType, vehicle);
   const spawn = input.destination ?? preferredSpawnCell(state, source!, movementAllowance, troopType, vehicle);
   if (!source || !leaderId || !spawn) throw new Error('无法创建出征预览');
   const next = structuredClone(state);
@@ -183,9 +209,11 @@ export function deployUnitPreviewWithId(state: GameState, forceId: ForceId, inpu
   const previewMaxPolitics = previewOfficers.reduce((max, candidate) => Math.max(max, candidate?.stats.politics ?? 0), 0);
   const previewBingbuBonus = hasPlotFacility(source, 'bingbu') ? 0.2 : 0;
   const initialStamina = Math.min(100, Math.floor(source.training * 0.25 + previewMaxPolitics * (0.2 + previewBingbuBonus)));
+  // 与 deployUnit 同口径：部队士气 = 出发据点士气 + 「随军参谋」按主将政治加成
+  const previewEnergy = Math.min(moraleCapOf(state, forceId), source.training + initialEnergyBonus(state, forceId, previewOfficers[0]?.stats.politics ?? 0));
   next.units[unitId] = {
     id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.passId ? (source as Pass).homeCityId : input.cityId!,
-    troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: 100, stamina: initialStamina,
+    troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: previewEnergy, stamina: initialStamina,
     movementRemaining: movementAllowance, moved: true, acted: false,
   };
   return { state: next, unitId };
@@ -232,7 +260,9 @@ export function deployTransportUnit(state: GameState, forceId: ForceId, input: T
   }
   next.units[unitId] = {
     id: unitId, kind: 'transport', forceId, leaderId: input.officerId, homeCityId: input.passId ? (source as Pass).homeCityId : input.cityId!,
-    gold: input.gold, q: spawn.q, r: spawn.r, troops: input.troops, food: input.food, energy: 100,
+    gold: input.gold, q: spawn.q, r: spawn.r, troops: input.troops, food: input.food,
+    // 与出征同口径：输送队士气也来自出发据点
+    energy: Math.min(moraleCapOf(state, forceId), source.training),
     movementRemaining: 0, moved: true, acted: false,
   };
   next.logs.push({ id: `transport-${unitId}`, month: next.month, forceId, message: `${officer.name}从${source.name}输送物资` });

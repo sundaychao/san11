@@ -2,11 +2,11 @@ import { nextRandom } from './random';
 import { cityCanBuildFacility, hasCityTrait, forceMaxTraining } from './cityTraits';
 import { REWARD_AP_COST, REWARD_GOLD_COST, REWARD_LOYALTY_GAIN, officerLoyalty, recruitmentInitialLoyalty, setOfficerLoyalty } from './loyalty';
 import { addOfficerMerit, applyPositionStatDelta, MERIT_PER_COMMAND, officerIsOnCampaign, officerMerit, positionDefinition, forceRankOf, rankDefinition, rankIndex } from './ranks';
-import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, CITY_ARMAMENT_CAPS, armamentCost, armamentsOf, armamentProductionTenDays, clampArmamentsTo, isDelayedArmament, produceArmamentYield } from './armaments';
+import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentCost, armamentsOf, armamentProductionTenDays, clampArmamentsTo, isDelayedArmament, produceArmamentYield } from './armaments';
 import { ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, CULTIVATE_TEN_DAYS, abilityCultivateRemaining, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
 import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from './skills/rules/city';
 import { effectsOfKind, officerSkillNames, resolveCommandSkills, resolveOfficerSkills } from './skills';
-import { MAX_TECH_LEVEL, RESEARCH_AP_COST, TECH_BRANCHES, TECH_COSTS, TECHP_PER_CIVIL_ACTION, TECHP_PER_CONSTRUCTION, TECHP_PER_PATROL, TECHP_PER_PRODUCE_ARMAMENT, TECHP_PER_TRADE, TECHP_PER_TRAIN, addTechP, recruitMultiplier, researchTenDays, techLevelOf } from './techs';
+import { RESEARCH_AP_COST, TECHP_PER_CIVIL_ACTION, TECHP_PER_CONSTRUCTION, TECHP_PER_PATROL, TECHP_PER_PRODUCE_ARMAMENT, TECHP_PER_TRADE, TECHP_PER_TRAIN, actionPointCostMultiplier, addTechP, canBuildFacility, facilityLevelCap, hasTech, moraleCapOf, researchTenDays, techCostOf, techNodeOf, techPrereqMet } from './techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_CHANCE, EXPLORE_GOLD_MAX, EXPLORE_GOLD_MIN, EXPLORE_GOLD_PER_OFFICER, EXPLORE_TREASURE_BASE_CHANCE, EXPLORE_TREASURE_INT_BONUS_MAX, treasureDefinition } from './treasures';
 import { RUMOR_AP_COST, RUMOR_GOLD_COST, resolveRumor, POACH_AP_COST, POACH_GOLD_COST, resolvePoach, canPoach } from './rumor';
 import { DIPLOMACY_AP_COST, GOODWILL_GOLD_COST, DIPLOMACY_GOLD_MAX, REINFORCEMENT_TEN_DAYS, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, adjustDiplomacy, areAllies, forceHasCity, goodwillGain, resolveAlliance, resolveRequestTroops, resolveTruce } from './diplomacy';
@@ -15,10 +15,10 @@ import { MARRY_TECHP_COST, RELATIONSHIP_LABELS, areRelated, enterRelationship, r
 import { isPassBlocked } from './passes';
 import { createDebate } from './debate';
 import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, COMMAND_OFFICER_MAX,
-                             appointSuccessorGovernor, CITY_FOOD_CAP, CITY_GOLD_CAP, hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
+                             appointSuccessorGovernor, hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
 import { appointStrongholdSuccessor, isPassGarrison } from './strongholds';
-import { clampStrongholdsInPlace } from './strongholdCapacity';
-import type { City, CityId, ForceId, GameCommand, GameState, Legion, Officer, Pass, PassId, TechBranchId } from './types';
+import { cityResourceCaps, clampStrongholdsInPlace } from './strongholdCapacity';
+import type { City, CityId, ForceId, GameCommand, GameState, Legion, Officer, Pass, PassId, TechNodeId } from './types';
 
 export const COMMAND_AP = {
   recruit: 20,
@@ -206,14 +206,14 @@ function commandGoldCost(command: GameCommand, stronghold?: City | Pass) {
   }
 }
 
-/** 研究下一级科技的金钱消耗 */
-export function researchGoldCost(state: GameState, forceId: ForceId, branch: TechBranchId): number {
-  return TECH_COSTS[techLevelOf(state, forceId, branch)]?.gold ?? 0;
+/** 研究指定科技的金钱消耗 */
+export function researchGoldCost(nodeId: TechNodeId): number {
+  return techCostOf(nodeId)?.gold ?? 0;
 }
 
-/** 研究下一级科技的技巧P消耗（指导：消耗减半；多名执行武将中任一人持有即生效） */
-export function researchTechPCost(state: GameState, forceId: ForceId, branch: TechBranchId, officerIds?: string[]): number {
-  const base = TECH_COSTS[techLevelOf(state, forceId, branch)]?.techP ?? 0;
+/** 研究指定科技的技巧P消耗（指导：消耗减半；多名执行武将中任一人持有即生效） */
+export function researchTechPCost(state: GameState, nodeId: TechNodeId, officerIds?: string[]): number {
+  const base = techCostOf(nodeId)?.techP ?? 0;
   if (!officerIds || officerIds.length === 0) return base;
   const multiplier = effectsOfKind(resolveOfficerSkills(state, officerIds), 'researchTechPCostMultiplier')
     .reduce((lowest, { effect }) => Math.min(lowest, effect.multiplier), 1);
@@ -492,7 +492,7 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
           break;
         }
       }
-      const apCost = EXPLORE_AP_PER_OFFICER * count;
+      const apCost = Math.max(1, Math.round(EXPLORE_AP_PER_OFFICER * count * actionPointCostMultiplier(state, forceId)));
       if (state.actionPoints[forceId] < apCost) errors.push(`行动力不足 ${apCost}`);
       const garrison = commandGarrison(state, command);
       if (garrison.gold < EXPLORE_GOLD_PER_OFFICER * count) errors.push(`资金不足 ${EXPLORE_GOLD_PER_OFFICER * count}`);
@@ -657,6 +657,10 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     if (!cityCanBuildFacility(city.id, command.facility)) {
       errors.push(command.facility === 'shipyard' ? '只有水港城市可以建造船厂' : '只有学术城市可以建造太学');
     }
+    // 科技门槛：未研究出对应科技的设施不可建造（鱼市/军屯农/六部衙门默认全城不可建）
+    if (!canBuildFacility(state, forceId, command.facility)) {
+      errors.push(`尚未研究出建造「${PLOT_LABELS[command.facility]}」的科技`);
+    }
     // 一城限一设施（造币/谷仓/大市场/鱼市/军屯农/六部/太学/铜雀台）：建设中也占用名额
     if (UNIQUE_FACILITIES.includes(command.facility) && plotCountIncludingConstructing(city, command.facility) > 0) {
       errors.push('该设施一城只能建造一座（同类型正在建设中）');
@@ -682,8 +686,13 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     }
   }
 
-  if (state.actionPoints[forceId] < COMMAND_AP[command.type]) {
-    errors.push(`行动力不足 ${COMMAND_AP[command.type]}`);
+  // 文官制度：指令行动力消耗－20%（校验与实际扣减必须同一口径）
+  const baseRequiredAp = COMMAND_AP[command.type];
+  if (baseRequiredAp > 0) {
+    const requiredAp = Math.max(1, Math.round(baseRequiredAp * actionPointCostMultiplier(state, forceId)));
+    if (state.actionPoints[forceId] < requiredAp) {
+      errors.push(`行动力不足 ${requiredAp}`);
+    }
   }
   if (!city) return [...new Set(errors)];
 
@@ -722,9 +731,10 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     } else if (command.mode === 'sell' && command.amount > city.food) {
       errors.push('兵粮不足');
     } else if (command.mode === 'buy') {
-      // 粮食不能超过城池容纳上限：已满/余量不足时直接拦下，避免花金买入后被上限丢弃
-      if (city.food + command.amount > CITY_FOOD_CAP) {
-        errors.push(`兵粮容纳上限${CITY_FOOD_CAP.toLocaleString('en-US')}，最多还能买入${Math.max(0, CITY_FOOD_CAP - city.food).toLocaleString('en-US')}`);
+      // 粮食不能超过城池容纳上限（含科技「修筑要塞」倍率）：已满/余量不足时直接拦下，避免花金买入后被上限丢弃
+      const foodCap = cityResourceCaps(state, city).food;
+      if (city.food + command.amount > foodCap) {
+        errors.push(`兵粮容纳上限${foodCap.toLocaleString('en-US')}，最多还能买入${Math.max(0, foodCap - city.food).toLocaleString('en-US')}`);
       } else {
         const officer = localOfficer(state, forceId, command);
         const goldCost = Math.ceil(command.amount / (grainPriceOf(city) * tradeEffectMultiplier(officer?.stats.politics ?? 50)));
@@ -734,27 +744,28 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
       // 卖出同理：资金满了就卖不进去，避免白送兵粮
       const officer = localOfficer(state, forceId, command);
       const goldGain = quoteTrade(city, officer?.stats.politics ?? 50, 'sell', command.amount).goldDelta;
-      if (city.gold + goldGain > CITY_GOLD_CAP) {
-        errors.push(`资金容纳上限${CITY_GOLD_CAP.toLocaleString('en-US')}，卖出所得会溢出`);
+      const goldCap = cityResourceCaps(state, city).gold;
+      if (city.gold + goldGain > goldCap) {
+        errors.push(`资金容纳上限${goldCap.toLocaleString('en-US')}，卖出所得会溢出`);
       }
     }
   }
   if (command.type === 'research') {
-    const branch = TECH_BRANCHES.find((candidate) => candidate.id === command.branch);
-    if (!branch) errors.push('科技方向无效');
-    else {
-      const level = techLevelOf(state, forceId, command.branch);
-      if (level >= MAX_TECH_LEVEL) errors.push('该方向科技已研究完毕');
-      else {
-        const cost = TECH_COSTS[level];
-        if (stronghold.gold < cost.gold) errors.push(`资金不足 ${cost.gold}`);
-        const requiredTechP = researchTechPCost(state, forceId, command.branch, command.officerIds);
-        if ((state.forces[forceId]?.techP ?? 0) < requiredTechP) errors.push(`技巧P不足 ${requiredTechP}`);
-        // 每旬每势力同时只能研究一项（含城间）
-        const busy = Object.values(state.officers).some((officer) =>
-          officer.forceId === forceId && officer.location.kind === 'task' && officer.location.task === 'research');
-        if (busy) errors.push('已有科技正在研究中');
-      }
+    const node = techNodeOf(command.nodeId);
+    if (!node) errors.push('科技节点无效');
+    else if (hasTech(state, forceId, command.nodeId)) errors.push('该科技已研究完成');
+    else if (!techPrereqMet(state, forceId, command.nodeId)) {
+      const prereq = node.prev ? techNodeOf(node.prev)?.name : undefined;
+      errors.push(`需先研究「${prereq ?? '前置科技'}」`);
+    } else {
+      const cost = techCostOf(command.nodeId)!;
+      if (stronghold.gold < cost.gold) errors.push(`资金不足 ${cost.gold}`);
+      const requiredTechP = researchTechPCost(state, command.nodeId, command.officerIds);
+      if ((state.forces[forceId]?.techP ?? 0) < requiredTechP) errors.push(`技巧P不足 ${requiredTechP}`);
+      // 每旬每势力同时只能研究一项（含城间）
+      const busy = Object.values(state.officers).some((officer) =>
+        officer.forceId === forceId && officer.location.kind === 'task' && officer.location.task === 'research');
+      if (busy) errors.push('已有科技正在研究中');
     }
   }
   if (command.type === 'abilityResearch') {
@@ -955,7 +966,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       // 征兵量 = 1000 + 魅力总和 × (治安+20) × 5 ÷ 100，再乘特技/科技/兵舍修正
       const baseGain = recruitBaseYield(officers, city);
       const gain = Math.round(baseGain * commandYieldMultiplier(next, command)
-        * recruitMultiplier(next, forceId) * barracksYieldMultiplier(city));
+        * barracksYieldMultiplier(city));
       city.gold -= 800;
       city.food -= 500;
       city.population -= 500;
@@ -966,7 +977,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         ? forceMaxTraining((Object.keys(next.cities) as CityId[]).filter((id) => next.cities[id].ownerId === forceId), next.cities)
         : city.training;
       city.troops += gain;
-      city.training = Math.round(clamp((prevTroops * prevTraining + gain * RECRUIT_TROOP_MORALE) / city.troops, 0, 100));
+      city.training = Math.round(clamp((prevTroops * prevTraining + gain * RECRUIT_TROOP_MORALE) / city.troops, 0, moraleCapOf(next, forceId)));
       city.order = clamp(city.order - 2, 0, 100);
       addTechP(next, forceId, TECHP_PER_CIVIL_ACTION);
       message = `${names}在${city.name}征募士兵${gain.toLocaleString('en-US')}`;
@@ -1012,8 +1023,8 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
           ...current,
           [command.armamentType]: current[command.armamentType] + gain,
         };
-        // 按容纳上限截断后再算实际入库量：满了就只报实际增加的部分，不谎报产量
-        clampArmamentsTo(city.armaments, CITY_ARMAMENT_CAPS);
+        // 按容纳上限截断后再算实际入库量（含科技「修筑要塞」倍率）：满了就只报实际增加的部分，不谎报产量
+        clampArmamentsTo(city.armaments, cityResourceCaps(next, city).armaments);
         const applied = city.armaments[command.armamentType] - current[command.armamentType];
         addTechP(next, forceId, TECHP_PER_PRODUCE_ARMAMENT);
         message = `${names}生产${city.name}${ARMAMENT_LABELS[command.armamentType]}，增加了${applied.toLocaleString('en-US')}`;
@@ -1039,7 +1050,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       // 兵部：城池建有兵部时训练效果翻倍（关隘无都市设施不生效）
       let gain = trainMoraleGain(officers, stronghold.troops);
       if (!isPass && hasPlotFacility(city, 'bingbu')) gain *= 2;
-      stronghold.training = clamp(stronghold.training + gain, 0, 100);
+      stronghold.training = clamp(stronghold.training + gain, 0, moraleCapOf(next, stronghold.ownerId));
       addTechP(next, forceId, TECHP_PER_TRAIN);
       message = `${names}训练${garrisonName}守军，气力+${gain}`;
       const passGarrison = isPassGarrison(stronghold) ? stronghold : undefined;
@@ -1141,17 +1152,14 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'research': {
       const officers = command.officerIds.map((officerId) => next.officers[officerId]);
       const names = officers.map((officer) => officer.name).join('、');
-      const branchDef = TECH_BRANCHES.find((candidate) => candidate.id === command.branch)!;
-      const level = techLevelOf(next, forceId, command.branch);
-      const cost = TECH_COSTS[level];
+      const nodeDef = techNodeOf(command.nodeId)!;
+      const cost = techCostOf(command.nodeId)!;
       stronghold.gold -= cost.gold;
       const force = next.forces[forceId];
       // 指导：研究技巧P消耗减半（多名执行武将中任一人持有即生效）
-      force.techP = Math.max(0, (force.techP ?? 0) - researchTechPCost(next, forceId, command.branch, command.officerIds));
-      // 相关能力纯等权重加和：枪/戟/弩/骑兵→统率，军制/内政→政治
-      const statSum = officers.reduce((sum, officer) => sum + (branchDef.researchStat === 'leadership'
-        ? officer.stats.leadership
-        : officer.stats.politics), 0);
+      force.techP = Math.max(0, (force.techP ?? 0) - researchTechPCost(next, command.nodeId, command.officerIds));
+      // 相关能力纯等权重加和：武系→统率，军制/经济/文教→政治，理工/化工→智力
+      const statSum = officers.reduce((sum, officer) => sum + officer.stats[nodeDef.stat], 0);
       const tenDays = researchTenDays(cost.baseDays, statSum);
       for (const [index, officer] of officers.entries()) {
         officer.location = {
@@ -1159,13 +1167,13 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
           cityId: city.id,
           passId: isPass ? command.passId : undefined,
           task: 'research',
-          branch: command.branch,
+          nodeId: command.nodeId,
           remainingTenDays: tenDays,
           lead: index === 0,
         };
       }
       for (const officer of officers) officer.acted = true;
-      message = `${names}在${garrisonName}开始研究${branchDef.name}系「${branchDef.levels[level].name}」，预计${tenDays}旬完成`;
+      message = `${names}在${garrisonName}开始研究「${nodeDef.name}」，预计${tenDays}旬完成`;
       break;
     }
     case 'abilityResearch': {
@@ -1197,9 +1205,10 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     }
     case 'trade': {
       const officer = next.officers[command.officerId];
-      // 买入时按容纳余量收敛（validateCommand 已拦，这里是兜底）：绝不出现「花了全额金却不进粮」
+      // 买入时按容纳余量收敛（validateCommand 已拦，这里是兜底）：绝不出现「花了全额金却不进粮」。
+      // 余量口径与校验一致：按城池归属势力的科技（修筑要塞）计算上限。
       const amount = command.mode === 'buy'
-        ? Math.min(command.amount, Math.max(0, CITY_FOOD_CAP - city.food))
+        ? Math.min(command.amount, Math.max(0, cityResourceCaps(next, city).food - city.food))
         : command.amount;
       const quote = quoteTrade(city, officer.stats.politics, command.mode, amount);
       city.gold += quote.goldDelta;
@@ -1448,7 +1457,8 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     }
     case 'buildFacilityPlot': {
       const officers = command.officerIds.map((officerId) => next.officers[officerId]);
-      const result = startBuildCityPlot(city, command.plotIndex, command.facility, officers);
+      // 新建等级 = 科技等级上限（市场/农田/厩舍/兵舍/锻冶 2~3 级由科技解锁）
+      const result = startBuildCityPlot(city, command.plotIndex, command.facility, officers, facilityLevelCap(next, forceId, command.facility));
       // 建设黑市不加技巧P，其他设施+30
       if (command.facility !== 'blackmarket') addTechP(next, forceId, TECHP_PER_CONSTRUCTION);
       message = result.message;
@@ -1482,10 +1492,11 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     }
   }
 
-  // 探索按人数结算行动力（每人20）
-  const apCost = command.type === 'explore'
+  // 探索按人数结算行动力（每人20）；文官制度：指令行动力消耗－20%
+  const baseApCost = command.type === 'explore'
     ? EXPLORE_AP_PER_OFFICER * command.officerIds.length
     : COMMAND_AP[command.type];
+  const apCost = Math.max(1, Math.round(baseApCost * actionPointCostMultiplier(next, forceId)));
   next.actionPoints[forceId] -= apCost;
   next.logs.push({
     id: `command-${next.month}-${next.logs.length}`,

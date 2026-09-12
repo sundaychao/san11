@@ -88,7 +88,7 @@ describe('defaultOfficersFor 按效果自动推荐 1~3 人，饱和后停止增�
       { id: 's40', politics: 50, leadership: 40 },
     ]);
     // 枪兵方向使用统率
-    const picks = defaultOfficersFor(state.cities.jiangling, officers, { type: 'research', branch: 'spear' });
+    const picks = defaultOfficersFor(state.cities.jiangling, officers, { type: 'research', nodeId: 'qiangshuxunlian' });
     expect(picks).toEqual(['s90', 's80', 's40']);
   });
 

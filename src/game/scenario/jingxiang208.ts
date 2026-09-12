@@ -43,7 +43,7 @@ const forces: Record<ForceId, Force> = {
     description: '据守北境重镇，政务与统率均衡。',
     // 开局技巧P 10000，便于直接测试/验证科技研究效果
     techP: 10000,
-    techs: { spear: 1 },
+    techNodes: ['zhiyehua'],
   },
   liu: {
     id: 'liu',
@@ -52,7 +52,7 @@ const forces: Record<ForceId, Force> = {
     color: '#f2c230',
     description: '人才出众，以民心和武将能力见长。',
     techP: 10000,
-    techs: { cavalry: 1 },
+    techNodes: ['liangmayuzhong'],
   },
   sun: {
     id: 'sun',
@@ -61,7 +61,7 @@ const forces: Record<ForceId, Force> = {
     color: '#e23d34',
     description: '立足江东水网，城市资源较为充裕。',
     techP: 10000,
-    techs: { crossbow: 1 },
+    techNodes: ['gonggongjiaoyu'],
   },
   biao: {
     id: 'biao',
@@ -70,7 +70,7 @@ const forces: Record<ForceId, Force> = {
     color: '#30b45a',
     description: '深耕荆南，治安稳定且人才待发掘。',
     techP: 10000,
-    techs: { civil: 1 },
+    techNodes: ['chuanwu'],
   },
 };
 

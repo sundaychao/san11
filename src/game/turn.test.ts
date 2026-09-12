@@ -5,6 +5,7 @@ import { hasCityTrait } from './cityTraits';
 import { cityMonthlyGoldIncome, cityMonthlyOfficerSalary, cityQuarterlyFoodIncome, cityPlots } from './innerAffairs';
 import { createGame } from './scenario/jingxiang208';
 import { resolveCitySkills } from './skills/sources';
+import { orderDropResist } from './techs';
 import { settleMonth, settleTenDay } from './turn';
 
 describe('monthly settlement', () => {
@@ -569,7 +570,8 @@ describe('ten-day settlement', () => {
 
     const next = settleTenDay(state);
 
-    expect(next.cities.jiangling.durability).toBe(before - 150 * 3);
+    // 火焰伤害 150×3 之后，本旬据点耐久自然回复 ceil(maxDurability×1%)（工兵科技前为 1 倍）
+    expect(next.cities.jiangling.durability).toBe(before - 150 * 3 + Math.ceil(city.maxDurability * 0.01));
     expect(next.cities.jiangling.durability).toBeGreaterThan(0);
   });
 
@@ -582,7 +584,8 @@ describe('ten-day settlement', () => {
 
     const next = settleTenDay(state);
 
-    expect(next.cities.jiangling.durability).toBe(0);
+    // 余火把耐久打到 0 后，本旬据点耐久自然回复 ceil(maxDurability×1%)：归零是当旬内的瞬时状态
+    expect(next.cities.jiangling.durability).toBe(Math.ceil(city.maxDurability * 0.01));
     expect(next.cities.jiangling.ownerId).toBe(owner); // 持续火烧至 0 不算攻破
   });
 
@@ -609,7 +612,8 @@ describe('ten-day settlement', () => {
 
     const next = settleTenDay(state);
 
-    expect(next.cities.jiangling.plots![0].durability).toBe(500 - 150);
+    // 着火地格掉 150 后，本旬设施耐久自然回复 ceil(500×2%)（工兵科技前为 1 倍）
+    expect(next.cities.jiangling.plots![0].durability).toBe(500 - 150 + Math.ceil(500 * 0.02));
     expect(next.cities.jiangling.plots![0].type).toBe('market');
     expect(next.cities.jiangling.plots![1]).toMatchObject({ type: 'farm', durability: 500 });
   });
@@ -623,6 +627,7 @@ describe('ten-day settlement', () => {
 
     const next = settleTenDay(state);
 
+    // 地格被烧毁后变为空地：空地无设施可修，不参与每旬耐久自然回复，durability 保持 0（已毁状态）
     expect(next.cities.jiangling.plots![0]).toMatchObject({ type: 'empty', level: 0, value: 0, durability: 0 });
   });
 
@@ -805,31 +810,31 @@ describe('ten-day settlement', () => {
     expect(afterThree.officers['guan-yu'].acted).toBe(false);
   });
 
-  it('completes tech research and raises the force branch level', () => {
+  it('completes tech research and unlocks the researched node', () => {
     const state = createGame('liu', 1);
-    state.forces.liu.techs = { spear: 1 };
+    state.forces.liu.techNodes = ['zhiyehua'];
     state.officers['liu-bei'].location = {
-      kind: 'task', cityId: 'jiangling', task: 'research', branch: 'spear', remainingTenDays: 1,
+      kind: 'task', cityId: 'jiangling', task: 'research', nodeId: 'qiangshuxunlian', remainingTenDays: 1,
     };
 
     const next = settleTenDay(state);
 
-    expect(next.forces.liu.techs?.spear).toBe(2);
+    expect(next.forces.liu.techNodes).toContain('qiangshuxunlian');
     expect(next.officers['liu-bei'].location).toEqual({ kind: 'city', cityId: 'jiangling' });
     expect(next.officers['liu-bei'].acted).toBe(false);
-    expect(next.logs.some((log) => log.message.includes('「兵粮袭击」研究'))).toBe(true);
+    expect(next.logs.some((log) => log.message.includes('「枪术训练」研究'))).toBe(true);
   });
 
   it('keeps a mid-progress research task running across ten-days', () => {
     const state = createGame('liu', 1);
     state.officers['liu-bei'].location = {
-      kind: 'task', cityId: 'jiangling', task: 'research', branch: 'civil', remainingTenDays: 3,
+      kind: 'task', cityId: 'jiangling', task: 'research', nodeId: 'gonggongjiaoyu', remainingTenDays: 3,
     };
 
     const next = settleTenDay(state);
 
     expect(next.officers['liu-bei'].location).toMatchObject({ kind: 'task', remainingTenDays: 2 });
-    expect(next.forces.liu.techs?.civil).toBeUndefined();
+    expect(next.forces.liu.techNodes ?? []).not.toContain('gonggongjiaoyu');
   });
 
   it('accumulates techP from city population each ten-day', () => {
@@ -850,9 +855,10 @@ describe('ten-day settlement', () => {
     expect(next.forces.liu.techP).toBe(state.forces.liu.techP + expected);
   });
 
-  it('regenerates unit energy faster and beyond 100 with military techs', () => {
+  it('regenerates unit energy beyond 100 up to the 职业化 cap', () => {
     const state = createGame('liu', 1);
-    state.forces.liu.techs = { military: 4 };
+    // 职业化（军制1级）：部队最大士气（气力上限）＋20 → 120；每旬固定回复5
+    state.forces.liu.techNodes = ['zhiyehua'];
     state.units['energy-tech-unit'] = {
       id: 'energy-tech-unit',
       kind: 'combat',
@@ -872,18 +878,20 @@ describe('ten-day settlement', () => {
 
     const next = settleTenDay(state);
 
-    // 军制4级：每旬恢复10（105-400食物消耗后+10 → 但食物3000够耗，恢复10）
-    expect(next.units['energy-tech-unit'].energy).toBe(115);
+    // 每旬回复5，气力上限120：105 + 5 = 110
+    expect(next.units['energy-tech-unit'].energy).toBe(110);
   });
 
-  it('raises city order each ten-day with the benevolent-rule civil tech', () => {
+  it('公共教育（文教1级）承接原「内政4级治安回升」：换季治安下降概率减半', () => {
     const state = createGame('liu', 1);
-    state.forces.liu.techs = { civil: 4 };
-    const startOrder = state.cities.jiangling.order;
+    state.forces.liu.techNodes = ['gonggongjiaoyu'];
+    expect(orderDropResist(state, 'liu')).toBe(true);
 
+    // 旧树「内政4级每旬治安+2」已随科技树重做删除：旬末结算不再无条件回升治安
+    const startOrder = state.cities.jiangling.order;
     const next = settleTenDay(state);
 
-    expect(next.cities.jiangling.order).toBe(startOrder + 2);
+    expect(next.cities.jiangling.order).toBe(startOrder);
   });
 
   it('completes ability research after its months and lets cultivation raise an officer', () => {

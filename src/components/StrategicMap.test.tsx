@@ -2,11 +2,13 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
+import { initialArmaments } from '../game/armaments';
 import { deployUnit } from '../game/battle/actions';
 import { sevenCellCityFootprint } from '../game/battle/grid';
 import { createGame } from '../game/scenario/jingxiang208';
 import { createMobileDuelGame } from '../game/scenario/mobileDuel';
 import { GameProvider } from '../game/store/GameProvider';
+import { completeTechResearch } from '../game/techs';
 import { settleTenDay } from '../game/turn';
 import type { CityId, GameState, TerrainType } from '../game/types';
 import { GameShell } from './GameShell';
@@ -833,6 +835,48 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     fireEvent.pointerLeave(unitMarker);
 
     await waitFor(() => expect(screen.queryByTestId('unit-info-panel')).not.toBeInTheDocument());
+  });
+
+  it('地图部队字形吃科技：研究「机械」「弹道」后冲车/井阑标记显示为木兽/投石车', () => {
+    const before = createGame('liu', 1);
+    before.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5, tower: 5 };
+    const deployed = deployUnit(before, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      troops: 4000,
+      food: 6000,
+    });
+    Object.assign(Object.values(deployed.units)[0], { q: 10, r: 10 });
+
+    const first = renderGame(deployed);
+    const markerBefore = screen.getByTestId('battle-unit-marker');
+    expect(within(markerBefore).getByText('冲')).toBeVisible();
+    expect(markerBefore.getAttribute('aria-label')).toContain('冲车');
+    first.unmount();
+
+    // 同一势力研究「机械」（冲车→木兽）与「弹道」（井阑→投石车）后，存储字段不变、字形升级
+    const after = createGame('liu', 1);
+    after.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5, tower: 5 };
+    const upgraded = deployUnit(after, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      troops: 4000,
+      food: 6000,
+    });
+    completeTechResearch(upgraded, 'liu', 'jixie');
+    completeTechResearch(upgraded, 'liu', 'dandao');
+    Object.assign(Object.values(upgraded.units)[0], { q: 10, r: 10 });
+    renderGame(upgraded);
+
+    const marker = screen.getByTestId('battle-unit-marker');
+    expect(within(marker).getByText('兽')).toBeVisible();
+    expect(within(marker).queryByText('冲')).not.toBeInTheDocument();
+    expect(marker).toHaveAttribute('data-troop-type', 'siege');
+    expect(marker.getAttribute('aria-label')).toContain('木兽');
   });
 
   it('marks units with distinct force ids and force colors', () => {

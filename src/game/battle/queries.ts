@@ -27,7 +27,8 @@ import { attackablePlots, attackablePasses, type PlotAttackTarget } from './targ
 import { strategyEnergyCostForUnit } from './strategies';
 import { STRATEGY_MIN_TROOPS } from './catalog';
 import { formationMovementAllowanceBonus } from '../skills';
-import { troopMovementBonusForTroop } from '../techs';
+import { battleShipMovementBonus } from './catalog';
+import { movementTechBonus } from '../techs';
 import { TROOP_LABELS } from '../armaments';
 import type { ArmyUnit, City, CityId, Facility, FacilityType, GameState, Pass, PassId, TroopType } from '../types';
 
@@ -35,6 +36,8 @@ export interface DeploymentTargetQueryInput {
   cityId?: CityId;
   passId?: PassId;
   troopType?: TroopType;
+  /** 舰船出征时的载具（楼船 / 斗舰），用于预览移动力与可达格 */
+  vehicle?: 'boat' | 'ship';
   officerIds?: string[];
   kind?: 'combat' | 'transport';
 }
@@ -108,8 +111,9 @@ export function getDeploymentTargets(state: GameState, input: DeploymentTargetQu
   const troopType = input.troopType ?? 'sword';
   const movementAllowance = movementAllowanceForProfile(troopType) +
     formationMovementAllowanceBonus(state, input.officerIds ?? [], troopType) +
-    troopMovementBonusForTroop(state, state.turnForceId, troopType);
-  return deploymentCellsForStronghold(state, sourceId, movementAllowance, troopType);
+    movementTechBonus(state, state.turnForceId, { kind: 'combat', troopType }) +
+    battleShipMovementBonus(state, { forceId: state.turnForceId, vehicle: input.vehicle });
+  return deploymentCellsForStronghold(state, sourceId, movementAllowance, troopType, input.vehicle);
 }
 
 export function getMovementTargets(state: GameState, unitId: string) {

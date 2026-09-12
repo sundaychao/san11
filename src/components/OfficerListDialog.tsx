@@ -2,14 +2,13 @@ import { X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { useGame } from '../game/store/GameProvider';
-import { ARMAMENT_LABELS } from '../game/armaments';
+import { armamentLabelFor } from '../game/armaments';
 import { officerAge, oldAgeDeathChance } from '../game/health';
 import { officerLoyalty } from '../game/loyalty';
 import { affinityOf, officerCompatWithRuler } from '../game/diplomacy';
-import { hasMasterHearts } from '../game/techs';
+import { loyaltyLossResist, techNodeOf } from '../game/techs';
 import { officerMerit, positionDefinition } from '../game/ranks';
 import { PLOT_LABELS } from '../game/innerAffairs';
-import { TECH_BRANCH_LABELS } from '../game/techs';
 import { skillDefinition, officerSkillNames, officerSkillsText } from '../game/skills';
 import { strongholdTransferDuration } from '../game/commands';
 import type { City, ForceId, GameState, Officer, OfficerAptitudes, Pass, Stats } from '../game/types';
@@ -175,12 +174,12 @@ export function taskInfo(officer: Officer, state: GameState) {
   }
   if (officer.location.kind === 'task') {
     const taskLabel = officer.location.task === 'research'
-      ? `研究${TECH_BRANCH_LABELS[officer.location.branch]}系科技`
+      ? `研究「${techNodeOf(officer.location.nodeId)?.name ?? '科技'}」`
       : officer.location.task === 'cultivate'
         ? `培育能力`
         : officer.location.task === 'construction'
           ? `建设${PLOT_LABELS[officer.location.facility]}`
-          : `生产${ARMAMENT_LABELS[officer.location.armamentType]}`;
+          : `生产${armamentLabelFor(state, officer.forceId ?? state.playerForceId, officer.location.armamentType)}`;
     return {
       status: '执行中',
       task: taskLabel,
@@ -234,7 +233,7 @@ function loyaltyHint(officer: Officer, state: GameState): string | undefined {
   } else if (tier.key === 'far') {
     lines.push('与君主相性相克，忠诚易流失');
   }
-  if (hasMasterHearts(state, officer.forceId)) lines.push('本方掌握人心，掉忠概率下降');
+  if (loyaltyLossResist(state, officer.forceId)) lines.push('克己复礼：掉忠概率下降');
   return lines.join('\n');
 }
 

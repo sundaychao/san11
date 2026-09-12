@@ -5,12 +5,14 @@ import { App } from '../app/App';
 import { deployUnit } from '../game/battle/actions';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
 import { cityPlots, PLOT_BASE_VALUE } from '../game/innerAffairs';
+import { initialArmaments } from '../game/armaments';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
 import type { CityId } from '../game/types';
 import { writeSave } from '../game/persistence';
 import { buildSlotMeta, slotMetaKey, slotStateKey, writeSlot } from '../game/saveSlots';
 import { settleTenDay } from '../game/turn';
+import { completeTechResearch } from '../game/techs';
 import { GameShell } from './GameShell';
 import { OfficerListDialog } from './OfficerListDialog';
 import { UnitDetailDialog } from './UnitDetailDialog';
@@ -508,6 +510,37 @@ describe('game interface shell', () => {
     const detailRow = (label: string) => within(dialog).getByText(label, { selector: 'dt' }).closest('div')!;
     expect(detailRow('适性')).toHaveTextContent('—');
     expect(detailRow('战法暴击率')).toHaveTextContent('—');
+  });
+
+  it('部队情报吃科技：研究「机械」后兵种与随身兵装显示「木兽」而非「冲车」', () => {
+    const game = createGame('liu', 1);
+    game.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5 };
+    const state = deployUnit(game, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'liu-bei',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units)[0];
+    unit.armaments = { ...(unit.armaments ?? {}), ram: 1 };
+
+    // 对照：未研究「机械」时仍是「冲车」
+    const first = render(<UnitDetailDialog unit={unit} state={state} onClose={vi.fn()} />);
+    let dialog = screen.getByTestId('unit-detail-dialog');
+    const detailRow = (label: string) => within(dialog).getByText(label, { selector: 'dt' }).closest('div')!;
+    expect(detailRow('兵种')).toHaveTextContent('冲车');
+    expect(detailRow('随身兵装')).toHaveTextContent('冲车 1');
+    first.unmount();
+
+    completeTechResearch(state, 'liu', 'jixie');
+    render(<UnitDetailDialog unit={unit} state={state} onClose={vi.fn()} />);
+    dialog = screen.getByTestId('unit-detail-dialog');
+    const upgradedRow = (label: string) => within(dialog).getByText(label, { selector: 'dt' }).closest('div')!;
+    expect(upgradedRow('兵种')).toHaveTextContent('木兽');
+    // 只换显示名：随身兵装的存储字段仍是 ram，数量不变
+    expect(upgradedRow('随身兵装')).toHaveTextContent('木兽 1');
   });
 
   it('shows harmful strategy success chance for the eligible hovered enemy formation', async () => {

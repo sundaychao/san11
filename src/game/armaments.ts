@@ -1,5 +1,6 @@
 import { citySpecialtyOf, type CitySpecialty } from './cityTraits';
-import type { ArmamentType, CityArmaments, City, Officer, Pass, TroopType, VehicleType } from './types';
+import { canUseBattleShip, canUseCatapult, canUseWoodenBeast } from './techs';
+import type { ArmamentType, ArmyUnit, CityArmaments, City, ForceId, GameState, Officer, Pass, TroopType, VehicleType } from './types';
 
 export const ARMAMENT_TYPES: ArmamentType[] = ['spear', 'halberd', 'crossbow', 'cavalry', 'ram', 'tower', 'ship'];
 export const DELAYED_ARMAMENT_TYPES: ArmamentType[] = ['ram', 'tower', 'ship'];
@@ -14,6 +15,92 @@ export const ARMAMENT_LABELS: Record<ArmamentType, string> = {
   tower: '井阑',
   ship: '楼船',
 };
+
+/**
+ * 攻城器械的「实际形态」。兵装存储口径只有冲车（ram）/井阑（tower）两种，
+ * 科技会把已生产/已在外的器械就地升级，而不改动存档字段：
+ * - 机械（jixie）：冲车 → 木兽（攻击时使被攻击地点着火）
+ * - 弹道（dandao）：井阑 → 投石车（射程 2~3，命中后按霹雳溅射）
+ */
+export type SiegeWeaponKind = 'ram' | 'woodenBeast' | 'tower' | 'catapult';
+
+export const SIEGE_WEAPON_KIND_LABELS: Record<SiegeWeaponKind, string> = {
+  ram: '冲车',
+  woodenBeast: '木兽',
+  tower: '井阑',
+  catapult: '投石车',
+};
+
+/** 斗舰：造船术解锁的楼船升级版 */
+export const BATTLE_SHIP_LABEL = '斗舰';
+
+/**
+ * 部队当前实际使用的攻城器械（吃势力科技）。
+ * `ram` 在拥有「机械」时升为 `woodenBeast`，`tower` 在拥有「弹道」时升为 `catapult`；
+ * 非兵器部队（没有 siegeWeapon）返回 undefined。
+ * 因为升级是运行时派生的，**已生产的冲车与在外部队的冲车都会自动变成木兽**，无需迁移存档。
+ */
+export function siegeWeaponKindOf(
+  state: GameState,
+  unit: Pick<ArmyUnit, 'forceId' | 'siegeWeapon'>,
+): SiegeWeaponKind | undefined {
+  if (unit.siegeWeapon === 'ram') return canUseWoodenBeast(state, unit.forceId) ? 'woodenBeast' : 'ram';
+  if (unit.siegeWeapon === 'tower') return canUseCatapult(state, unit.forceId) ? 'catapult' : 'tower';
+  return undefined;
+}
+
+/** 斗舰：`vehicle === 'ship'` 且势力已研究「造船术」（楼船的升级版：攻防与移动力更强） */
+export function isBattleShip(
+  state: GameState,
+  unit: Pick<ArmyUnit, 'forceId' | 'vehicle'>,
+): boolean {
+  return unit.vehicle === 'ship' && canUseBattleShip(state, unit.forceId);
+}
+
+/**
+ * 是否拥有「投石」攻击方式：投石车（弹道升级后的井阑），或开发「弹道」后的斗舰
+ * （斗舰本身需要「造船术」，故斗舰投石需要造船术＋弹道两个节点）。
+ */
+export function unitHasCatapultAttack(
+  state: GameState,
+  unit: Pick<ArmyUnit, 'forceId' | 'vehicle' | 'siegeWeapon'>,
+): boolean {
+  if (siegeWeaponKindOf(state, unit) === 'catapult') return true;
+  return isBattleShip(state, unit) && canUseCatapult(state, unit.forceId);
+}
+
+/** 兵装显示名（吃科技）：机械把冲车显示为木兽、弹道把井阑显示为投石车、造船术把楼船显示为斗舰；存储仍是原类型 */
+export function armamentLabelFor(
+  state: GameState,
+  forceId: ForceId | null | undefined,
+  armamentType: ArmamentType,
+): string {
+  if (armamentType === 'ram' && canUseWoodenBeast(state, forceId)) return SIEGE_WEAPON_KIND_LABELS.woodenBeast;
+  if (armamentType === 'tower' && canUseCatapult(state, forceId)) return SIEGE_WEAPON_KIND_LABELS.catapult;
+  if (armamentType === 'ship' && canUseBattleShip(state, forceId)) return BATTLE_SHIP_LABEL;
+  return ARMAMENT_LABELS[armamentType];
+}
+
+/** 载具显示名（吃科技）：造船术把楼船显示为斗舰；存储仍是 `vehicle === 'ship'` */
+export function vehicleLabelFor(
+  state: GameState,
+  forceId: ForceId | null | undefined,
+  vehicle: VehicleType,
+): string {
+  if (vehicle === 'ship' && canUseBattleShip(state, forceId)) return BATTLE_SHIP_LABEL;
+  return VEHICLE_LABELS[vehicle];
+}
+
+/** 部队当前器械/舰船的显示名（供界面直接取用）；非兵器且非舰船返回 undefined */
+export function unitArmamentLabel(
+  state: GameState,
+  unit: Pick<ArmyUnit, 'forceId' | 'vehicle' | 'siegeWeapon'>,
+): string | undefined {
+  const kind = siegeWeaponKindOf(state, unit);
+  if (kind) return SIEGE_WEAPON_KIND_LABELS[kind];
+  if (unit.vehicle === 'ship') return vehicleLabelFor(state, unit.forceId, 'ship');
+  return undefined;
+}
 
 export const ARMAMENT_BASE_YIELD: Record<ArmamentType, number> = {
   spear: 1000,

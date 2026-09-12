@@ -1,4 +1,4 @@
-import { techLevelOf } from './techs';
+import { deployTroopCapOf } from './techs';
 import type { ForceId, GameState, Officer, RankId, Stats } from './types';
 
 /**
@@ -170,11 +170,12 @@ export function officerTroopCapOf(state: GameState, forceId: ForceId, officer: O
   return position ? position.troopCommand : BASE_OFFICER_TROOP_CAP;
 }
 
-/** 部队出征上限（官职/爵位基准 + 军制3级军制改革 +3000） */
+/** 部队出征上限（官职/爵位基准 + 科技「节度使」+3000） */
 export function unitTroopCapOf(state: GameState, forceId: ForceId, leaderId: string | undefined): number {
   const leader = leaderId ? state.officers[leaderId] : undefined;
   const base = leader ? officerTroopCapOf(state, forceId, leader) : 10000;
-  return base + (techLevelOf(state, forceId, 'military') >= 3 ? 3000 : 0);
+  // deployTroopCapOf 含 10000 基准，此处只取科技追加的 +3000
+  return base + (deployTroopCapOf(state, forceId) - 10000);
 }
 
 /** 授予/免去官职时同步增减五维（与宝物加成一致，免官精确还原） */

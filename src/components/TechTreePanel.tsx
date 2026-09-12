@@ -1,33 +1,60 @@
 import { TECH_TREE_LEVELS, TECH_TREE_NODES, TECH_TREE_SYSTEMS, type TechSystemId } from './techTreeData';
 
 /**
- * 新版科技树界面（展示用）。
+ * 新版科技树界面。
  *
  * 按参考图排布：顶部六层箭头标题+各层资金／技巧值需求；中部九大系统科技节点，
  * 同层内用箭头连到「下一个可研究层次」；底部为系统图例。
- * 目前只呈现名称、等级与连线，节点不可点击，也不对接 src/game/techs.ts 的既有研究机制。
+ *
+ * 状态与选中均为**可选**：不传 `nodeStatus` / `onSelectNode` 时与纯展示版完全一致
+ * （节点不可点击、统一系统配色）；传入后按状态着色并支持点击选点。
  */
+
+/** 节点状态：done=已研究／researching=正在研究／current=当前可研究／available=可研究（非当前选择）／locked=前置未满足 */
+export type TechNodeStatus = 'done' | 'current' | 'available' | 'locked' | 'researching';
+
+export interface TechTreePanelProps {
+  /** 可选：查询某节点状态（不传则所有节点按普通样式绘制） */
+  nodeStatus?(nodeId: string): TechNodeStatus;
+  /** 可选：当前选中的节点 id（额外加一圈外框） */
+  selectedNodeId?: string;
+  /** 可选：点击节点回调（传入后节点可点击；不传则纯展示） */
+  onSelectNode?(nodeId: string): void;
+}
+
+/** 各状态的描边／透明度覆写（未列出的状态用系统配色）。
+ *  「可研究（current）」是默认状态、节点数量最多，不画描边，避免整棵树被浅色框线塞满、压住文字；
+ *  真正需要突出的只有：已研究（绿）、正在研究（橙）、未解锁（暗），以及被选中的那一个（外框虚线）。 */
+const STATUS_STROKE: Record<TechNodeStatus, { stroke: string; strokeWidth: number }> = {
+  // 已研究：不画框，只用右上角对勾表示（避免整片浅色框线压住文字）
+  done: { stroke: 'none', strokeWidth: 0 },
+  researching: { stroke: '#e0a077', strokeWidth: 2.4 },
+  current: { stroke: 'none', strokeWidth: 0 },
+  available: { stroke: 'none', strokeWidth: 0 },
+  locked: { stroke: '#6f6a5d', strokeWidth: 1.4 },
+};
+
+/** 未解锁节点整体压暗（含文字），与「可研究」形成对比 */
+const LOCKED_OPACITY = 0.42;
+
+/** 未研究科技的统一底色（深灰）——只有一个已研究的节点才显示系统配色 */
+const UNRESEARCHED_FILL = '#3a3a36';
 
 /** 六列的左上角 x 坐标（与参考图列位一致） */
 const COLUMN_X = [40, 220, 400, 579, 759, 938];
 const BOX_W = 139;
-const BOX_H = 25;
+const BOX_H = 23;
 /** 第 1 行节点框顶部 y */
-const FIRST_ROW_TOP = 74;
-const ROW_PITCH = 37;
+const FIRST_ROW_TOP = 56;
+const ROW_PITCH = 29;
 const CANVAS_W = 1129;
-const CANVAS_H = 700;
+const CANVAS_H = 522;
 
 const HEADER_TOP = 4;
 const HEADER_H = 28;
 const HEADER_W = 148;
 const HEADER_NOTCH = 18;
-const COST_TEXT_Y = HEADER_TOP + HEADER_H + 18;
-
-const LEGEND_TOP = 668;
-const LEGEND_H = 25;
-const LEGEND_W = 106;
-const LEGEND_GAP = 8;
+const COST_TEXT_Y = HEADER_TOP + HEADER_H + 14;
 
 /** 连线／箭头：深色底上取暖灰，与面板描边同系 */
 const LINE_COLOR = '#8b8272';
@@ -67,8 +94,10 @@ function buildConnectors(): Connector[] {
 const NODE_TEXT_STYLE = { fontFamily: 'STKaiti, KaiTi, "Noto Serif SC", serif' } as const;
 const UI_TEXT_STYLE = { fontFamily: '"Microsoft YaHei", "Segoe UI", sans-serif' } as const;
 
-export function TechTreePanel() {
+export function TechTreePanel({ nodeStatus, selectedNodeId, onSelectNode }: TechTreePanelProps = {}) {
   const connectors = buildConnectors();
+  /** 可点击时节点框会显示手型并进入 Tab 顺序 */
+  const clickable = Boolean(onSelectNode);
 
   return (
     <div className="tech-tree-panel" data-testid="tech-tree-panel">
@@ -107,27 +136,53 @@ export function TechTreePanel() {
           ) : null))}
         </g>
 
-        {/* 科技节点 */}
+        {/* 科技节点（传入 nodeStatus / onSelectNode 时按状态着色并支持点击） */}
         <g className="tech-tree-nodes">
           {TECH_TREE_NODES.map((node) => {
             const system = systemOf(node.system);
             const x = boxX(node.level);
             const y = boxY(node.row);
+            const status = nodeStatus?.(node.id);
+            const stroke = status ? STATUS_STROKE[status] : null;
+            // 底色：已研究 / 当前可研究 → 保留系统配色；
+            // 还没轮到的（前置未满足、正在研究中）→ 统一深灰，形成一面「够不到的墙」
+            const colored = !status || status === 'done' || status === 'current' || status === 'available';
+            const fill = colored ? system.fill : UNRESEARCHED_FILL;
+            const selected = selectedNodeId === node.id;
+            const centerY = y + BOX_H / 2;
             return (
-              <g key={node.id} data-testid={`tech-node-${node.id}`}>
+              <g
+                key={node.id}
+                data-testid={`tech-node-${node.id}`}
+                className={`tech-tree-node${status ? ` is-${status}` : ''}${selected ? ' is-selected' : ''}`}
+                style={{
+                  cursor: clickable ? 'pointer' : undefined,
+                  opacity: status === 'locked' ? LOCKED_OPACITY : undefined,
+                }}
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                aria-pressed={clickable ? selected : undefined}
+                aria-label={clickable ? `${node.name}（Lv${node.level}）` : undefined}
+                onClick={clickable ? () => onSelectNode!(node.id) : undefined}
+                onKeyDown={clickable ? (event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  event.preventDefault();
+                  onSelectNode!(node.id);
+                } : undefined}
+              >
                 <rect
                   x={x}
                   y={y}
                   width={BOX_W}
                   height={BOX_H}
                   rx={3}
-                  fill={system.fill}
-                  stroke={system.color}
-                  strokeWidth={1.6}
+                  fill={fill}
+                  stroke={stroke ? stroke.stroke : system.color}
+                  strokeWidth={stroke ? stroke.strokeWidth : 1.6}
                 />
                 <text
                   x={x + BOX_W / 2}
-                  y={y + BOX_H / 2}
+                  y={centerY}
                   textAnchor="middle"
                   dominantBaseline="central"
                   fill="#ffffff"
@@ -137,6 +192,38 @@ export function TechTreePanel() {
                 >
                   {node.name}
                 </text>
+                {/* 已研究：右上角对勾 */}
+                {status === 'done' && (
+                  <path
+                    d={`M${x + BOX_W - 21},${centerY} l4,4.5 l8,-10`}
+                    fill="none"
+                    stroke="#d7f0c6"
+                    strokeWidth={2.2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )}
+                {/* 研究中：右上角小座钟 */}
+                {status === 'researching' && (
+                  <g fill="none" stroke="#ffd9b0" strokeWidth={1.4} strokeLinecap="round">
+                    <circle cx={x + BOX_W - 13} cy={centerY} r={6} />
+                    <path d={`M${x + BOX_W - 13},${centerY - 3.6} V${centerY} H${x + BOX_W - 9.6}`} />
+                  </g>
+                )}
+                {/* 选中：外圈虚线框（全树只有这一个，用来告诉玩家「点的是哪一个」） */}
+                {selected && (
+                  <rect
+                    x={x - 3}
+                    y={y - 3}
+                    width={BOX_W + 6}
+                    height={BOX_H + 6}
+                    rx={5}
+                    fill="none"
+                    stroke="#fff6d6"
+                    strokeWidth={1.6}
+                    strokeDasharray="5 3"
+                  />
+                )}
               </g>
             );
           })}
@@ -198,39 +285,6 @@ export function TechTreePanel() {
                   style={UI_TEXT_STYLE}
                 >
                   {`金${item.gold}｜技${item.techP}`}
-                </text>
-              </g>
-            );
-          })}
-        </g>
-
-        {/* 系统图例 */}
-        <g className="tech-tree-legend">
-          {TECH_TREE_SYSTEMS.map((system, index) => {
-            const x = 6 + index * (LEGEND_W + LEGEND_GAP);
-            return (
-              <g key={system.id} data-testid={`tech-system-${system.id}`}>
-                <rect
-                  x={x}
-                  y={LEGEND_TOP}
-                  width={LEGEND_W}
-                  height={LEGEND_H}
-                  rx={4}
-                  fill={system.fill}
-                  stroke={system.color}
-                  strokeWidth={1.4}
-                />
-                <text
-                  x={x + LEGEND_W / 2}
-                  y={LEGEND_TOP + LEGEND_H / 2 - 1}
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  fill="#ffffff"
-                  fontSize={12}
-                  fontWeight={700}
-                  style={NODE_TEXT_STYLE}
-                >
-                  {system.name}
                 </text>
               </g>
             );

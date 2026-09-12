@@ -3,9 +3,8 @@ import { BLOCKED_TERRAINS, isWaterTerrain } from './battle/catalog';
 import { positionDefinition } from './ranks';
 import { armamentProductionTenDays, isDelayedArmament, produceArmamentYield } from './armaments';
 import { cityCanBuildFacility, hasCityTrait } from './cityTraits';
-import type { TechBranchId } from './types';
-import { TECH_COSTS, TECH_BRANCHES, researchTenDays } from './techs';
-import type { ArmamentType, City, CityId, ForceId, GameState, GridCell, Legion, Officer, Pass, TerrainType } from './types';
+import type { ArmamentType, City, CityId, ForceId, GameState, GridCell, Legion, Officer, Pass, TechNodeId, TerrainType } from './types';
+import { TECH_LEVEL_COSTS, counterAttackMultiplier, durabilityRecoveryMultiplier, facilityLevelCap, moraleCapOf, rangedRangeBonus, researchTenDays, techNodeOf } from './techs';
 
 /** 本地 clamp，避免与 commands.ts 的循环依赖 */
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -179,10 +178,12 @@ export const CITY_BODY_RANGE = 1;
 /** 反击区内圈起点：城池本身范围之外的紧邻一圈 */
 export const CITY_ATTACK_MIN = CITY_BODY_RANGE + 1;
 
-/** 获取城池反击区格子（距城心 CITY_ATTACK_MIN~CITY_ATTACK_RANGE 圈，不含城池本身7格） */
-export function cityAttackRangeCoords(city: City): GridCoord[] {
+/** 获取城池反击区格子（距城心 CITY_ATTACK_MIN~CITY_ATTACK_RANGE 圈，不含城池本身7格）。
+ *  extraRange 为科技（劲弩）追加的射程圈数，默认 0 = 原版行为（建造区阻挡等逻辑不受科技影响）。 */
+export function cityAttackRangeCoords(city: City, extraRange = 0): GridCoord[] {
   const coords: GridCoord[] = [];
-  for (let d = CITY_ATTACK_MIN; d <= CITY_ATTACK_RANGE; d += 1) {
+  const maxRange = CITY_ATTACK_RANGE + Math.max(0, extraRange);
+  for (let d = CITY_ATTACK_MIN; d <= maxRange; d += 1) {
     coords.push(...ringCoordsWithinRange({ q: city.gridQ, r: city.gridR }, d));
   }
   return coords;
@@ -213,7 +214,8 @@ export function settleCityRangedAttack(state: GameState): string[] {
   const events: string[] = [];
   for (const city of Object.values(state.cities)) {
     if (!city.ownerId) continue;
-    const attackKeys = new Set(cityAttackRangeCoords(city).map(gridKey));
+    // 劲弩：据点射程＋1（科技只影响箭雨范围，不影响建造区阻挡判定）
+    const attackKeys = new Set(cityAttackRangeCoords(city, rangedRangeBonus(state, city.ownerId)).map(gridKey));
 
     // 查找攻击范围内的敌方部队
     const enemyUnitsInRange = Object.values(state.units).filter((unit) => {
@@ -221,10 +223,12 @@ export function settleCityRangedAttack(state: GameState): string[] {
       return attackKeys.has(gridKey({ q: unit.q, r: unit.r }));
     });
 
+    // 垛墙：据点反击（箭雨）伤害＋50%
+    const counterMultiplier = counterAttackMultiplier(state, city.ownerId);
     for (const unit of enemyUnitsInRange) {
-      // 箭矢伤害：城池兵力 × 5%，最低100；要塞城伤害+50%
+      // 箭矢伤害：城池兵力 × 5%，最低100；要塞城伤害+50%，垛墙再+50%
       const fortressMultiplier = hasCityTrait(city.id, 'fortress') ? 1.5 : 1;
-      const damage = Math.max(100, Math.round(city.troops * CITY_RANGED_BASE_DAMAGE_RATIO * fortressMultiplier));
+      const damage = Math.max(100, Math.round(city.troops * CITY_RANGED_BASE_DAMAGE_RATIO * fortressMultiplier * counterMultiplier));
       unit.troops = Math.max(0, unit.troops - damage);
       state.battleDamageReports ??= [];
       state.battleDamageReports.push({
@@ -789,13 +793,22 @@ export function isPlotOccupiedByOtherCity(state: GameState, cityId: string, q: n
   );
 }
 
-/** 启动建设设施：扣金，设定建设中状态（不立即完成）。1~3名武将共同施工。返回预计旬数 */
-export function startBuildCityPlot(city: City, plotIndex: number, facility: PlotType, officers: Officer[]): { tenDays: number; message: string } {
+/** 启动建设设施：扣金，设定建设中状态（不立即完成）。1~3名武将共同施工。返回预计旬数。
+ *  level 为落成等级（默认 1），由调用方按科技等级上限 facilityLevelCap(state, forceId, facility) 传入；
+ *  建设期间地格仍视为「空地」，等级/产出先写入，完工时由 settlePlotConstruction 按当时科技上限落成。 */
+export function startBuildCityPlot(
+  city: City,
+  plotIndex: number,
+  facility: PlotType,
+  officers: Officer[],
+  level = 1,
+): { tenDays: number; message: string } {
   const plots = cityPlots(city);
   const plot = plots[plotIndex];
   if (!plot || !canBuildPlot(city, plotIndex)) throw new Error('该地格无法建设');
   if (officers.length === 0) throw new Error('至少指派一名武将');
   if (!cityCanBuildFacility(city.id, facility)) throw new Error('该城池特性无法建设此设施');
+  const buildLevel = Math.max(1, Math.floor(level));
   city.gold = Math.max(0, city.gold - plotCost(facility));
   const tenDays = constructTenDaysForOfficers(officers);
   plot.constructing = {
@@ -803,6 +816,9 @@ export function startBuildCityPlot(city: City, plotIndex: number, facility: Plot
     officerIds: officers.map((officer) => officer.id),
     remainingTenDays: tenDays,
   };
+  // 科技决定新建设施等级：直接按等级上限落位（1级=8、2级=16、3级=32）
+  plot.level = buildLevel;
+  plot.value = plotValueFor(buildLevel);
   // 建设启动即拥有满耐久（建设中也可悬停查看耐久值）
   plot.durability = PLOT_MAX_DURABILITY;
   // 建设期间武将进入任务状态，整个工期被占用（无法执行其他命令）
@@ -827,9 +843,12 @@ export function settlePlotConstruction(state: GameState): string[] {
         const facility = plot.constructing.facility;
         const officerIds = [...plot.constructing.officerIds];
         plot.constructing = undefined;
+        // 落成等级 = 科技等级上限（建设期间研究出升级科技也在此一并抬高，不低于已写入的目标等级）
+        const cap = city.ownerId ? facilityLevelCap(state, city.ownerId, facility) : 1;
+        const level = Math.max(1, plot.level, cap);
         plot.type = facility;
-        plot.level = 1;
-        plot.value = plotValueFor(1);
+        plot.level = level;
+        plot.value = plotValueFor(level);
         plot.durability = PLOT_MAX_DURABILITY;
         // 建设完成：释放全部建设武将回城（若仍处于建设任务状态）
         for (const officerId of officerIds) {
@@ -847,16 +866,26 @@ export function settlePlotConstruction(state: GameState): string[] {
   return completed;
 }
 
-/** 旧兼容接口：同步完成 construction（用于直接建设）。当前实现为异步建设，此函数保留但调用 startBuildCityPlot 的同步完成路径（供测试/军团自动用） */
-export function buildCityPlot(state: GameState, city: City, plotIndex: number, facility: PlotType, officers: Officer[]): string {
-  const result = startBuildCityPlot(city, plotIndex, facility, officers);
+/** 旧兼容接口：同步完成 construction（用于直接建设）。当前实现为异步建设，此函数保留但调用 startBuildCityPlot 的同步完成路径（供测试/军团自动用）。
+ *  level 为落成等级（默认 1），由调用方按科技等级上限传入。 */
+export function buildCityPlot(
+  state: GameState,
+  city: City,
+  plotIndex: number,
+  facility: PlotType,
+  officers: Officer[],
+  level = 1,
+): string {
+  startBuildCityPlot(city, plotIndex, facility, officers, level);
   // 同步立即完成（兼容旧调用处）
   const plots = cityPlots(city);
   const plot = plots[plotIndex];
   if (plot?.constructing) {
+    const cap = city.ownerId ? facilityLevelCap(state, city.ownerId, facility) : 1;
+    const buildLevel = Math.max(1, Math.floor(level), plot.level, cap);
     plot.type = facility;
-    plot.level = 1;
-    plot.value = plotValueFor(1);
+    plot.level = buildLevel;
+    plot.value = plotValueFor(buildLevel);
     plot.durability = PLOT_MAX_DURABILITY;
     plot.constructing = undefined;
   }
@@ -868,8 +897,86 @@ export function buildCityPlot(state: GameState, city: City, plotIndex: number, f
       officer.acted = false;
     }
   }
-  void state;
   return `${officers.map((officer) => officer.name).join('、')}在${city.name}修建了${PLOT_LABELS[facility]}`;
+}
+
+/** 有科技等级门槛的内政设施：等级随科技上限提升（可合并升级的设施） */
+export const PLOT_LEVELED_FACILITIES: readonly string[] = ['market', 'farm', 'stable', 'barracks', 'forge'];
+
+/** 科技提升后，把该势力已建成的同类内政设施提升到新的等级上限（返回升级数量） */
+export function applyFacilityLevelTech(state: GameState, forceId: ForceId): number {
+  let upgraded = 0;
+  for (const city of Object.values(state.cities)) {
+    if (city.ownerId !== forceId) continue;
+    for (const plot of city.plots ?? []) {
+      if (!PLOT_LEVELED_FACILITIES.includes(plot.type)) continue;
+      const cap = facilityLevelCap(state, forceId, plot.type);
+      if (cap <= plot.level) continue;
+      plot.level = cap;
+      plot.value = plotValueFor(cap);
+      plot.durability = PLOT_MAX_DURABILITY;
+      upgraded += 1;
+    }
+  }
+  return upgraded;
+}
+
+/** 据点（城池/关隘）耐久每旬自然回复基础比例：最大耐久 × 1% */
+export const STRONGHOLD_DURABILITY_RECOVERY_RATIO = 0.01;
+/** 内政设施耐久每旬自然回复基础比例：上限耐久（500）× 2% */
+export const PLOT_DURABILITY_RECOVERY_RATIO = 0.02;
+
+/** 单个据点耐久自然回复（无主据点跳过，未满时才回复） */
+function recoverStrongholdDurability(state: GameState, stronghold: City | Pass): void {
+  const ownerId = stronghold.ownerId;
+  if (!ownerId) return;
+  const max = stronghold.maxDurability;
+  if (stronghold.durability >= max) return;
+  const gain = Math.ceil(max * STRONGHOLD_DURABILITY_RECOVERY_RATIO * durabilityRecoveryMultiplier(state, ownerId, 'stronghold'));
+  stronghold.durability = Math.min(max, stronghold.durability + gain);
+}
+
+/** 据点上已建内政设施的耐久自然回复（空地/已被摧毁的地格无设施可修，跳过；未受损的跳过；旧存档无耐久字段视为满值） */
+function recoverPlotDurability(state: GameState, stronghold: City | Pass): void {
+  const ownerId = stronghold.ownerId;
+  if (!ownerId) return;
+  const plots = stronghold.plots;
+  if (!plots || plots.length === 0) return;
+  const gain = Math.ceil(PLOT_MAX_DURABILITY * PLOT_DURABILITY_RECOVERY_RATIO * durabilityRecoveryMultiplier(state, ownerId, 'facility'));
+  for (const plot of plots) {
+    // 地格为空地（无设施、也未在建设中）时不回复：被火焰/攻击摧毁的地格保持 durability=0 的「已毁」状态
+    if (plot.type === 'empty' && !plot.constructing) continue;
+    const current = plot.durability ?? PLOT_MAX_DURABILITY;
+    if (current >= PLOT_MAX_DURABILITY) continue;
+    plot.durability = Math.min(PLOT_MAX_DURABILITY, current + gain);
+  }
+}
+
+/** 每旬据点与内政设施的耐久自然回复（工兵科技倍增）。基础：据点 = 最大耐久×1%/旬，内政设施 = 500×2%/旬 */
+export function settleDurabilityRecovery(state: GameState): void {
+  for (const city of Object.values(state.cities)) {
+    recoverStrongholdDurability(state, city);
+    recoverPlotDurability(state, city);
+  }
+  for (const pass of Object.values(state.passes ?? {})) {
+    recoverStrongholdDurability(state, pass);
+    recoverPlotDurability(state, pass);
+  }
+}
+
+/** 工程学：据点最大耐久＋bonus（该势力已建成的据点同步提升，耐久一并增加） */
+export function applyStrongholdDurabilityTech(state: GameState, forceId: ForceId, bonus: number): void {
+  if (!Number.isFinite(bonus) || bonus <= 0) return;
+  for (const city of Object.values(state.cities)) {
+    if (city.ownerId !== forceId) continue;
+    city.maxDurability += bonus;
+    city.durability += bonus;
+  }
+  for (const pass of Object.values(state.passes ?? {})) {
+    if (pass.ownerId !== forceId) continue;
+    pass.maxDurability += bonus;
+    pass.durability += bonus;
+  }
 }
 
 /** 基础人口粮税（每季度）= 7 × √总人口（如500万总人口→7×√500000≈4949） */
@@ -1095,7 +1202,6 @@ function pickLegionAction(policy: Legion['policy'], city: City): LegionAction {
 
 function runLegionAction(state: GameState, city: City, officers: Officer[], action: LegionAction): string | null {
   if (officers.length === 0) return null;
-  void state;
   const names = officers.map((officer) => officer.name).join('、');
   const gain = (base: number) => Math.max(1, Math.round(base));
   switch (action) {
@@ -1120,7 +1226,7 @@ function runLegionAction(state: GameState, city: City, officers: Officer[], acti
       city.food -= 300;
       // 兵部：城池建有兵部时训练效果翻倍
       const gain = trainMoraleGain(officers, city.troops) * (hasPlotFacility(city, 'bingbu') ? 2 : 1);
-      city.training = clamp(city.training + gain, 0, 100);
+      city.training = clamp(city.training + gain, 0, moraleCapOf(state, city.ownerId));
       for (const officer of officers) officer.acted = true;
       return `${names}训练守军`;
     }
@@ -1134,7 +1240,7 @@ function runLegionAction(state: GameState, city: City, officers: Officer[], acti
       const prevTroops = city.troops;
       const prevTraining = city.training;
       city.troops += gained;
-      city.training = Math.round(clamp((prevTroops * prevTraining + gained * 50) / city.troops, 0, 100));
+      city.training = Math.round(clamp((prevTroops * prevTraining + gained * 50) / city.troops, 0, moraleCapOf(state, city.ownerId)));
       city.order = clamp(city.order - 2, 0, 100);
       for (const officer of officers) officer.acted = true;
       return `${names}征募士兵${gained}`;
@@ -1170,7 +1276,7 @@ export type DefaultOfficersContext =
   | { type: 'recruit' }
   | { type: 'train' }
   | { type: 'patrol' }
-  | { type: 'research'; branch: TechBranchId }
+  | { type: 'research'; nodeId: TechNodeId }
   | { type: 'produceRam' | 'produceTower' | 'produceShip' }; // 兼容旧枚举调用
 
 /** 将 score（越大越好）最小化型（工期/耗时）指标统一翻转为"增益分数"，保证越大=越优 */
@@ -1183,6 +1289,8 @@ export function defaultOfficersFor(
   stronghold: City | Pass,
   availableOfficers: Officer[],
   context: DefaultOfficersContext,
+  /** 据点士气上限（基础 100，科技「职业化」+20 → 120）；仅 `train` 分支用它判断饱和 */
+  moraleCap = 100,
 ): string[] {
   if (availableOfficers.length === 0) return [];
 
@@ -1218,17 +1326,17 @@ export function defaultOfficersFor(
       break;
     case 'train':
       sortByStat = 'war';
-      // 训练受 (100 - currentTraining) 上限影响，用 clamp 后的值作为 score
-      score = (subset) => Math.min(trainMoraleGain(subset, stronghold.troops), Math.max(0, 100 - stronghold.training));
+      // 训练受 (士气上限 - currentTraining) 上限影响，用 clamp 后的值作为 score
+      score = (subset) => Math.min(trainMoraleGain(subset, stronghold.troops), Math.max(0, moraleCap - stronghold.training));
       break;
     case 'patrol':
       sortByStat = 'leadership';
       score = (subset) => Math.min(patrolOrderGain(subset), Math.max(0, 100 - stronghold.order));
       break;
     case 'research': {
-      sortByStat = TECH_BRANCHES.find((branch) => branch.id === context.branch)?.researchStat ?? 'politics';
+      sortByStat = techNodeOf(context.nodeId)?.stat ?? 'politics';
       // 按最高等级的 baseDays 作近似最大天数估算（等级越高 baseDays 越大，越能给人才留出加入空间）
-      const maxBaseDays = TECH_COSTS.reduce((max, cost) => Math.max(max, cost.baseDays), 0);
+      const maxBaseDays = TECH_LEVEL_COSTS.reduce((max, cost) => Math.max(max, cost.baseDays), 0);
       score = (subset) => {
         const statSum = subset.reduce((sum, officer) => sum + officer.stats[sortByStat], 0);
         return inverseCost(researchTenDays(maxBaseDays, statSum));

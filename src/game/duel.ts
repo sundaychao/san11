@@ -3,6 +3,7 @@ import { officerSkillNames } from './skills';
 import { treasureDefinition } from './treasures';
 import { captureChance, hasNamedHorse } from './captives';
 import { applyInjury, DUEL_KILL_CHANCE, injuryMultiplier, rollDeath } from './health';
+import { energyCapOf } from './techs';
 import type { ArmyUnit, CityId, ForceId, GameState, Officer } from './types';
 
 /**
@@ -321,11 +322,15 @@ export function executeDuel(state: GameState, communityForce: ForceId, unitId: s
   if (result.attackerDied && next.units[unitId]) dissolveOrPromote(next, next.units[unitId]);
   if (result.defenderDied && next.units[targetUnitId]) dissolveOrPromote(next, next.units[targetUnitId]);
 
-  // 胜者气力+20、攻方标记已行动并消耗气力
+  // 胜者士气+20（不超过士气上限）、攻方标记已行动并消耗士气
   const nextAttacker = next.units[unitId];
   const nextDefender = next.units[targetUnitId];
-  if (result.winner === 'attacker' && nextDefender) nextDefender.energy += 20;
-  if (result.winner === 'defender' && nextAttacker) nextAttacker.energy += 20;
+  if (result.winner === 'attacker' && nextDefender) {
+    nextDefender.energy = Math.min(energyCapOf(next, nextDefender.forceId), nextDefender.energy + 20);
+  }
+  if (result.winner === 'defender' && nextAttacker) {
+    nextAttacker.energy = Math.min(energyCapOf(next, nextAttacker.forceId), nextAttacker.energy + 20);
+  }
   if (nextAttacker) {
     nextAttacker.acted = true;
     nextAttacker.energy = Math.max(0, nextAttacker.energy - 20);

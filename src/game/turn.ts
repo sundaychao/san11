@@ -1,20 +1,20 @@
 import { clamp, rollGrainPrices, rollMerchants, appointStrongholdSuccessor, officerIsBusy } from './commands';
 import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
-import { ARMAMENT_LABELS, CITY_ARMAMENT_CAPS, PASS_ARMAMENT_CAPS, armamentsOf } from './armaments';
-import { MAX_TECH_LEVEL, TECH_BRANCHES, TECHP_CITY_POP_DIVISOR, TECHP_RURAL_POP_DIVISOR, techLevelOf, addTechP } from './techs';
-import { movementAllowanceForUnit, unitSupplyMultiplier } from './battle/actions';
+import { ARMAMENT_LABELS, armamentsOf } from './armaments';
+import { TECHP_CITY_POP_DIVISOR, TECHP_RURAL_POP_DIVISOR, addTechP, completeTechResearch, energyCapOf, maxDurabilityBonus, movementTechBonus, orderDropResist, populationGrowthMultiplier } from './techs';
+import { movementAllowanceForUnit, unitSupplyMultiplier, upgradeFacilitiesForTech } from './battle/actions';
 import { unitMaxPolitics } from './battle/legacyCore';
 import { applyGroundFireDamageToCities, applyGroundFireDamageToFacilities, applyGroundFireDamageToPasses, applyGroundFireDamageToPlots, applyGroundFireDamageToUnits } from './battle/fire';
 import { cellAt } from './battle/movementRules';
+import { battleShipMovementBonus } from './battle/catalog';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
 import { hasCityTrait } from './cityTraits';
 import { territoryCityAt } from './territory';
 import { movementAllowanceBonus } from './skills/rules/movement';
 import { cityPopulationOf, ruralPopulationOf } from './innerAffairs';
-import { appointSuccessorGovernor } from './innerAffairs';
-import { settleLoyaltyDrift } from './loyalty';
-import { settleCaptives } from './captives';
+import { appointSuccessorGovernor, applyFacilityLevelTech, settleDurabilityRecovery } from './innerAffairs';
+import { settleLoyaltyDrift } from './loyalty';import { settleCaptives } from './captives';
 import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
 import { settleLegionAutomation, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, cityQuarterlyFoodIncome, DEFAULT_OFFICER_SALARY } from './innerAffairs';
 import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
@@ -25,8 +25,8 @@ import { settleForceTurnStart } from './skills/rules/turn';
 import { cityIncomeMultiplier } from './skills/rules/city';
 import { tenDayIndex } from './diplomacy';
 import { passIncomeMultiplierByBlockade, passQuarterlyFoodIncome, passMonthlyGoldIncome } from './passes';
-import { clampStrongholdsInPlace } from './strongholdCapacity';
-import type { ArmyUnit, City, CityId, FacilityRepairReport, ForceId, GameState } from './types';
+import { cityResourceCaps, clampStrongholdsInPlace, passResourceCaps } from './strongholdCapacity';
+import type { ArmyUnit, City, CityId, FacilityRepairReport, ForceId, GameState, Pass, TechNodeId } from './types';
 
 interface CityEvent {
   name: string;
@@ -114,7 +114,9 @@ function settleBarbarianRaids(next: GameState) {
     if (hasRepress) continue;
     const roll = nextRandom(next.seed, next.rngCursor);
     next.rngCursor = roll.cursor;
-    const chance = (50 - city.order) / 120;
+    // 公共教育：换季治安下降概率降低50%
+    const baseChance = (50 - city.order) / 120;
+    const chance = orderDropResist(next, city.ownerId) ? baseChance / 2 : baseChance;
     if (roll.value >= chance) continue;
     const goldLoss = Math.floor(city.gold * (0.02 + roll.value * 0.06));
     const foodLoss = Math.floor(city.food * (0.03 + roll.value * 0.07));
@@ -311,7 +313,8 @@ export function settleMonth(state: GameState): GameState {
         city.food += Math.round(cityQuarterlyFoodIncome(city) * cityIncomeMultiplier(next, city.id, 'food'));
       }
     }
-    const popGrowth = Math.floor((city.population * 0.005 * city.order) / 100);
+    // 中医学：人口增长＋20%
+    const popGrowth = Math.floor((city.population * 0.005 * city.order) / 100 * populationGrowthMultiplier(next, city.ownerId));
     city.population += popGrowth;
     // 城市/农村人口按各自占比同步增长（保持初始比例）
     if (city.cityPopulation != null && city.ruralPopulation != null) {
@@ -431,10 +434,6 @@ function settleCitySupply(next: GameState, city: City) {
       });
     }
   }
-  // 内政4级仁政：治安自然回升翻倍
-  if (city.ownerId && techLevelOf(next, city.ownerId, 'civil') >= 4) {
-    city.order = clamp(city.order + 2, 0, 100);
-  }
   // 技巧P：每旬每城按城市/农村人口双系数产出（对应血色6.0 城市系数8、农村系数2，按旬分摊后近似 城市÷3000 + 农村÷12000）
   // 学术城：人口产生的技巧值+50%
   if (city.ownerId) {
@@ -445,8 +444,8 @@ function settleCitySupply(next: GameState, city: City) {
 }
 
 function settleUnitSupply(next: GameState, unit: ArmyUnit) {
-  const energyCap = unit.forceId ? (100 + (techLevelOf(next, unit.forceId, 'military') >= 1 ? 20 : 0)) : 100;
-  const energyRegen = unit.forceId && techLevelOf(next, unit.forceId, 'military') >= 4 ? 10 : 5;
+  const energyCap = unit.forceId ? energyCapOf(next, unit.forceId) : 100;
+  const energyRegen = 5;
   // 战力回复：每旬恢复 部队最高政治×12% 的战力（运输队无战力属性，跳过）
   if (unit.stamina !== undefined) {
     unit.stamina = Math.min(100, (unit.stamina ?? 0) + unitMaxPolitics(next, unit) * 0.12);
@@ -477,7 +476,10 @@ function settleUnitSupply(next: GameState, unit: ArmyUnit) {
   settleUnitBurning(next, unit);
   if (unit.troops <= 0) return;
 
-  unit.movementRemaining = movementAllowanceForUnit(unit) + movementAllowanceBonus(next, unit, cellAt(next, unit)?.terrain);
+  unit.movementRemaining = movementAllowanceForUnit(unit)
+    + movementAllowanceBonus(next, unit, cellAt(next, unit)?.terrain)
+    + movementTechBonus(next, unit.forceId, unit)
+    + battleShipMovementBonus(next, unit);
   unit.moved = false;
   unit.acted = false;
   tickUnitStatus(unit, 'confusedTenDays');
@@ -550,6 +552,37 @@ function settleAbilityResearch(next: GameState) {
   }
 }
 
+/** 科技研究完成时的连锁效果：已建成的内政设施自动升级、建筑学升级土垒/箭楼。
+ *  工程学「据点最大耐久＋3000」不在这里结算，改为每旬由 settleTechDurabilityBonuses 幂等收口，
+ *  这样研究完成当旬起、以及此后新占领/易主的据点都能拿到这份上限。 */
+function applyTechCompletionSideEffects(next: GameState, forceId: ForceId, nodeId: TechNodeId) {
+  applyFacilityLevelTech(next, forceId);
+  upgradeFacilitiesForTech(next, forceId, nodeId);
+}
+
+/**
+ * 工程学（据点最大耐久＋3000）的**幂等收口**：每旬按据点当前归属势力补齐应得的耐久加成。
+ *
+ * 只在研究完成当刻给「当时已有」的据点加成，会导致此后占领的据点永远拿不到这份上限；
+ * 这里以 `techDurabilityBonus`（该据点已吃到的加成额度）为标记逐旬补齐：
+ * 易主/新占自动补上，同一份加成不会重复叠加，未研究该科技的势力也不会凭空获得。
+ */
+function settleTechDurabilityBonuses(next: GameState) {
+  const applyBonus = (stronghold: City | Pass) => {
+    const ownerId = stronghold.ownerId;
+    if (!ownerId) return;
+    const bonus = maxDurabilityBonus(next, ownerId);
+    const applied = stronghold.techDurabilityBonus ?? 0;
+    if (applied >= bonus) return;
+    const delta = bonus - applied;
+    stronghold.maxDurability += delta;
+    stronghold.durability += delta;
+    stronghold.techDurabilityBonus = bonus;
+  };
+  for (const city of Object.values(next.cities)) applyBonus(city);
+  for (const pass of Object.values(next.passes ?? {})) applyBonus(pass);
+}
+
 function settleOfficerTasks(next: GameState) {
   for (const officer of Object.values(next.officers)) {
     if (officer.location.kind !== 'task') continue;
@@ -565,18 +598,17 @@ function settleOfficerTasks(next: GameState) {
       : { kind: 'city' as const, cityId: city.id };
     const returnCityId = taskPass ? taskPass.homeCityId : city.id;
     if (task.task === 'research') {
-      // 研究完成：势力科技等级+1（多人研究仅主将 lead 结算一次，随从静默释放）
-      if (task.lead !== false) {
-        const force = officer.forceId ? next.forces[officer.forceId] : undefined;
-        const branchDef = TECH_BRANCHES.find((candidate) => candidate.id === task.branch);
-        if (force && branchDef) {
-          const currentLevel = force.techs?.[task.branch] ?? 0;
-          force.techs = { ...force.techs, [task.branch]: Math.min(MAX_TECH_LEVEL, currentLevel + 1) };
+      // 研究完成：写入该科技节点（多人研究仅主将 lead 结算一次，随从静默释放）
+      if (task.lead !== false && officer.forceId) {
+        const force = next.forces[officer.forceId];
+        const nodeDef = completeTechResearch(next, officer.forceId, task.nodeId);
+        if (force && nodeDef) {
+          applyTechCompletionSideEffects(next, officer.forceId, task.nodeId);
           next.logs.push({
             id: `research-complete-${next.month}-${officer.id}-${next.logs.length}`,
             month: next.month,
             forceId: officer.forceId,
-            message: `${officer.name}完成「${branchDef.levels[currentLevel].name}」研究，${force.name}科技提升`,
+            message: `${officer.name}完成「${nodeDef.name}」研究，${force.name}科技提升`,
           });
         }
       }
@@ -617,7 +649,10 @@ function settleOfficerTasks(next: GameState) {
     const armamentBase = taskPass ?? city;
     if (task.lead !== false) {
       const current = armamentsOf(armamentBase.armaments);
-      const armamentCaps = taskPass ? PASS_ARMAMENT_CAPS : CITY_ARMAMENT_CAPS;
+      // 容纳上限按该据点归属势力的科技（修筑要塞）计算，与指令侧同口径
+      const armamentCaps = taskPass
+        ? passResourceCaps(next, taskPass).armaments
+        : cityResourceCaps(next, city).armaments;
       const capLimit = armamentCaps[task.armamentType];
       // 按容纳上限截断后再算实际入库量（据点已满时不会谎报"增加了X"）
       const applied = Math.max(0, Math.min(capLimit, current[task.armamentType] + task.amount) - current[task.armamentType]);
@@ -680,6 +715,10 @@ export function settleTenDay(state: GameState): GameState {
   settleExpiringUnits(next);
   // 建设用地建设进度推进（完成则立即转为已建成设施）
   settlePlotConstruction(next);
+  // 据点与内政设施的耐久每旬自然回复（工兵科技倍增）
+  settleDurabilityRecovery(next);
+  // 工程学「据点最大耐久＋3000」：按当前归属势力逐旬补齐（新占/易主的据点也能拿到，不重复叠加）
+  settleTechDurabilityBonuses(next);
 
   if (next.tenDay === 3) {
     next = settleMonth(next);

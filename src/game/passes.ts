@@ -1,6 +1,7 @@
 import { emptyArmaments } from './armaments';
 import { gridKey, neighborsOf, ringCoordsWithinRange, type GridCoord } from './battle/grid';
 import { builtinPassAnchors } from './scenario/builtinMapData';
+import { counterAttackMultiplier, rangedRangeBonus } from './techs';
 import type { CityArmaments, CityId, ForceId, GameState, Pass, PassId } from './types';
 
 /** 原版关隘锚点（单格，来自 Scen000.s11 建筑坐标，与 jingxiang208.china42Passes 同源） */
@@ -165,10 +166,12 @@ export const PASS_ATTACK_MIN = 1;
 /** 关隘箭矢每旬基础伤害（按守军兵力比例，与城池一致） */
 export const PASS_RANGED_BASE_DAMAGE_RATIO = 0.05;
 
-/** 获取关隘攻击区格子（距关隘中心 PASS_ATTACK_MIN~PASS_ATTACK_RANGE 圈，不含关隘本身） */
-export function passAttackRangeCoords(pass: Pass): GridCoord[] {
+/** 获取关隘攻击区格子（距关隘中心 PASS_ATTACK_MIN~PASS_ATTACK_RANGE 圈，不含关隘本身）。
+ *  extraRange 为科技（劲弩）追加的射程圈数，默认 0 = 原版行为。 */
+export function passAttackRangeCoords(pass: Pass, extraRange = 0): GridCoord[] {
   const coords: GridCoord[] = [];
-  for (let d = PASS_ATTACK_MIN; d <= PASS_ATTACK_RANGE; d += 1) {
+  const maxRange = PASS_ATTACK_RANGE + Math.max(0, extraRange);
+  for (let d = PASS_ATTACK_MIN; d <= maxRange; d += 1) {
     coords.push(...ringCoordsWithinRange({ q: pass.q, r: pass.r }, d));
   }
   return coords;
@@ -216,20 +219,22 @@ export function passCenterBlockedFor(state: Pick<GameState, 'passes'>, coord: Gr
 
 /**
  * 旬结算：关隘箭矢射击（对攻击区内敌方部队每旬造成伤害）。
- * 与城池一致：伤害 = 守军兵力 × 5%，最低 100。
+ * 与城池一致：伤害 = 守军兵力 × 5%，最低 100；劲弩射程＋1，垛墙伤害＋50%。
  */
 export function settlePassRangedAttack(state: GameState): string[] {
   const events: string[] = [];
   for (const pass of Object.values(state.passes ?? {})) {
     if (!pass.ownerId) continue;
-    const attackKeys = new Set(passAttackRangeCoords(pass).map(gridKey));
+    const attackKeys = new Set(passAttackRangeCoords(pass, rangedRangeBonus(state, pass.ownerId)).map(gridKey));
     const enemyUnitsInRange = Object.values(state.units).filter((unit) => {
       if (!unit.forceId || unit.forceId === pass.ownerId) return false;
       return attackKeys.has(gridKey({ q: unit.q, r: unit.r }));
     });
 
+    // 垛墙：据点反击（箭雨）伤害＋50%
+    const counterMultiplier = counterAttackMultiplier(state, pass.ownerId);
     for (const unit of enemyUnitsInRange) {
-      const damage = Math.max(100, Math.round(pass.troops * PASS_RANGED_BASE_DAMAGE_RATIO));
+      const damage = Math.max(100, Math.round(pass.troops * PASS_RANGED_BASE_DAMAGE_RATIO * counterMultiplier));
       unit.troops = Math.max(0, unit.troops - damage);
       state.battleDamageReports ??= [];
       state.battleDamageReports.push({

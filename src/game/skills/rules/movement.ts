@@ -1,26 +1,18 @@
 import type { ArmyUnit, GameState, TerrainType, TroopType } from '../../types';
 import { isWaterTerrain } from '../../battle/catalog';
-import { techLevelOf } from '../../techs';
 import { resolveOfficerSkills, resolveUnitSkills } from '../sources';
 import { effectsOfKind } from '../stacking';
 
 export function movementAllowanceBonus(state: GameState, unit: ArmyUnit, terrain?: TerrainType) {
   const unitKind: 'combat' | 'transport' = unit.kind === 'transport' ? 'transport' : 'combat';
-  let bonus = effectsOfKind(resolveUnitSkills(state, unit), 'movementAllowance')
+  const bonus = effectsOfKind(resolveUnitSkills(state, unit), 'movementAllowance')
     .filter(({ effect }) => (
       (effect.kinds ?? ['combat']).includes(unitKind) &&
       (!effect.troopTypes || effect.troopTypes.includes(unit.troopType ?? 'sword')) &&
       (!effect.waterOnly || isWaterTerrain(terrain))
     ))
     .reduce((sum, { effect }) => sum + effect.add, 0);
-  // 科技：兵科4级精锐——对应兵种移动力+6
-  if (unit.forceId && unit.kind !== 'transport') {
-    const troop = unit.troopType;
-    if ((troop === 'spear' || troop === 'halberd' || troop === 'crossbow' || troop === 'cavalry')
-      && techLevelOf(state, unit.forceId, troop) >= 4) {
-      bonus += 6;
-    }
-  }
+  // 科技移动力加成（急行军/良马育种/轮轴/罗盘/后勤体系）由 techs.movementTechBonus 统一提供
   return bonus;
 }
 

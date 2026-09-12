@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createGame } from '../scenario/jingxiang208';
 import type { ArmyUnit } from '../types';
-import { deploymentCells, isLegalUnitCell, movementCells, reachableCosts } from './movementRules';
-import { sevenCellCityFootprint } from './grid';
+import { cellAt, deploymentCells, isLegalUnitCell, movementCells, reachableCosts } from './movementRules';
+import { neighborsOf, sevenCellCityFootprint } from './grid';
+import { territoryForceAt } from '../territory';
 
 function addUnit(state: ReturnType<typeof createGame>, unit: ArmyUnit) {
   state.units[unit.id] = unit;
@@ -113,6 +114,87 @@ describe('movement rules', () => {
     const state = createGame('liu', 1);
     const cells = deploymentCells(state, 'jiangling', 20, 'sword');
     expect(cells.length).toBeGreaterThan(0);
+  });
+
+  it('科技「开路军」：未研究时小径／浅滩／川不可通行，研究后可通行', () => {
+    const state = createGame('liu', 1);
+    for (const cell of state.grid) cell.terrain = 'plain';
+    // 目标格周围铺一条小径，其余保持平原（平地消耗 4）
+    const pathCell = state.grid.find((cell) => cell.q === 10 && cell.r === 9);
+    if (!pathCell) throw new Error('test cell missing');
+    pathCell.terrain = 'path';
+    const streamCell = state.grid.find((cell) => cell.q === 10 && cell.r === 11);
+    if (!streamCell) throw new Error('test cell missing');
+    streamCell.terrain = 'stream';
+    const unit: ArmyUnit = {
+      id: 'kailu-test',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      homeCityId: 'jiangling',
+      troopType: 'sword',
+      q: 10,
+      r: 10,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 20,
+      moved: false,
+      acted: false,
+    };
+    addUnit(state, unit);
+    state.forces.liu.techNodes = [];
+
+    expect(isLegalUnitCell(state, { q: 10, r: 9 }, 'kailu-test', 'sword', 'liu')).toBe(false);
+    expect(isLegalUnitCell(state, { q: 10, r: 11 }, 'kailu-test', 'sword', 'liu')).toBe(false);
+
+    // 研究开路军后：小径（消耗 5）与川都可通行
+    state.forces.liu.techNodes = ['kailujun'];
+    expect(isLegalUnitCell(state, { q: 10, r: 9 }, 'kailu-test', 'sword', 'liu')).toBe(true);
+    expect(isLegalUnitCell(state, { q: 10, r: 11 }, 'kailu-test', 'sword', 'liu')).toBe(true);
+    const costs = reachableCosts(state, state.units['kailu-test']);
+    expect(costs.get('10,9')).toBe(5);
+  });
+
+  it('科技「修筑要塞」：敌军在我方领地内移动消耗 +1', () => {
+    const state = createGame('liu', 1);
+    for (const cell of state.grid) cell.terrain = 'plain';
+    // 找一处「刘备领地内、且能从领地外一格踏进来」的平原格
+    const target = state.grid.find((cell) => territoryForceAt(state, cell) === 'liu'
+      && neighborsOf(cell.q, cell.r).some((n) => cellAt(state, n) && territoryForceAt(state, n) !== 'liu'));
+    if (!target) throw new Error('找不到刘备领地边缘格');
+    const origin = neighborsOf(target.q, target.r)
+      .find((n) => cellAt(state, n) && territoryForceAt(state, n) !== 'liu')!;
+    const key = `${target.q},${target.r}`;
+
+    const unit: ArmyUnit = {
+      id: 'territory-test',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'cao-cao',
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: origin.q,
+      r: origin.r,
+      troops: 3000,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 20,
+      moved: false,
+      acted: false,
+    };
+    addUnit(state, unit);
+    state.forces.liu.techNodes = [];
+    expect(reachableCosts(state, unit).get(key)).toBe(4);
+
+    // 刘备研究「修筑要塞」后，曹军踏入其领地要多花 1 点移动力
+    state.forces.liu.techNodes = ['xiuzhuyaosai'];
+    expect(reachableCosts(state, state.units['territory-test']).get(key)).toBe(5);
+
+    // 己方领地不受影响（刘备自己的部队走进自家领地仍是 4）
+    const own: ArmyUnit = { ...unit, id: 'own-territory', forceId: 'liu' };
+    addUnit(state, own);
+    expect(reachableCosts(state, state.units['own-territory']).get(key)).toBe(4);
   });
 });
 

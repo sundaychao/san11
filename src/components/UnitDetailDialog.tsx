@@ -1,6 +1,6 @@
 import { X } from 'lucide-react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { ARMAMENT_LABELS, ARMAMENT_TYPES, TROOP_LABELS, VEHICLE_LABELS } from '../game/armaments';
+import { armamentLabelFor, ARMAMENT_TYPES, TROOP_LABELS, unitArmamentLabel, vehicleLabelFor } from '../game/armaments';
 import { effectiveUnitAbilities, fireStrategySuccessChance, tacticCriticalChance } from '../game/battle/actions';
 import { effectiveStat } from '../game/health';
 import type { ArmyUnit, GameState, Officer } from '../game/types';
@@ -18,16 +18,19 @@ function unitName(unit: ArmyUnit, state: GameState) {
   return `${leader?.name ?? '部队'}队`;
 }
 
-function unitKind(unit: ArmyUnit) {
+/** 兵种显示名：兵器部队按势力科技显示「冲车/木兽」「井阑/投石车」（unitArmamentLabel 已含回落） */
+function unitKind(unit: ArmyUnit, state: GameState) {
   if (unit.kind === 'transport') return '输送队';
   if (unit.troopType === 'siege' && unit.siegeWeapon) {
-    return unit.siegeWeapon === 'ram' ? '冲车' : '井阑';
+    return unitArmamentLabel(state, unit) ?? TROOP_LABELS[unit.troopType ?? 'sword'];
   }
   return TROOP_LABELS[unit.troopType ?? 'sword'];
 }
 
-function unitVehicle(unit: ArmyUnit) {
-  return unit.vehicle ? VEHICLE_LABELS[unit.vehicle] : null;
+/** 载具显示名：造船术后楼船显示为斗舰；存储仍是 `vehicle === 'ship'` */
+function unitVehicle(unit: ArmyUnit, state: GameState) {
+  if (!unit.vehicle) return null;
+  return vehicleLabelFor(state, unit.forceId, unit.vehicle);
 }
 
 function unitStatus(unit: ArmyUnit) {
@@ -92,8 +95,8 @@ export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps
         <dl className="unit-detail-grid">
           <div><dt>势力</dt><dd>{state.forces[unit.forceId].name}</dd></div>
           <div><dt>军团</dt><dd>{state.cities[unit.homeCityId].name}</dd></div>
-          <div><dt>兵种</dt><dd>{unitKind(unit)}</dd></div>
-          {unitVehicle(unit) && <div><dt>工具</dt><dd>{unitVehicle(unit)}</dd></div>}
+          <div><dt>兵种</dt><dd>{unitKind(unit, state)}</dd></div>
+          {unitVehicle(unit, state) && <div><dt>工具</dt><dd>{unitVehicle(unit, state)}</dd></div>}
           <div><dt>坐标</dt><dd>{unit.q},{unit.r}</dd></div>
           <div><dt>士兵</dt><dd>{unit.troops.toLocaleString('en-US')}</dd></div>
           <div><dt>士气</dt><dd>{unit.energy}</dd></div>
@@ -103,7 +106,7 @@ export function UnitDetailDialog({ unit, state, onClose }: UnitDetailDialogProps
           {carriedArmaments.length > 0 && (
             <div>
               <dt>随身兵装</dt>
-              <dd>{carriedArmaments.map(([type, amount]) => `${ARMAMENT_LABELS[type]} ${amount.toLocaleString('en-US')}`).join(' · ')}</dd>
+              <dd>{carriedArmaments.map(([type, amount]) => `${armamentLabelFor(state, unit.forceId, type)} ${amount.toLocaleString('en-US')}`).join(' · ')}</dd>
             </div>
           )}
           <div><dt>行动</dt><dd>{unit.movementRemaining}</dd></div>

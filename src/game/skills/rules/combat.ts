@@ -2,7 +2,7 @@ import { nextRandom } from '../../random';
 import { isWaterTerrain, NAVAL_TACTIC_IDS } from '../../battle/catalog';
 import { cellAt } from '../../battle/movementRules';
 import type { TacticId } from '../../battle/tactics';
-import { deployTroopCapOf, energyCapOf, techLevelOf } from '../../techs';
+import { deployTroopCapOf, energyCapOf, halberdBlocksMelee, halberdBlocksRanged, spearForestNoCounter } from '../../techs';
 import type { ArmyUnit, GameState, TerrainType } from '../../types';
 import { skillConditionMatches } from '../conditions';
 import { resolveUnitSkills } from '../sources';
@@ -44,6 +44,8 @@ export function reduceIncomingDamageBySkills(
   target: ArmyUnit,
   damage: number,
   source: 'normalAttack' | 'counter' | 'tactic',
+  /** 该次普攻/反击是否为远程（非相邻）——决定戟兵「盾牌防御 / 连锁防御」是否生效 */
+  ranged = false,
 ) {
   // 金刚：仅当实际受到的伤害低于阈值时才按条件结算
   const chance = effectsOfKind(resolveUnitSkills(state, target), 'negateIncomingDamage')
@@ -54,12 +56,13 @@ export function reduceIncomingDamageBySkills(
         : skillConditionMatches(state, effect.condition, target)
     ))
     .reduce((highest, { effect }) => Math.max(highest, effect.chance), 0);
-  // 科技：戟兵2级矢盾（受远程攻击30%免伤）、3级大盾（受普通攻击30%免伤）
+  // 科技：戟兵「盾牌防御」1/3 概率挡远程普攻、「连锁防御」1/3 概率挡近距离普攻
   let techShieldChance = 0;
-  if (target.forceId && target.troopType === 'halberd') {
-    const halberdLevel = techLevelOf(state, target.forceId, 'halberd');
-    if (halberdLevel >= 2 && (source === 'normalAttack' || source === 'tactic')) techShieldChance = 0.3;
-    if (halberdLevel >= 3 && source === 'normalAttack') techShieldChance = 0.3;
+  if (target.forceId && target.troopType === 'halberd' && (source === 'normalAttack' || source === 'counter')) {
+    const blocked = ranged
+      ? halberdBlocksRanged(state, target.forceId)
+      : halberdBlocksMelee(state, target.forceId);
+    if (blocked) techShieldChance = 1 / 3;
   }
   const totalChance = Math.max(chance, techShieldChance);
   if (totalChance === 0) {
@@ -82,9 +85,9 @@ export function applyNonFireDamageMultiplier(state: GameState, target: ArmyUnit,
 }
 
 export function rollNoCounterAttack(state: GameState, attacker: ArmyUnit, terrain: TerrainType) {
-  // 科技：枪兵3级奇袭——在森林地形攻击不受反击
+  // 科技「奇袭」：枪兵在森林地形攻击不受反击
   if (attacker.forceId && attacker.troopType === 'spear' && terrain === 'forest'
-    && techLevelOf(state, attacker.forceId, 'spear') >= 3) {
+    && spearForestNoCounter(state, attacker.forceId)) {
     return true;
   }
   const chance = effectsOfKind(resolveUnitSkills(state, attacker), 'noCounterAttack')

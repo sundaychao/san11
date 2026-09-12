@@ -3,7 +3,7 @@ import { executeCommand, validateCommand } from './commands';
 import { DEFAULT_OFFICER_LOYALTY, LEADER_INITIAL_LOYALTY, LOYALTY_MAX, settleLoyaltyDrift } from './loyalty';
 import { createGame } from './scenario/jingxiang208';
 import { compatTierOf, affinityOf, officerCompatWithRuler } from './diplomacy';
-import { hasMasterHearts } from './techs';
+import { loyaltyLossResist } from './techs';
 import { recruitCaptiveChance } from './captives';
 import { poachChance } from './rumor';
 
@@ -92,11 +92,11 @@ describe('相性/忠诚对齐原版', () => {
     expect(compatTierOf(75).factor).toBe(1.5);
   });
 
-  it('掌握人心（军制4级）开关', () => {
+  it('克己复礼（文教6级）开关', () => {
     const state = createGame('cao');
-    expect(hasMasterHearts(state, 'cao')).toBe(false);
-    state.forces.cao.techs = { military: 4 };
-    expect(hasMasterHearts(state, 'cao')).toBe(true);
+    expect(loyaltyLossResist(state, 'cao')).toBe(false);
+    state.forces.cao.techNodes = ['kejifuli'];
+    expect(loyaltyLossResist(state, 'cao')).toBe(true);
   });
 
   it('相性差取圆环最短距离并与君主比较', () => {
@@ -123,7 +123,7 @@ describe('相性/忠诚对齐原版', () => {
     expect(officer.loyalty).toBe(100);
   });
 
-  it('厌恶君主必降忠诚（无视义理/野望与掌握人心）', () => {
+  it('厌恶君主必降忠诚（无视义理/野望与克己复礼）', () => {
     const state = createGame('cao', 1);
     const officer = state.officers['guan-yu'];
     officer.forceId = 'cao';
@@ -132,7 +132,7 @@ describe('相性/忠诚对齐原版', () => {
     officer.ambition = 10;
     officer.hates = ['cao-cao'];
     officer.location = { kind: 'unaffiliated', cityId: 'wan' };
-    state.forces.cao.techs = { military: 4 };
+    state.forces.cao.techNodes = ['kejifuli'];
     settleLoyaltyDrift(state);
     expect(officer.loyalty).toBeLessThan(100);
   });
@@ -168,7 +168,7 @@ describe('相性/忠诚对齐原版', () => {
     expect(recruitCaptiveChance(state, 'liu', executor, target)).toBe(0);
   });
 
-  it('厌恶挖角被拒：概率为0；掌握人心进一步压制', () => {
+  it('厌恶挖角被拒：概率为0；克己复礼进一步压制', () => {
     const state = createGame('cao', 1);
     const executor = state.officers['cao-cao'];
     const target = state.officers['zhou-yu'];
@@ -178,9 +178,9 @@ describe('相性/忠诚对齐原版', () => {
 
     const target2 = state.officers['lu-su'];
     target2.forceId = 'sun';
-    const noHearts = poachChance(state, executor, target2);
-    state.forces.sun.techs = { military: 4 };
-    const withHearts = poachChance(state, executor, target2);
-    expect(withHearts).toBeLessThan(noHearts);
+    const withoutResist = poachChance(state, executor, target2);
+    state.forces.sun.techNodes = ['kejifuli'];
+    const withResist = poachChance(state, executor, target2);
+    expect(withResist).toBeLessThan(withoutResist);
   });
 });

@@ -1,24 +1,25 @@
 import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentCost, armamentProductionIntelligence, armamentProductionTenDays, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
+import { ARMAMENT_GOLD_COST, ARMAMENT_TYPES, armamentCost, armamentLabelFor, armamentProductionIntelligence, armamentProductionTenDays, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
 import { COMMAND_AP, COMMAND_LABELS, SELL_FEE_RATIO, TRADE_MAX_GRAIN, grainPriceOf, patrolGoldCost, passAvailableOfficers, quoteTrade, researchTechPCost, strongholdTransferDuration, tradeEffectMultiplier, tradeEffectPercent, validateCommand } from '../game/commands';
-import { MAX_TECH_LEVEL, TECH_BRANCHES, TECH_COSTS, recruitMultiplier, researchTenDays, techLevelOf } from '../game/techs';
+import { TECH_NODES, TECH_SYSTEMS, canBuildFacility, facilityGateNode, hasTech, moraleCapOf, researchTenDays, researchableTechs, techCostOf, techNodeOf } from '../game/techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition, treasureEffectText } from '../game/treasures';
 import { REWARD_GOLD_COST, officerLoyalty, rewardLoyaltyGain } from '../game/loyalty';
 import { ABILITY_CENTER, ABILITY_NODE_MAP, ABILITY_NODES, ABILITY_RESEARCH_GOLD, ABILITY_START_ID, ABILITY_TREE_COLS, ABILITY_TREE_ROWS, abilityCultivateRemaining, abilityEffectText, abilityKindLabel, abilityNodeStatus, canCultivateOfficer } from '../game/abilityResearch';
 import { POSITIONS, forceRankOf, officerIsOnCampaign, officerMerit, positionDefinition, rankDefinition, rankIndex } from '../game/ranks';
 import { capturableByLoyalty, captivesOf, recruitCaptiveChance, CAPTIVE_RECRUIT_LOYALTY_THRESHOLD } from '../game/captives';
 import { DIPLOMACY_GOLD_MAX, GOODWILL_GOLD_COST, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, areAllies, forceDiplomacy } from '../game/diplomacy';
-import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, CITY_FOOD_CAP, CITY_GOLD_CAP, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasPlotFacility, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
+import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasPlotFacility, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
+import { cityResourceCaps } from '../game/strongholdCapacity';
 import { hasCityTrait } from '../game/cityTraits';
 import { MARRY_TECHP_COST, relationCandidates } from '../game/relationship';
 import { POACH_GOLD_COST, RUMOR_GOLD_COST, canPoach, rumorTargets } from '../game/rumor';
 import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from '../game/skills/rules/city';
 import { useGame } from '../game/store/GameProvider';
-import type { ArmamentType, CityId, ForceId, GameCommand, Officer, PassId, TechBranchId } from '../game/types';
+import type { ArmamentType, CityId, ForceId, GameCommand, Officer, PassId, TechNodeId } from '../game/types';
 import { OfficerPickerDialog } from './OfficerPickerDialog';
-import { TechTreePanel } from './TechTreePanel';
+import { TechTreePanel, type TechNodeStatus } from './TechTreePanel';
 import { closePopupOnContextMenu } from './popupEvents';
 
 interface CommandDialogProps {
@@ -34,11 +35,6 @@ interface CommandDialogProps {
 /** 多人执行指令（勾选1~3名武将共同执行） */
 const MULTI_OFFICER_TYPES: GameCommand['type'][] = ['recruit', 'produceArmament', 'train', 'patrol', 'research', 'buildFacilityPlot'];
 
-/**
- * 科技研究面板是否显示旧版科技表。
- * 新版界面（TechTreePanel）按参考图只做展示、暂不接旧科技系统，旧表格与详情代码保留以便回退。
- */
-const SHOW_LEGACY_TECH_TABLE = false;
 type ExecutorStatKey = keyof Officer['stats'];
 const EXECUTOR_STAT_LABELS: Record<ExecutorStatKey, string> = {
   leadership: '统率',
@@ -66,8 +62,8 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
   const [executorPickerOpen, setExecutorPickerOpen] = useState(false);
   // 交易滑块：0=不交易，负值=卖出兵粮，正值=买入兵粮（单位：兵粮）
   const [tradeValue, setTradeValue] = useState(0);
-  // 技巧研究：选中的科技方向
-  const [researchBranch, setResearchBranch] = useState<TechBranchId>('spear');
+  // 技巧研究：选中的科技节点 id（'' = 用默认节点：第一个可研究节点）
+  const [techNodeId, setTechNodeId] = useState<TechNodeId>('');
   // 能力研究：选中的节点 + 培育武将
   const [abilityNodeId, setAbilityNodeId] = useState<string>('warLow');
   const [cultivateOfficerId, setCultivateOfficerId] = useState('');
@@ -170,9 +166,39 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
     && rankIndex(forceRankNow) >= rankIndex(position.rankNeeded),
   );
   const activePositionDef = activePositionId ? positionDefinition(activePositionId) : null;
-  // 技巧研究：按所选方向的研究属性排序武将
-  const researchBranchDef = TECH_BRANCHES.find((branch) => branch.id === researchBranch)!;
-  const researchStatKey = researchBranchDef.researchStat;
+  // 技巧研究：默认选中第一个可研究节点（无任何可研究节点时回退到科技树第一个节点）
+  const researchableNodeIds = researchableTechs(state, state.playerForceId);
+  const activeTechNodeId: string = techNodeId || researchableNodeIds[0] || TECH_NODES[0].id;
+  const activeTechNode = techNodeOf(activeTechNodeId);
+  const activeTechCost = techCostOf(activeTechNodeId);
+  const activeTechSystem = TECH_SYSTEMS.find((system) => system.id === activeTechNode?.system);
+  // 本势力正在研究的节点（每旬每势力只允许一项）
+  const researchingNodeIds = new Set<string>(Object.values(state.officers).flatMap((officer) => {
+    const location = officer.location;
+    return officer.forceId === state.playerForceId && location.kind === 'task' && location.task === 'research'
+      ? [location.nodeId]
+      : [];
+  }));
+  /** 科技树节点状态：已研究／正在研究／可研究／前置未满足 */
+  const techNodeStatus = (nodeId: string): TechNodeStatus => {
+    if (hasTech(state, state.playerForceId, nodeId)) return 'done';
+    if (researchingNodeIds.has(nodeId)) return 'researching';
+    return researchableNodeIds.includes(nodeId) ? 'current' : 'locked';
+  };
+  // 技巧研究：按所选节点的研究属性排序武将
+  const researchStatKey: ExecutorStatKey = activeTechNode?.stat ?? 'politics';
+  const forceTechP = state.forces[state.playerForceId]?.techP ?? 0;
+  const activeTechPrevId = activeTechNode?.prev;
+  /** 选中节点的研究状态提示：已研究／正在研究中／需先研究「前置」／可研究 */
+  const researchStatusText = !activeTechNode
+    ? '节点无效'
+    : hasTech(state, state.playerForceId, activeTechNodeId)
+      ? '已研究'
+      : researchingNodeIds.has(activeTechNodeId)
+        ? '正在研究中'
+        : activeTechPrevId && !hasTech(state, state.playerForceId, activeTechPrevId)
+          ? `需先研究「${techNodeOf(activeTechPrevId)?.name ?? '前置科技'}」`
+          : '可研究';
   // 多人执行指令：默认推荐 1~3 名武将，达到最佳效果即停止增加
   const isMultiOfficer = MULTI_OFFICER_TYPES.includes(type);
   const executorStatKey: ExecutorStatKey = type === 'recruit' ? 'charisma'
@@ -198,16 +224,16 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
       case 'recruit':
         return defaultOfficersFor(garrison, availableOfficers, { type: 'recruit' });
       case 'train':
-        return defaultOfficersFor(garrison, availableOfficers, { type: 'train' });
+        return defaultOfficersFor(garrison, availableOfficers, { type: 'train' }, moraleCapOf(state, garrison.ownerId));
       case 'patrol':
         return defaultOfficersFor(garrison, availableOfficers, { type: 'patrol' });
       case 'research':
-        return defaultOfficersFor(garrison, availableOfficers, { type: 'research', branch: researchBranch });
+        return defaultOfficersFor(garrison, availableOfficers, { type: 'research', nodeId: activeTechNodeId });
       default:
         return executorCandidates[0] ? [executorCandidates[0].id] : [];
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMultiOfficer, type, garrison.id, availableOfficers.length, armamentType, researchBranch, state.actionPoints[state.playerForceId] // actionPoints 作校验标识，避免无限重算
+  }, [isMultiOfficer, type, garrison.id, availableOfficers.length, armamentType, activeTechNodeId, state.actionPoints[state.playerForceId] // actionPoints 作校验标识，避免无限重算
   ]);
   const validExecutorIds = executorIds.filter((id) => executorCandidates.some((officer) => officer.id === id));
   const activeExecutorIds = validExecutorIds.length > 0
@@ -293,17 +319,19 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
   const grainPrice = grainPriceOf(garrison);
   const tradeEffect = activeOfficer ? tradeEffectMultiplier(activeOfficer.stats.politics) : 1;
   const tradePercent = activeOfficer ? tradeEffectPercent(activeOfficer.stats.politics) : 100;
+  // 交易/生产的容纳上限与指令校验同口径：按城池归属势力的科技（修筑要塞）计算，基准值由 strongholdCapacity 统一收口
+  const cityCaps = cityResourceCaps(state, city);
   // 滑块左卖右买、居中为0：右侧可买上限受资金与城池兵粮余量限制，
   // 左侧可卖上限受兵粮与城池资金余量限制（两端都不得突破据点容纳上限），均不超过单次30000
   const tradeBuyMax = activeOfficer
-    ? Math.min(TRADE_MAX_GRAIN, Math.floor(garrisonGold * grainPrice * tradeEffect), Math.max(0, CITY_FOOD_CAP - city.food))
+    ? Math.min(TRADE_MAX_GRAIN, Math.floor(garrisonGold * grainPrice * tradeEffect), Math.max(0, cityCaps.food - city.food))
     : 0;
-  // 卖出上限：兵粮、单次上限，以及目标城池的资金余量（卖出的金不能超过 CITY_GOLD_CAP）
+  // 卖出上限：兵粮、单次上限，以及目标城池的资金余量（卖出的金不能超过资金容纳上限）
   const sellGoldPerGrain = (tradeEffect * SELL_FEE_RATIO) / grainPrice;
   const tradeSellMax = Math.min(
     TRADE_MAX_GRAIN,
     garrisonFood,
-    sellGoldPerGrain > 0 ? Math.floor(Math.max(0, CITY_GOLD_CAP - city.gold) / sellGoldPerGrain) : TRADE_MAX_GRAIN,
+    sellGoldPerGrain > 0 ? Math.floor(Math.max(0, cityCaps.gold - city.gold) / sellGoldPerGrain) : TRADE_MAX_GRAIN,
   );
   const tradeValueClamped = Math.max(-tradeSellMax, Math.min(tradeValue, tradeBuyMax));
   const tradeIdle = tradeValueClamped === 0;
@@ -408,12 +436,12 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
       return { type, cityId, passId, officerId: effective };
     }
     if (type === 'produceArmament') return { type, cityId, passId, officerIds: activeExecutorIds, armamentType };
-    if (type === 'research') return { type, cityId, passId, officerIds: activeExecutorIds, branch: researchBranch };
+    if (type === 'research') return { type, cityId, passId, officerIds: activeExecutorIds, nodeId: activeTechNodeId };
     if (isMultiOfficer) return { type, cityId, passId, officerIds: activeExecutorIds } as GameCommand;
     const base = { cityId, passId, officerId: activeOfficerId };
     if (type === 'trade') return { ...base, type, mode: tradeValue >= 0 ? 'buy' : 'sell', amount: Math.min(Math.abs(tradeValue), TRADE_MAX_GRAIN) };
     return { ...base, type } as GameCommand;
-  }, [abilityNode, abilityNodeId, activeCaptiveId, activeDiplomacyForceId, activeExecutorIds, activeMarryOfficerA, activeMarryOfficerB, activeOfficerId, activePoachOfficerId, activePoachTargetCityId, activePositionId, activePositionOfficer, activeRumorTargetId, activeTargetId, activeTreasureId, armamentType, captiveAction, cityId, cultivateMode, cultivateOfficerChosen, diplomacyAction, diplomacyGold, diplomacyMonths, exploreOfficerIds, grantOfficerId, isMultiOfficer, legionCityId, legionCommanderId, legionPolicy, marryRelation, officerIds, passId, plotFacility, poachTargetCityId, poachTargetOfficerId, researchBranch, strategistOfficerId, swornOfficerIds, tradeValue, type, rewardOfficerIds]);
+  }, [abilityNode, abilityNodeId, activeCaptiveId, activeDiplomacyForceId, activeExecutorIds, activeMarryOfficerA, activeMarryOfficerB, activeOfficerId, activePoachOfficerId, activePoachTargetCityId, activePositionId, activePositionOfficer, activeRumorTargetId, activeTargetId, activeTechNodeId, activeTreasureId, armamentType, captiveAction, cityId, cultivateMode, cultivateOfficerChosen, diplomacyAction, diplomacyGold, diplomacyMonths, exploreOfficerIds, grantOfficerId, isMultiOfficer, legionCityId, legionCommanderId, legionPolicy, marryRelation, officerIds, passId, plotFacility, poachTargetCityId, poachTargetOfficerId, strategistOfficerId, swornOfficerIds, tradeValue, type, rewardOfficerIds]);
 
   const errors = validateCommand(state, state.playerForceId, command);
   const label = COMMAND_LABELS[type];
@@ -431,11 +459,10 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
 
   // 多人执行指令效果预估（与 commands.ts 结算公式保持一致）
   const hasExecutors = activeExecutors.length > 0;
-  // 征兵：1000 + 魅力总和 × (治安+20) × 5 ÷ 100，再乘特技/科技/兵舍修正
+  // 征兵：1000 + 魅力总和 × (治安+20) × 5 ÷ 100，再乘特技/兵舍修正
   const recruitEstimate = type === 'recruit' && hasExecutors
     ? Math.round(recruitBaseYield(activeExecutors, garrison)
       * commandYieldMultiplier(state, command)
-      * recruitMultiplier(state, state.playerForceId)
       * barracksYieldMultiplier(garrison))
     : 0;
   // 兵装生产数量：1000 + 最高智力×10 + 其余2人智力各×5，再乘特技/设施修正
@@ -448,9 +475,9 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
   const productionTenDays = type === 'produceArmament' && isDelayedArmament(armamentType) && hasExecutors
     ? armamentProductionTenDays(activeExecutors, armamentProductionSpeedMultiplier(state, command as Extract<GameCommand, { type: 'produceArmament' }>))
     : 0;
-  // 训练：气力 +【(武力总和 + 武力最大值) ÷ 基数】+ 3（封顶100），据点建有兵部时效果翻倍
+  // 训练：气力 +【(武力总和 + 武力最大值) ÷ 基数】+ 3（封顶为据点士气上限），据点建有兵部时效果翻倍
   const trainEstimate = type === 'train' && hasExecutors
-    ? Math.min(trainMoraleGain(activeExecutors, garrisonTroops) * (hasPlotFacility(garrison, 'bingbu') ? 2 : 1), 100 - garrisonTraining)
+    ? Math.min(trainMoraleGain(activeExecutors, garrisonTroops) * (hasPlotFacility(garrison, 'bingbu') ? 2 : 1), moraleCapOf(state, garrison.ownerId) - garrisonTraining)
     : 0;
   // 巡查：治安 +【统率总和 ÷ 28】+ 2（封顶100）
   const patrolEstimate = type === 'patrol' && hasExecutors
@@ -459,13 +486,13 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
   // 建设：综合政治 = 最高政治 + 其余政治之和 ÷ 3
   const constructionPoliticsValue = hasExecutors ? constructionPolitics(activeExecutors) : 0;
   const constructionTenDays = hasExecutors ? constructTenDaysForOfficers(activeExecutors) : 0;
-  // 科技研究：相关能力纯等权重加和
+  // 科技研究：相关能力纯等权重加和（统率／政治／智力，按节点所属系统而定）
   const researchStatSum = hasExecutors
     ? activeExecutors.reduce((sum, officer) => sum + officer.stats[researchStatKey], 0)
     : 0;
-  const researchTechCost = hasExecutors
-    ? researchTechPCost(state, state.playerForceId, researchBranch, activeExecutorIds)
-    : TECH_COSTS[techLevelOf(state, state.playerForceId, researchBranch)]?.techP ?? 0;
+  // 技巧P消耗（「指导」特技可减半，非执行武将时取基础值）
+  const researchTechCost = researchTechPCost(state, activeTechNodeId, activeExecutorIds);
+  const researchTenDaysEstimate = activeTechCost ? researchTenDays(activeTechCost.baseDays, researchStatSum) : 0;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -517,7 +544,7 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
       : type === 'train'
         ? `兵粮 300 · 气力 +${trainEstimate}`
         : type === 'produceArmament'
-          ? `资金 ${armamentCost(garrison, armamentType)} · ${ARMAMENT_LABELS[armamentType]} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType) ? `${productionTenDays}旬` : '即时'}`
+          ? `资金 ${armamentCost(garrison, armamentType)} · ${armamentLabelFor(state, state.playerForceId, armamentType)} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType) ? `${productionTenDays}旬` : '即时'}`
           : type === 'patrol'
             ? `资金 ${patrolGoldCost(garrison)} · 治安 +${patrolEstimate}`
             : type === 'trade'
@@ -526,10 +553,9 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
                 ? `资金 ${REWARD_GOLD_COST * (rewardOfficerIds.length || 1)} · 忠诚+${rewardLoyaltyGain(0)}/人`
                 : type === 'research'
                 ? (() => {
-                  const level = techLevelOf(state, state.playerForceId, researchBranch);
-                  if (level >= MAX_TECH_LEVEL) return '该方向已研究完毕';
-                  const cost = TECH_COSTS[level];
-                  return `资金 ${cost.gold} · 技巧P ${researchTechCost} · ${researchTenDays(cost.baseDays, researchStatSum)}旬`;
+                  if (!activeTechCost) return '科技节点无效';
+                  if (hasTech(state, state.playerForceId, activeTechNodeId)) return '该科技已研究完成';
+                  return `资金 ${activeTechCost.gold} · 技巧P ${researchTechCost} · ${researchTenDaysEstimate}旬`;
                 })()
                 : type === 'abilityResearch'
                   ? cultivateMode
@@ -764,13 +790,13 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
                   <button
                     key={item}
                     type="button"
-                    aria-label={ARMAMENT_LABELS[item]}
+                    aria-label={armamentLabelFor(state, state.playerForceId, item)}
                     className={selected ? 'is-active' : ''}
                     disabled={facilityMissing}
                     title={facilityMissing ? `需先建设${armamentFacilityLabel(item)}才能生产` : undefined}
                     onClick={() => setArmamentType(item)}
                   >
-                    <strong>{ARMAMENT_LABELS[item]}</strong>
+                    <strong>{armamentLabelFor(state, state.playerForceId, item)}</strong>
                     <span>{facilityMissing ? `需${armamentFacilityLabel(item)}` : selected ? `${stock.toLocaleString('en-US')} → ${nextStock.toLocaleString('en-US')}` : stock.toLocaleString('en-US')}</span>
                   </button>
                 );
@@ -802,8 +828,8 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
               />
             </div>
             <dl className="trade-quote">
-              <div><dt>资金</dt><dd>{garrisonGold.toLocaleString('en-US')} → {Math.min(CITY_GOLD_CAP, Math.max(0, garrisonGold + tradeQuote.goldDelta)).toLocaleString('en-US')}</dd></div>
-              <div><dt>兵粮</dt><dd>{garrisonFood.toLocaleString('en-US')} → {Math.min(CITY_FOOD_CAP, Math.max(0, garrisonFood + tradeQuote.foodDelta)).toLocaleString('en-US')}</dd></div>
+              <div><dt>资金</dt><dd>{garrisonGold.toLocaleString('en-US')} → {Math.min(cityCaps.gold, Math.max(0, garrisonGold + tradeQuote.goldDelta)).toLocaleString('en-US')}</dd></div>
+              <div><dt>兵粮</dt><dd>{garrisonFood.toLocaleString('en-US')} → {Math.min(cityCaps.food, Math.max(0, garrisonFood + tradeQuote.foodDelta)).toLocaleString('en-US')}</dd></div>
             </dl>
             <div className="command-note">向左拖动卖出兵粮（八成折价），向右拖动买入兵粮；单次最多交易{TRADE_MAX_GRAIN.toLocaleString('en-US')}兵粮（不得超过据点资金/兵粮容纳上限）</div>
           </section>
@@ -811,74 +837,21 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
 
         {type === 'research' && (
           <section className="tech-research-panel" aria-label="科技研究">
-            <TechTreePanel />
-            {/* 旧版科技表：暂留代码以便回退，改 SHOW_LEGACY_TECH_TABLE 为 true 即恢复 */}
-            {SHOW_LEGACY_TECH_TABLE && (
-            <>
-            <table className="tech-table">
-              <thead>
-                <tr>
-                  <th scope="col">等级</th>
-                  {[1, 2, 3, 4].map((lv) => <th key={lv} scope="col">{lv}</th>)}
-                </tr>
-                <tr className="tech-cost-row">
-                  <th scope="row">技巧P／资金</th>
-                  {TECH_COSTS.map((cost) => (
-                    <th key={cost.gold}>{cost.techP.toLocaleString('en-US')}／{cost.gold.toLocaleString('en-US')}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {TECH_BRANCHES.map((branch) => {
-                  const level = techLevelOf(state, state.playerForceId, branch.id);
-                  return (
-                    <tr key={branch.id}>
-                      <th scope="row">{branch.name}</th>
-                      {branch.levels.map((tech, index) => {
-                        const done = index < level;
-                        const isNext = index === level && level < MAX_TECH_LEVEL;
-                        const selected = isNext && researchBranch === branch.id;
-                        return (
-                          <td key={tech.name}>
-                            {isNext ? (
-                              <button
-                                type="button"
-                                className={selected ? 'is-selected' : ''}
-                                aria-pressed={selected}
-                                title={tech.description}
-                                onClick={() => setResearchBranch(branch.id)}
-                              >
-                                {tech.name}
-                              </button>
-                            ) : (
-                              <span className={done ? 'is-done' : 'is-locked'} title={done ? tech.description : `需先研究${branch.levels[index - 1]?.name ?? '前置科技'}`}>
-                                {tech.name}
-                              </span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {(() => {
-              const level = techLevelOf(state, state.playerForceId, researchBranch);
-              const cost = TECH_COSTS[level];
-              const tech = researchBranchDef.levels[level];
-              const forceTechP = state.forces[state.playerForceId]?.techP ?? 0;
-              return (
-                <dl className="tech-info">
-                  <div><dt>技巧P</dt><dd>{level < MAX_TECH_LEVEL ? `${researchTechCost.toLocaleString('en-US')}／${forceTechP.toLocaleString('en-US')}` : forceTechP.toLocaleString('en-US')}</dd></div>
-                  <div><dt>资金</dt><dd>{level < MAX_TECH_LEVEL ? `${cost.gold.toLocaleString('en-US')}／${garrisonGold.toLocaleString('en-US')}` : garrisonGold.toLocaleString('en-US')}</dd></div>
-                  <div><dt>相关能力</dt><dd>{EXECUTOR_STAT_LABELS[researchStatKey]}总和 {researchStatSum}</dd></div>
-                  <div className="tech-effect"><dt>效果</dt><dd>{level < MAX_TECH_LEVEL ? tech.description : `${researchBranchDef.name}系科技已研究完毕`}</dd></div>
-                  <div><dt>期间</dt><dd>{level < MAX_TECH_LEVEL ? `${researchTenDays(cost.baseDays, researchStatSum)}旬` : '已研究完毕'}</dd></div>
-                </dl>
-              );
-            })()}
-            </>
+            <TechTreePanel
+              nodeStatus={techNodeStatus}
+              selectedNodeId={activeTechNodeId}
+              onSelectNode={setTechNodeId}
+            />
+            {activeTechNode && activeTechCost ? (
+              <dl className="tech-info">
+                <div><dt>资金</dt><dd>{activeTechCost.gold.toLocaleString('en-US')}／{garrisonGold.toLocaleString('en-US')}</dd></div>
+                <div><dt>技巧P</dt><dd>{researchTechCost.toLocaleString('en-US')}／{forceTechP.toLocaleString('en-US')}</dd></div>
+                <div><dt>相关能力</dt><dd>{EXECUTOR_STAT_LABELS[researchStatKey]}总和 {researchStatSum}</dd></div>
+                <div><dt>期间</dt><dd>{researchStatusText === '已研究' || researchStatusText === '正在研究中' ? '—' : `${researchTenDaysEstimate}旬`}</dd></div>
+                <div className="tech-effect"><dt>效果</dt><dd>{activeTechNode.description}</dd></div>
+              </dl>
+            ) : (
+              <div className="command-note">科技节点数据缺失，无法研究</div>
             )}
           </section>
         )}
@@ -1283,13 +1256,21 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
             if (f === 'taixue' && !hasCityTrait(city.id, 'academy')) return '只有学术城市可以建造太学';
             return undefined;
           };
+          // 科技门槛（与 commands.ts validateCommand 同一判定 canBuildFacility）：
+          // 1 级即需科技的设施（鱼市/军屯农/六部衙门）未研究时置灰，悬停提示前置科技名。
+          const techLockedReason = (f: PlotType): string | undefined => {
+            if (canBuildFacility(state, state.playerForceId, f)) return undefined;
+            const node = facilityGateNode(f, 1);
+            return `需先研究「${node ? techNodeOf(node)?.name ?? '前置科技' : '前置科技'}」`;
+          };
           return (
             <section className="grant-treasure-panel" aria-label="开发">
               <div className="plot-facility-grid">
                 {ALL_FACILITIES.map((f) => {
                   const selected = plotFacility === f;
                   const traitReason = traitBlockedReason(f);
-                  const disabled = isUniqueBuilt(f) || !!traitReason;
+                  const techReason = techLockedReason(f);
+                  const disabled = isUniqueBuilt(f) || !!traitReason || !!techReason;
                   const level = facilityCounts[f];
                   return (
                     <button
@@ -1298,17 +1279,17 @@ export function CommandDialog({ type, cityId, passId, onClose, onSubmitOverride 
                       className={`plot-facility-card${selected ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
                       onClick={() => !disabled && setPlotFacility(f)}
                       disabled={disabled}
-                      title={traitReason}
+                      title={traitReason ?? techReason}
                     >
                       <div className="plot-facility-card-title">
                         <span>{PLOT_LABELS[f]}</span>
                         {disabled ? (
-                          <span className="plot-facility-card-level">{traitReason ? '特性不符' : '已建'}</span>
+                          <span className="plot-facility-card-level">{traitReason ? '特性不符' : techReason ? '未解锁' : '已建'}</span>
                         ) : level > 0 ? (
                           <span className="plot-facility-card-level">Lv.{level}</span>
                         ) : null}
                       </div>
-                      <div className="plot-facility-card-desc">{plotCost(f)} 金{traitReason ? ` · ${f === 'shipyard' ? '需水港' : '需学术'}` : UNIQUE_FACILITIES.includes(f) ? ' · 限一' : ''}</div>
+                      <div className="plot-facility-card-cost">{plotCost(f)} 金</div>
                     </button>
                   );
                 })}

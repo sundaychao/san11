@@ -1,5 +1,5 @@
-import { TRANSPORT_MOVEMENT, TROOP_MOVEMENT } from '../armaments';
-import type { AptitudeGrade, ArmyUnit, FacilityType, GridCell, TerrainType, TroopType } from '../types';
+import { isBattleShip, TRANSPORT_MOVEMENT, TROOP_MOVEMENT } from '../armaments';
+import type { AptitudeGrade, ArmyUnit, FacilityType, GameState, GridCell, TerrainType, TroopType } from '../types';
 import type { GridCoord } from './grid';
 
 export const DEPLOY_AP_COST = 20;
@@ -24,14 +24,40 @@ export const FULL_DAMAGE_TROOPS = 1000;
  */
 export const STRATEGY_MIN_TROOPS = 500;
 export const DRUM_DAMAGE_MULTIPLIER = 1.15;
+/**
+ * 据点型设施的防护梯度（阵 → 砦 → 城塞）：射程内本方部队受到的伤害与补给消耗逐级降低。
+ * 城塞的 0.7/0.7/3 为既有数值，保持不变。
+ */
 export const FORTRESS_DAMAGE_MULTIPLIER = 0.7;
 export const FORTRESS_SUPPLY_MULTIPLIER = 0.7;
 export const FORTRESS_RANGE = 3;
+export const FORT_DAMAGE_MULTIPLIER = 0.8;
+export const FORT_SUPPLY_MULTIPLIER = 0.8;
+export const FORT_RANGE = 2;
+export const FORMATION_DAMAGE_MULTIPLIER = 0.9;
+export const FORMATION_SUPPLY_MULTIPLIER = 0.9;
+export const FORMATION_RANGE = 1;
 export const ARROW_TOWER_DAMAGE = 300;
+/** 连弩楼：箭楼的升级版（建筑学），射程同为 1~2 格 */
+export const CROSSBOW_TOWER_DAMAGE = 500;
+/** 投石台：弹道解锁，只打距其 2~3 格的敌军（不含相邻 1 格） */
+export const CATAPULT_TOWER_DAMAGE = 700;
+export const CATAPULT_TOWER_MIN_RANGE = 2;
+export const CATAPULT_TOWER_MAX_RANGE = 3;
+/** 霹雳：投石命中后对中心 6 格内部队的溅射伤害倍率 */
+export const CATAPULT_SPLASH_MULTIPLIER = 0.5;
 export const FIRE_PLOT_DAMAGE = 500;
 export const FIRE_FACILITY_DAMAGE = 150;
 export const FIRE_SEED_DAMAGE = 700;
 export const FIRE_BALL_DAMAGE = 700;
+/** 业火种/业火球（化学）：伤害更高、留下的业火持续更久 */
+export const HELLFIRE_SEED_DAMAGE = 1200;
+export const HELLFIRE_BALL_DAMAGE = 1200;
+/** 着火格持续旬数：普通陷阱 1~3 旬，业火 2~4 旬 */
+export const FIRE_PLOT_MIN_TEN_DAYS = 1;
+export const FIRE_PLOT_MAX_TEN_DAYS = 3;
+export const HELLFIRE_PLOT_MIN_TEN_DAYS = 2;
+export const HELLFIRE_PLOT_MAX_TEN_DAYS = 4;
 export const FACILITY_BUILD_DURABILITY_PER_TEN_THOUSAND = 500;
 
 export type MovementProfile = TroopType | 'transport';
@@ -115,8 +141,13 @@ export const TERRAIN_COST_BY_PROFILE: Record<MovementProfile, Record<TerrainType
 };
 
 export const SHIP_WATER_COST = 4;
+/** 楼船（造船术前）：水域攻击 ×1.1、受到伤害 ×0.9 */
 export const SHIP_WATER_ATTACK_MULTIPLIER = 1.1;
 export const SHIP_WATER_DEFENSE_MULTIPLIER = 0.9;
+/** 斗舰（造船术）：楼船的升级版——水域攻击 ×1.2、受到伤害 ×0.85，移动力另加 4 */
+export const BATTLESHIP_WATER_ATTACK_MULTIPLIER = 1.2;
+export const BATTLESHIP_WATER_DEFENSE_MULTIPLIER = 0.85;
+export const BATTLESHIP_MOVEMENT_BONUS = 4;
 
 /** 地形防御系数（受伤倍率；森林/湿地/荒地有掩体减免，与原版方向一致） */
 export const TERRAIN_DEFENSE: Record<TerrainType, number> = {
@@ -245,29 +276,64 @@ export interface UnitFacility {
   durability: number;
 }
 
+/**
+ * 野外设施造价（金），由低到高：阵 300 < 土垒/火焰种/火焰球 400 < 石墙 500 < 箭楼/业火种/业火球 600 <
+ * 砦 700 < 连弩楼 800 < 太鼓台/军乐台 800 < 城塞/投石台 900。既有设施数值保持不变。
+ */
 export const FACILITY_BUILD_COSTS: Record<FacilityType, number> = {
+  formation: 300,
+  fort: 700,
   fortress: 900,
-  arrowTower: 600,
   earthwork: 400,
+  stoneWall: 500,
+  arrowTower: 600,
+  crossbowTower: 800,
+  catapultTower: 900,
   drum: 800,
   musicTower: 800,
   fireSeed: 400,
   fireBall: 400,
+  hellfireSeed: 600,
+  hellfireBall: 600,
 };
 
+/**
+ * 野外设施定义（耐久为满耐久）。既有设施数值保持不变：
+ * 箭楼 700/600 金、城塞 1200/900、土垒 400/400、火焰种·火焰球 200/400。
+ * 新增梯度：据点型 阵 500/300 → 砦 900/700 → 城塞 1200/900；
+ * 阻挡型 土垒 400/400 → 石墙 600/500；
+ * 攻击型 箭楼 700/600 → 连弩楼 900/800 → 投石台 800/900（耐久略低但伤害与射程更强）；
+ * 陷阱型 火焰种·火焰球 200/400 → 业火种·业火球 250/600。
+ */
 export const FACILITIES: Partial<Record<FacilityType, UnitFacility>> = {
   drum: { type: 'drum', name: '太鼓台', durability: 800 },
   arrowTower: { type: 'arrowTower', name: '箭楼', durability: 700 },
+  crossbowTower: { type: 'crossbowTower', name: '连弩楼', durability: 900 },
+  catapultTower: { type: 'catapultTower', name: '投石台', durability: 800 },
   musicTower: { type: 'musicTower', name: '军乐台', durability: 800 },
+  formation: { type: 'formation', name: '阵', durability: 500 },
+  fort: { type: 'fort', name: '砦', durability: 900 },
   earthwork: { type: 'earthwork', name: '土垒', durability: 400 },
-  fireSeed: { type: 'fireSeed', name: '火种', durability: 200 },
-  fireBall: { type: 'fireBall', name: '火球', durability: 200 },
+  stoneWall: { type: 'stoneWall', name: '石墙', durability: 600 },
+  fireSeed: { type: 'fireSeed', name: '火焰种', durability: 200 },
+  fireBall: { type: 'fireBall', name: '火焰球', durability: 200 },
+  hellfireSeed: { type: 'hellfireSeed', name: '业火种', durability: 250 },
+  hellfireBall: { type: 'hellfireBall', name: '业火球', durability: 250 },
   fortress: { type: 'fortress', name: '城塞', durability: 1200 },
 };
 
-export const SPACING_LIMITED_FACILITY_TYPES = new Set<FacilityType>(['arrowTower', 'drum', 'musicTower', 'fortress']);
-export const ZOC_FACILITY_TYPES = new Set<FacilityType>(['arrowTower', 'drum', 'musicTower', 'fortress']);
-export const PUBLIC_REPAIRABLE_FACILITY_TYPES = new Set<FacilityType>(['earthwork', 'fireSeed', 'fireBall']);
+/** 占用间距的设施（彼此需间隔 2 格以上）：据点型与攻击型设施，与箭楼/城塞同口径 */
+export const SPACING_LIMITED_FACILITY_TYPES = new Set<FacilityType>([
+  'formation', 'fort', 'fortress', 'arrowTower', 'crossbowTower', 'catapultTower', 'drum', 'musicTower',
+]);
+/** 提供 ZOC（敌方部队经过其控制区需要停止）的设施：与占用间距的据点型设施一致 */
+export const ZOC_FACILITY_TYPES = new Set<FacilityType>([
+  'formation', 'fort', 'fortress', 'arrowTower', 'crossbowTower', 'catapultTower', 'drum', 'musicTower',
+]);
+/** 可被任意势力修补的设施（只阻挡移动的土垒/石墙，以及陷阱） */
+export const PUBLIC_REPAIRABLE_FACILITY_TYPES = new Set<FacilityType>([
+  'earthwork', 'stoneWall', 'fireSeed', 'fireBall', 'hellfireSeed', 'hellfireBall',
+]);
 
 export function movementProfileForUnit(unit: Pick<ArmyUnit, 'kind' | 'troopType'>): MovementProfile {
   return unit.kind === 'transport' ? 'transport' : unit.troopType ?? 'sword';
@@ -279,6 +345,19 @@ export function movementAllowanceForProfile(profile: MovementProfile) {
 
 export function movementAllowanceForUnit(unit: Pick<ArmyUnit, 'kind' | 'troopType'>) {
   return movementAllowanceForProfile(movementProfileForUnit(unit));
+}
+
+/**
+ * 斗舰移动力加成（造船术，`vehicle === 'ship'`）。
+ * 水军科技「罗盘」的 +6 已由 `techs.movementTechBonus` 统一给到，这里只补斗舰相对楼船的 +4，
+ * 避免同一份科技加成被重复计入。需要 state 判定科技，故不能并入 `movementAllowanceForUnit`：
+ * 出征（deployment）与每旬重置（turn）两处都要显式加上本函数。
+ */
+export function battleShipMovementBonus(
+  state: GameState,
+  unit: Pick<ArmyUnit, 'forceId' | 'vehicle'>,
+): number {
+  return isBattleShip(state, unit) ? BATTLESHIP_MOVEMENT_BONUS : 0;
 }
 
 export function movementCostForCell(cell: GridCell | undefined, profile: MovementProfile = 'sword', vehicle?: 'boat' | 'ship') {

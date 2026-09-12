@@ -1,7 +1,7 @@
 import { executeCommand, researchTechPCost, validateCommand } from './commands';
 import { dispatchTerritoryDefenseForForce } from './battle/actions';
 import { autoResolveDebate, dismissDebate } from './debate';
-import { TECH_BRANCHES, TECH_COSTS, MAX_TECH_LEVEL, techLevelOf } from './techs';
+import { researchableTechs, techCostOf, techNodeOf } from './techs';
 import { ABILITY_NODES, ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition } from './treasures';
 import { POSITIONS, forceRankOf, officerMerit, positionDefinition, rankIndex } from './ranks';
@@ -58,17 +58,13 @@ function chooseAiResearchCommand(state: GameState, forceId: ForceId): GameComman
   const cities = Object.values(state.cities).filter((city) => city.ownerId === forceId);
   if (cities.length === 0) return null;
 
-  // 方向优先级：已研究过的方向优先升级，其次按剧本预研方向
-  const startedBranches = TECH_BRANCHES
-    .filter((branch) => techLevelOf(state, forceId, branch.id) > 0)
-    .sort((left, right) => techLevelOf(state, forceId, right.id) - techLevelOf(state, forceId, left.id));
-  const freshBranches = TECH_BRANCHES.filter((branch) => techLevelOf(state, forceId, branch.id) === 0);
-  const orderedBranches = [...startedBranches, ...freshBranches];
+  // 只考虑前置已满足的节点；低等级优先（先铺开基础科技），同级按系统内节点顺序
+  const candidates = researchableTechs(state, forceId)
+    .map((nodeId) => techNodeOf(nodeId)!)
+    .sort((left, right) => left.level - right.level);
 
-  for (const branch of orderedBranches) {
-    const level = techLevelOf(state, forceId, branch.id);
-    if (level >= MAX_TECH_LEVEL) continue;
-    const cost = TECH_COSTS[level];
+  for (const node of candidates) {
+    const cost = techCostOf(node.id)!;
     if (techP < cost.techP) continue;
     // 找一座金钱充足的城市，用对应属性最优的武将研究
     const sortedCities = [...cities].sort((a, b) => b.gold - a.gold);
@@ -76,12 +72,12 @@ function chooseAiResearchCommand(state: GameState, forceId: ForceId): GameComman
       if (city.gold < cost.gold + 2000) continue;
       const officers = availableOfficers(state, forceId, city);
       // 多人研究：按研究属性取至多3名武将，人数越多研究越快
-      const picked = bestOfficers(officers, branch.researchStat, COMMAND_OFFICER_MAX);
+      const picked = bestOfficers(officers, node.stat, COMMAND_OFFICER_MAX);
       if (picked.length === 0) continue;
       const officerIds = picked.map((officer) => officer.id);
       // 指导：研究技巧P消耗减半后仍不足则跳过
-      if (techP < researchTechPCost(state, forceId, branch.id, officerIds)) continue;
-      const command: GameCommand = { type: 'research', cityId: city.id, officerIds, branch: branch.id };
+      if (techP < researchTechPCost(state, node.id, officerIds)) continue;
+      const command: GameCommand = { type: 'research', cityId: city.id, officerIds, nodeId: node.id };
       if (validateCommand(state, forceId, command).length === 0) return command;
     }
   }

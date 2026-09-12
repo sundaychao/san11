@@ -1,7 +1,8 @@
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { useGame } from '../game/store/GameProvider';
-import { armamentsOf, ARMAMENT_LABELS, ARMAMENT_TYPES, PASS_ARMAMENT_CAPS } from '../game/armaments';
+import { armamentsOf, armamentLabelFor, ARMAMENT_TYPES, PASS_ARMAMENT_CAPS } from '../game/armaments';
 import { passMonthlyGoldIncome, passQuarterlyFoodIncome, PASS_FOOD_CAP, PASS_GOLD_CAP, PASS_TROOP_CAP } from '../game/passes';
+import { moraleCapOf } from '../game/techs';
 import type { PassId } from '../game/types';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -68,7 +69,7 @@ export function PassInfoDialog({ passId, onClose }: PassInfoDialogProps) {
             <dl className="city-info-dialog-grid city-info-dialog-grid-cols-2">
               <div><dt>人口</dt><dd>{formatNumber(pass.population)}</dd></div>
               <div><dt>耐久</dt><dd>{formatNumber(pass.durability)} / {formatNumber(pass.maxDurability)}</dd></div>
-              <div><dt>士气</dt><dd>{pass.training}/100</dd></div>
+              <div><dt>士气</dt><dd>{pass.training}/{moraleCapOf(state, pass.ownerId)}</dd></div>
               <div><dt>虎将</dt><dd>{governor?.name ?? '暂无'}</dd></div>
             </dl>
           </section>
@@ -78,7 +79,7 @@ export function PassInfoDialog({ passId, onClose }: PassInfoDialogProps) {
             <dl className="city-info-dialog-grid city-info-dialog-grid-cols-3">
               {ARMAMENT_TYPES.map((type) => (
                 <div key={type}>
-                  <dt>{ARMAMENT_LABELS[type]}</dt>
+                  <dt>{armamentLabelFor(state, pass.ownerId, type)}</dt>
                   <dd>{formatNumber(armaments[type])} / {formatNumber(PASS_ARMAMENT_CAPS[type])}</dd>
                 </div>
               ))}

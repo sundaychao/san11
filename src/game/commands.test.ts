@@ -592,16 +592,16 @@ describe('command engine', () => {
   it('starts research with gold, techP, action point, and task costs', () => {
     const state = createGame('liu', 1);
     state.forces.liu.techP = 3200;
-    state.forces.liu.techs = { cavalry: 1 };
+    state.forces.liu.techNodes = ['zhiyehua'];
     const startGold = state.cities.jiangling.gold;
 
     const next = executeCommand(state, 'liu', {
-      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], branch: 'cavalry',
+      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], nodeId: 'qiangshuxunlian',
     });
 
-    // 刘备统率78，2级基本70日 −【78÷7】= 59日 → 6旬完成
+    // 枪术训练（步战2级）：2000金/2000技巧P；刘备统率78，2级基本70日 −【78÷7】= 59日 → 6旬完成
     expect(next.officers['liu-bei'].location).toEqual({
-      kind: 'task', cityId: 'jiangling', task: 'research', branch: 'cavalry', remainingTenDays: 6, lead: true,
+      kind: 'task', cityId: 'jiangling', task: 'research', nodeId: 'qiangshuxunlian', remainingTenDays: 6, lead: true,
     });
     expect(next.cities.jiangling.gold).toBe(startGold - 2000);
     expect(next.forces.liu.techP).toBe(3200 - 2000);
@@ -613,57 +613,59 @@ describe('command engine', () => {
     const poor = createGame('liu', 1);
     poor.forces.liu.techP = 500;
     expect(validateCommand(poor, 'liu', {
-      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], branch: 'spear',
+      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], nodeId: 'zhiyehua',
     })).toContain('技巧P不足 1000');
 
     const busy = createGame('liu', 1);
     busy.forces.liu.techP = 5000;
     busy.officers['jian-yong'].location = {
-      kind: 'task', cityId: 'wuling', task: 'research', branch: 'civil', remainingTenDays: 2,
+      kind: 'task', cityId: 'wuling', task: 'research', nodeId: 'gonggongjiaoyu', remainingTenDays: 2,
     };
     expect(validateCommand(busy, 'liu', {
-      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], branch: 'spear',
+      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], nodeId: 'zhiyehua',
     })).toContain('已有科技正在研究中');
 
     const finished = createGame('liu', 1);
     finished.forces.liu.techP = 99999;
-    finished.forces.liu.techs = { spear: 4 };
+    finished.forces.liu.techNodes = ['zhiyehua'];
     expect(validateCommand(finished, 'liu', {
-      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], branch: 'spear',
-    })).toContain('该方向科技已研究完毕');
+      type: 'research', cityId: 'jiangling', officerIds: ['liu-bei'], nodeId: 'zhiyehua',
+    })).toContain('该科技已研究完成');
   });
 
-  it('boosts recruit yield with the corvee civil tech', () => {
+  it('军制系徭役制度解锁2级兵舍，征兵产出本身不再受科技加成', () => {
     const state = withFacilities(createGame('liu', 1));
     const plain = withFacilities(createGame('liu', 1));
-    state.forces.liu.techs = { civil: 3 };
-    plain.forces.liu.techs = {};
+    state.forces.liu.techNodes = ['zhiyehua', 'yaoyizhidu'];
+    plain.forces.liu.techNodes = [];
 
     const boosted = executeCommand(state, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'] });
     const base = executeCommand(plain, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'] });
 
     const boostedGain = boosted.cities.jiangling.troops - state.cities.jiangling.troops;
     const baseGain = base.cities.jiangling.troops - plain.cities.jiangling.troops;
-    // 科技徭役 ×1.3 与兵舍1级 ×1.15 均以同一基础值计算，不应对已取整的结果再乘一次
+    // 征兵量只由基础值与兵舍等级加成决定（无科技乘数）
     const rawBase = recruitBaseYield([state.officers['liu-bei']], state.cities.jiangling);
     const facility = barracksYieldMultiplier(state.cities.jiangling);
     expect(baseGain).toBe(Math.round(rawBase * facility));
-    expect(boostedGain).toBe(Math.round(rawBase * facility * 1.3));
+    expect(boostedGain).toBe(baseGain);
   });
 
-  it('applies troop damage and movement techs to combat math', async () => {
-    const { troopDamageMultiplier, troopMovementBonus, deployTroopCapOf, energyCapOf } = await import('./techs');
+  it('applies tactic power and movement techs to combat math', async () => {
+    const { tacticPowerMultiplier, movementTechBonus, deployTroopCapOf, energyCapOf } = await import('./techs');
     const state = createGame('liu', 1);
-    state.forces.liu.techs = { spear: 1 };
-    expect(troopDamageMultiplier(state, 'liu', 'spear')).toBeCloseTo(1.1);
-    expect(troopDamageMultiplier(state, 'liu', 'cavalry')).toBe(1);
-    expect(troopMovementBonus(state, 'liu', 'spear')).toBe(0);
+    state.forces.liu.techNodes = ['qiangshuxunlian'];
+    // 枪术训练：枪兵战法威力＋10%（只对战法生效）
+    expect(tacticPowerMultiplier(state, 'liu', { kind: 'combat', troopType: 'spear' })).toBeCloseTo(1.1);
+    expect(tacticPowerMultiplier(state, 'liu', { kind: 'combat', troopType: 'cavalry' })).toBe(1);
+    expect(movementTechBonus(state, 'liu', { kind: 'combat', troopType: 'spear' })).toBe(0);
 
-    state.forces.liu.techs = { spear: 4, military: 3 };
-    expect(troopDamageMultiplier(state, 'liu', 'spear')).toBeCloseTo(1.2);
-    expect(troopMovementBonus(state, 'liu', 'spear')).toBe(6);
+    state.forces.liu.techNodes = ['zhiyehua', 'jiedushi', 'qiangshuxunlian', 'qiangbingjingzhuan', 'jixingjun'];
+    // 枪术训练＋10% 与 枪兵专精＋25% 叠加；急行军步兵移动＋6
+    expect(tacticPowerMultiplier(state, 'liu', { kind: 'combat', troopType: 'spear' })).toBeCloseTo(1.35);
+    expect(movementTechBonus(state, 'liu', { kind: 'combat', troopType: 'spear' })).toBe(6);
+    // 节度使：带兵上限＋3000（基准10000）；职业化：最大士气＋20
     expect(deployTroopCapOf(state, 'liu')).toBe(13000);
-    // 军制3级含1级熟练兵：气力上限+20
     expect(energyCapOf(state, 'liu')).toBe(120);
   });
 

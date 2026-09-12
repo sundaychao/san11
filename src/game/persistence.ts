@@ -2,7 +2,7 @@ import { CITY_IDS, FORCE_IDS, OFFICER_IDS, china42InteriorByCityId, createScenar
 import { createScenarioPasses, PASS_IDS } from './passes';
 import { createMobileDuelGrid } from './scenario/mobileDuel';
 import { ARMAMENT_TYPES } from './armaments';
-import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, CityId, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Pass, PassId, Stats, StrategyResultReport } from './types';
+import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, CityId, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Pass, PassId, Stats, StrategyResultReport, TechNodeId } from './types';
 import china42Data from './scenario/china42.json';
 import china42xData from './scenario/maps/china42x.json';
 import { initConstructionPlots } from './innerAffairs';
@@ -13,10 +13,17 @@ export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
 export type SaveSlot = 'auto' | 'manual';
 
 const TROOP_TYPES = ['sword', 'spear', 'halberd', 'crossbow', 'cavalry', 'siege'];
-const FACILITY_TYPES = ['drum', 'arrowTower', 'musicTower', 'fortress', 'earthwork', 'fireSeed', 'fireBall'];
+/** 合法野外设施类型（与 game/types.ts 的 FacilityType 同步；新增设施时必须同步此白名单，否则新档会被判为无效） */
+const FACILITY_TYPES = [
+  'drum', 'arrowTower', 'crossbowTower', 'catapultTower', 'musicTower',
+  'formation', 'fort', 'fortress', 'earthwork', 'stoneWall',
+  'fireSeed', 'fireBall', 'hellfireSeed', 'hellfireBall',
+];
 const APTITUDE_GRADES = ['S', 'A', 'B', 'C'];
 const STRATEGY_IDS = ['fire', 'extinguish', 'false-report', 'disturb', 'calm', 'inspire', 'discord'];
 const MOBILE_DUEL_CITY_IDS = ['xiangyang', 'jiangling'];
+/** 部队士气（气力）上限：基础 100 + 科技「职业化」20（见 game/techs.ts 的 energyCapOf） */
+const MAX_UNIT_ENERGY = 120;
 /** 全部合法地形值（含原版 20 值细分地形 + 旧手绘地图兼容值） */
 const TERRAIN_VALUES = [
   'road', 'path', 'plank', 'plain', 'grass', 'sand', 'wasteland', 'wetland', 'poison',
@@ -135,7 +142,7 @@ function validOfficerLocation(location: unknown, custom?: boolean) {
       return ARMAMENT_TYPES.includes(value.armamentType as ArmamentType) &&
         Number.isInteger(value.amount) && Number(value.amount) >= 0;
     }
-    if (value.task === 'research') return typeof value.branch === 'string';
+    if (value.task === 'research') return typeof value.nodeId === 'string';
     if (value.task === 'cultivate') return typeof value.nodeId === 'string';
     if (value.task === 'construction') {
       return typeof value.facility === 'string' && Number.isInteger(value.plotIndex) && Number(value.plotIndex) >= 0;
@@ -223,7 +230,8 @@ function validUnit(value: unknown, custom?: boolean): value is ArmyUnit {  if (!
     validResource(unit.troops) &&
     validResource(unit.food) &&
     validResource(unit.energy) &&
-    unit.energy! <= 100 &&
+    // 士气（气力）上限为基础 100，科技「职业化」再 +20（对齐 game/techs.ts 的 energyCapOf）
+    unit.energy! <= MAX_UNIT_ENERGY &&
     validResource(unit.movementRemaining) &&
     validStatus(unit.confusedTenDays) &&
     validStatus(unit.falseReportedTenDays) &&
@@ -294,7 +302,8 @@ function validFirePlot(value: unknown): value is FirePlot {
     (plot.remainingTenDays === undefined || (
       Number.isInteger(plot.remainingTenDays) &&
       plot.remainingTenDays >= 1 &&
-      plot.remainingTenDays <= 3
+      // 普通陷阱火 1~3 旬，业火种/业火球点燃的业火 2~4 旬
+      plot.remainingTenDays <= 4
     ));
 }
 
@@ -442,7 +451,7 @@ export function loadSave(storage: SaveAdapter, slot: SaveSlot): LoadResult {
   try {
     const parsed = JSON.parse(raw) as { schemaVersion?: unknown };
     if (parsed?.schemaVersion !== 2) return { ok: false, reason: '存档版本不兼容' };
-    const injected = injectMissingCities(parsed);
+    const injected = injectMissingCities(migrateLegacyForceTechs(parsed));
     if (!isGameState(injected)) return { ok: false, reason: '存档无法读取' };
     const migrated = migrateTerrainGrid(injected);
     const withPasses = injectMissingPasses(migrated);
@@ -453,6 +462,46 @@ export function loadSave(storage: SaveAdapter, slot: SaveSlot): LoadResult {
   } catch {
     return { ok: false, reason: '存档无法读取' };
   }
+}
+
+/**
+ * 旧版存档科技兼容：科技树从「6 方向 × 4 级」改为「9 系统 × 6 级」后，
+ * 旧档势力上的 `techs: { spear: 1 }` 已无意义，按原方向映射为新树的根节点；
+ * 已写入 `techNodes` 的新档（无 `techs` 字段）原样保留。
+ */
+const LEGACY_TECH_NODE_BY_BRANCH: Readonly<Record<string, TechNodeId>> = {
+  spear: 'zhiyehua',
+  halberd: 'zhiyehua',
+  crossbow: 'gonggongjiaoyu',
+  cavalry: 'liangmayuzhong',
+  military: 'zhiyehua',
+  civil: 'chuanwu',
+};
+
+function migrateLegacyForceTechs(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const state = value as { forces?: Record<string, unknown> };
+  if (!state.forces || typeof state.forces !== 'object') return value;
+  let changed = false;
+  const forces: Record<string, unknown> = { ...state.forces };
+  for (const [forceId, rawForce] of Object.entries(forces)) {
+    if (!rawForce || typeof rawForce !== 'object') continue;
+    const force = rawForce as Record<string, unknown>;
+    if (!Object.hasOwn(force, 'techs')) continue;
+    const legacyTechs = (force.techs ?? {}) as Record<string, unknown>;
+    const nodes = new Set<TechNodeId>(
+      Array.isArray(force.techNodes) ? force.techNodes.filter((id): id is TechNodeId => typeof id === 'string') : [],
+    );
+    for (const [branch, level] of Object.entries(legacyTechs)) {
+      const nodeId = LEGACY_TECH_NODE_BY_BRANCH[branch];
+      if (nodeId && typeof level === 'number' && level >= 1) nodes.add(nodeId);
+    }
+    const migrated: Record<string, unknown> = { ...force, techNodes: [...nodes] };
+    delete migrated.techs;
+    forces[forceId] = migrated;
+    changed = true;
+  }
+  return changed ? { ...state, forces } : value;
 }
 
 /**

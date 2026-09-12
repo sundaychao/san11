@@ -14,8 +14,9 @@ import {
   citySizeOf,
 } from '../game/innerAffairs';
 import { CITY_TRAIT_LABELS, CITY_TRAIT_DESCRIPTIONS, hasCityTrait, type CityTrait } from '../game/cityTraits';
-import { ARMAMENT_LABELS, ARMAMENT_TYPES, CITY_ARMAMENT_CAPS, armamentsOf } from '../game/armaments';
+import { armamentLabelFor, ARMAMENT_TYPES, CITY_ARMAMENT_CAPS, armamentsOf } from '../game/armaments';
 import type { CityId } from '../game/types';
+import { moraleCapOf } from '../game/techs';
 import { closePopupOnContextMenu } from './popupEvents';
 
 interface CityInfoDialogProps {
@@ -94,7 +95,7 @@ export function CityInfoDialog({ cityId, onClose }: CityInfoDialogProps) {
             <dl className="city-info-dialog-grid city-info-dialog-grid-cols-3">
               {ARMAMENT_TYPES.map((type) => (
                 <div key={type}>
-                  <dt>{ARMAMENT_LABELS[type]}</dt>
+                  <dt>{armamentLabelFor(state, city.ownerId, type)}</dt>
                   <dd>{formatNumber(armaments[type])} / {formatNumber(CITY_ARMAMENT_CAPS[type])}</dd>
                 </div>
               ))}
@@ -122,7 +123,7 @@ export function CityInfoDialog({ cityId, onClose }: CityInfoDialogProps) {
               <div><dt>城市人口</dt><dd>{formatNumber(cityPopulationOf(city))}</dd></div>
               <div><dt>农村人口</dt><dd>{formatNumber(ruralPopulationOf(city))}</dd></div>
               <div><dt>治安</dt><dd>{city.order}/100</dd></div>
-              <div><dt>士气</dt><dd>{city.training}</dd></div>
+              <div><dt>士气</dt><dd>{city.training}/{moraleCapOf(state, city.ownerId)}</dd></div>
               <div><dt>耐久</dt><dd>{formatNumber(city.durability)}/{formatNumber(city.maxDurability)}</dd></div>
             </dl>
           </section>

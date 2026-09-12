@@ -7,7 +7,7 @@ import { affinityOf, officerCompatWithRuler } from '../game/diplomacy';
 import { officerSkillNames, skillDefinition } from '../game/skills';
 import { treasureDefinition } from '../game/treasures';
 import { officerRelationshipIds, RELATIONSHIP_LABELS } from '../game/relationship';
-import { hasMasterHearts } from '../game/techs';
+import { loyaltyLossResist } from '../game/techs';
 import type { GameState, Officer, OfficerAptitudes } from '../game/types';
 import { OfficerHealthBadge } from './OfficerHealthBadge';
 import { closePopupOnContextMenu } from './popupEvents';
@@ -75,7 +75,7 @@ function stabilityLines(state: GameState, officer: Officer): string[] {
     if (tier.key === 'far') lines.push('与君主相性相克，忠诚易流失');
   }
   if (rulerId !== undefined && (officer.likes ?? []).includes(rulerId)) lines.push('亲爱君主，忠诚稳定');
-  if (hasMasterHearts(state, officer.forceId)) lines.push('本方掌握人心，掉忠概率下降');
+  if (loyaltyLossResist(state, officer.forceId)) lines.push('克己复礼：掉忠概率下降');
   if (lines.length === 0) lines.push('忠诚稳定');
   return lines;
 }

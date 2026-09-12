@@ -1,6 +1,6 @@
 import { nextRandom } from './random';
 import { officerSkillNames } from './skills';
-import { hasMasterHearts } from './techs';
+import { loyaltyLossResist } from './techs';
 import { affinityOf, officerCompatWithRuler } from './diplomacy';
 import type { CityId, ForceId, GameState, Officer } from './types';
 
@@ -55,9 +55,9 @@ export function setOfficerLoyalty(officer: Officer, value: number): void {
  * 参照原版，逐要素判定——任一步命中即本旬不掉忠：
  *  1. 关系锁定：同势力内有配偶/义兄弟 → 完全锁定；
  *  2. 仁政（城级）：武将所在城内有「仁政」持有者驻留 → 本城免疫（原版只保当城）；
- *  3. 「掌握人心」科技：2/3 概率免疫掉忠（厌恶君主者除外）；
+ *  3. 「克己复礼」科技：忠诚下降概率降低50%（厌恶君主者除外）；
  *  4. 相性差：相克(≥50)放大掉忠概率，同相(≤24)减半，中庸×1；
- *  5. 厌恶君主：必降忠诚（无视掌握人心，但仍受关系锁/仁政约束）。
+ *  5. 厌恶君主：必降忠诚（无视克己复礼，但仍受关系锁/仁政约束）。
  */
 export function settleLoyaltyDrift(state: GameState): void {
   const officersByForce = new Map<ForceId, Officer[]>();
@@ -81,7 +81,7 @@ export function settleLoyaltyDrift(state: GameState): void {
         benevolentCityIds.add(officer.location.cityId);
       }
     }
-    const hasMasterHeartsTech = hasMasterHearts(state, forceId);
+    const resistLoyaltyLoss = loyaltyLossResist(state, forceId);
 
     for (const officer of officers) {
       // 君主不参与忠诚系统（不掉忠，忠诚始终为初始满值）
@@ -104,11 +104,11 @@ export function settleLoyaltyDrift(state: GameState): void {
       // 2. 仁政（城级）免疫：仅当武将驻留在有仁政者的城内
       if (officer.location.kind === 'city' && benevolentCityIds.has(officer.location.cityId)) continue;
 
-      // 3. 掌握人心：2/3 概率免疫掉忠（厌恶君主者不适用）
-      if (!dislikesRuler && hasMasterHeartsTech) {
-        const heartsRoll = nextRandom(state.seed, state.rngCursor);
-        state.rngCursor = heartsRoll.cursor;
-        if (heartsRoll.value < 2 / 3) continue;
+      // 3. 克己复礼：忠诚下降概率降低50%（厌恶君主者不适用）
+      if (!dislikesRuler && resistLoyaltyLoss) {
+        const resistRoll = nextRandom(state.seed, state.rngCursor);
+        state.rngCursor = resistRoll.cursor;
+        if (resistRoll.value < 0.5) continue;
       }
 
       const roll = nextRandom(state.seed, state.rngCursor);

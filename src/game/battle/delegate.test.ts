@@ -95,8 +95,16 @@ function findRemoteLandCell(state: GameLike, from: { q: number; r: number }, min
   return undefined;
 }
 
+/** 火种陷阱需「火药 huoyao」科技才能建设：本文件的建设/修补委任用例统一为势力补上该科技 */
+function grantFireSeedTech(state: GameLike) {
+  const force = state.forces.liu;
+  if (!force) return;
+  force.techNodes = force.techNodes?.includes('huoyao') ? force.techNodes : [...(force.techNodes ?? []), 'huoyao'];
+}
+
 /** 在江陵附近找一处「邻格存在可建设格（火种）」的站位 */
 function findBuildSpawn(state: GameLike) {
+  grantFireSeedTech(state);
   const city = state.cities.jiangling;
   for (let q = city.gridQ - 8; q <= city.gridQ + 8; q += 1) {
     for (let r = city.gridR - 8; r <= city.gridR + 8; r += 1) {
@@ -112,6 +120,7 @@ function findBuildSpawn(state: GameLike) {
 
 /** 沿六方向向外扫描，找一处「可达且可建设（火种）」的远方格 */
 function findRemoteBuildCell(state: GameLike, from: { q: number; r: number }, minDistance: number) {
+  grantFireSeedTech(state);
   const directions = [
     [1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1],
   ] as const;

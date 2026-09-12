@@ -1,8 +1,9 @@
 import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import { unitIsIncapacitated } from '../game/battle/actions';
+import { SIEGE_WEAPON_KIND_LABELS, siegeWeaponKindOf, vehicleLabelFor, type SiegeWeaponKind } from '../game/armaments';
 import { unitAuraRange } from '../game/battle/aura';
-import { isWaterTerrain } from '../game/battle/catalog';
+import { CATAPULT_TOWER_MAX_RANGE, CATAPULT_TOWER_MIN_RANGE, FORMATION_RANGE, FORT_RANGE, isWaterTerrain } from '../game/battle/catalog';
 import { coordsWithinRange, gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
 import { china42Passes } from '../game/scenario/jingxiang208';
@@ -12,7 +13,7 @@ import { rulerCityOf } from '../game/territory';
 import type { EditableCityMarker, EditorCityPlot } from '../game/map-editor/editor';
 import type { MapCamera } from '../game/saveSlots';
 import { useGame } from '../game/store/GameProvider';
-import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GridCell, PassId, StrategyResultReport, TerrainType, TroopType } from '../game/types';
+import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GameState, GridCell, PassId, StrategyResultReport, TerrainType, TroopType } from '../game/types';
 
 interface MapView {
   x: number;
@@ -57,10 +58,34 @@ const VEHICLE_TEXTURES: Record<'boat' | 'ship', { glyph: string; label: string }
   ship: { glyph: '船', label: '楼船' },
 };
 
-const SIEGE_TEXTURES: Record<'ram' | 'tower', { glyph: string; label: string }> = {
-  ram: { glyph: '冲', label: '冲车' },
-  tower: { glyph: '井', label: '井阑' },
+/**
+ * 攻城器械字形：**字形与存储口径解耦**——`ram`/`tower` 各自有一个升级形态
+ * （机械→`woodenBeast` 木兽、弹道→`catapult` 投石车），四态字形两两可区分：
+ * 冲车「冲」/ 木兽「兽」/ 井阑「井」/ 投石车「炮」。
+ * 标签直接复用 SIEGE_WEAPON_KIND_LABELS，避免与引擎侧文案漂移。
+ */
+const SIEGE_GLYPHS: Record<SiegeWeaponKind, string> = {
+  ram: '冲',
+  woodenBeast: '兽',
+  tower: '井',
+  catapult: '炮',
 };
+
+/** 部队标记的显示名（字形 + 文本），吃势力科技 */
+function siegeTextureOf(state: GameState, unit: ArmyUnit) {
+  const kind = siegeWeaponKindOf(state, unit);
+  return kind ? { glyph: SIEGE_GLYPHS[kind], label: SIEGE_WEAPON_KIND_LABELS[kind] } : undefined;
+}
+
+/**
+ * 水上载具显示名：字形沿用 VEHICLE_TEXTURES（楼船/斗舰同形），
+ * 文本走 `vehicleLabelFor` —— 势力有造船术时显示「斗舰」。
+ */
+function vehicleTextureOf(state: GameState, unit: ArmyUnit) {
+  if (!unit.vehicle) return undefined;
+  const texture = VEHICLE_TEXTURES[unit.vehicle];
+  return { ...texture, label: vehicleLabelFor(state, unit.forceId, unit.vehicle) };
+}
 
 const FACILITY_GLYPHS: Partial<Record<FacilityType, string>> = {
   drum: '鼓',
@@ -69,16 +94,46 @@ const FACILITY_GLYPHS: Partial<Record<FacilityType, string>> = {
   earthwork: '垒',
   fireSeed: '火',
   fireBall: '球',
+  // 科技解锁的新设施：阵/砦（据点型）、石墙（阻挡型）、连弩楼/投石台（攻击型）、业火种/业火球（陷阱型）
+  formation: '阵',
+  fort: '砦',
+  stoneWall: '墙',
+  crossbowTower: '弩',
+  catapultTower: '炮',
+  hellfireSeed: '业',
+  hellfireBall: '爆',
 };
 FACILITY_GLYPHS.fortress = '塞';
 
+/** 设施效果范围（外圈，单位：格）。未建成的设施不显示范围圈。 */
 const FACILITY_RANGE: Partial<Record<FacilityType, number>> = {
   arrowTower: 2,
   drum: 2,
   musicTower: 2,
   fortress: 3,
+  // 据点型设施与城塞同口径：显示防护/补给半径（阵 1 格、砦 2 格）
+  formation: FORMATION_RANGE,
+  fort: FORT_RANGE,
+  // 连弩楼：箭楼的升级版，射程同为 1~2 格
+  crossbowTower: 2,
+  // 投石台：射程 2~3 格且**不含相邻 1 格**（内圈见 FACILITY_RANGE_MIN），故外圈取 MAX_RANGE
+  catapultTower: CATAPULT_TOWER_MAX_RANGE,
 };
-const FORCE_COLORED_FACILITIES = new Set<FacilityType>(['drum', 'arrowTower', 'musicTower', 'fortress']);
+
+/**
+ * 设施范围圈的**内圈**（缺省 1 = 从相邻格起算）。
+ * 投石台（科技「弹道」）只打距其 2~3 格的敌军，**不含相邻的 1 格** ——
+ * 与 battle/catalog.ts 的 CATAPULT_TOWER_MIN_RANGE 同口径：高亮时挖掉第 1 圈。
+ */
+const FACILITY_RANGE_MIN: Partial<Record<FacilityType, number>> = {
+  catapultTower: CATAPULT_TOWER_MIN_RANGE,
+};
+
+/** 据点型设施（阵/砦/城塞、箭楼/连弩楼/投石台、太鼓台/军乐台）：底衬用归属势力色 */
+const FORCE_COLORED_FACILITIES = new Set<FacilityType>([
+  'drum', 'arrowTower', 'musicTower', 'fortress',
+  'formation', 'fort', 'crossbowTower', 'catapultTower',
+]);
 
 /** 无主城市的中性色（城牌/小地图圆点） */
 const NEUTRAL_CITY_COLOR = '#ffffff';
@@ -768,8 +823,15 @@ export function StrategicMap({
   const facilityRangeCells = hoveredFacility && hoveredFacilityRange
     ? (() => {
         const keys = new Set(displayGrid.map(gridKey));
+        // 内圈（投石台不含相邻 1 格）：先按同一 BFS 距离口径取内圈格再挖掉，保证内外圈口径一致
+        const innerRange = (FACILITY_RANGE_MIN[hoveredFacility.type] ?? 1) - 1;
+        const innerKeys = innerRange > 0
+          ? new Set(coordsWithinRange(hoveredFacility, innerRange).map(gridKey))
+          : undefined;
         return coordsWithinRange(hoveredFacility, hoveredFacilityRange)
-          .filter((coord) => keys.has(gridKey(coord)) && (coord.q !== hoveredFacility.q || coord.r !== hoveredFacility.r));
+          .filter((coord) => keys.has(gridKey(coord))
+            && !innerKeys?.has(gridKey(coord))
+            && (coord.q !== hoveredFacility.q || coord.r !== hoveredFacility.r));
       })()
     : [];
   // 城池攻击范围格子（鼠标悬停城池时显示，外1~2圈）
@@ -852,9 +914,9 @@ export function StrategicMap({
     const texture = unitKind === 'transport'
       ? { glyph: '输', label: '输送队' }
       : onWater && vehicle
-        ? VEHICLE_TEXTURES[vehicle]
+        ? (vehicleTextureOf(state, unit) ?? VEHICLE_TEXTURES[vehicle])
         : troopType === 'siege' && unit.siegeWeapon
-          ? SIEGE_TEXTURES[unit.siegeWeapon]
+          ? (siegeTextureOf(state, unit) ?? TROOP_TEXTURES[troopType])
           : TROOP_TEXTURES[troopType];
     const centerX = position.x + CELL_SIZE / 2;
     const centerY = position.y + CELL_SIZE / 2;

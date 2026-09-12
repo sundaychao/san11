@@ -37,14 +37,16 @@ describe('TechTreePanel（新版科技树界面）', () => {
     }
   });
 
-  it('九大系统图例齐全', () => {
-    render(<TechTreePanel />);
+  it('不再渲染系统图例（「步战系／射击系…」那一行已按需求去掉）', () => {
+    const { container } = render(<TechTreePanel />);
 
+    // 九个系统的配色定义仍保留，供节点着色使用
     expect(TECH_TREE_SYSTEMS.map((system) => system.name)).toEqual([
       '步战系', '射击系', '军制系', '骑牧系', '航行系', '理工系', '经济系', '文教系', '化工系',
     ]);
+    expect(container.querySelector('.tech-tree-legend')).toBeNull();
     for (const system of TECH_TREE_SYSTEMS) {
-      expect(screen.getByTestId(`tech-system-${system.id}`).textContent).toBe(system.name);
+      expect(screen.queryByTestId(`tech-system-${system.id}`)).toBeNull();
     }
   });
 

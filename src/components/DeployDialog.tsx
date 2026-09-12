@@ -1,13 +1,13 @@
 import { AlertCircle, Swords, X } from 'lucide-react';
 import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useAudioEventAdapter, type AudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { armamentsOf, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT } from '../game/armaments';
+import { armamentLabelFor, armamentsOf, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT, vehicleLabelFor } from '../game/armaments';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { unitTroopCapOf } from '../game/ranks';
 import { effectiveStat } from '../game/health';
 import { useGame } from '../game/store/GameProvider';
 import { officerSkillsText } from '../game/skills';
-import type { CityId, Officer, OfficerAptitudes, PassId, Stats, TroopType } from '../game/types';
+import type { CityId, ForceId, GameState, Officer, OfficerAptitudes, PassId, Stats, TroopType } from '../game/types';
 import { OfficerHealthBadge } from './OfficerHealthBadge';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -34,7 +34,9 @@ interface DeployDialogProps {
 
 interface DeployTroopOption {
   id: string;
-  label: string;
+  /** 静态显示名：**仅非兵器项使用**。兵器项（ram/tower）的显示名吃势力科技（冲车/木兽、井阑/投石车），
+   *  渲染时由 `troopTypeLabelOf` 现取，故不在此维护，避免两处文案漂移。 */
+  label?: string;
   troopType: TroopType;
   siegeWeapon?: 'ram' | 'tower';
   attack: number;
@@ -48,13 +50,32 @@ const TROOP_TYPES: DeployTroopOption[] = [
   { id: 'halberd', troopType: 'halberd', label: '戟兵', attack: 31, defense: 39, movement: 20 },
   { id: 'crossbow', troopType: 'crossbow', label: '弩兵', attack: 36, defense: 28, movement: 19 },
   { id: 'cavalry', troopType: 'cavalry', label: '骑兵', attack: 42, defense: 27, movement: 30 },
-  { id: 'ram', troopType: 'siege', siegeWeapon: 'ram', label: '冲车', attack: 30, defense: 26, movement: 16 },
-  { id: 'tower', troopType: 'siege', siegeWeapon: 'tower', label: '井阑', attack: 26, defense: 22, movement: 16 },
+  { id: 'ram', troopType: 'siege', siegeWeapon: 'ram', attack: 30, defense: 26, movement: 16 },
+  { id: 'tower', troopType: 'siege', siegeWeapon: 'tower', attack: 26, defense: 22, movement: 16 },
 ];
 const VEHICLE_TYPES: Array<{ id: 'boat' | 'ship'; label: string }> = [
   { id: 'boat', label: '小舟' },
   { id: 'ship', label: '楼船' },
 ];
+
+/**
+ * 出征兵种显示名（吃科技）：兵器项按势力科技取「冲车/木兽」「井阑/投石车」。
+ * `TROOP_TYPES` 里的 `label` 保留为非兵器项的静态文案，存储口径仍是 `siegeWeapon: 'ram' | 'tower'`。
+ */
+function troopTypeLabelOf(state: GameState, forceId: ForceId | null | undefined, type: DeployTroopOption): string {
+  return type.siegeWeapon ? armamentLabelFor(state, forceId, type.siegeWeapon) : type.label ?? TROOP_LABELS[type.troopType];
+}
+
+/** 兵器兵种项（按 siegeWeapon 取）：用于「XX不足」这类只有兵装类型、没有兵种项的文案 */
+function siegeTroopLabelOf(state: GameState, forceId: ForceId | null | undefined, siegeWeapon: 'ram' | 'tower'): string {
+  const type = TROOP_TYPES.find((item) => item.siegeWeapon === siegeWeapon);
+  return type ? troopTypeLabelOf(state, forceId, type) : armamentLabelFor(state, forceId, siegeWeapon);
+}
+
+/** 载具显示名（吃科技）：造船术把楼船显示为斗舰 */
+function vehicleTypeLabelOf(state: GameState, forceId: ForceId | null | undefined, id: 'boat' | 'ship'): string {
+  return vehicleLabelFor(state, forceId, id);
+}
 type OfficerPickerView = 'ability' | 'skill' | 'aptitude';
 type OfficerPickerSortDirection = 'desc' | 'asc';
 type OfficerPickerSortKey = 'name' | keyof Stats | 'skill' | keyof OfficerAptitudes;
@@ -333,6 +354,9 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
   const activeOfficerId = activeOfficerIds[0] ?? '';
   const activeOfficer = state.officers[activeOfficerId];
   const armamentType = TROOP_ARMAMENT[troopType];
+  // 显示名按出发据点的归属势力科技取值（出征只对本方据点开放，ownerId 即本方势力）；
+  // 无主据点（ownerId === null）由 armamentLabelFor/vehicleLabelFor 自带回落。
+  const ownerForceId = source.ownerId ?? state.playerForceId;
   const cityArmaments = armamentsOf(source.armaments);
   const armamentStock = armamentType ? cityArmaments[armamentType] : null;
   const shipStock = cityArmaments.ship;
@@ -364,8 +388,8 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
     !Number.isInteger(goldAmount) || goldAmount < 0 || goldAmount > source.gold ? '资金不足' : '',
     !Number.isInteger(foodAmount) || foodAmount < 0 || foodAmount > source.food ? '兵粮不足' : '',
     armamentType && armamentStock !== null && armamentStock < troopAmount ? `${TROOP_LABELS[troopType]}兵装不足` : '',
-    vehicle === 'ship' && shipStock < 1 ? '楼船兵装不足' : '',
-    troopType === 'siege' && cityArmaments[siegeWeapon] < 1 ? `${TROOP_TYPES.find((item) => item.siegeWeapon === siegeWeapon)?.label}不足` : '',
+    vehicle === 'ship' && shipStock < 1 ? `${vehicleTypeLabelOf(state, ownerForceId, 'ship')}兵装不足` : '',
+    troopType === 'siege' && cityArmaments[siegeWeapon] < 1 ? `${siegeTroopLabelOf(state, ownerForceId, siegeWeapon)}不足` : '',
   ].filter(Boolean);
 
   const submit = (event: FormEvent) => {
@@ -426,8 +450,9 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
             {TROOP_TYPES.map((type) => {
               const disabled = type.siegeWeapon ? cityArmaments[type.siegeWeapon] < 1 : false;
               const active = troopType === type.troopType && (!type.siegeWeapon || siegeWeapon === type.siegeWeapon);
+              const troopLabel = troopTypeLabelOf(state, ownerForceId, type);
               return (
-                <button key={type.id} type="button" aria-label={type.label} disabled={disabled} className={`${active ? 'is-active' : ''}${disabled ? 'is-disabled' : ''}`} onClick={() => {
+                <button key={type.id} type="button" aria-label={troopLabel} disabled={disabled} className={`${active ? 'is-active' : ''}${disabled ? 'is-disabled' : ''}`} onClick={() => {
                   if (disabled) return;
                   setTroopType(type.troopType);
                   if (type.siegeWeapon) setSiegeWeapon(type.siegeWeapon);
@@ -435,7 +460,7 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
                   setSubmitError(null);
                 }}>
                   <Swords aria-hidden="true" />
-                  <span>{type.label}</span>
+                  <span>{troopLabel}</span>
                   <small>{type.siegeWeapon ? `${cityArmaments[type.siegeWeapon]}` : TROOP_ARMAMENT[type.troopType] ? `${cityArmaments[TROOP_ARMAMENT[type.troopType]!]}` : '不限'}</small>
                 </button>
               );
@@ -446,14 +471,15 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
           <div className="deploy-troop-grid vehicle-grid" aria-label="交通工具选择">
             {VEHICLE_TYPES.map((item) => {
               const disabled = item.id === 'ship' && shipStock < 1;
+              const vehicleLabel = vehicleTypeLabelOf(state, ownerForceId, item.id);
               return (
-                <button key={item.id} type="button" aria-label={item.label} disabled={disabled} className={`${vehicle === item.id ? 'is-active' : ''}${disabled ? 'is-disabled' : ''}`} onClick={() => {
+                <button key={item.id} type="button" aria-label={vehicleLabel} disabled={disabled} className={`${vehicle === item.id ? 'is-active' : ''}${disabled ? 'is-disabled' : ''}`} onClick={() => {
                   if (disabled) return;
                   setVehicle(item.id);
                   setSubmitError(null);
                 }}>
                   <Swords aria-hidden="true" />
-                  <span>{item.label}</span>
+                  <span>{vehicleLabel}</span>
                   <small>{item.id === 'ship' ? `${shipStock}` : '免费'}</small>
                 </button>
               );
@@ -495,7 +521,7 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
             <div><dt>兵装</dt><dd>{armamentStock === null ? '剑兵不限' : `${armamentStock.toLocaleString('en-US')} → ${Math.max(0, armamentStock - Math.max(0, troopAmount)).toLocaleString('en-US')}`}</dd></div>
             <div><dt>资金</dt><dd>{source.gold.toLocaleString('en-US')} → {Math.max(0, source.gold - Math.max(0, goldAmount)).toLocaleString('en-US')}</dd></div>
           </dl>
-          <p className="deploy-note">带走的兵装随部队移动：回城/进军据点时，枪戟弩马按存活士兵返还，楼船/冲车/井阑整件返还。</p>
+          <p className="deploy-note">带走的兵装随部队移动：回城/进军据点时，枪戟弩马按存活士兵返还，{vehicleTypeLabelOf(state, ownerForceId, 'ship')}/{armamentLabelFor(state, ownerForceId, 'ram')}/{armamentLabelFor(state, ownerForceId, 'tower')}整件返还。</p>
         </aside>
 
         {(errors.length > 0 || submitError) && (

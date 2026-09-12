@@ -7,7 +7,7 @@ import { skillDefinition } from '../registry';
 import * as skillRules from '../index';
 import { skillAttackRangeBonus, unitAttackRange } from '../../battle/targetRules';
 import { attackUnit } from '../../battle/combat';
-import { TECH_COSTS, TECHP_PER_BREAK_UNIT } from '../../techs';
+import { techCostOf, TECHP_PER_BREAK_UNIT } from '../../techs';
 import { cityAvailableOfficers, executeCommand, researchTechPCost } from '../../commands';
 import {
   absorbTroopsOnCritical,
@@ -169,6 +169,8 @@ describe('combat skill rules', () => {
 
   it('restores energy after breaking a unit for 昂扬 and after being hit by a tactic for 怒发', () => {
     const { state, attacker } = combatFixture('昂扬');
+    // 本用例只验证昂扬/怒发的回复量，气力上限取基准 100（曹操开局科技「职业化」会把上限抬到 120）
+    state.forces.cao.techNodes = [];
     attacker.energy = 80;
 
     breakUnitEnergyRecovery(state, attacker);
@@ -349,9 +351,11 @@ describe('m15c skill hooks (行军/内政/灾害/攻击)', () => {
     const state = createGame('liu', 1);
     state.officers['liu-bei'].skill = '指导';
 
-    expect(researchTechPCost(state, 'liu', 'civil')).toBe(TECH_COSTS[0].techP);
-    expect(researchTechPCost(state, 'liu', 'civil', ['liu-bei'])).toBe(Math.round(TECH_COSTS[0].techP / 2));
-    expect(researchTechPCost(state, 'liu', 'civil', ['guan-yu'])).toBe(TECH_COSTS[0].techP);
+    // 公共教育（文教1级）：1000 技巧P
+    const level1TechP = techCostOf('gonggongjiaoyu')!.techP;
+    expect(researchTechPCost(state, 'gonggongjiaoyu')).toBe(level1TechP);
+    expect(researchTechPCost(state, 'gonggongjiaoyu', ['liu-bei'])).toBe(Math.round(level1TechP / 2));
+    expect(researchTechPCost(state, 'gonggongjiaoyu', ['guan-yu'])).toBe(level1TechP);
   });
 
   it('眼力 guarantees discovering an in-city talent while exploring', () => {
