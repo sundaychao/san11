@@ -1182,6 +1182,8 @@ function settleDebateOutcome(next: GameState, session: DebateSession): void {
     target.location = { kind: 'city', cityId };
     target.bannedUntilMonth = undefined;
     target.loyalty = recruitmentInitialLoyalty(target);
+    // 血色衣冠 6.0：换主后仕龄从 0 重新计算（出仕第一年）
+    target.serviceYears = 0;
     // 本旬通过舌战新登用的武将视为已行动，下个回合（旬）才可执行指令
     target.acted = true;
     // 技巧P入账（与探索/登庸一致，避免与 commands 形成循环依赖）

@@ -1,7 +1,6 @@
 import { nextRandom } from './random';
 import { effectsOfKind, resolveOfficerSkills } from './skills';
-import { clampLoyalty, recruitmentInitialLoyalty, setOfficerLoyalty } from './loyalty';
-import { compatDifference } from './diplomacy';
+import { clampLoyalty, recruitmentInitialLoyalty, setOfficerLoyalty, recruitWillOf, willSuccessChance, RECRUIT_REFUSE_LOYALTY } from './loyalty';
 import { treasureDefinition } from './treasures';
 import { applyDefeatInjuries, applyDeathConsequences, DEFEAT_DEATH_CHANCE, rollDeath } from './health';
 import { addTechP, TECHP_PER_CITY_CAPTURE } from './techs';
@@ -12,14 +11,18 @@ import type { ArmyUnit, City, CityId, ForceId, GameState, Officer, Pass, PassId 
  * 俘虏系统（参考《三国志11》原版）：
  * - 追击损灭敌部队时按捕获率判定俘获敌将；「强运」不受俘、「血路」部队全员不受俘、
  *   名马宝物不受俘、攻击方有「捕缚」则必俘；武/智越高越难被抓。
- * - 俘虏每月忠诚下降（1/4/7/10月额外下降），忠诚降至 94 以下才可登用。
+ * - 俘虏每月忠诚下降（1/4/7/10月额外下降），在仕忠诚高于必拒线（96）时不可登用。
  * - 处置：登用/释放（没收宝物，禁仕6个月）/处决（死亡）。
  * - 俘虏每月有概率逃走；关押势力失去全部城市时俘虏自动获得自由。
  */
 export const CAPTIVE_LOYALTY_DROP_PER_MONTH = 2;
 export const CAPTIVE_LOYALTY_DROP_QUARTER_BONUS = 3;
-/** 忠诚低于该值方可登用俘虏 */
-export const CAPTIVE_RECRUIT_LOYALTY_THRESHOLD = 94;
+/** 必拒线（血色衣冠 6.0）：在仕忠诚高于该值的俘虏必定拒绝登用。
+ *  用**函数**惰性读取 loyalty 的常量：captives ↔ skills ↔ battle/legacyCore 存在模块循环，
+ *  顶层取值在浏览器的模块执行序下会 TDZ（整页白屏），vitest 的执行序则碰不到 —— 别改回常量。 */
+export function captiveRecruitLoyaltyThreshold(): number {
+  return RECRUIT_REFUSE_LOYALTY;
+}
 /** 释放俘虏后的禁仕期限（月） */
 export const CAPTIVE_BAN_MONTHS_RELEASE = 6;
 /** 每月逃跑基础概率 */
@@ -356,26 +359,17 @@ export function settleCaptives(state: GameState): void {
   }
 }
 
-/** 登用俘虏的成功概率：
- * - 厌恶关系（任一方厌恶另一方）→ 必不成功（0%）；
- * - 忠诚越低、执行者能力越高、相性越近越易成功；
- * - 目标亲爱捕获方君主 → 更容易成功。
+/** 登用俘虏的成功率 —— 血色衣冠 6.0 新忠诚系统口径：
+ * 统一走「登用接受意愿」公式（recruitWillOf，俘虏 +10 意愿）：
+ * - 必拒（目标是君主 / 厌恶登用君主或武将 / 忠诚高于必拒线 96）→ 0%；
+ * - 必成（目标亲爱捕获方君主）→ 100%；
+ * - 其余按意愿值换算（willSuccessChance：意愿 20 → 30%，40 → 60%，60 → 90%）。
  */
 export function recruitCaptiveChance(state: GameState, forceId: ForceId, executor: Officer, target: Officer): number {
-  const captorLeaderId = state.forces[forceId]?.leaderId;
-  const captorLeader = captorLeaderId ? state.officers[captorLeaderId] : undefined;
-  const crossHates = captorLeaderId !== undefined
-    && ((target.hates ?? []).includes(captorLeaderId) || (captorLeader?.hates ?? []).includes(target.id));
-  if (crossHates) return 0;
-
-  const loyalty = target.loyalty ?? 92;
-  const compatibilityPenalty = target.forceId ? compatDifference(state, forceId, target.forceId) / 2 : 0;
-  const likeBonus = captorLeaderId !== undefined && (target.likes ?? []).includes(captorLeaderId) ? 20 : 0;
-  const raw = (executor.stats.politics + executor.stats.charisma) / 2
-    + (CAPTIVE_RECRUIT_LOYALTY_THRESHOLD - loyalty) * 1.5
-    - compatibilityPenalty
-    + likeBonus;
-  return Math.min(90, Math.max(5, Math.floor(raw)));
+  const verdict = recruitWillOf(state, executor, target);
+  if (verdict.verdict === 'refuse') return 0;
+  if (verdict.verdict === 'accept') return 100;
+  return willSuccessChance(verdict.will);
 }
 
 export interface CaptiveRecruitResult {
@@ -402,6 +396,8 @@ export function resolveRecruitCaptive(state: GameState, forceId: ForceId, execut
     target.loyalty = likeLoyalty
       ? clampLoyalty(recruitmentInitialLoyalty(target) + 20)
       : recruitmentInitialLoyalty(target);
+    // 血色衣冠 6.0：换主后仕龄从 0 重新计算（出仕第一年）
+    target.serviceYears = 0;
     target.bannedUntilMonth = undefined;
     // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
     target.acted = true;
@@ -478,9 +474,9 @@ export function bannedRemainingMonths(state: GameState, officer: Officer): numbe
   return Math.max(0, bannedUntil - state.month);
 }
 
-/** 忠诚是否已合格（可登用俘虏） */
+/** 忠诚是否已合格（可登用俘虏）：按血色必拒线（忠诚 ≤96）粗筛 */
 export function capturableByLoyalty(officer: Officer): boolean {
-  return (officer.loyalty ?? 92) < CAPTIVE_RECRUIT_LOYALTY_THRESHOLD;
+  return (officer.loyalty ?? 92) <= captiveRecruitLoyaltyThreshold();
 }
 
 export { };

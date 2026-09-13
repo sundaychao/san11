@@ -242,7 +242,7 @@ export function troopCategoryOf(unit: Pick<ArmyUnit, 'kind' | 'troopType' | 'veh
 }
 
 /** 各兵种的「训练 / 专精」科技节点（战法威力 +10% / +25%） */
-const TACTIC_POWER_NODES: Partial<Record<TroopType | 'navy', [TechNodeId, TechNodeId]>> = {
+export const TACTIC_POWER_NODES: Partial<Record<TroopType | 'navy', [TechNodeId, TechNodeId]>> = {
   spear: ['qiangshuxunlian', 'qiangbingjingzhuan'],
   halberd: ['jishuxunlian', 'jibingjingzhuan'],
   crossbow: ['sheshuxunlian', 'nubingjingzhuan'],
@@ -539,3 +539,44 @@ export function canBuildFacility(state: GameState, forceId: ForceId | null | und
   if (!node) return true;
   return hasTech(state, forceId, node);
 }
+
+// ---------------------------------------------------------------------------
+// 效果欠账清单
+//
+// 这是**技术债台账**，不是设计开关：新增科技节点时必须同步实现效果，
+// 实现完就从本表移除。techs.test.ts 用本表做双向守卫——
+//   1. 表外节点必须已有实现（出现在本文件的效果代码里）；
+//   2. `missing === 'all'` 的节点必须确实没有实现（防止台账过期）。
+// ---------------------------------------------------------------------------
+
+export interface TechEffectGap {
+  /** 科技节点 id */
+  node: TechNodeId;
+  /** 缺失的部分；'all' 表示整个效果都还没做 */
+  missing: string;
+  /** 为什么没做／要做什么 */
+  reason: string;
+}
+
+export const TECH_EFFECT_GAPS: readonly TechEffectGap[] = [
+  {
+    node: 'yinshuashu',
+    missing: 'all',
+    reason: '「军团直辖城市上限＋4」依赖「直辖/军团城市上限」机制（血色衣冠为基准 4 城、超限行动力＋10%），'
+      + '本项目没有城市上限概念（Legion 只有 cityIds），单独实现该科技没有意义。'
+      + '2026-09-13 拍板：上限机制暂不建，本条维持欠账。'
+      + '另注：血色衣冠 6.0 把「直辖＋4」给了文官制度、把「行动力－20%」给了印刷术，与本项目相反；'
+      + '同样于 2026-09-13 拍板**保持现状**（沿用原版 311 口径），不要顺手对调。',
+  },
+  {
+    node: 'houqintixi',
+    missing: '粮道提供的粮食损耗－50%',
+    reason: '「运输队移动＋8」已由 movementTechBonus 实现；但「粮道」机制本身在本项目中不存在，'
+      + '该半条效果无落点，属描述超前于实现。2026-09-13 拍板：粮道机制与描述均维持现状。',
+  },
+];
+
+/** 完全未接入效果的节点（missing === 'all'），供回归守卫使用 */
+export const TECH_NODES_WITHOUT_EFFECT: readonly TechNodeId[] = TECH_EFFECT_GAPS
+  .filter((gap) => gap.missing === 'all')
+  .map((gap) => gap.node);

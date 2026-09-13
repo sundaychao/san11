@@ -1,7 +1,7 @@
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { effectiveUnitAbilities, harmfulStrategySuccessChance, deployUnitPreviewWithId, FACILITY_BUILD_COSTS, unitFacilities, unitFacilityMenuOptions, unitIsIncapacitated, unitStrategies, type StrategyId, type TacticId } from '../game/battle/actions';
+import { effectiveUnitAbilities, harmfulStrategySuccessChance, deployUnitPreviewWithId, deployTransportUnitWithId, FACILITY_BUILD_COSTS, suppliableUnits, unitFacilities, unitFacilityMenuOptions, unitIsIncapacitated, unitStrategies, type StrategyId, type SupplyArmament, type TacticId } from '../game/battle/actions';
 import type { CSSProperties } from 'react';
 import { gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticFacilityTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
@@ -16,7 +16,7 @@ import { allPassAnchorKeys } from '../game/battle/movementRules';
 import { useGame } from '../game/store/GameProvider';
 import { territoryForceAt } from '../game/territory';
 import type { MapCamera } from '../game/saveSlots';
-import type { BattleDamageReport, CityEffectReport, CityId, ForceId, FacilityRepairReport, FacilityType, GameCommand, GameState, GridCell, PassId, StrategyResultReport, TerrainType } from '../game/types';
+import type { BattleDamageReport, CityEffectReport, CityId, DiplomacyAction, ForceId, FacilityRepairReport, FacilityType, GameCommand, GameState, GridCell, PassId, StrategyResultReport, TerrainType } from '../game/types';
 import { BattlePanel } from './BattlePanel';
 import { CityInfoPanel } from './CityInfoPanel';
 import { CityInfoDialog } from './CityInfoDialog';
@@ -44,14 +44,24 @@ import { SaveLoadDialog, type SaveLoadDialogMode } from './SaveLoadDialog';
 import { StrategicMap } from './StrategicMap';
 import { TopBar } from './TopBar';
 import { TransportDialog, type TransportConfirmInput } from './TransportDialog';
+import { SupplyDialog } from './SupplyDialog';
 import { UnitDetailDialog } from './UnitDetailDialog';
 import { UnitInfoPanel } from './UnitInfoPanel';
 import { useUnitMenuInteraction } from './useUnitMenuInteraction';
 
-const UNIT_COMMANDS = ['待命', '攻击', '齐攻', '战法', '单挑', '计略', '设置', '修补'] as const;
+const UNIT_COMMANDS = ['待命', '攻击', '齐攻', '战法', '单挑', '计略', '设置', '修补', '补给'] as const;
 const UNIT_STRATEGIES = unitStrategies();
 const UNIT_FACILITIES = unitFacilities();
 const PENDING_DEPLOY_UNIT_ID = '__pending-deploy__';
+
+/** 落位后命令菜单的挂起部署：出征与输送共用一套流程，kind 区分落位后执行的意图 */
+type PendingDeployCommand =
+  | { kind: 'combat'; input: DeployConfirmInput; destination: GridCoord }
+  | { kind: 'transport'; input: TransportConfirmInput; destination: GridCoord };
+
+type PendingDeployAction =
+  | { kind: 'combat'; input: DeployConfirmInput & { destination: GridCoord }; unitId: string }
+  | { kind: 'transport'; input: TransportConfirmInput & { destination: GridCoord }; unitId: string };
 const HARMFUL_UNIT_STRATEGIES = new Set<StrategyId>(['false-report', 'disturb', 'discord']);
 
 const TERRAIN_LABELS: Record<TerrainType, string> = {
@@ -87,7 +97,7 @@ type DeployDelegateMenuState = {
 };
 
 export function GameShell() {
-  const { attackCity, attackFacility, attackPass, attackPlot, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, deployUnitDelegate, dismantleFacility, duelUnit, endTenDay, executeDelegatedUnits, clearPendingCamera, issueCommand, moveUnit, online, pendingCamera, repairFacility, setBuildDelegate, setMoveDelegate, setRepairDelegate, state, selectedCityId, resetGame, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
+  const { attackCity, attackFacility, attackPass, attackPlot, attackUnit, jointAttackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitAction, deployUnitDelegate, dismantleFacility, duelUnit, endTenDay, executeDelegatedUnits, clearPendingCamera, issueCommand, moveUnit, online, pendingCamera, repairFacility, setBuildDelegate, setMoveDelegate, setRepairDelegate, state, selectedCityId, resetGame, supplyUnit, useUnitStrategy, useUnitTactic, waitUnit } = useGame();
   const { emit: emitAudioEvent } = useAudioEventAdapter();
   /** 储存 / 载入对话框：null 表示关闭 */
   const [saveDialogMode, setSaveDialogMode] = useState<SaveLoadDialogMode | null>(null);
@@ -101,6 +111,8 @@ export function GameShell() {
   const [activeCommand, setActiveCommand] = useState<GameCommand['type'] | null>(null);
   /** 当前命令/培育对话框的关隘宿主：非空时以关隘为据点宿主执行命令（cityId 仅作归辖城） */
   const [activeCommandPassId, setActiveCommandPassId] = useState<PassId | null>(null);
+  /** 外交对话框的初始行动：由命令菜单「外交」段选中，null 时按亲善处理 */
+  const [activeDiplomacyAction, setActiveDiplomacyAction] = useState<DiplomacyAction | null>(null);
   const [activeCultivate, setActiveCultivate] = useState<CultivateCategory | null>(null);
   const [cultivatePickerOpen, setCultivatePickerOpen] = useState(false);
   const [positionPanelOpen, setPositionPanelOpen] = useState(false);
@@ -109,8 +121,9 @@ export function GameShell() {
   const [transportCityId, setTransportCityId] = useState<CityId | PassId | null>(null);
   const [pendingDeploy, setPendingDeploy] = useState<DeployConfirmInput | null>(null);
   const [pendingTransport, setPendingTransport] = useState<TransportConfirmInput | null>(null);
-  const [pendingDeployCommand, setPendingDeployCommand] = useState<{ input: DeployConfirmInput; destination: GridCoord } | null>(null);
-  const [pendingDeployAction, setPendingDeployAction] = useState<{ input: DeployConfirmInput & { destination: GridCoord }; unitId: string } | null>(null);
+  /** 落位后命令菜单的挂起部署（出征与输送共用）：点「待命」等命令时才真正执行 */
+  const [pendingDeployCommand, setPendingDeployCommand] = useState<PendingDeployCommand | null>(null);
+  const [pendingDeployAction, setPendingDeployAction] = useState<PendingDeployAction | null>(null);
   /** 待选建设用地的开发参数 */
   const [pendingConstruction, setPendingConstruction] = useState<{ cityId: NonNullable<typeof selectedCityId>; officerIds: string[]; facility: PlotType } | null>(null);
   /** 反映最新渲染状态的 ref，避免事件闭包中使用陈旧值导致重复提交命令 */
@@ -145,6 +158,10 @@ export function GameShell() {
   const [targetingFacility, setTargetingFacility] = useState<{ unitId: string; facilityType: FacilityType; origin?: GridCoord } | null>(null);
   const [targetingRepair, setTargetingRepair] = useState<{ unitId: string; origin?: GridCoord } | null>(null);
   const [duelDialogUnit, setDuelDialogUnit] = useState<{ unitId: string; origin?: GridCoord } | null>(null);
+  /** 运输队「补给」选目标模式：可补给的部队头顶显示箭头，点击部队标记打开补给页 */
+  const [targetingSupply, setTargetingSupply] = useState<{ unitId: string; origin?: GridCoord } | null>(null);
+  /** 运输队补给页（ SupplyDialog）；deployAction 非空 = 出城落位后的跟随补给（部队尚未真正出城） */
+  const [supplyDialog, setSupplyDialog] = useState<{ unitId: string; targetId: string; destination?: GridCoord; deployAction?: PendingDeployAction } | null>(null);
   const [visibleDamageReports, setVisibleDamageReports] = useState<BattleDamageReport[]>([]);
   const [visibleStrategyResultReports, setVisibleStrategyResultReports] = useState<StrategyResultReport[]>([]);
   const [visibleCityEffectReports, setVisibleCityEffectReports] = useState<CityEffectReport[]>([]);
@@ -220,6 +237,7 @@ export function GameShell() {
   const closeCommand = useCallback(() => {
     setActiveCommand(null);
     setActiveCommandPassId(null);
+    setActiveDiplomacyAction(null);
   }, []);
   const closeCultivate = useCallback(() => {
     setActiveCultivate(null);
@@ -287,9 +305,10 @@ export function GameShell() {
       setHoveredUnit(null);
     }, 120);
   }, [cancelUnitHoverClose]);
-  const launchCommand = useCallback((type: GameCommand['type'], passId?: PassId | null) => {
+  const launchCommand = useCallback((type: GameCommand['type'], passId?: PassId | null, diplomacyAction?: DiplomacyAction) => {
     setActiveCommand(type);
     setActiveCommandPassId(passId ?? null);
+    setActiveDiplomacyAction(diplomacyAction ?? null);
     setCityMenu(null);
     setMapContextMenu(null);
     setShowMapIntelOptions(false);
@@ -399,7 +418,7 @@ export function GameShell() {
   const moveControlUnitId = placingDeployPreview?.unitId ?? selectedUnitId;
   const moveTargets = useMemo(() => {
     if (!moveControlState || !moveControlUnitId) return [];
-    if (targetingAttack || targetingTactic || targetingFirePlot || targetingUnitStrategy || targetingFacility || targetingRepair) return [];
+    if (targetingAttack || targetingTactic || targetingFirePlot || targetingUnitStrategy || targetingFacility || targetingRepair || targetingSupply) return [];
     const cells = getMovementTargets(moveControlState, moveControlUnitId);
     if (!placingDeployPreview) return cells;
     // 出征落位：排除所有城池 footprint 与关隘锚点/翼格（普通移动可进入本方城格，但出征落点不能是据点格）
@@ -409,10 +428,18 @@ export function GameShell() {
     }
     const excluded = new Set([...cityKeys, ...allPassAnchorKeys(moveControlState), ...passBlockedKeys(moveControlState)]);
     return cells.filter((coord) => !excluded.has(gridKey(coord)));
-  }, [moveControlState, moveControlUnitId, placingDeployPreview, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingTactic, targetingUnitStrategy]);
+  }, [moveControlState, moveControlUnitId, placingDeployPreview, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingSupply, targetingTactic, targetingUnitStrategy]);
   const pendingDeployPreview = useMemo(() => {
     if (!state || !pendingDeployCommand || !isPendingDeployCommandMenu) return null;
     try {
+      if (pendingDeployCommand.kind === 'transport') {
+        // 输送队预演：deployTransportUnit 是纯函数，返回的克隆态里部队已落位（资源已扣），
+        // 只用于菜单可用性查询，不写回真实对局
+        return deployTransportUnitWithId(state, state.playerForceId, {
+          ...pendingDeployCommand.input,
+          destination: pendingDeployCommand.destination,
+        });
+      }
       return deployUnitPreviewWithId(state, state.playerForceId, {
         ...pendingDeployCommand.input,
         destination: pendingDeployCommand.destination,
@@ -424,11 +451,20 @@ export function GameShell() {
   const pendingDeployActionPreview = useMemo(() => {
     if (!state || !pendingDeployAction) return null;
     try {
+      if (pendingDeployAction.kind === 'transport') {
+        return deployTransportUnitWithId(state, state.playerForceId, pendingDeployAction.input);
+      }
       return deployUnitPreviewWithId(state, state.playerForceId, pendingDeployAction.input);
     } catch {
       return null;
     }
   }, [pendingDeployAction, state]);
+  /** 补给选目标模式：头顶显示箭头的可补给部队（出城跟随补给按预演态算，部队还没真正落位） */
+  const supplyTargetUnitIds = useMemo(() => {
+    const targetState = pendingDeployActionPreview?.state ?? state;
+    if (!targetState || !targetingSupply) return [];
+    return suppliableUnits(targetState, targetingSupply.unitId, targetingSupply.origin).map((unit) => unit.id);
+  }, [pendingDeployActionPreview, state, targetingSupply]);
   const unitMenuState = pendingDeployPreview?.state ?? state;
   const unitMenuUnitId = pendingDeployPreview?.unitId ?? unitCommandMenu?.unitId;
   const unitMenuDestination = pendingDeployPreview ? undefined : unitCommandMenu?.destination;
@@ -536,11 +572,17 @@ export function GameShell() {
       setDelegateFacilityMenu(null);
       setDelegatePath([]);
       if (pendingTransport) {
-        deployTransportUnit({ ...pendingTransport, destination: coord });
-        setPendingTransport(null);
+        // 与出征一致：点落位格先弹命令菜单（待命/攻击/…/补给），选了命令才真正出城
+        setPendingDeployCommand({ kind: 'transport', input: pendingTransport, destination: coord });
+        setUnitCommandMenu({ unitId: PENDING_DEPLOY_UNIT_ID, position, destination: coord });
+        setUnitTacticMenu(null);
+        setUnitStrategyMenu(null);
+        setUnitFacilityMenu(null);
+        setSelectedUnitId(null);
+        setPendingDeployAction(null);
         return;
       }
-      setPendingDeployCommand({ input: pendingDeploy!, destination: coord });
+      setPendingDeployCommand({ kind: 'combat', input: pendingDeploy!, destination: coord });
       setUnitCommandMenu({ unitId: PENDING_DEPLOY_UNIT_ID, position, destination: coord });
       setUnitTacticMenu(null);
       setUnitStrategyMenu(null);
@@ -562,7 +604,7 @@ export function GameShell() {
       officerIds: pendingDeploy.officerIds,
     });
     const fallbackSpawn = chooseDelegateSpawnCell(deployCells, coord);
-    const deployInput: DeployConfirmInput & { destination?: GridCoord } = pendingDeployCommand
+    const deployInput: DeployConfirmInput & { destination?: GridCoord } = pendingDeployCommand?.kind === 'combat'
       ? { ...pendingDeployCommand.input, destination: pendingDeployCommand.destination }
       : fallbackSpawn
         ? { ...pendingDeploy, destination: fallbackSpawn }
@@ -583,7 +625,7 @@ export function GameShell() {
     } catch {
       return;
     }
-  }, [canOperateCurrentTurn, deployTargets, deployTransportUnit, pendingDeploy, pendingDeployCommand, pendingTransport, state]);
+  }, [canOperateCurrentTurn, deployTargets, pendingDeploy, pendingDeployCommand, pendingTransport, state]);
 
   const selectUnit = useCallback((unitId: string, position: { x: number; y: number }) => {
     cancelUnitHoverClose();
@@ -699,7 +741,7 @@ export function GameShell() {
       setTargetingRepair(null);
       // 出征落位：与普通移动一致，点选目标格后弹出行动菜单
       if (placingDeploy) {
-        setPendingDeployCommand({ input: pendingDeploy!, destination: coord });
+        setPendingDeployCommand({ kind: 'combat', input: pendingDeploy!, destination: coord });
         setUnitCommandMenu({ unitId: PENDING_DEPLOY_UNIT_ID, position, destination: coord });
         setPendingDeployAction(null);
         return;
@@ -769,25 +811,34 @@ export function GameShell() {
 
   const beginPendingDeployAction = useCallback(() => {
     if (!pendingDeployCommand || !pendingDeployPreview) return null;
-    const action = {
-      input: {
-        ...pendingDeployCommand.input,
-        destination: pendingDeployCommand.destination,
-      },
-      unitId: pendingDeployPreview.unitId,
-    };
+    const action: PendingDeployAction = pendingDeployCommand.kind === 'combat'
+      ? {
+        kind: 'combat',
+        input: { ...pendingDeployCommand.input, destination: pendingDeployCommand.destination },
+        unitId: pendingDeployPreview.unitId,
+      }
+      : {
+        kind: 'transport',
+        input: { ...pendingDeployCommand.input, destination: pendingDeployCommand.destination },
+        unitId: pendingDeployPreview.unitId,
+      };
     setPendingDeployAction(action);
     return action;
   }, [pendingDeployCommand, pendingDeployPreview]);
 
   const finishPendingDeployAction = useCallback((action: Parameters<typeof deployUnitAction>[1]) => {
     if (!pendingDeployAction) return false;
-    deployUnitAction(pendingDeployAction.input, action);
+    if (pendingDeployAction.kind === 'transport') {
+      deployTransportUnit(pendingDeployAction.input, action);
+    } else {
+      deployUnitAction(pendingDeployAction.input, action);
+    }
     setPendingDeployAction(null);
     setPendingDeployCommand(null);
     setPendingDeploy(null);
+    setPendingTransport(null);
     return true;
-  }, [deployUnitAction, pendingDeployAction]);
+  }, [deployTransportUnit, deployUnitAction, pendingDeployAction]);
 
   const executeUnitAttackCommand = useCallback(() => {
     if (
@@ -901,6 +952,53 @@ export function GameShell() {
     });
   }, [beginPendingDeployAction, canOperateCurrentTurn, emitAudioEvent, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuUnitId]);
 
+  /** 运输队「补给」：进入选目标模式——可补给的部队头顶显示箭头，点部队标记开补给页。
+   *  出城落位菜单同样可用：先挂起部署（与攻击同款预演），补给随出城一步原子结算。 */
+  const executeUnitSupplyCommand = useCallback(() => {
+    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || !unitMenuQuery?.commandAvailability.supply) return;
+    emitAudioEvent({ type: 'menu-click-on' });
+    if (isPendingDeployCommandMenu) {
+      const deployAction = beginPendingDeployAction();
+      if (!deployAction) return;
+      // 预演态里部队已落位：按落位格算邻居，targetingSupply 不带 origin
+      setTargetingSupply({ unitId: deployAction.unitId });
+    } else {
+      setTargetingSupply({ unitId: unitMenuUnitId, origin: unitMenuDestination });
+    }
+    setUnitCommandMenu(null);
+  }, [beginPendingDeployAction, canOperateCurrentTurn, emitAudioEvent, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuUnitId]);
+
+  /** 选目标模式下点击带箭头的部队标记 → 打开补给页（出城跟随补给用预演态读数） */
+  const selectSupplyTarget = useCallback((targetId: string) => {
+    if (!canOperateCurrentTurn || !targetingSupply) return;
+    const deployAction = pendingDeployAction?.unitId === targetingSupply.unitId ? pendingDeployAction : undefined;
+    setSupplyDialog({
+      unitId: targetingSupply.unitId,
+      targetId,
+      destination: deployAction ? undefined : targetingSupply.origin,
+      deployAction,
+    });
+    setTargetingSupply(null);
+  }, [canOperateCurrentTurn, pendingDeployAction, targetingSupply]);
+
+  const confirmSupply = useCallback((amount: { troops: number; gold: number; food: number; armaments?: Partial<SupplyArmament> }) => {
+    if (!supplyDialog) return;
+    if (supplyDialog.deployAction) {
+      // 出城即补给：与「部署 → supplyUnit」两步同口径的原子意图
+      finishPendingDeployAction({
+        type: 'supplyUnit',
+        targetId: supplyDialog.targetId,
+        troops: amount.troops,
+        gold: amount.gold,
+        food: amount.food,
+        armaments: amount.armaments,
+      });
+    } else {
+      supplyUnit(supplyDialog.unitId, supplyDialog.targetId, amount, supplyDialog.destination);
+    }
+    setSupplyDialog(null);
+  }, [finishPendingDeployAction, supplyDialog, supplyUnit]);
+
   const selectUnitTactic = useCallback((tacticId: TacticId) => {
     if (!canOperateCurrentTurn) return;
     if (!unitTacticMenu) return;
@@ -988,9 +1086,14 @@ export function GameShell() {
     if (!unitCommandMenu) return;
     if (unitCommandMenu.unitId === PENDING_DEPLOY_UNIT_ID) {
       if (!pendingDeployCommand) return;
-      deployUnitAction({ ...pendingDeployCommand.input, destination: pendingDeployCommand.destination }, { type: 'wait' });
+      if (pendingDeployCommand.kind === 'transport') {
+        deployTransportUnit({ ...pendingDeployCommand.input, destination: pendingDeployCommand.destination }, { type: 'wait' });
+      } else {
+        deployUnitAction({ ...pendingDeployCommand.input, destination: pendingDeployCommand.destination }, { type: 'wait' });
+      }
       setPendingDeployCommand(null);
       setPendingDeploy(null);
+      setPendingTransport(null);
       setPendingDeployAction(null);
     } else if (unitCommandMenu.destination) {
       moveUnit(unitCommandMenu.unitId, unitCommandMenu.destination);
@@ -1390,12 +1493,14 @@ export function GameShell() {
       setRepairConfirm(null);
       return;
     }
-    if (unitCommandMenu || unitTacticMenu || unitStrategyMenu || unitFacilityMenu) {
+    if (unitCommandMenu || unitTacticMenu || unitStrategyMenu || unitFacilityMenu || targetingSupply) {
       setUnitCommandMenu(null);
       setUnitTacticMenu(null);
       setUnitStrategyMenu(null);
       setUnitFacilityMenu(null);
+      setTargetingSupply(null);
       setPendingDeploy(null);
+      setPendingTransport(null);
       setPendingDeployCommand(null);
       setPendingDeployAction(null);
       setTargetingAttack(null);
@@ -1406,7 +1511,7 @@ export function GameShell() {
       setTargetingRepair(null);
       return;
     }
-    if (selectedUnitId || targetingAttack || targetingTactic || targetingFirePlot || targetingUnitStrategy || targetingFacility || targetingRepair) {
+    if (selectedUnitId || targetingAttack || targetingTactic || targetingFirePlot || targetingUnitStrategy || targetingFacility || targetingRepair || targetingSupply) {
       setSelectedUnitId(null);
       setTargetingAttack(null);
       setTargetingTactic(null);
@@ -1414,6 +1519,7 @@ export function GameShell() {
       setTargetingUnitStrategy(null);
       setTargetingFacility(null);
       setTargetingRepair(null);
+      setTargetingSupply(null);
       if (pendingDeployAction || pendingDeploy) {
         setPendingDeploy(null);
         setPendingDeployCommand(null);
@@ -1450,7 +1556,7 @@ export function GameShell() {
     setTargetingRepair(null);
     setShowMapIntelOptions(false);
     setMapContextMenu(position);
-  }, [cancelConfirm, cityMenu, delegateFacilityMenu, delegateMenu, delegatePath, deployCityId, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, plotContextMenu, returnCityConfirm, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
+  }, [cancelConfirm, cityMenu, delegateFacilityMenu, delegateMenu, delegatePath, deployCityId, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, plotContextMenu, returnCityConfirm, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingSupply, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
 
   const proceedTenDayFromMap = useCallback(() => {
     setMapContextMenu(null);
@@ -1600,6 +1706,8 @@ export function GameShell() {
     setUnitTacticMenu(null);
     setUnitStrategyMenu(null);
     setUnitFacilityMenu(null);
+    setPendingDeploy(null);
+    setPendingTransport(null);
     setPendingDeployCommand(null);
     setPendingDeployAction(null);
     setTargetingUnitStrategy(null);
@@ -1974,6 +2082,7 @@ export function GameShell() {
         attackTargetFacilityIds={targetFacilityIds}
         attackTargetUnitIds={attackTargetUnitIds}
         attackTargetPlotKeys={attackTargetPlotKeys}
+        supplyTargetUnitIds={supplyTargetUnitIds}
         damageReports={visibleDamageReports}
         strategyResultReports={visibleStrategyResultReports}
         cityEffectReports={visibleCityEffectReports}
@@ -1992,6 +2101,7 @@ export function GameShell() {
         onCityHover={(cityId, position) => setHoveredCity({ cityId, position })}
         onCityLeave={() => setHoveredCity(null)}
         onAttackTargetSelect={selectAttackTarget}
+        onSupplyTargetSelect={selectSupplyTarget}
         onAttackCityTargetSelect={selectAttackCityTarget}
         onAttackPassTargetSelect={selectAttackPassTarget}
         onFacilityTargetSelect={selectFacilityTarget}
@@ -2396,6 +2506,8 @@ export function GameShell() {
           onContextMenu={closeUnitCommandMenuFromRightClick}
         >
           {UNIT_COMMANDS.map((command, commandIndex) => {
+            // 「补给」是运输队专属命令：作战部队的菜单里不出现这一项
+            if (command === '补给' && unitMenuQuery?.unit?.kind !== 'transport') return null;
             const disabled = command === '待命'
               ? !unitMenuQuery?.commandAvailability.wait
               : commandIndex === 1
@@ -2412,7 +2524,9 @@ export function GameShell() {
                           ? !unitMenuQuery?.commandAvailability.facility
                           : command === '修补'
                             ? !unitMenuQuery?.commandAvailability.repair
-                            : true;
+                            : command === '补给'
+                              ? !unitMenuQuery?.commandAvailability.supply
+                              : true;
             const onClick =
               command === '待命' ? executeUnitWaitCommand :
               commandIndex === 1 ? executeUnitAttackCommand :
@@ -2421,11 +2535,13 @@ export function GameShell() {
               command === '单挑' ? executeUnitDuelCommand :
               command === '计略' ? executeUnitStrategyCommand :
               commandIndex === 7 ? executeUnitRepairCommand :
+              command === '补给' ? executeUnitSupplyCommand :
               undefined;
             return (
               <button
                 key={command}
                 type="button"
+                data-testid={command === '补给' ? 'unit-command-supply' : undefined}
                 className={disabled ? 'is-disabled' : undefined}
                 disabled={disabled}
                 onClick={commandIndex === 6 ? executeUnitFacilityCommand : onClick}
@@ -2638,6 +2754,7 @@ export function GameShell() {
           type={activeCommand}
           cityId={activeHostCityId}
           passId={activeCommandPassId ?? undefined}
+          diplomacyAction={activeDiplomacyAction ?? undefined}
           onClose={() => {
             setPendingConstruction(null);
             pendingConstructionRef.current = null;
@@ -2692,6 +2809,16 @@ export function GameShell() {
           onClose={closeTransportDialog}
         />
       ))}
+      {supplyDialog && (supplyDialog.deployAction ? pendingDeployActionPreview?.state : state)?.units[supplyDialog.unitId]
+        && (supplyDialog.deployAction ? pendingDeployActionPreview?.state : state)?.units[supplyDialog.targetId] && (
+        <SupplyDialog
+          unitId={supplyDialog.unitId}
+          targetId={supplyDialog.targetId}
+          previewState={supplyDialog.deployAction ? pendingDeployActionPreview?.state : undefined}
+          onConfirm={confirmSupply}
+          onClose={() => setSupplyDialog(null)}
+        />
+      )}
       {saveDialogMode && (
         <SaveLoadDialog
           mode={saveDialogMode}

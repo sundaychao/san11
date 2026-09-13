@@ -529,6 +529,21 @@ button { color: inherit; }
 .battle-unit-morale-bar { pointer-events: none; }
 .battle-unit-morale-track { fill: rgba(9, 13, 11, 0.55); stroke: rgba(255, 246, 214, 0.85); stroke-width: 0.5; }
 .battle-unit-morale-fill { fill: #ffd842; }
+/* 运输队补给选目标：可补给部队头顶的金色下指箭头（上下浮动动画） */
+.supply-target-arrow { pointer-events: none; }
+.supply-target-arrow polygon {
+  fill: #ffd842;
+  stroke: rgba(60, 42, 8, 0.95);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  animation: supply-arrow-bob 1s ease-in-out infinite;
+}
+.battle-unit-marker.is-supply-target { cursor: pointer; }
+.battle-unit-marker.is-supply-target .battle-unit-troops { fill: #ffd842; }
+@keyframes supply-arrow-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
 .city-marker-layer { position: absolute; z-index: 3; pointer-events: none; }
 .city-marker-layer.is-editing { pointer-events: none; opacity: 0.8; }
 .city-marker {
@@ -954,6 +969,38 @@ button { color: inherit; }
 .skill-catalog-item.is-planned .skill-catalog-head em { border-color: rgba(146, 136, 115, 0.7); color: var(--muted); }
 .skill-catalog-item.is-blocked .skill-catalog-head em { border-color: rgba(238, 132, 123, 0.6); color: #ee847b; }
 .skill-catalog-item.is-planned, .skill-catalog-item.is-blocked { opacity: 0.72; }
+
+/* 临时游戏规则面板：左目录 + 右内容 */
+.game-rules-panel { width: min(1000px, calc(100vw - 40px)); max-height: calc(100dvh - 60px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 14px; padding: 16px; border-radius: 4px; overflow: hidden; }
+.game-rules-panel header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.game-rules-panel header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
+.game-rules-panel h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 26px; }
+.game-rules-body { min-height: 0; display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 14px; }
+.game-rules-index { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 8px; padding: 10px; border: 1px solid var(--line); background: rgba(12, 28, 31, 0.4); }
+.game-rules-index > p { margin: 0; color: var(--gold); font-size: 12px; letter-spacing: 2px; }
+.game-rules-index ul { min-height: 0; display: grid; align-content: start; gap: 4px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.game-rules-index button { width: 100%; min-height: 34px; display: flex; align-items: center; padding: 0 10px; border: 1px solid transparent; background: transparent; color: var(--paper); font-size: 13px; text-align: left; cursor: pointer; }
+.game-rules-index button:hover, .game-rules-index button:focus-visible { border-color: rgba(146, 136, 115, 0.6); background: rgba(244, 237, 217, 0.08); outline: none; }
+.game-rules-index button.is-selected { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.18); color: #fff6d6; }
+.game-rules-content { min-height: 0; padding: 14px 16px; border: 1px solid var(--line); background: rgba(12, 28, 31, 0.4); overflow: auto; }
+.game-rules-content h3 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 21px; }
+.game-rules-summary { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.game-rules-blocks { display: grid; gap: 10px; margin-top: 14px; }
+.rule-heading { margin: 4px 0 0; padding-bottom: 5px; border-bottom: 1px solid rgba(146, 136, 115, 0.45); color: var(--gold); font-size: 13px; font-weight: 400; }
+.rule-paragraph { margin: 0; color: #e8e0c8; font-size: 13px; line-height: 1.75; }
+.rule-bullets { display: grid; gap: 6px; margin: 0; padding-left: 18px; color: #e8e0c8; font-size: 13px; line-height: 1.75; }
+.rule-bullets li::marker { color: var(--gold); }
+.rule-formula { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid rgba(197, 173, 111, 0.4); background: rgba(197, 173, 111, 0.08); }
+.rule-formula span { color: var(--muted); font-size: 11px; }
+.rule-formula code { color: #fff6d6; font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
+.rule-table-wrap { overflow-x: auto; }
+.rule-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.rule-table th, .rule-table td { padding: 6px 8px; border: 1px solid rgba(146, 136, 115, 0.4); text-align: left; vertical-align: top; line-height: 1.6; }
+.rule-table thead th { background: rgba(197, 173, 111, 0.14); color: var(--gold); font-weight: 400; }
+.rule-table tbody th { color: #fff6d6; font-weight: 400; white-space: nowrap; }
+.rule-table tbody td { color: #e8e0c8; }
+.rule-note { margin: 0; padding: 8px 10px; border-left: 2px solid var(--gold); background: rgba(244, 237, 217, 0.05); color: var(--muted); font-size: 12px; line-height: 1.75; }
+.game-rules-footer { display: flex; justify-content: flex-end; }
 .officer-list-dialog { width: min(760px, calc(100vw - 72px)); max-height: min(680px, calc(100dvh - 96px)); display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 13px; padding: 16px; overflow: hidden; background: rgba(18, 43, 45, 0.96); }
 .officer-list-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .officer-list-dialog header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
@@ -1140,6 +1187,64 @@ button { color: inherit; }
 .officer-picker-trigger:hover, .officer-picker-trigger:focus-visible { border-color: var(--gold-line); outline: 1px solid var(--gold-line); }
 .officer-picker-trigger strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 17px; }
 .officer-picker-trigger small { color: var(--muted); font-size: 10px; }
+
+/* ── 外交「选择对象势力」一览（参考原版势力情报窗口） ───────────────── */
+.force-select-trigger { width: 100%; min-height: 46px; display: grid; align-content: center; gap: 2px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 2px; background: #26362f; color: var(--paper); text-align: left; cursor: pointer; }
+.force-select-trigger:hover, .force-select-trigger:focus-visible { border-color: var(--gold-line); outline: 1px solid var(--gold-line); }
+.force-select-trigger strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 17px; }
+.force-select-trigger small { color: var(--muted); font-size: 10px; }
+.force-select-dialog { width: min(900px, calc(100vw - 48px)); max-height: min(860px, calc(100dvh - 32px)); display: flex; flex-direction: column; gap: 12px; padding: 18px; }
+.force-select-dialog > header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.force-select-dialog > header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
+.force-select-dialog > header h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 24px; }
+
+/* ── 登庸「选择对象武将」列表（原版式全武将一览，在野置顶） ───────────── */
+.modal-backdrop:has(.talent-target-dialog) { z-index: 52; }
+.talent-target-dialog { width: min(880px, calc(100vw - 48px)); max-height: min(720px, calc(100dvh - 48px)); display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
+.talent-target-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.talent-target-header h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 24px; letter-spacing: 4px; }
+.talent-target-tabs { display: flex; gap: 6px; }
+.talent-target-tabs button { min-width: 64px; min-height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.06); color: var(--paper); cursor: pointer; font-size: 12px; }
+.talent-target-tabs button:hover, .talent-target-tabs button:focus-visible, .talent-target-tabs button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.22); outline: none; }
+.talent-target-tabs button.is-active { color: #fff6d6; font-weight: 700; }
+.talent-target-scroll { min-height: 0; overflow: auto; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(12, 28, 31, 0.5); }
+.talent-target-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.talent-target-table th { position: sticky; top: 0; z-index: 1; padding: 7px 8px; border-bottom: 1px solid var(--gold-line); background: rgba(32, 42, 37, 0.97); color: #efdba2; font-weight: 700; text-align: center; white-space: nowrap; }
+.talent-target-table td { padding: 5px 8px; border-bottom: 1px solid rgba(146, 136, 115, 0.28); color: var(--paper); text-align: center; white-space: nowrap; }
+.talent-target-table .talent-name { font-family: STKaiti, KaiTi, serif; font-size: 14px; color: #fff6d6; text-align: left; padding-left: 12px; }
+.talent-target-table .talent-ok { color: var(--gold); font-weight: 700; }
+.talent-target-row { cursor: pointer; }
+.talent-target-row:hover:not(.is-monarch), .talent-target-row:focus-visible { background: rgba(197, 173, 111, 0.16); outline: none; }
+.talent-target-row.is-unaffiliated .talent-name { color: #ffd98a; }
+.talent-target-row.is-monarch { cursor: not-allowed; opacity: 0.45; }
+.talent-target-row.is-selected { background: rgba(197, 173, 111, 0.24); box-shadow: inset 0 0 0 1px var(--gold-line); }
+.talent-target-empty { margin: 0; padding: 28px 0; color: var(--muted); text-align: center; font-size: 13px; }
+.talent-target-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.talent-target-hint { color: var(--muted); font-size: 11px; }
+.force-select-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.force-select-tabs button { min-width: 58px; min-height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.06); color: var(--paper); cursor: pointer; font-size: 12px; }
+.force-select-tabs button:hover, .force-select-tabs button:focus-visible { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.22); outline: none; }
+.force-select-tabs button.is-active { border-color: var(--gold-line); background: var(--gold); color: var(--ink); font-weight: 700; }
+.force-select-table-wrap { flex: 1 1 auto; min-height: 0; max-height: min(520px, 56dvh); overflow: auto; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(12, 28, 31, 0.5); }
+.force-select-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; font-variant-numeric: tabular-nums; }
+.force-select-table th, .force-select-table td { padding: 7px 10px; border: 1px solid rgba(146, 136, 115, 0.32); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.force-select-table thead th { position: sticky; top: 0; z-index: 1; height: 34px; border-bottom-color: var(--gold-line); background: rgba(197, 173, 111, 0.16); color: #e8d9ac; font-family: STKaiti, KaiTi, serif; font-size: 15px; font-weight: 700; }
+.force-select-table thead th:first-child { background: rgba(197, 173, 111, 0.3); color: #fff6d6; }
+.force-select-table th.is-left, .force-select-table td.is-left { text-align: left; }
+.force-select-table th.is-center, .force-select-table td.is-center { text-align: center; }
+.force-select-table th.is-right, .force-select-table td.is-right { text-align: right; }
+.force-select-row { color: var(--paper); background: rgba(12, 28, 31, 0.38); cursor: pointer; }
+.force-select-row:hover, .force-select-row.is-cursor { background: rgba(197, 173, 111, 0.13); }
+.force-select-row.is-selected { background: rgba(197, 173, 111, 0.22); box-shadow: inset 3px 0 0 var(--gold); }
+.force-select-row:focus-visible { outline: 1px solid var(--gold-line); outline-offset: -1px; }
+.force-select-row.is-defunct { cursor: default; opacity: 0.45; }
+.force-select-name { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 15px; }
+.force-select-sub { margin-left: 6px; color: var(--muted); font-size: 10px; }
+.force-tier { font-style: normal; font-weight: 700; }
+.force-tier.is-good { color: #7fb87a; }
+.force-tier.is-neutral { color: var(--muted); }
+.force-tier.is-bad { color: #d08163; }
+.force-select-dialog footer { display: flex; justify-content: flex-start; margin-top: 0; }
 .deploy-troop-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .deploy-troop-grid button { min-height: 64px; display: grid; place-items: center; gap: 3px; padding: 6px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.06); cursor: pointer; }
 .deploy-troop-grid button:hover, .deploy-troop-grid button:focus-visible, .deploy-troop-grid button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.22); outline: none; }
@@ -1168,6 +1273,9 @@ button { color: inherit; }
 .field-row > span, .amount-grid label > span { color: var(--muted); font-size: 12px; }
 .field-row select, .amount-grid input { width: 100%; min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 2px; background: #26362f; color: var(--paper); }
 .field-row select:focus, .amount-grid input:focus { border-color: var(--gold-line); outline: 1px solid var(--gold-line); }
+.diplomacy-slider { display: flex; align-items: center; gap: 12px; }
+.diplomacy-slider input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--gold); cursor: pointer; }
+.diplomacy-slider strong { flex: 0 0 auto; min-width: 72px; line-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.06); color: #fff6d6; font: 12px Consolas, "Courier New", monospace; text-align: right; }
 .segmented-field, .transfer-officers { margin: 15px 0 0; padding: 0; border: 0; }
 .segmented-field legend, .transfer-officers legend { margin-bottom: 7px; color: var(--muted); font-size: 12px; }
 .segmented-field > div { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); }
@@ -1297,7 +1405,77 @@ button { color: inherit; }
 .range-field input[type="range"]:disabled { accent-color: #6b6658; opacity: 0.45; cursor: not-allowed; }
 .range-field output.is-disabled { border-color: var(--line); color: var(--muted); }
 .range-field output { min-height: 32px; display: grid; place-items: center; padding: 0 8px; border: 1px solid var(--line); background: rgba(244, 237, 217, 0.06); color: #fff6d6; font: 12px Consolas, "Courier New", monospace; text-align: right; }
+
+/* 输送编制（复刻原版输送界面）：左侧「武将面板 + 兵装/资源拖动条」，右侧「部队能力 + 据点库存」 */
+.transport-dialog { width: min(840px, calc(100vw - 376px)); max-height: min(700px, calc(100dvh - 72px)); grid-template-columns: minmax(300px, 1.2fr) minmax(230px, 0.8fr); gap: 10px 12px; padding: 12px; }
+.transport-dialog > header { padding-bottom: 9px; }
+.transport-dialog h2 { font-size: 21px; }
+.transport-dialog .deploy-left { gap: 6px; padding: 10px; }
+.transport-dialog .deploy-right { gap: 7px; padding: 10px; }
+.transport-dialog .deploy-right h3 { font-size: 12px; }
+.transport-dialog .deploy-left > .deploy-section-label { margin-top: 0; }
+.transport-officer-panel { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; padding: 6px; border: 1px solid var(--line); border-radius: 2px; background: #26362f; color: var(--paper); text-align: left; cursor: pointer; }
+.transport-officer-panel:hover, .transport-officer-panel:focus-visible { border-color: var(--gold-line); outline: 1px solid var(--gold-line); }
+.transport-officer-slot { min-width: 0; display: grid; align-content: start; gap: 1px; padding: 4px 6px; border: 1px solid rgba(146, 136, 115, 0.55); background: rgba(12, 28, 31, 0.6); }
+.transport-officer-slot.is-leader { border-color: var(--gold-line); }
+.transport-officer-slot.is-empty strong { color: var(--muted); font-family: inherit; font-size: 12px; }
+.transport-officer-slot > span { color: var(--muted); font-size: 10px; }
+.transport-officer-slot strong { overflow: hidden; color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 14px; line-height: 1.25; white-space: nowrap; text-overflow: ellipsis; }
+.transport-officer-slot small { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.transport-officer-slot em { overflow: hidden; color: #c9b884; font-size: 10px; font-style: normal; white-space: nowrap; text-overflow: ellipsis; }
+.transport-officer-hint { margin-left: 8px; color: var(--muted); font-size: 10px; font-weight: 400; }
+.transport-range-group { display: grid; gap: 3px; }
+.transport-range { grid-template-columns: 46px minmax(0, 1fr) 126px; }
+.transport-range.is-disabled > span { color: #6b6658; }
+.transport-range output { min-height: 26px; white-space: nowrap; }
+.transport-footer-row { display: flex; align-items: center; gap: 8px; }
+.transport-bulk { flex: 0 0 auto; display: flex; gap: 8px; }
+.transport-bulk .secondary-button { min-height: 30px; }
+.transport-ap { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 8px; border: 1px solid rgba(146, 136, 115, 0.55); }
+.transport-ap > span { color: var(--muted); font-size: 12px; }
+.transport-ap strong { margin-left: auto; color: #fff6d6; font-variant-numeric: tabular-nums; }
+.transport-ap small { color: var(--muted); font-size: 11px; }
+.transport-ability-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; padding: 5px 8px; border: 1px solid rgba(146, 136, 115, 0.65); background: rgba(12, 28, 31, 0.4); font-size: 12px; }
+.transport-ability-line > span { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.transport-ability-line strong { color: #fff6d6; font-variant-numeric: tabular-nums; }
+.transport-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; margin: 0; font-size: 12px; }
+.transport-facts > div { display: inline-flex; align-items: center; gap: 5px; }
+.transport-facts dt { color: var(--muted); }
+.transport-facts dd { margin: 0; color: #fff6d6; font-variant-numeric: tabular-nums; }
+.transport-dialog .deploy-stock { gap: 3px; }
+.transport-dialog .deploy-stock > div { grid-template-columns: 42px minmax(0, 1fr); gap: 8px; min-height: 26px; padding: 0 7px; font-size: 12px; }
+.transport-dialog .deploy-note { margin: 0; }
+.supply-dialog { width: min(760px, calc(100vw - 376px)); max-height: min(620px, calc(100dvh - 72px)); grid-template-columns: 1fr; gap: 10px; padding: 12px; }
+.supply-dialog > header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 9px; border-bottom: 1px solid var(--line); grid-column: 1; }
+.supply-dialog > header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
+.supply-dialog h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 21px; }
+.supply-parties { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.supply-party { min-width: 0; padding: 8px 10px; border: 1px solid rgba(146, 136, 115, 0.65); background: rgba(12, 28, 31, 0.58); }
+.supply-party > header { display: flex; align-items: center; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.supply-party strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 16px; }
+.supply-party-tag { padding: 1px 6px; border: 1px solid var(--gold-line); color: #efdba2; font-size: 11px; }
+.supply-facts { display: grid; gap: 3px; margin: 6px 0 0; }
+.supply-facts > div { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 24px; padding: 0 6px; border: 1px solid rgba(146, 136, 115, 0.45); }
+.supply-facts dt { color: var(--muted); font-size: 12px; }
+.supply-facts dd { margin: 0; color: #fff6d6; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.supply-range-group { display: grid; gap: 6px; }
+.supply-range { display: grid; grid-template-columns: minmax(118px, auto) 34px minmax(0, 1fr) minmax(150px, auto); align-items: center; gap: 8px; padding: 2px 6px; border: 1px solid rgba(146, 136, 115, 0.55); }
+.supply-range > span { color: var(--muted); font-size: 12px; text-align: center; }
+.supply-range input[type="range"] { width: 100%; min-width: 0; accent-color: var(--gold); cursor: pointer; }
+.supply-range input[type="range"]:disabled { accent-color: #6b6658; opacity: 0.45; cursor: not-allowed; }
+.supply-range output { white-space: nowrap; color: #fff6d6; font: 12px Consolas, "Courier New", monospace; font-variant-numeric: tabular-nums; }
+.supply-range-giver { text-align: right; }
+.supply-range.is-disabled .supply-range-giver, .supply-range.is-disabled .supply-range-receiver, .supply-range.is-disabled > span { color: var(--muted); }
+.supply-bulk { display: flex; gap: 8px; }
+.supply-bulk .secondary-button { min-height: 30px; }
+.supply-dialog footer { display: flex; justify-content: flex-end; gap: 8px; }
 .command-note { margin-top: 10px; padding: 8px 10px; border: 1px solid rgba(146, 136, 115, 0.45); background: rgba(15, 30, 29, 0.72); color: var(--muted); font-size: 12px; }
+/* 血色衣冠 6.0：登用意愿四档色点（深绿=高 / 浅绿=中 / 浅黄=小 / 灰白=无） */
+.will-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.will-dot.will-high { background: #2ea44f; }
+.will-dot.will-mid { background: #7ee2b8; }
+.will-dot.will-low { background: #d4a72c; }
+.will-dot.will-none { background: #9aa5a1; }
 .transfer-officers > div { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
 .transfer-officers label { display: flex; align-items: center; gap: 7px; padding: 7px; border: 1px solid rgba(146, 136, 115, 0.65); font-size: 12px; cursor: pointer; }
 .transfer-officers input { accent-color: var(--gold); }
@@ -1911,6 +2089,11 @@ button { color: inherit; }
   .skill-catalog-trigger { min-height: 32px; padding: 0 9px; font-size: 11px; }
   .skill-catalog-panel { width: 100%; max-height: calc(100dvh - 40px); }
   .skill-catalog-body { grid-template-columns: 1fr; }
+  .top-actions { gap: 6px; }
+  .game-rules-panel { width: 100%; max-height: calc(100dvh - 40px); }
+  .game-rules-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .game-rules-index ul { display: flex; gap: 6px; overflow-x: auto; }
+  .game-rules-index button { width: auto; white-space: nowrap; }
   .map-region { height: calc(100dvh - 56px); }
   .city-status-panel { top: auto; bottom: 0; left: 0; transform: none; width: 100%; max-height: 44dvh; border-width: 1px 0 0; border-radius: 0; }
   .csp-heading h2 { font-size: 24px; }
@@ -2030,6 +2213,12 @@ button { color: inherit; }
   .unit-detail-dialog { width: 100%; max-height: min(90dvh, calc(100dvh - 16px)); padding: 15px; border-width: 1px 0 0; }
   .command-dialog, .result-overlay, .confirm-dialog { width: 100%; max-height: 86dvh; padding: 15px; border-width: 1px 0 0; }
   .amount-grid { grid-template-columns: 1fr; }
+  .transport-dialog { width: 100%; }
+  .transport-officer-panel { grid-template-columns: 1fr; }
+  .transport-range { grid-template-columns: 40px minmax(0, 1fr) 108px; }
+  .transport-footer-row { flex-wrap: wrap; }
+  .supply-dialog { width: 100%; }
+  .supply-parties { grid-template-columns: 1fr; }
   .result-overlay h1 { font-size: 25px; }
   .final-map-actions { top: 64px; right: 8px; }
   .final-map-actions .secondary-button, .final-map-actions .primary-button { min-height: 36px; padding: 0 10px; font-size: 11px; }

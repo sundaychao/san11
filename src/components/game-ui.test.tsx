@@ -1171,8 +1171,10 @@ describe('game interface shell', () => {
       expect(window.localStorage.getItem(slotMetaKey(19))).not.toBeNull();
     });
 
-    await user.click(screen.getByTestId('save-dialog-back'));
-    expect(screen.queryByTestId('save-load-dialog')).not.toBeInTheDocument();
+    // 保存完成即退出到游戏界面，不再停留在存档列表页
+    await waitFor(() => {
+      expect(screen.queryByTestId('save-load-dialog')).not.toBeInTheDocument();
+    });
 
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
     await user.click(screen.getByTestId('map-context-proceed-button'));
@@ -1247,7 +1249,8 @@ describe('game interface shell', () => {
     await user.click(within(dialog).getByTestId('save-slot-7'));
     await user.click(within(dialog).getByTestId('save-confirm-submit'));
     await waitFor(() => expect(window.localStorage.getItem(slotStateKey(7))).not.toBeNull());
-    await user.click(screen.getByTestId('save-dialog-back'));
+    // 保存完成即退出到游戏界面
+    await waitFor(() => expect(screen.queryByTestId('save-load-dialog')).not.toBeInTheDocument());
 
     // 把镜头复位到地图中心，确保接下来的还原真的来自存档而不是残留状态
     await user.click(screen.getByRole('button', { name: '复位地图' }));

@@ -72,11 +72,14 @@ export function mergeUnitIntoStronghold(state: GameState, unit: ArmyUnit, strong
 }
 
 /**
- * 部队并入据点时返还它出征时带走的兵装（`ArmyUnit.armaments`，由 `armamentsCarriedByDeploy` 写入）。
+ * 部队并入据点时返还它携带的兵装（`ArmyUnit.armaments`）。
  *
- * - 枪/戟/弩/军马按兵力计，只返还「实际并入据点」的兵力数 —— 战损带走的装备不再归还；
- * - 楼船/冲车/井阑按「艘/辆」计，整件返还；
- * - **未记录兵装的部队不返还**（疆域防御队、输送队、旧存档）：避免凭空造出兵装。
+ * 两种口径取决于这份兵装的**性质**，用 `unit.kind` 区分：
+ * - **战斗部队**：兵装是士兵的装备，由 `armamentsCarriedByDeploy` 写入。枪/戟/弩/军马按兵力计，
+ *   只返还「实际并入据点」的兵力数 —— 战损带走的装备不再归还；楼船/冲车/井阑按「艘/辆」计，整件返还。
+ * - **输送队**：兵装是**货物**，一件不少地整件返还（不分兵力缩放）；否则「空兵押运 3000 杆枪」
+ *   回城时会凭空蒸发全部货物。
+ * - **未记录兵装的部队不返还**（疆域防御队、旧存档）：避免凭空造出兵装。
  * 返还后由调用方末尾的 `clamp*Resources` 统一按据点上限收口。
  */
 function returnArmamentsToStronghold(stronghold: City | Pass, unit: ArmyUnit, addedTroops: number): void {
@@ -88,7 +91,9 @@ function returnArmamentsToStronghold(stronghold: City | Pass, unit: ArmyUnit, ad
   for (const type of ARMAMENT_TYPES) {
     const amount = carried[type] ?? 0;
     if (amount <= 0) continue;
-    const returned = TROOP_SCALED_ARMAMENT_TYPES.includes(type) ? Math.min(amount, Math.max(0, addedTroops)) : amount;
+    const returned = unit.kind === 'transport' || !TROOP_SCALED_ARMAMENT_TYPES.includes(type)
+      ? amount
+      : Math.min(amount, Math.max(0, addedTroops));
     if (returned <= 0) continue;
     next[type] = base[type] + returned;
     changed = true;

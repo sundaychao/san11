@@ -279,7 +279,7 @@ describe('command engine', () => {
   it('starts a debate when finding a local talent to recruit', () => {
     const state = createGame('liu', 1);
     const next = executeCommand(state, 'liu', {
-      type: 'talent', cityId: 'jiangling', officerId: 'liu-bei',
+      type: 'talent', cityId: 'jiangling', officerId: 'liu-bei', targetOfficerId: 'zhao-yun',
     });
 
     expect(next.debateSession?.status).toBe('ongoing');
@@ -292,7 +292,7 @@ describe('command engine', () => {
   it('does not recruit the talent before the debate finishes regardless of seed', () => {
     const state = createGame('liu', 14336);
     const next = executeCommand(state, 'liu', {
-      type: 'talent', cityId: 'jiangling', officerId: 'liu-bei',
+      type: 'talent', cityId: 'jiangling', officerId: 'liu-bei', targetOfficerId: 'zhao-yun',
     });
 
     expect(next.debateSession?.status).toBe('ongoing');

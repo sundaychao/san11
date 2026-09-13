@@ -21,6 +21,7 @@ import {
   type UnitStrategy,
   type UnitTactic,
 } from './actions';
+import { suppliableUnits } from './supply';
 import { movementAllowanceForProfile } from './definitions';
 import type { GridCoord } from './grid';
 import { attackablePlots, attackablePasses, type PlotAttackTarget } from './targetRules';
@@ -56,6 +57,8 @@ export interface UnitCommandAvailability {
   strategy: boolean;
   facility: boolean;
   repair: boolean;
+  /** 仅运输队可能出现：周围 6 格有己方作战部队时可补给 */
+  supply: boolean;
 }
 
 export interface UnitActionQuery {
@@ -67,6 +70,8 @@ export interface UnitActionQuery {
   attackPlots: PlotAttackTarget[];
   jointAttackUnits: ArmyUnit[];
   repairFacilities: Facility[];
+  /** 运输队周围可补给的己方作战部队（非运输队恒为空） */
+  supplyUnits: ArmyUnit[];
   tacticOptions: UnitTacticOption[];
   availableTactics: UnitTactic[];
   availableStrategies: UnitStrategy[];
@@ -84,6 +89,7 @@ function emptyCommandAvailability(): UnitCommandAvailability {
     strategy: false,
     facility: false,
     repair: false,
+    supply: false,
   };
 }
 
@@ -163,6 +169,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
       attackPlots: [],
       jointAttackUnits: [],
       repairFacilities: [],
+      supplyUnits: [],
       tacticOptions: [],
       availableTactics: [],
       availableStrategies: [],
@@ -178,6 +185,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
   const attackPlots = attackablePlots(state, unitId, origin);
   const jointAttackUnits = jointAttackableUnits(state, unitId, origin);
   const repairFacilities = repairableFacilities(state, unitId, origin);
+  const supplyUnits = suppliableUnits(state, unitId, origin);
   const tacticOptions = getUnitTacticOptions(state, unitId, origin);
   const availableTactics = tacticOptions
     .filter((option) => !option.unavailableReason)
@@ -198,12 +206,15 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
     : {
         wait: true,
         attack: attackUnits.length > 0 || attackCities.length > 0 || attackPasses.length > 0 || attackFacilities.length > 0 || attackPlots.length > 0,
-        duel: attackUnits.length > 0,
+        // 运输队可普攻敌方部队，但**不发起单挑**（单挑是武将间的对决，辎重队不参与）
+        duel: unit.kind !== 'transport' && attackUnits.length > 0,
         jointAttack: jointAttackUnits.length > 0,
         tactic: availableTactics.length > 0,
         strategy: availableStrategies.length > 0,
         facility: availableFacilities.length > 0,
         repair: repairFacilities.length > 0,
+        // 补给是运输队专属命令：周围 6 格有己方作战部队才可用
+        supply: unit.kind === 'transport' && supplyUnits.length > 0,
       };
 
   return {
@@ -215,6 +226,7 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
     attackPlots,
     jointAttackUnits,
     repairFacilities,
+    supplyUnits,
     tacticOptions,
     availableTactics,
     availableStrategies,

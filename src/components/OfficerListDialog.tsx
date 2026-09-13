@@ -52,6 +52,11 @@ export interface OfficerListTableProps {
   testId?: string;
   /** 可选：点击武将名时回调（用于打开武将详情）；未提供则武将名不可点 */
   onRowClick?: (officer: Officer) => void;
+  /**
+   * 可选：整行点击即选定（不出现勾选框列）。用于「单击即选定并返回」的单选场景，
+   * 与 checkboxes 互斥；两者同时传时以 checkboxes 为准。
+   */
+  onRowPick?: (officer: Officer) => void;
 }
 
 export type OfficerListTab = '奖赏' | '召唤' | '所属' | '能力' | '特技' | '适性' | '状态';
@@ -91,6 +96,8 @@ const fallbackAptitudes: OfficerAptitudes = {
   navy: 'C',
 };
 const aptitudeRank: Record<OfficerAptitudes[keyof OfficerAptitudes], number> = {
+  'S++': 6,
+  'S+': 5,
   S: 4,
   A: 3,
   B: 2,
@@ -106,6 +113,7 @@ function locationText(officer: Officer, state: GameState) {
   if (officer.location.kind === 'pass') return state.passes?.[officer.location.passId]?.name ?? '关隘';
   if (officer.location.kind === 'unit') return '部队';
   if (officer.location.kind === 'transfer') return '在途';
+  if (officer.location.kind === 'envoy') return `出使${state.forces[officer.location.targetForceId]?.name ?? ''}`;
   return state.cities[officer.location.cityId].name;
 }
 
@@ -126,7 +134,7 @@ function summonDurationOf(officer: Officer, state: GameState, target?: City | Pa
       ? state.cities[officer.location.cityId]
       : undefined;
   if (!source) return null;
-  return strongholdTransferDuration(source, target);
+  return strongholdTransferDuration(state, source, target);
 }
 
 /** 召唤日数：1旬 = 10天 */
@@ -452,6 +460,7 @@ export function OfficerListTable({
   checkboxes,
   testId,
   onRowClick,
+  onRowPick,
   summonTarget,
 }: OfficerListTableProps) {
   const { state } = useGame();
@@ -553,16 +562,17 @@ export function OfficerListTable({
               const isOverLimit = !isChecked && checkedIds.size >= max;
               // 已勾选的项始终可取消，避免锁定性别/超出上限后无法撤销
               const isInputDisabled = (disabledIds.has(officer.id) || isOverLimit) && !isChecked;
-              const rowClickable = Boolean(checkboxes) && !isInputDisabled;
+              const rowClickable = Boolean(checkboxes || onRowPick) && !isInputDisabled;
               return (
                 <tr
                   key={officer.id}
                   className={[isChecked ? 'is-selected' : '', rowClickable ? 'is-clickable' : ''].filter(Boolean).join(' ') || undefined}
-                  title={rowClickable ? '点击行切换勾选' : undefined}
+                  title={rowClickable ? (checkboxes ? '点击行切换勾选' : '点击选定该武将') : undefined}
                   onClick={rowClickable ? (event) => {
                     // checkbox 自身已触发 onChange，跳过避免重复切换
                     if ((event.target as HTMLElement).closest('input')) return;
-                    checkboxes!.onToggle(officer.id);
+                    if (checkboxes) checkboxes.onToggle(officer.id);
+                    else onRowPick?.(officer);
                   } : undefined}
                 >
                   {checkboxes && (

@@ -31,14 +31,20 @@ interface OfficerPickerDialogProps {
   initialTab?: OfficerListTab;
   /** 召唤目标据点（启用"召唤"分类时用于计算各武将召唤日数） */
   summonTarget?: City | Pass;
+  /**
+   * 选择方式：'multi'（默认，勾选框 + 确定按钮，可共同执行）
+   * 或 'single'（无勾选框列，点击某一行即选定并立即返回，用于外交出使等只派一人的场合）。
+   */
+  pickMode?: 'multi' | 'single';
   onConfirm(ids: string[]): void;
   onClose(): void;
 }
 
 /** 执行武将勾选弹窗：复用武将一览的 tab + 可排序列 + checkbox，勾选 1~3 名武将共同执行指令 */
-export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, genderRule, hint, disabledOfficerIds, selectAllable, selectAllLimit, tabs, initialTab, summonTarget, onConfirm, onClose }: OfficerPickerDialogProps) {
+export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, genderRule, hint, disabledOfficerIds, selectAllable, selectAllLimit, tabs, initialTab, summonTarget, pickMode = 'multi', onConfirm, onClose }: OfficerPickerDialogProps) {
   const [picked, setPicked] = useState<string[]>(() => selectedIds.filter((id) => officers.some((officer) => officer.id === id)));
   const dialogRef = useRef<HTMLDivElement>(null);
+  const single = pickMode === 'single';
 
   const pickedSet = useMemo(() => new Set(picked), [picked]);
 
@@ -55,7 +61,10 @@ export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, g
   }, [genderRule, officers, picked, disabledOfficerIds]);
 
   useEffect(() => {
-    dialogRef.current?.querySelector<HTMLElement>('input[type="checkbox"]:not([disabled])')?.focus();
+    const root = dialogRef.current;
+    if (!root) return;
+    // 单选模式没有勾选框：把焦点落在弹窗本身，保证 Esc 关闭仍然可用
+    (root.querySelector<HTMLElement>('input[type="checkbox"]:not([disabled])') ?? root).focus();
   }, []);
 
   const toggle = (id: string) => {
@@ -86,11 +95,11 @@ export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, g
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div ref={dialogRef} className="executor-picker-dialog tool-panel" role="dialog" aria-modal="true" aria-label="选择执行武将" onKeyDown={handleKeyDown}>
+      <div ref={dialogRef} className="executor-picker-dialog tool-panel" role="dialog" aria-modal="true" aria-label="选择执行武将" tabIndex={-1} onKeyDown={handleKeyDown}>
         <header>
           <div>
-            <p>可共同执行，人数越多效果越强</p>
-            <h2>选择执行武将（{picked.length}/{max}）</h2>
+            <p>{single ? '点击武将即选定并返回' : '可共同执行，人数越多效果越强'}</p>
+            <h2>{single ? '选择执行武将' : `选择执行武将（${picked.length}/${max}）`}</h2>
           </div>
           <button type="button" className="icon-button" aria-label="关闭选择" title="关闭" onClick={onClose}><X /></button>
         </header>
@@ -103,30 +112,33 @@ export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, g
             initialTab={initialTab ?? '能力'}
             tabs={tabs}
             summonTarget={summonTarget}
-            checkboxes={{
+            checkboxes={single ? undefined : {
               checked: pickedSet,
               max,
               disabledIds,
               onToggle: toggle,
             }}
+            onRowPick={single ? (officer) => onConfirm([officer.id]) : undefined}
           />
         )}
         <footer>
-          {selectAllable && (
+          {!single && selectAllable && (
             <div className="executor-picker-select-all">
               <button type="button" className="explore-select-all" onClick={selectAll}>一并</button>
               <button type="button" className="explore-select-all" onClick={() => setPicked([])}>一并解除</button>
             </div>
           )}
           <button type="button" className="secondary-button" onClick={onClose}>返回</button>
-          <button
-            type="button"
-            className="primary-button"
-            disabled={picked.length < min || picked.length === 0}
-            onClick={() => onConfirm(picked)}
-          >
-            确定（{picked.length}人）
-          </button>
+          {!single && (
+            <button
+              type="button"
+              className="primary-button"
+              disabled={picked.length < min || picked.length === 0}
+              onClick={() => onConfirm(picked)}
+            >
+              确定（{picked.length}人）
+            </button>
+          )}
         </footer>
       </div>
     </div>

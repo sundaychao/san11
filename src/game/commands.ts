@@ -1,6 +1,6 @@
 import { nextRandom } from './random';
 import { cityCanBuildFacility, hasCityTrait, forceMaxTraining } from './cityTraits';
-import { REWARD_AP_COST, REWARD_GOLD_COST, REWARD_LOYALTY_GAIN, officerLoyalty, recruitmentInitialLoyalty, setOfficerLoyalty } from './loyalty';
+import { REWARD_AP_COST, REWARD_GOLD_COST, REWARD_LOYALTY_GAIN, loyaltyCapOf, officerLoyalty, recruitWillOf, recruitmentInitialLoyalty, setOfficerLoyalty } from './loyalty';
 import { addOfficerMerit, applyPositionStatDelta, MERIT_PER_COMMAND, officerIsOnCampaign, officerMerit, positionDefinition, forceRankOf, rankDefinition, rankIndex } from './ranks';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentCost, armamentsOf, armamentProductionTenDays, clampArmamentsTo, isDelayedArmament, produceArmamentYield } from './armaments';
 import { ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, CULTIVATE_TEN_DAYS, abilityCultivateRemaining, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
@@ -9,16 +9,18 @@ import { effectsOfKind, officerSkillNames, resolveCommandSkills, resolveOfficerS
 import { RESEARCH_AP_COST, TECHP_PER_CIVIL_ACTION, TECHP_PER_CONSTRUCTION, TECHP_PER_PATROL, TECHP_PER_PRODUCE_ARMAMENT, TECHP_PER_TRADE, TECHP_PER_TRAIN, actionPointCostMultiplier, addTechP, canBuildFacility, facilityLevelCap, hasTech, moraleCapOf, researchTenDays, techCostOf, techNodeOf, techPrereqMet } from './techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_CHANCE, EXPLORE_GOLD_MAX, EXPLORE_GOLD_MIN, EXPLORE_GOLD_PER_OFFICER, EXPLORE_TREASURE_BASE_CHANCE, EXPLORE_TREASURE_INT_BONUS_MAX, treasureDefinition } from './treasures';
 import { RUMOR_AP_COST, RUMOR_GOLD_COST, resolveRumor, POACH_AP_COST, POACH_GOLD_COST, resolvePoach, canPoach } from './rumor';
-import { DIPLOMACY_AP_COST, GOODWILL_GOLD_COST, DIPLOMACY_GOLD_MAX, REINFORCEMENT_TEN_DAYS, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, adjustDiplomacy, areAllies, forceHasCity, goodwillGain, resolveAlliance, resolveRequestTroops, resolveTruce } from './diplomacy';
-import { CAPTIVE_RECRUIT_LOYALTY_THRESHOLD, capturableByLoyalty, executeCaptive, recruitCaptiveChance, releaseCaptive, resolveRecruitCaptive } from './captives';
+import { ALLIANCE_GOODWILL_GAIN, ALLIANCE_GOODWILL_LOSS, BREAK_GOODWILL_LOSS, DIPLOMACY_AP_COST, GOODWILL_GOLD_COST, DIPLOMACY_GOLD_MAX, REINFORCEMENT_TEN_DAYS, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, adjustDiplomacy, areAllies, forceHasCity, goodwillGain, leaderCityOf, resolveAlliance, resolveRequestTroops, resolveTruce } from './diplomacy';
+import { captiveRecruitLoyaltyThreshold, capturableByLoyalty, executeCaptive, recruitCaptiveChance, releaseCaptive, resolveRecruitCaptive } from './captives';
 import { MARRY_TECHP_COST, RELATIONSHIP_LABELS, areRelated, enterRelationship, relationshipValidation } from './relationship';
 import { isPassBlocked } from './passes';
 import { createDebate } from './debate';
+import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './battle/grid';
+import { cellAt } from './battle/movementRules';
 import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, COMMAND_OFFICER_MAX,
                              appointSuccessorGovernor, hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
 import { appointStrongholdSuccessor, isPassGarrison } from './strongholds';
 import { cityResourceCaps, clampStrongholdsInPlace } from './strongholdCapacity';
-import type { City, CityId, ForceId, GameCommand, GameState, Legion, Officer, Pass, PassId, TechNodeId } from './types';
+import type { City, CityId, DiplomacyAction, ForceId, GameCommand, GameState, Legion, Officer, Pass, PassId, TechNodeId, TerrainType } from './types';
 
 export const COMMAND_AP = {
   recruit: 20,
@@ -70,7 +72,7 @@ export const COMMAND_LABELS: Record<GameCommand['type'], string> = {
   appointPosition: '任命官职',
   rumor: '流言',
   poach: '挖角',
-  diplomacy: '亲善',
+  diplomacy: '亲善', // 兜底值：对话框标题实际按子行动显示（外交 · 同盟），见 CommandDialog
   captiveDispose: '处置俘虏',
   marry: '仲介',
   legion: '委任军团',
@@ -176,9 +178,234 @@ export function strongholdTransferDistance(source: City | Pass, target: City | P
   return Math.abs(a.q - b.q) + Math.abs(a.r - b.r);
 }
 
-/** 据点间移动耗时（旬） */
-export function strongholdTransferDuration(source: City | Pass, target: City | Pass): number {
-  return Math.max(1, Math.ceil(strongholdTransferDistance(source, target) / 10));
+/**
+ * 据点邻接图（城池/关隘都是节点）：
+ * 两个据点「主径直连」= 从一方 footprint 出发沿主径（主径 road / 栈道 plank / 渡所 ferry）
+ * 走，中途不经过任何其他据点，就能抵达另一方 footprint —— 即地图上直接相连、
+ * 中间没有隔其他城池。移动耗时 = 主径图上最短跳数，1 跳 = 1 旬 = 10 天，
+ * 中间每多隔一座据点 +10 天。
+ *
+ * 本图提取自原版地图地形，是稀疏网络（42 城约 40 余条边）：不在同一主径连通分量
+ * 的据点对不建边，`strongholdTransferDuration` 对这些对退回直线距离口径。
+ *
+ * 缓存按 grid 数组引用 + 据点坐标签名（与 `cellAt` 同一约定：grid 只整体替换、
+ * 不原地改写格内容；据点坐标变化时签名失效自动重建）。
+ */
+const ROAD_NETWORK_TERRAINS: readonly TerrainType[] = ['road', 'plank', 'ferry'];
+
+interface StrongholdAdjacencyCache {
+  signature: string;
+  graph: Map<string, Set<string>>;
+}
+const strongholdAdjacencyByGrid = new WeakMap<GameState['grid'], StrongholdAdjacencyCache>();
+
+/** 全部据点及其占格（城 = 7 格 footprint，关 = 锚点单格） */
+function strongholdNodesOf(state: GameState): { id: string; cells: GridCoord[] }[] {
+  const nodes: { id: string; cells: GridCoord[] }[] = [];
+  for (const city of Object.values(state.cities)) {
+    nodes.push({ id: city.id, cells: sevenCellCityFootprint({ q: city.gridQ, r: city.gridR }) });
+  }
+  for (const pass of Object.values(state.passes ?? {})) {
+    nodes.push({ id: pass.id, cells: [{ q: pass.q, r: pass.r }] });
+  }
+  return nodes;
+}
+
+function buildStrongholdAdjacency(state: GameState, nodes: { id: string; cells: GridCoord[] }[]): Map<string, Set<string>> {
+  const ownerByCell = new Map<string, string>();
+  for (const node of nodes) {
+    for (const cell of node.cells) ownerByCell.set(gridKey(cell), node.id);
+  }
+  const graph = new Map<string, Set<string>>(nodes.map((node) => [node.id, new Set<string>()]));
+  for (const node of nodes) {
+    const reach = graph.get(node.id)!;
+    const seen = new Set(node.cells.map(gridKey));
+    let frontier = [...node.cells];
+    while (frontier.length > 0) {
+      const current = frontier.pop()!;
+      for (const neighbor of neighborsOf(current.q, current.r)) {
+        const key = gridKey(neighbor);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const owner = ownerByCell.get(key);
+        if (owner && owner !== node.id) {
+          // 抵达其他据点即发现邻接：记录后不再穿过它（中间隔了据点就不能算直连）
+          reach.add(owner);
+          continue;
+        }
+        const cell = cellAt(state, neighbor);
+        if (!cell || !ROAD_NETWORK_TERRAINS.includes(cell.terrain)) continue;
+        frontier.push(neighbor);
+      }
+    }
+  }
+  return graph;
+}
+
+function strongholdAdjacencyOf(state: GameState): Map<string, Set<string>> {
+  const nodes = strongholdNodesOf(state);
+  const signature = nodes.map((node) => `${node.id}@${node.cells.map((cell) => `${cell.q}.${cell.r}`).join(',')}`).join('|');
+  const cached = strongholdAdjacencyByGrid.get(state.grid);
+  if (cached && cached.signature === signature) return cached.graph;
+  const graph = buildStrongholdAdjacency(state, nodes);
+  strongholdAdjacencyByGrid.set(state.grid, { signature, graph });
+  return graph;
+}
+
+/** 据点邻接图最短跳数（1 跳 = 1 旬）；不连通时返回 null */
+export function strongholdPathHops(state: GameState, sourceId: string, targetId: string): number | null {
+  if (sourceId === targetId) return 0;
+  const graph = strongholdAdjacencyOf(state);
+  const visited = new Set<string>([sourceId]);
+  let frontier = [sourceId];
+  let hops = 0;
+  while (frontier.length > 0) {
+    hops += 1;
+    const next: string[] = [];
+    for (const current of frontier) {
+      for (const neighbor of graph.get(current) ?? []) {
+        if (neighbor === targetId) return hops;
+        if (visited.has(neighbor)) continue;
+        visited.add(neighbor);
+        next.push(neighbor);
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+/**
+ * 据点间移动耗时（旬）= min(主径跳数, 直线旬数)：
+ * - 主径直接相连 1 旬（10 天），主径链上中间每多隔一座据点 +1 旬（关隘也是节点，
+ *   洛阳 → 函谷关 → 宛 = 2 旬）；
+ * - 主径链路比直线绕远时按直线口径保底（主径网络提取自原版地形，个别城对链路
+ *   绕行远超直线距离，纯跳数会让相邻城反而变慢）。
+ * 任何城对的耗时都不会高于旧的直线口径。
+ */
+export function strongholdTransferDuration(state: GameState, source: City | Pass, target: City | Pass): number {
+  const hops = strongholdPathHops(state, source.id, target.id);
+  const straight = Math.max(1, Math.ceil(strongholdTransferDistance(source, target) / 10));
+  return hops === null ? straight : Math.min(hops, straight);
+}
+
+/**
+ * 外交使者单程旬数：出发据点 → 目标势力君主所在城池。
+ * 去程与返程同距同耗时；目标势力已无城池时返回 null（无法出使）。
+ * 1 旬 = 10 天，对话框里的「抵达日期 / 归还日期」= 本值 × 10。
+ */
+export function envoyTravelTenDays(state: GameState, from: City | Pass, targetForceId: ForceId): number | null {
+  const destination = leaderCityOf(state, targetForceId);
+  if (!destination) return null;
+  return strongholdTransferDuration(state, from, destination);
+}
+
+/**
+ * 外交使者携带的任务内容。出发时写入 `OfficerLocation('envoy')`，抵达当旬由
+ * `resolveDiplomacyMission` 结算 —— 出发与结算共用同一份描述，避免两处口径漂移。
+ */
+export interface DiplomacyMission {
+  forceId: ForceId;
+  /** 出发据点宿主城（请求援军按此城坐标找最近敌城） */
+  cityId: CityId;
+  passId?: PassId;
+  targetForceId: ForceId;
+  action: DiplomacyAction;
+  gold?: number;
+  months?: number;
+}
+
+/**
+ * 使者抵达对方城池时结算外交效果（就地改写 `next`，返回写入战报的文案）。
+ * 礼金在出发时已从出发据点扣除，这里不再动钱。
+ */
+export function resolveDiplomacyMission(next: GameState, officer: Officer, mission: DiplomacyMission): string {
+  const { forceId, targetForceId, action } = mission;
+  const targetForce = next.forces[targetForceId];
+  const targetName = targetForce?.name ?? '目标势力';
+  const city = next.cities[mission.cityId];
+  const fromAllies = next.forces[forceId].allies ?? [];
+  const toAllies = next.forces[targetForceId]?.allies ?? [];
+  switch (action) {
+    case 'goodwill': {
+      const gain = goodwillGain(next, forceId, targetForceId, officer);
+      adjustDiplomacy(next, forceId, targetForceId, gain);
+      return `${officer.name}出使${targetName}，增进双方友好度 ${gain}`;
+    }
+    case 'alliance': {
+      const gold = mission.gold ?? 0;
+      const result = resolveAlliance(next, forceId, targetForceId, officer, gold);
+      if (result.success) {
+        next.forces[forceId].allies = [...fromAllies, targetForceId];
+        next.forces[targetForceId].allies = [...toAllies, forceId];
+        adjustDiplomacy(next, forceId, targetForceId, ALLIANCE_GOODWILL_GAIN);
+        return `${officer.name}促成与${targetName}的同盟！从此互不侵犯、可请求援军`;
+      }
+      adjustDiplomacy(next, forceId, targetForceId, -ALLIANCE_GOODWILL_LOSS);
+      return `${officer.name}出使${targetName}结盟失败（判定值${result.judgment}）`;
+    }
+    case 'truce': {
+      const gold = mission.gold ?? 0;
+      const months = mission.months ?? TRUCE_MONTHS_MIN;
+      const result = resolveTruce(next, forceId, targetForceId, officer, gold, months);
+      if (result.success) {
+        const tenDays = months * 3;
+        next.forces[forceId].truces = { ...(next.forces[forceId].truces ?? {}), [targetForceId]: tenDays };
+        next.forces[targetForceId].truces = { ...(next.forces[targetForceId].truces ?? {}), [forceId]: tenDays };
+        return `${officer.name}与${targetName}达成停战协定（${months}个月）`;
+      }
+      return `${officer.name}与${targetName}停战交涉失败（判定值${result.judgment}）`;
+    }
+    case 'requestTroops': {
+      const result = resolveRequestTroops(next, forceId, targetForceId, officer);
+      if (!result.success) return `${targetName}拒绝了请求援军的要求`;
+      // 目标：与请求方最近的敌城（不含盟友）
+      const enemies = Object.values(next.cities).filter((c) => c.ownerId && c.ownerId !== forceId && c.ownerId !== targetForceId);
+      const targetCity = enemies.sort((a, b) =>
+        (Math.abs(a.gridQ - city.gridQ) + Math.abs(a.gridR - city.gridR))
+        - (Math.abs(b.gridQ - city.gridQ) + Math.abs(b.gridR - city.gridR)))[0] ?? city;
+      const allyCity = Object.values(next.cities).find((c) => c.ownerId === targetForceId);
+      if (allyCity) {
+        const allyOfficers = Object.values(next.officers).filter((o) =>
+          o.forceId === targetForceId && o.location.kind === 'city' && o.location.cityId === allyCity.id && o.id !== next.forces[targetForceId].leaderId && !o.deathMonth);
+        const commander = allyOfficers.sort((a, b) => b.stats.leadership - a.stats.leadership)[0];
+        if (commander) {
+          const allyCityState = next.cities[allyCity.id];
+          const troops = Math.min(5000, allyCityState.troops - 1000);
+          if (troops >= 2000) {
+            allyCityState.troops -= troops;
+            commander.location = { kind: 'unit', unitId: `reinforce-${forceId}-${commander.id}` };
+            next.units[`reinforce-${forceId}-${commander.id}`] = {
+              id: `reinforce-${forceId}-${commander.id}`,
+              kind: 'combat',
+              forceId: targetForceId,
+              leaderId: commander.id,
+              officerIds: [commander.id],
+              homeCityId: allyCity.id,
+              q: targetCity.gridQ,
+              r: targetCity.gridR,
+              troops,
+              food: 5000,
+              energy: 20,
+              movementRemaining: 10,
+              expiresTenDay: next.month * 3 + (next.tenDay ?? 1) + REINFORCEMENT_TEN_DAYS,
+              moved: false,
+              acted: false,
+            };
+            commander.cityId = targetCity.id;
+            return `${targetName}接受请求，派${commander.name}率${troops.toLocaleString('en-US')}军驰援${targetCity.name}！`;
+          }
+        }
+      }
+      return `${targetName}接受请求，但无兵可派`;
+    }
+    case 'break': {
+      next.forces[forceId].allies = fromAllies.filter((id) => id !== targetForceId);
+      next.forces[targetForceId].allies = toAllies.filter((id) => id !== forceId);
+      adjustDiplomacy(next, forceId, targetForceId, -BREAK_GOODWILL_LOSS);
+      return `${officer.name}代表${next.forces[forceId].name}宣布与${targetName}断交（破盟）！`;
+    }
+  }
 }
 
 export { appointStrongholdSuccessor, isPassGarrison } from './strongholds';
@@ -268,7 +495,7 @@ function validateTransfer(state: GameState, forceId: ForceId, command: Extract<G
  */
 export function officerIsBusy(officer: Officer): boolean {
   const kind = officer.location.kind;
-  return kind === 'transfer' || kind === 'task' || kind === 'captive';
+  return kind === 'transfer' || kind === 'task' || kind === 'captive' || kind === 'envoy';
 }
 
 /** 召唤：将本方势力其他据点（城池/关隘）的待命武将召唤至本据点，耗时与移动相同 */
@@ -532,11 +759,14 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     if (state.debateSession && state.debateSession.status === 'ongoing') {
       errors.push('已有舌战正在进行');
     } else {
-      const target = findLocalTalent(state, city);
-      if (!target) {
-        errors.push(`${pass ? '归属城池' : '本城'}没有可登用的在野武将`);
-      } else if (target.bannedUntilMonth && target.bannedUntilMonth > state.month) {
-        errors.push(`${target.name}短期内不愿仕官，暂时无法登用`);
+      const target = state.officers[command.targetOfficerId];
+      if (!target || target.deathMonth) {
+        errors.push('对象武将无效');
+      } else if (target.forceId === forceId) {
+        errors.push('对象须为在野或其他势力的武将');
+      } else {
+        if (target.forceId && state.forces[target.forceId]?.leaderId === target.id) errors.push('无法登庸一方君主');
+        if (target.bannedUntilMonth && target.bannedUntilMonth > state.month) errors.push(`${target.name}短期内不愿仕官，暂时无法登用`);
       }
       if (commandGarrison(state, command).gold < 500) errors.push('资金不足 500');
     }
@@ -588,7 +818,7 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     if (!target || target.location.kind !== 'captive' || target.location.captorForceId !== forceId) {
       errors.push('只能处置本势力关押的俘虏');
     } else if (command.action === 'recruit' && !capturableByLoyalty(target)) {
-      errors.push(`俘虏忠诚未降至${CAPTIVE_RECRUIT_LOYALTY_THRESHOLD}以下，暂时无法登用`);
+      errors.push(`俘虏忠诚高于必拒线${captiveRecruitLoyaltyThreshold()}，暂时无法登用`);
     }
   }
 
@@ -809,14 +1039,20 @@ function resolveTalentSearch(state: GameState, forceId: ForceId, city: City, off
   state.rngCursor = roll.cursor;
   const chance = Math.min(85, 35 + Math.floor(officer.stats.intelligence / 2)) / 100;
   if (talent && roll.value < chance) {
-    talent.forceId = forceId;
-    talent.location = { kind: 'city', cityId: city.id };
-    talent.cityId = city.id;
-    talent.loyalty = recruitmentInitialLoyalty(talent);
-    // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
-    talent.acted = true;
-    addTechP(state, forceId, 150);
-    return `${officer.name}在${city.name}登用了${talent.name}`;
+    // 血色衣冠 6.0：登用接受意愿 >0 才可能应允（亲爱君主必定同意）
+    const will = recruitWillOf(state, officer, talent);
+    if (will.verdict !== 'refuse' && (will.verdict === 'accept' || will.will > 0)) {
+      talent.forceId = forceId;
+      talent.location = { kind: 'city', cityId: city.id };
+      talent.cityId = city.id;
+      talent.loyalty = recruitmentInitialLoyalty(talent);
+      talent.serviceYears = 0;
+      // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
+      talent.acted = true;
+      addTechP(state, forceId, 150);
+      return `${officer.name}在${city.name}登用了${talent.name}`;
+    }
+    return `${officer.name}在${city.name}寻得${talent.name}，但对方无意出仕`;
   }
   return talent
     ? `${officer.name}尝试登用${talent.name}，但未能登用`
@@ -834,14 +1070,21 @@ function resolveExplore(state: GameState, forceId: ForceId, city: City, officer:
   state.rngCursor = talentRoll.cursor;
   const talentChance = Math.min(85, 35 + Math.floor(officer.stats.intelligence / 2)) / 100;
   if (talent && (eyeForTalent || talentRoll.value < talentChance)) {
-    talent.forceId = forceId;
-    talent.location = { kind: 'city', cityId: city.id };
-    talent.cityId = city.id;
-    talent.loyalty = recruitmentInitialLoyalty(talent);
-    // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
-    talent.acted = true;
-    addTechP(state, forceId, 150);
-    parts.push(`登用了${talent.name}`);
+    // 血色衣冠 6.0：登用接受意愿 >0 才可能应允（亲爱君主必定同意）
+    const will = recruitWillOf(state, officer, talent);
+    if (will.verdict !== 'refuse' && (will.verdict === 'accept' || will.will > 0)) {
+      talent.forceId = forceId;
+      talent.location = { kind: 'city', cityId: city.id };
+      talent.cityId = city.id;
+      talent.loyalty = recruitmentInitialLoyalty(talent);
+      talent.serviceYears = 0;
+      // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
+      talent.acted = true;
+      addTechP(state, forceId, 150);
+      parts.push(`登用了${talent.name}`);
+    } else {
+      parts.push(`寻得${talent.name}，但对方无意出仕`);
+    }
   } else if (talent) {
     parts.push(`尝试登用${talent.name}，但未能登用`);
   }
@@ -888,7 +1131,7 @@ function applyTransfer(state: GameState, command: Extract<GameCommand, { type: '
   const source = sourcePass ?? state.cities[command.cityId];
   const targetPass = command.targetPassId ? state.passes?.[command.targetPassId] : undefined;
   const target = targetPass ?? state.cities[command.targetCityId];
-  const duration = strongholdTransferDuration(source, target);
+  const duration = strongholdTransferDuration(state, source, target);
   const names: string[] = [];
   let governorLeft = false;
   for (const officerId of command.officerIds) {
@@ -925,7 +1168,7 @@ function applySummon(state: GameState, command: Extract<GameCommand, { type: 'su
     const sourceCity = officer.location.kind === 'city' ? state.cities[officer.location.cityId] : undefined;
     const source = sourcePass ?? sourceCity;
     if (!source) continue;
-    const duration = strongholdTransferDuration(source, target);
+    const duration = strongholdTransferDuration(state, source, target);
     // 若为所在据点太守，被召唤后自动补任太守
     const wasGovernor = source.governorId === officerId;
     if (wasGovernor) source.governorId = null;
@@ -1097,9 +1340,34 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'talent': {
       const officer = next.officers[command.officerId];
       stronghold.gold -= 500;
-      const target = findLocalTalent(next, city);
-      if (!target) {
-        message = `${officer.name}在${city.name}登庸人才，但城中无在野武将`;
+      const target = next.officers[command.targetOfficerId];
+      if (!target || target.deathMonth || target.forceId === forceId) {
+        message = `${officer.name}在${city.name}登庸人才，但对象无效`;
+        break;
+      }
+      // 血色衣冠 6.0 新忠诚系统：先判定「登用接受意愿」
+      const will = recruitWillOf(next, officer, target);
+      if (will.verdict === 'refuse') {
+        message = `${officer.name}尝试登庸${target.name}，被径直回绝（${will.reasons[0] ?? '无意出仕'}）`;
+        officer.acted = true;
+        break;
+      }
+      if (will.verdict === 'accept') {
+        // 素来亲善我方君主：不待舌战，必定同意出仕
+        target.forceId = forceId;
+        target.location = { kind: 'city', cityId: city.id };
+        target.cityId = city.id;
+        target.loyalty = recruitmentInitialLoyalty(target);
+        target.serviceYears = 0;
+        target.acted = true;
+        addTechP(next, forceId, 150);
+        message = `${target.name}素来亲善我方君主，${officer.name}不待舌战便将其登庸！`;
+        officer.acted = true;
+        break;
+      }
+      if (will.will <= 0) {
+        message = `${officer.name}尝试登庸${target.name}，但对方无意出仕`;
+        officer.acted = true;
         break;
       }
       // 登庸触发舌战：胜利则登用，失败则目标短期禁仕
@@ -1233,15 +1501,25 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       break;
     case 'reward': {
       const names: string[] = [];
+      let cappedCount = 0;
       for (const officerId of command.officerIds) {
         const officer = next.officers[officerId];
         const current = officerLoyalty(officer);
-        setOfficerLoyalty(officer, current + REWARD_LOYALTY_GAIN);
+        // 血色衣冠 6.0：褒奖只能把忠诚提到「忠诚度基准值」为止
+        const cap = loyaltyCapOf(next, officer);
+        if (current >= cap) {
+          cappedCount += 1;
+          officer.rewarded = true;
+          names.push(`${officer.name} ${current}（已达基准值${cap}）`);
+          continue;
+        }
+        setOfficerLoyalty(officer, Math.min(current + REWARD_LOYALTY_GAIN, cap));
         officer.rewarded = true;
         names.push(`${officer.name} ${current} → ${officerLoyalty(officer)}`);
       }
       stronghold.gold -= REWARD_GOLD_COST * command.officerIds.length;
-      message = `褒奖${names.join('、')}，忠诚+${REWARD_LOYALTY_GAIN}`;
+      message = `褒奖${names.join('、')}，忠诚+${REWARD_LOYALTY_GAIN}`
+        + (cappedCount > 0 ? `（${cappedCount}人已达忠诚基准值上限）` : '');
       break;
     }
     case 'appointPosition': {
@@ -1301,103 +1579,31 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     case 'diplomacy': {
       const officer = next.officers[command.officerId];
       const targetForce = next.forces[command.targetForceId];
-      const fromAllies = next.forces[forceId].allies ?? [];
-      const toAllies = next.forces[command.targetForceId].allies ?? [];
-      officer.acted = true;
-      switch (command.action) {
-        case 'goodwill': {
-          stronghold.gold -= GOODWILL_GOLD_COST;
-          const gain = goodwillGain(next, forceId, command.targetForceId, officer);
-          adjustDiplomacy(next, forceId, command.targetForceId, gain);
-          message = `${officer.name}出使${targetForce.name}，增进双方友好度 ${gain}`;
-          break;
-        }
-        case 'alliance': {
-          const gold = command.gold ?? 0;
-          stronghold.gold -= gold;
-          const result = resolveAlliance(next, forceId, command.targetForceId, officer, gold);
-          if (result.success) {
-            next.forces[forceId].allies = [...fromAllies, command.targetForceId];
-            next.forces[command.targetForceId].allies = [...toAllies, forceId];
-            adjustDiplomacy(next, forceId, command.targetForceId, 30);
-            message = `${officer.name}促成与${targetForce.name}的同盟！从此互不侵犯、可请求援军`;
-          } else {
-            adjustDiplomacy(next, forceId, command.targetForceId, -10);
-            message = `${officer.name}出使${targetForce.name}结盟失败（判定值${result.judgment}）`;
-          }
-          break;
-        }
-        case 'truce': {
-          const gold = command.gold ?? 0;
-          const months = command.months ?? TRUCE_MONTHS_MIN;
-          stronghold.gold -= gold;
-          const result = resolveTruce(next, forceId, command.targetForceId, officer, gold, months);
-          if (result.success) {
-            const tenDays = months * 3;
-            next.forces[forceId].truces = { ...(next.forces[forceId].truces ?? {}), [command.targetForceId]: tenDays };
-            next.forces[command.targetForceId].truces = { ...(next.forces[command.targetForceId].truces ?? {}), [forceId]: tenDays };
-            message = `${officer.name}与${targetForce.name}达成停战协定（${months}个月）`;
-          } else {
-            message = `${officer.name}与${targetForce.name}停战交涉失败（判定值${result.judgment}）`;
-          }
-          break;
-        }
-        case 'requestTroops': {
-          const result = resolveRequestTroops(next, forceId, command.targetForceId, officer);
-          if (result.success) {
-            // 目标：与请求方最近的敌城（不含盟友）
-            const enemies = Object.values(next.cities).filter((c) => c.ownerId && c.ownerId !== forceId && c.ownerId !== command.targetForceId);
-            const targetCity = enemies.sort((a, b) =>
-              (Math.abs(a.gridQ - city.gridQ) + Math.abs(a.gridR - city.gridR))
-              - (Math.abs(b.gridQ - city.gridQ) + Math.abs(b.gridR - city.gridR)))[0] ?? city;
-            const allyCity = Object.values(next.cities).find((c) => c.ownerId === command.targetForceId);
-            if (allyCity) {
-              const allyOfficers = Object.values(next.officers).filter((o) =>
-                o.forceId === command.targetForceId && o.location.kind === 'city' && o.location.cityId === allyCity.id && o.id !== next.forces[command.targetForceId].leaderId && !o.deathMonth);
-              const commander = allyOfficers.sort((a, b) => b.stats.leadership - a.stats.leadership)[0];
-              if (commander) {
-                const allyCityState = next.cities[allyCity.id];
-                const troops = Math.min(5000, allyCityState.troops - 1000);
-                if (troops >= 2000) {
-                  allyCityState.troops -= troops;
-                  commander.location = { kind: 'unit', unitId: `reinforce-${forceId}-${commander.id}` };
-                  next.units[`reinforce-${forceId}-${commander.id}`] = {
-                    id: `reinforce-${forceId}-${commander.id}`,
-                    kind: 'combat',
-                    forceId: command.targetForceId,
-                    leaderId: commander.id,
-                    officerIds: [commander.id],
-                    homeCityId: allyCity.id,
-                    q: targetCity.gridQ,
-                    r: targetCity.gridR,
-                    troops,
-                    food: 5000,
-                    energy: 20,
-                    movementRemaining: 10,
-                    expiresTenDay: next.month * 3 + (next.tenDay ?? 1) + REINFORCEMENT_TEN_DAYS,
-                    moved: false,
-                    acted: false,
-                  };
-                  commander.cityId = targetCity.id;
-                  message = `${targetForce.name}接受请求，派${commander.name}率${troops.toLocaleString('en-US')}军驰援${targetCity.name}！`;
-                  break;
-                }
-              }
-            }
-            message = `${targetForce.name}接受请求，但无兵可派`;
-          } else {
-            message = `${targetForce.name}拒绝了请求援军的要求`;
-          }
-          break;
-        }
-        case 'break': {
-          next.forces[forceId].allies = fromAllies.filter((id) => id !== command.targetForceId);
-          next.forces[command.targetForceId].allies = toAllies.filter((id) => id !== forceId);
-          adjustDiplomacy(next, forceId, command.targetForceId, -40);
-          message = `${officer.name}代表${next.forces[forceId].name}宣布与${targetForce.name}断交（破盟）！`;
-          break;
-        }
+      const destination = leaderCityOf(next, command.targetForceId);
+      if (!officer || !targetForce || !destination) {
+        message = '外交目标无效';
+        break;
       }
+      // 礼金随使者一同出发（亲善固定1000金，同盟/停战为选定礼金），出发当刻即从出发据点扣除
+      const gold = command.action === 'goodwill' ? GOODWILL_GOLD_COST : (command.gold ?? 0);
+      stronghold.gold -= gold;
+      const travel = strongholdTransferDuration(next, stronghold, destination);
+      officer.acted = true;
+      officer.cityId = command.cityId;
+      officer.location = {
+        kind: 'envoy',
+        fromCityId: command.cityId,
+        fromPassId: command.passId,
+        targetForceId: command.targetForceId,
+        action: command.action,
+        gold: command.gold,
+        months: command.months,
+        outboundTenDays: travel,
+        returnTenDays: travel,
+        phase: 'outbound',
+        remainingTenDays: travel,
+      };
+      message = `${officer.name}出使${targetForce.name}，预计${travel * 10}天后抵达${destination.name}`;
       break;
     }
     case 'captiveDispose': {

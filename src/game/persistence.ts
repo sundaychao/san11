@@ -2,13 +2,20 @@ import { CITY_IDS, FORCE_IDS, OFFICER_IDS, china42InteriorByCityId, createScenar
 import { createScenarioPasses, PASS_IDS } from './passes';
 import { createMobileDuelGrid } from './scenario/mobileDuel';
 import { ARMAMENT_TYPES } from './armaments';
-import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, CityId, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Pass, PassId, Stats, StrategyResultReport, TechNodeId } from './types';
+import type { ArmyUnit, ArmamentType, BattleDamageReport, City, CityEffectReport, CityId, DiplomacyAction, Facility, FacilityRepairReport, FirePlot, Force, GameState, GridCell, Officer, Pass, PassId, Stats, StrategyResultReport, TechNodeId } from './types';
 import china42Data from './scenario/china42.json';
 import china42xData from './scenario/maps/china42x.json';
 import { initConstructionPlots } from './innerAffairs';
+import { DIPLOMACY_ACTIONS, NEUTRAL_DIPLOMACY, clampDiplomacy } from './diplomacy';
 
 export const AUTO_SAVE_KEY = 'jingxiang-208-autosave-v1';
 export const MANUAL_SAVE_KEY = 'jingxiang-208-manual-v1';
+
+/**
+ * 当前存档结构版本。改动 `GameState` 字段的**语义**（不是新增可选字段）时必须递增，
+ * 并在 `migrateSaveToCurrent` 里补上对应迁移，否则旧档会以错误语义被读取。
+ */
+export const SCHEMA_VERSION = 3;
 
 export type SaveSlot = 'auto' | 'manual';
 
@@ -19,7 +26,7 @@ const FACILITY_TYPES = [
   'formation', 'fort', 'fortress', 'earthwork', 'stoneWall',
   'fireSeed', 'fireBall', 'hellfireSeed', 'hellfireBall',
 ];
-const APTITUDE_GRADES = ['S', 'A', 'B', 'C'];
+const APTITUDE_GRADES = ['S++', 'S+', 'S', 'A', 'B', 'C'];
 const STRATEGY_IDS = ['fire', 'extinguish', 'false-report', 'disturb', 'calm', 'inspire', 'discord'];
 const MOBILE_DUEL_CITY_IDS = ['xiangyang', 'jiangling'];
 /** 部队士气上限：基础 100 + 科技「职业化」20（见 game/techs.ts 的 energyCapOf） */
@@ -155,6 +162,16 @@ function validOfficerLocation(location: unknown, custom?: boolean) {
       return typeof value.facility === 'string' && Number.isInteger(value.plotIndex) && Number(value.plotIndex) >= 0;
     }
     return false;
+  }
+  if (value.kind === 'envoy') {
+    return cityRef(value.fromCityId) &&
+      (value.fromPassId === undefined || passRef(value.fromPassId)) &&
+      typeof value.targetForceId === 'string' &&
+      DIPLOMACY_ACTIONS.includes(value.action as DiplomacyAction) &&
+      (value.phase === 'outbound' || value.phase === 'return') &&
+      Number.isInteger(value.outboundTenDays) && Number(value.outboundTenDays) > 0 &&
+      Number.isInteger(value.returnTenDays) && Number(value.returnTenDays) > 0 &&
+      Number.isInteger(value.remainingTenDays) && Number(value.remainingTenDays) > 0;
   }
   return value.kind === 'transfer' &&
     cityRef(value.fromCityId) &&
@@ -331,7 +348,7 @@ export function isGameState(value: unknown): value is GameState {
   const state = value as Partial<GameState>;
   const validScenario = state.scenarioId === 'jingxiang-208' || state.scenarioId === 'mobile-duel' || state.scenarioId === 'custom-map';
   if (
-    state.schemaVersion !== 2 ||
+    state.schemaVersion !== SCHEMA_VERSION ||
     !validScenario ||
     !Number.isInteger(state.month) ||
     state.month! < 1 ||
@@ -384,6 +401,10 @@ export function isGameState(value: unknown): value is GameState {
         Boolean(cityById[officer.location.fromCityId]) &&
         targetValid;
     }
+    if (officer.location.kind === 'envoy') {
+      // 出使在途：出发城允许已易主（出使途中被夺城也要能读档），只要求城仍存在且使者有归属
+      return officer.forceId !== null && Boolean(cityById[officer.location.fromCityId]);
+    }
     return Boolean(cityById[officer.location.cityId]);
   };
   const participatingForceIds = new Set(cities.map((city) => city.ownerId));
@@ -396,8 +417,9 @@ export function isGameState(value: unknown): value is GameState {
       ))) &&
     officers.every((officer) => validOfficer(officer, isCustom) && officerById[officer.id] === officer &&
       Boolean(cityById[officer.cityId]) &&
-      // 俘虏关押在敌方城，cityId 不要求属本方；关隘驻将按关隘归属校验
-      (officer.location.kind === 'captive' || officer.forceId === null ||
+      // 俘虏关押在敌方城，cityId 不要求属本方；关隘驻将按关隘归属校验。
+      // 出使在途的使者同理：出发城可能在途中被敌方攻占，此时仍要能存读档（返程时由 settleEnvoys 改回本方据点）。
+      (officer.location.kind === 'captive' || officer.location.kind === 'envoy' || officer.forceId === null ||
         (officer.location.kind === 'pass'
           ? Boolean(state.passes?.[officer.location.passId]) && state.passes![officer.location.passId].ownerId === officer.forceId
           : cityById[officer.cityId].ownerId === officer.forceId)) &&
@@ -457,8 +479,9 @@ export function loadSave(storage: SaveAdapter, slot: SaveSlot): LoadResult {
   if (raw === null) return { ok: false, reason: '没有存档' };
   try {
     const parsed = JSON.parse(raw) as { schemaVersion?: unknown };
-    if (parsed?.schemaVersion !== 2) return { ok: false, reason: '存档版本不兼容' };
-    const injected = injectMissingCities(migrateLegacyForceTechs(parsed));
+    const upgraded = migrateSaveToCurrent(parsed);
+    if (!upgraded) return { ok: false, reason: '存档版本不兼容' };
+    const injected = injectMissingCities(migrateLegacyForceTechs(upgraded));
     if (!isGameState(injected)) return { ok: false, reason: '存档无法读取' };
     const migrated = migrateTerrainGrid(injected);
     const withPasses = injectMissingPasses(migrated);
@@ -468,6 +491,46 @@ export function loadSave(storage: SaveAdapter, slot: SaveSlot): LoadResult {
     return { ok: true, state: withPasses };
   } catch {
     return { ok: false, reason: '存档无法读取' };
+  }
+}
+
+/**
+ * 存档版本迁移的唯一入口：把受支持的旧版本升到 `SCHEMA_VERSION`。
+ * 版本不在支持范围内（含比当前更新的版本）时返回 null，由调用方报「存档版本不兼容」。
+ */
+export function migrateSaveToCurrent(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  if (record.schemaVersion === SCHEMA_VERSION) return record;
+  if (record.schemaVersion === 2) {
+    migrateDiplomacyRange(record);
+    record.schemaVersion = SCHEMA_VERSION;
+    return record;
+  }
+  return null;
+}
+
+/**
+ * 版本 2 → 3 的迁移：外交友好度区间由自拟的 `−100 ~ 100`（0 = 中立）
+ * 改为原版《三国志11》的 `0 ~ 100`（50 = 中立），线性映射 `new = round(old / 2 + 50)`。
+ *
+ * 必须迁移：旧档里「中立」存的是 `0`，直接按新体系读会变成最低档「险恶」，
+ * 所有势力的外交关系会整体塌到谷底。新档（版本 3）不会进入本函数。
+ */
+function migrateDiplomacyRange(state: Record<string, unknown>): void {
+  const forces = state.forces;
+  if (!forces || typeof forces !== 'object') return;
+  for (const force of Object.values(forces as Record<string, unknown>)) {
+    if (!force || typeof force !== 'object') continue;
+    const record = force as Record<string, unknown>;
+    const diplomacy = record.diplomacy;
+    if (!diplomacy || typeof diplomacy !== 'object') continue;
+    const next: Record<string, number> = {};
+    for (const [target, raw] of Object.entries(diplomacy as Record<string, unknown>)) {
+      if (typeof raw !== 'number' || !Number.isFinite(raw)) continue;
+      next[target] = clampDiplomacy(raw / 2 + NEUTRAL_DIPLOMACY);
+    }
+    record.diplomacy = next;
   }
 }
 

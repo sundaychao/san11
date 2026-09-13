@@ -8,6 +8,7 @@ import {
   TACTICS_BY_TROOP,
   TERRAIN_COST_BY_PROFILE,
   ZOC_FACILITY_TYPES,
+  troopMatchupModifier,
 } from './catalog';
 
 describe('battle catalog', () => {
@@ -66,5 +67,39 @@ describe('battle catalog', () => {
       expect(PUBLIC_REPAIRABLE_FACILITY_TYPES.has(type)).toBe(true);
       expect(ZOC_FACILITY_TYPES.has(type)).toBe(false);
     }
+  });
+});
+
+describe('兵种相克（血色衣冠 6.0）', () => {
+  it('枪兵克骑兵、戟兵克枪兵、骑兵克戟兵构成三角', () => {
+    expect(troopMatchupModifier('spear', 'cavalry')).toBe(1.15);
+    expect(troopMatchupModifier('halberd', 'spear')).toBe(1.2);
+    expect(troopMatchupModifier('cavalry', 'halberd')).toBe(1.1);
+  });
+
+  it('与原版不同：系数不对称，且枪骑互克（双方都增伤）', () => {
+    // 原版是对称的 1.15 / 0.85；血色衣冠里戟打枪 1.2，枪打戟只有 0.85
+    expect(troopMatchupModifier('halberd', 'spear')).toBeGreaterThan(troopMatchupModifier('spear', 'halberd'));
+    // 枪骑互克：两个方向都大于 1
+    expect(troopMatchupModifier('spear', 'cavalry')).toBeGreaterThan(1);
+    expect(troopMatchupModifier('cavalry', 'spear')).toBeGreaterThan(1);
+  });
+
+  it('戟兵互殴双方都打折，弩兵最怕戟，骑兵打弩兵最狠', () => {
+    expect(troopMatchupModifier('halberd', 'halberd')).toBe(0.8);
+    expect(troopMatchupModifier('crossbow', 'halberd')).toBe(0.7);
+    expect(troopMatchupModifier('cavalry', 'crossbow')).toBe(1.2);
+  });
+
+  it('剑兵、器械、舰船不参与相克，表外组合一律 1.0', () => {
+    const neutralForms = ['sword', 'ram', 'woodenBeast', 'tower', 'catapult', 'boat', 'ship', 'battleShip'] as const;
+    for (const form of neutralForms) {
+      expect(troopMatchupModifier(form, 'cavalry')).toBe(1);
+      expect(troopMatchupModifier('cavalry', form)).toBe(1);
+      expect(troopMatchupModifier(form, form)).toBe(1);
+    }
+    // 同兵种互殴、以及未登记的弩→骑组合
+    expect(troopMatchupModifier('spear', 'spear')).toBe(1);
+    expect(troopMatchupModifier('crossbow', 'cavalry')).toBe(1);
   });
 });

@@ -6,3 +6,4 @@ export * from './tactics';
 export * from './strategies';
 export * from './deployment';
 export * from './officerAbilities';
+export * from './supply';

@@ -1,4 +1,4 @@
-import type { DeployInput, StrategyId, StrategySelection, TransportInput, TacticId } from '../battle/actions';
+import type { DeployInput, StrategyId, StrategySelection, TransportInput, TacticId, SupplyArmament } from '../battle/actions';
 import type { GridCoord } from '../battle/grid';
 import type { CityId, FacilityType, GameCommand, PassId } from '../types';
 
@@ -13,13 +13,14 @@ export type DeployFollowupAction =
   | { type: 'useUnitTactic'; targetId: string; tacticId: TacticId }
   | { type: 'useUnitStrategy'; strategyId: StrategyId; selection: StrategySelection }
   | { type: 'buildFacility'; facilityType: FacilityType; target: GridCoord }
-  | { type: 'repairFacility'; facilityId: string };
+  | { type: 'repairFacility'; facilityId: string }
+  | { type: 'supplyUnit'; targetId: string; troops: number; gold: number; food: number; armaments?: Partial<SupplyArmament> };
 
 export type GameIntent =
   | { type: 'issueCommand'; command: GameCommand }
   | { type: 'deployUnit'; input: DeployInput }
   | { type: 'deployUnitAction'; input: DeployInput; action: DeployFollowupAction }
-  | { type: 'deployTransportUnit'; input: TransportInput }
+  | { type: 'deployTransportUnit'; input: TransportInput; action?: DeployFollowupAction }
   | { type: 'moveUnit'; unitId: string; destination: GridCoord }
   | { type: 'setMoveDelegate'; unitId: string; target: GridCoord }
   | { type: 'setBuildDelegate'; unitId: string; target: GridCoord; facility: FacilityType }
@@ -35,6 +36,7 @@ export type GameIntent =
   | { type: 'useFirePlot'; unitId: string; target: GridCoord; destination?: GridCoord }
   | { type: 'buildFacility'; unitId: string; facilityType: FacilityType; target: GridCoord; destination?: GridCoord }
   | { type: 'repairFacility'; unitId: string; facilityId: string; destination?: GridCoord }
+  | { type: 'supplyUnit'; unitId: string; targetId: string; troops: number; gold: number; food: number; armaments?: Partial<SupplyArmament>; destination?: GridCoord }
   | { type: 'dismantleFacility'; facilityId: string }
   | { type: 'attackCity'; attackerId: string; cityId: CityId; destination?: GridCoord }
   | { type: 'attackPass'; attackerId: string; passId: PassId; destination?: GridCoord }

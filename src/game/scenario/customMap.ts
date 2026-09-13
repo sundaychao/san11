@@ -195,7 +195,7 @@ export function createGameFromMap(
   const passes = createScenarioPassesFromMarkers({ cities, grid }, passMarkers);
 
   const state: GameState = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     scenarioId: 'custom-map',
     seed: seed >>> 0,
     rngCursor: 0,

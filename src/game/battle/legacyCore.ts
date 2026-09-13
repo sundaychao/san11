@@ -1,8 +1,8 @@
-import type { AptitudeGrade, ArmyUnit, City, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, PassId, StrategyResultReport, TerrainType, TroopType } from '../types';
-import { BLOCKED_TERRAINS, FACILITY_UPGRADE_CHAIN, UPGRADED_FACILITY_TYPES, isWaterTerrain } from './catalog';
+import type { AptitudeGrade, ArmyUnit, City, CityArmaments, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, PassId, StrategyResultReport, TerrainType, TroopType } from '../types';
+import { BLOCKED_TERRAINS, clamp, FACILITY_UPGRADE_CHAIN, LEADERSHIP_MODIFIER_DIVISOR, LEADERSHIP_MODIFIER_MAX, LEADERSHIP_MODIFIER_MIN, UPGRADED_FACILITY_TYPES, isWaterTerrain, troopMatchupModifier, type TroopCombatForm } from './catalog';
 import { isBattleShip } from '../armaments';
 import { nextRandom } from '../random';
-import { TECHP_PER_BREAK_UNIT, addTechP, canBuildFacility, catapultSplash, cavalryRaidMove, cavalryStirrupBonus, energyCapOf, fireDamageMultiplier, fireRangeBonus, moraleCapOf, spearSeizesFood, tacticPowerMultiplier, troopAttackTechBonus, troopDefenseTechBonus } from '../techs';
+import { TECHP_PER_BREAK_UNIT, addTechP, canBuildFacility, catapultSplash, cavalryRaidMove, cavalryStirrupBonus, energyCapOf, fireDamageMultiplier, fireRangeBonus, moraleCapOf, spearSeizesFood, tacticPowerMultiplier } from '../techs';
 import { complexHandlerById } from '../skills/handlers';
 import { effectsOfKind, resolveOfficerSkills, resolveUnitSkills } from '../skills';
 import {
@@ -30,10 +30,9 @@ import { committedTroops } from './frontline';
 import { applyImmediateFireDamageToCityAndPlot } from './fire';
 import { allCityKeys, cellAt, cityCenter, deploymentCells, isLegalUnitCell, occupiedFacilityKeys, occupiedUnitKeys, reachableCosts, spawnCellFor, unitIsIncapacitated } from './movementRules';
 import { areAdjacent, attackableCities, attackableFacilities, attackableUnits, gridDistanceWithin, isCityInAttackRange, jointAttackableUnits } from './targetRules';
-import { effectiveNavyAptitude, effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance } from './officerAbilities';
+import { effectiveNavyAptitude, effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance, unitCombatRating } from './officerAbilities';
 import {
   ARROW_TOWER_DAMAGE,
-  BASE_ATTACK_DAMAGE,
   BATTLESHIP_WATER_ATTACK_MULTIPLIER,
   BATTLESHIP_WATER_DEFENSE_MULTIPLIER,
   CATAPULT_SPLASH_MULTIPLIER,
@@ -118,11 +117,19 @@ export interface TransportInput {
   cityId?: CityId;
   /** 出发关隘 id（从关隘输送时必填；与 cityId 二选一） */
   passId?: PassId;
-  officerId: string;
+  /** 押运主将（`officerIds[0]` 的同义写法，二者至少给一个） */
+  officerId?: string;
+  /** 押运编队：主将 + 最多 2 名副将（与出征同口径，界面用同一个武将选择页） */
+  officerIds?: string[];
   destination?: GridCoord;
   troops: number;
   gold: number;
   food: number;
+  /**
+   * 随队押运的兵装。与出征携带的兵装**含义不同**：出征是「士兵装备」（并账时按存活兵力返还），
+   * 输送是「货物」（并账时整件返还，见 `returnArmamentsToStronghold`）。缺省视为不押运兵装。
+   */
+  armaments?: Partial<CityArmaments>;
 }
 
 function facilityAt(state: GameState, coord: GridCoord): Facility | undefined {
@@ -345,7 +352,32 @@ export function unitSupplyMultiplier(state: GameState, unit: ArmyUnit) {
 
 export function reduceUnitDamageByFortress(state: GameState, target: ArmyUnit, damage: number) {
   const multiplier = facilityProtectionForUnit(state, target)?.damageMultiplier ?? 1;
-  return Math.min(target.troops, Math.max(0, Math.round(damage * multiplier)));
+  return clamp(Math.round(damage * multiplier), 0, target.troops);
+}
+
+/** 「布阵」：规避兵种相克带来的负面效果 */
+function ignoresMatchupPenalty(state: GameState, unit: ArmyUnit) {
+  return effectsOfKind(resolveUnitSkills(state, unit), 'ignoreMatchupPenalty').length > 0;
+}
+
+/**
+ * 兵种相克系数（含「布阵」规避）。
+ *
+ * 系数 > 1 表示攻方增伤、守方吃亏；< 1 表示攻方吃亏、守方占优。
+ * 「布阵」只把**持有者自己吃亏**的那一侧归 1.0，占便宜的一侧照常保留 ——
+ * 所以骑兵带布阵打枪兵仍是 ×1.10，而枪兵打它时那 ×1.15 归零。
+ */
+function matchupModifierFor(
+  state: GameState,
+  attacker: ArmyUnit,
+  defender: ArmyUnit,
+  attackerForm: TroopCombatForm,
+  defenderForm: TroopCombatForm,
+) {
+  const raw = troopMatchupModifier(attackerForm, defenderForm);
+  if (raw === 1) return 1;
+  const disadvantaged = raw > 1 ? defender : attacker;
+  return ignoresMatchupPenalty(state, disadvantaged) ? 1 : raw;
 }
 
 function damageForRoll(
@@ -357,30 +389,39 @@ function damageForRoll(
   defender?: ArmyUnit,
 ) {
   const attack = effectiveUnitAbilities(state, attacker);
-  const defenderAbilities = defender ? effectiveUnitAbilities(state, defender) : undefined;
-  // 科技「武器精造 / 防具精造 / 装甲」：攻击＋10、防御＋10（攻击折算到武力、防御折算到统率）
-  const techAttack = troopAttackTechBonus(state, attacker.forceId, attacker);
-  const techDefense = defender ? troopDefenseTechBonus(state, defender.forceId, defender) : 0;
-  const defenseLeadership = (defenderAbilities ? defenderAbilities.leadership.value : attack.leadership.value) + techDefense;
-  const leadershipModifier = Math.min(1.2, Math.max(
-    0.8,
-    1 + (attack.leadership.value - defenseLeadership) / 250,
-  ));
-  const committed = committedTroops(state, attacker, defender);
-  // 残兵衰减：兵力低于满编时，固定基数与伤害地板同步等比缩小。
-  // 否则固定基数会与兵力脱钩，导致极小兵力部队打出远超自身兵力的伤害。
-  const commitmentScale = Math.min(1, committed / FULL_DAMAGE_TROOPS);
-  const attackScore = committed * (
-    0.08 + attack.leadership.value / 2000 + (attack.war.value + techAttack) / 3000
-  );
-  const rawDamage = BASE_ATTACK_DAMAGE * commitmentScale + attackScore;
-  const randomModifier = 0.92 + rollValue * 0.16;
+  // 水上形态判定提前：舰船是载具，只有部队在水上时才改用船体基础攻防
   const attackerOnWater = isWaterTerrain(unitTerrain(state, attacker));
+  const defenderOnWater = Boolean(defender) && isWaterTerrain(unitTerrain(state, defender!));
+  // 统率修正改用「部队攻防力」对比：攻方攻击力 − 守方防御力。
+  // 攻防力 = floor(编队最高统率 × 最高兵种适性乘数 × 兵种基础攻防 / 100)，
+  // 武器精造（＋10 攻击）与防具精造（＋10 防御）由 unitCombatRating 直接加在基础攻防上。
+  const attackRating = unitCombatRating(state, attacker, { onWater: attackerOnWater });
+  const defenderRating = defender ? unitCombatRating(state, defender, { onWater: defenderOnWater }) : undefined;
+  const leadershipModifier = clamp(
+    1 + (attackRating.attack - (defenderRating?.defense ?? attackRating.attack)) / LEADERSHIP_MODIFIER_DIVISOR,
+    LEADERSHIP_MODIFIER_MIN,
+    LEADERSHIP_MODIFIER_MAX,
+  );
+  // 兵种相克（血色衣冠 6.0）：枪→戟 0.85 / 戟→枪 1.2 / 枪骑互克 1.15 与 1.1 / 骑→弩 1.2 / 弩→戟 0.7。
+  // 反击时攻守互换，这里取到的就是反向系数，不需要额外分支。「布阵」特技在函数内规避不利一侧。
+  const matchupModifier = defenderRating
+    ? matchupModifierFor(state, attacker, defender!, attackRating.form, defenderRating.form)
+    : 1;
+  const committed = committedTroops(state, attacker, defender);
+  // 残兵衰减系数：兵力低于满编时基础伤害与伤害地板同步等比缩小，
+  // 避免极小兵力部队打出远超自身兵力的伤害。
+  const commitmentScale = Math.min(1, committed / FULL_DAMAGE_TROOPS);
+  // 攻击方武力不再参与基础伤害：武力的作用已由「统率修正」里的部队攻击力间接体现，
+  // 再在基础伤害里叠一次会让高武力武将双重吃收益（科技武器精造＋10 也已改挂到攻防力上）。
+  // 基础伤害没有固定基数（原 240 已移除）：rawDamage 与投入兵力严格成正比，
+  // k = 0.08 + 统率/2000 ∈ 0.08~0.13，所以兵力差距不再被稀释，残兵段则被 α 二次衰减。
+  const coefficient = 0.08 + attack.leadership.value / 2000;
+  const rawDamage = committed * coefficient * commitmentScale;
+  const randomModifier = 0.92 + rollValue * 0.16;
   // 造船术：同样的楼船船体升级为斗舰，水上攻击与防护都更强
   const attackerShipModifier = attacker.vehicle === 'ship' && attackerOnWater
     ? (isBattleShip(state, attacker) ? BATTLESHIP_WATER_ATTACK_MULTIPLIER : SHIP_WATER_ATTACK_MULTIPLIER)
     : 1;
-  const defenderOnWater = Boolean(defender) && isWaterTerrain(unitTerrain(state, defender!));
   const defenderShipModifier = defender && defender.vehicle === 'ship' && defenderOnWater
     ? (isBattleShip(state, defender) ? BATTLESHIP_WATER_DEFENSE_MULTIPLIER : SHIP_WATER_DEFENSE_MULTIPLIER)
     : 1;
@@ -390,6 +431,7 @@ function damageForRoll(
   const damage = Math.round(
     rawDamage *
     leadershipModifier *
+    matchupModifier *
     TERRAIN_DEFENSE[defenderTerrain] *
     randomModifier *
     facilityDamageMultiplier(state, attacker) *
@@ -400,7 +442,7 @@ function damageForRoll(
     (counter ? 0.6 : 1),
   );
   const damageFloor = Math.round(MIN_ATTACK_DAMAGE * commitmentScale);
-  return Math.min(2200, Math.max(damageFloor, damage));
+  return clamp(damage, damageFloor, 2200);
 }
 
 export function damageRoll(
@@ -647,7 +689,8 @@ export function buildableFacilitiesForUnit(state: GameState, unitId: string): Un
 
 export function facilityBuildTargets(state: GameState, unitId: string, origin?: GridCoord, facilityType?: FacilityType): GridCoord[] {
   const unit = state.units[unitId];
-  if (!unit) return [];
+  // 运输队不能设置设施（`buildFacility` 会抛错），可建位置直接返回空，菜单项随之置灰
+  if (!unit || unit.kind === 'transport') return [];
   // 科技门槛：砦/石墙（石工术）、城塞/连弩楼（建筑学）、投石台（弹道）、火焰种/火焰球（火药）、业火种/业火球（化学）
   if (facilityType && !canBuildFacility(state, unit.forceId, facilityType)) return [];
   if (facilityType && (unit.gold ?? 0) < FACILITY_BUILD_COSTS[facilityType]) return [];

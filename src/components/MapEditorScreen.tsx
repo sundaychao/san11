@@ -27,7 +27,7 @@ import { MapEditorPanel } from './MapEditorPanel';
 /** 编辑器所需的极简 GameState stub：仅满足 StrategicMap editorMode 分支的字段读取 */
 function editorStub(editor: MapEditorState): GameState {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     scenarioId: 'jingxiang-208',
     seed: 1,
     rngCursor: 0,

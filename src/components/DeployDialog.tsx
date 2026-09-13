@@ -1,14 +1,16 @@
 import { AlertCircle, Swords, X } from 'lucide-react';
 import { useMemo, useRef, useState, type FormEvent } from 'react';
-import { useAudioEventAdapter, type AudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { armamentLabelFor, armamentsOf, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT, vehicleLabelFor } from '../game/armaments';
+import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
+import { armamentLabelFor, armamentsOf, siegeWeaponKindOf, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT, vehicleLabelFor } from '../game/armaments';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
+import type { TroopCombatForm } from '../game/battle/catalog';
+import { troopCombatRating } from '../game/battle/officerAbilities';
 import { unitTroopCapOf } from '../game/ranks';
 import { effectiveStat } from '../game/health';
+import { troopAttackTechBonus, troopDefenseTechBonus } from '../game/techs';
 import { useGame } from '../game/store/GameProvider';
-import { officerSkillsText } from '../game/skills';
 import type { CityId, ForceId, GameState, Officer, OfficerAptitudes, PassId, Stats, TroopType } from '../game/types';
-import { OfficerHealthBadge } from './OfficerHealthBadge';
+import { FORMATION_OFFICER_MAX, FormationOfficerPicker, aptitudeRank, fallbackAptitudes } from './FormationOfficerPicker';
 import { closePopupOnContextMenu } from './popupEvents';
 
 export interface DeployConfirmInput {
@@ -39,19 +41,21 @@ interface DeployTroopOption {
   label?: string;
   troopType: TroopType;
   siegeWeapon?: 'ram' | 'tower';
-  attack: number;
-  defense: number;
   movement: number;
 }
 
+/**
+ * 出征可选的兵种项。基础攻防**不在这里维护**——由 `TROOP_BASE_ATTACK/DEFENSE`（catalog.ts）
+ * 按战斗形态现取，右侧「攻击 / 防御」面板见 `officerAbility`。
+ */
 const TROOP_TYPES: DeployTroopOption[] = [
-  { id: 'sword', troopType: 'sword', label: '剑兵', attack: 33, defense: 33, movement: 22 },
-  { id: 'spear', troopType: 'spear', label: '枪兵', attack: 38, defense: 31, movement: 22 },
-  { id: 'halberd', troopType: 'halberd', label: '戟兵', attack: 31, defense: 39, movement: 20 },
-  { id: 'crossbow', troopType: 'crossbow', label: '弩兵', attack: 36, defense: 28, movement: 19 },
-  { id: 'cavalry', troopType: 'cavalry', label: '骑兵', attack: 42, defense: 27, movement: 30 },
-  { id: 'ram', troopType: 'siege', siegeWeapon: 'ram', attack: 30, defense: 26, movement: 16 },
-  { id: 'tower', troopType: 'siege', siegeWeapon: 'tower', attack: 26, defense: 22, movement: 16 },
+  { id: 'sword', troopType: 'sword', label: '剑兵', movement: 22 },
+  { id: 'spear', troopType: 'spear', label: '枪兵', movement: 22 },
+  { id: 'halberd', troopType: 'halberd', label: '戟兵', movement: 20 },
+  { id: 'crossbow', troopType: 'crossbow', label: '弩兵', movement: 19 },
+  { id: 'cavalry', troopType: 'cavalry', label: '骑兵', movement: 30 },
+  { id: 'ram', troopType: 'siege', siegeWeapon: 'ram', movement: 16 },
+  { id: 'tower', troopType: 'siege', siegeWeapon: 'tower', movement: 16 },
 ];
 const VEHICLE_TYPES: Array<{ id: 'boat' | 'ship'; label: string }> = [
   { id: 'boat', label: '小舟' },
@@ -76,40 +80,50 @@ function siegeTroopLabelOf(state: GameState, forceId: ForceId | null | undefined
 function vehicleTypeLabelOf(state: GameState, forceId: ForceId | null | undefined, id: 'boat' | 'ship'): string {
   return vehicleLabelFor(state, forceId, id);
 }
-type OfficerPickerView = 'ability' | 'skill' | 'aptitude';
-type OfficerPickerSortDirection = 'desc' | 'asc';
-type OfficerPickerSortKey = 'name' | keyof Stats | 'skill' | keyof OfficerAptitudes;
-interface OfficerPickerColumn {
-  label: string;
-  sortKey: OfficerPickerSortKey;
-}
-const OFFICER_PICKER_TABS: Array<{ id: OfficerPickerView; label: string }> = [
-  { id: 'ability', label: '能力' },
-  { id: 'skill', label: '特技' },
-  { id: 'aptitude', label: '适性' },
-];
-const fallbackAptitudes: OfficerAptitudes = { spear: 'B', halberd: 'B', crossbow: 'B', cavalry: 'B', siege: 'C', navy: 'C' };
-const aptitudeRank: Record<OfficerAptitudes[keyof OfficerAptitudes], number> = {
-  S: 4,
-  A: 3,
-  B: 2,
-  C: 1,
-};
-type DeployAptitudeTroop = keyof OfficerAptitudes;
-
 function toAmount(value: string) {
   const amount = Number(value);
   return Number.isFinite(amount) ? amount : -1;
 }
 
-function officerAbility(officer: Officer | undefined, troopType: TroopType) {
-  const troop = TROOP_TYPES.find((item) => item.troopType === troopType) ?? TROOP_TYPES[0];
-  if (!officer) return { attack: troop.attack, defense: troop.defense, intelligence: 0, construction: 0, movement: TROOP_MOVEMENT[troopType] };
+/**
+ * 出征界面的部队能力预览。
+ * 攻击 / 防御 = floor(编队最高统率 × 编队最高兵种适性乘数 × 兵种基础攻防 / 100)。
+ * 兵种基础攻防吃科技：冲车→木兽、井阑→投石车（与显示名同源）；剑兵无适性，乘数按 1.0 计。
+ * 武器精造 / 防具精造（各＋10）直接加在基础攻防上，与战斗结算 `unitCombatRating` 同口径
+ * ——不然玩家在这里看到的数字会低于实际参战值。
+ */
+function officerAbility(
+  state: GameState,
+  forceId: ForceId | null | undefined,
+  officers: Officer[],
+  troopType: TroopType,
+  siegeWeapon: 'ram' | 'tower',
+) {
+  // 无归属势力时不做科技升级，直接用冲车 / 井阑的基础值
+  const form: TroopCombatForm = troopType !== 'siege'
+    ? troopType
+    : forceId
+      ? siegeWeaponKindOf(state, { forceId, siegeWeapon }) ?? siegeWeapon
+      : siegeWeapon;
+  // 出征预览阶段尚未选定载具，按陆战计（与 form 的解析口径一致）
+  const techProbe = { kind: 'combat' as const, troopType, vehicle: undefined };
+  const rating = troopCombatRating({
+    officers,
+    form,
+    aptitudeKey: troopType === 'sword' ? null : troopType,
+    bonusAttack: troopAttackTechBonus(state, forceId, techProbe),
+    bonusDefense: troopDefenseTechBonus(state, forceId, techProbe),
+  });
+  const bestOf = (key: keyof Stats) => officers.reduce(
+    (best, officer) => Math.max(best, effectiveStat(officer, key)),
+    0,
+  );
   return {
-    attack: effectiveStat(officer, 'leadership'),
-    defense: effectiveStat(officer, 'leadership'),
-    intelligence: effectiveStat(officer, 'intelligence'),
-    construction: effectiveStat(officer, 'politics'),
+    attack: rating.attack,
+    defense: rating.defense,
+    leadership: bestOf('leadership'),
+    intelligence: bestOf('intelligence'),
+    construction: bestOf('politics'),
     movement: TROOP_MOVEMENT[troopType],
   };
 }
@@ -135,192 +149,6 @@ function compareDeployRecommendation(left: Officer, right: Officer, troopType: T
 function recommendedOfficerIdsForTroop(officers: Officer[], troopType: TroopType) {
   const recommended = [...officers].sort((left, right) => compareDeployRecommendation(left, right, troopType))[0];
   return recommended ? [recommended.id] : [];
-}
-
-function columnsForOfficerPicker(activeView: OfficerPickerView): OfficerPickerColumn[] {
-  if (activeView === 'ability') return [
-    { label: '武将', sortKey: 'name' },
-    { label: '统帅', sortKey: 'leadership' },
-    { label: '武力', sortKey: 'war' },
-    { label: '智力', sortKey: 'intelligence' },
-    { label: '政治', sortKey: 'politics' },
-    { label: '魅力', sortKey: 'charisma' },
-  ];
-  if (activeView === 'skill') return [
-    { label: '武将', sortKey: 'name' },
-    { label: '特技', sortKey: 'skill' },
-  ];
-  return [
-    { label: '武将', sortKey: 'name' },
-    { label: '枪', sortKey: 'spear' },
-    { label: '戟', sortKey: 'halberd' },
-    { label: '弩', sortKey: 'crossbow' },
-    { label: '骑', sortKey: 'cavalry' },
-    { label: '兵器', sortKey: 'siege' },
-    { label: '水军', sortKey: 'navy' },
-  ];
-}
-
-function officerPickerSortValue(officer: Officer, sortKey: OfficerPickerSortKey) {
-  if (sortKey === 'name') return officer.name;
-  if (sortKey === 'skill') return officerSkillsText(officer);
-  if (sortKey in fallbackAptitudes) {
-    const aptitudes = officer.aptitudes ?? fallbackAptitudes;
-    return aptitudeRank[aptitudes[sortKey as keyof OfficerAptitudes]];
-  }
-  return officer.stats[sortKey as keyof Stats];
-}
-
-function compareOfficerPickerSortValues(left: string | number, right: string | number, direction: OfficerPickerSortDirection) {
-  const result = typeof left === 'number' && typeof right === 'number'
-    ? left - right
-    : String(left).localeCompare(String(right));
-  return direction === 'desc' ? -result : result;
-}
-
-function OfficerPicker({
-  officers,
-  selectedIds,
-  onLeader,
-  onDeputy,
-  onConfirm,
-  onBack,
-  audio,
-}: {
-  officers: Officer[];
-  selectedIds: string[];
-  onLeader(id: string): void;
-  onDeputy(id: string): void;
-  onConfirm(): void;
-  onBack(): void;
-  audio: AudioEventAdapter;
-}) {
-  const leaderId = selectedIds[0];
-  const deputyIds = selectedIds.slice(1);
-  const canConfirm = Boolean(leaderId);
-  const [activeView, setActiveView] = useState<OfficerPickerView>('ability');
-  const [sort, setSort] = useState<{ key: OfficerPickerSortKey; direction: OfficerPickerSortDirection } | null>(null);
-
-  const columns = columnsForOfficerPicker(activeView);
-  const sortedOfficers = useMemo(() => {
-    if (!sort) return officers;
-    return [...officers].sort((left, right) => (
-      compareOfficerPickerSortValues(
-        officerPickerSortValue(left, sort.key),
-        officerPickerSortValue(right, sort.key),
-        sort.direction,
-      ) ||
-      left.name.localeCompare(right.name) ||
-      left.id.localeCompare(right.id)
-    ));
-  }, [officers, sort]);
-  const changeView = (view: OfficerPickerView) => {
-    setActiveView(view);
-    setSort(null);
-  };
-  const sortBy = (sortKey: OfficerPickerSortKey) => {
-    setSort((current) => (
-      current?.key === sortKey
-        ? { key: sortKey, direction: current.direction === 'desc' ? 'asc' : 'desc' }
-        : { key: sortKey, direction: 'desc' }
-    ));
-  };
-
-  const renderOfficerCells = (officer: Officer) => {
-    if (activeView === 'ability') {
-      return (
-        <>
-          <span>{officer.stats.leadership}</span>
-          <span>{officer.stats.war}</span>
-          <span>{officer.stats.intelligence}</span>
-          <span>{officer.stats.politics}</span>
-          <span>{officer.stats.charisma}</span>
-        </>
-      );
-    }
-    if (activeView === 'skill') {
-      return <span>{officerSkillsText(officer)}</span>;
-    }
-    const aptitudes = officer.aptitudes ?? fallbackAptitudes;
-    return (
-      <>
-        <span>{aptitudes.spear}</span>
-        <span>{aptitudes.halberd}</span>
-        <span>{aptitudes.crossbow}</span>
-        <span>{aptitudes.cavalry}</span>
-        <span>{aptitudes.siege}</span>
-        <span>{aptitudes.navy}</span>
-      </>
-    );
-  };
-
-  return (
-    <div className="modal-backdrop" onContextMenu={(event) => closePopupOnContextMenu(event, onBack, audio)}>
-      <section className="deploy-dialog officer-picker-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="officer-picker-title">
-        <header>
-          <div>
-            <p>出征人员编制</p>
-            <h2 id="officer-picker-title">武将选择</h2>
-          </div>
-          <button type="button" className="icon-button" aria-label="关闭武将选择" title="关闭" onClick={onBack}><X /></button>
-        </header>
-
-        <section className="officer-picker-selected" aria-label="已选武将">
-          <div className="officer-slot is-leader"><span>主将</span><strong>{officers.find((officer) => officer.id === leaderId)?.name ?? '未选择'}</strong></div>
-          <div className="officer-slot"><span>副将 1</span><strong>{officers.find((officer) => officer.id === deputyIds[0])?.name ?? '未选择'}</strong></div>
-          <div className="officer-slot"><span>副将 2</span><strong>{officers.find((officer) => officer.id === deputyIds[1])?.name ?? '未选择'}</strong></div>
-        </section>
-
-        <div className="officer-picker-tabs" role="tablist" aria-label="武将显示切换">
-          {OFFICER_PICKER_TABS.map((tab) => (
-            <button key={tab.id} type="button" className={activeView === tab.id ? 'is-active' : undefined} onClick={() => changeView(tab.id)}>
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <section className={`officer-picker-table is-${activeView}`} aria-label="可出征武将">
-          <div className="officer-picker-heading">
-            {columns.map((column) => {
-              const active = sort?.key === column.sortKey;
-              return (
-                <button
-                  key={column.sortKey}
-                  type="button"
-                  aria-label={`按${column.label}排序`}
-                  className={active ? 'is-active' : undefined}
-                  onClick={() => sortBy(column.sortKey)}
-                >
-                  {column.label}{active ? (sort.direction === 'desc' ? ' ↓' : ' ↑') : ''}
-                </button>
-              );
-            })}
-            <span>编制</span>
-          </div>
-          {sortedOfficers.map((officer) => {
-            const selected = selectedIds.includes(officer.id);
-            const isLeader = leaderId === officer.id;
-            const isDeputy = deputyIds.includes(officer.id);
-            return (
-              <div className={`officer-picker-row${selected ? ' is-selected' : ''}${officer.acted ? ' is-acted' : ''}`} key={officer.id}>
-                <strong>{officer.name}<OfficerHealthBadge officer={officer} /></strong>
-                {renderOfficerCells(officer)}
-                <div className="officer-picker-actions">
-                  <button type="button" aria-label={`选择${officer.name}为主将`} disabled={officer.acted} className={isLeader ? 'is-active' : undefined} onClick={() => onLeader(officer.id)}>主将</button>
-                  <button type="button" aria-label={`选择${officer.name}为副将`} disabled={officer.acted || isLeader || (selectedIds.length >= 3 && !isDeputy)} className={isDeputy ? 'is-active' : undefined} onClick={() => onDeputy(officer.id)}>{isDeputy ? '取消' : '副将'}</button>
-                </div>
-              </div>
-            );
-          })}
-        </section>
-
-        <footer>
-          <button type="button" className="secondary-button" onClick={onBack}>返回</button>
-          <button type="button" className="primary-button" disabled={!canConfirm} onClick={onConfirm}>确定武将</button>
-        </footer>
-      </section>
-    </div>
-  );
 }
 
 export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialogProps) {
@@ -352,7 +180,9 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
   const selectedAvailableIds = officerIds.filter((id) => availableOfficers.some((officer) => officer.id === id));
   const activeOfficerIds = selectedAvailableIds.length > 0 ? selectedAvailableIds : recommendedOfficerIds;
   const activeOfficerId = activeOfficerIds[0] ?? '';
-  const activeOfficer = state.officers[activeOfficerId];
+  const activeOfficers = activeOfficerIds
+    .map((id) => state.officers[id])
+    .filter((officer): officer is Officer => Boolean(officer));
   const armamentType = TROOP_ARMAMENT[troopType];
   // 显示名按出发据点的归属势力科技取值（出征只对本方据点开放，ownerId 即本方势力）；
   // 无主据点（ownerId === null）由 armamentLabelFor/vehicleLabelFor 自带回落。
@@ -379,7 +209,10 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
   const troopAmount = toAmount(activeTroops);
   const goldAmount = toAmount(activeGold);
   const foodAmount = toAmount(activeFood);
-  const ability = useMemo(() => officerAbility(activeOfficer, troopType), [activeOfficer, troopType]);
+  const ability = useMemo(
+    () => officerAbility(state, ownerForceId, activeOfficers, troopType, siegeWeapon),
+    [state, ownerForceId, activeOfficers, troopType, siegeWeapon],
+  );
   const errors = [
     state.actionPoints[state.playerForceId] < DEPLOY_AP_COST ? `行动力不足 ${DEPLOY_AP_COST}` : '',
     !activeOfficerId ? '没有可出征武将' : '',
@@ -414,11 +247,13 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
 
   if (officerPickerOpen) {
     return (
-      <OfficerPicker
+      <FormationOfficerPicker
         officers={officers}
         selectedIds={activeOfficerIds}
+        subtitle="出征人员编制"
+        listLabel="可出征武将"
         onLeader={(id) => setOfficerIds((current) => [id, ...current.slice(1).filter((candidate) => candidate !== id)])}
-        onDeputy={(id) => setOfficerIds((current) => current.includes(id) ? current.filter((candidate) => candidate !== id) : [...current, id].slice(0, 3))}
+        onDeputy={(id) => setOfficerIds((current) => current.includes(id) ? current.filter((candidate) => candidate !== id) : [...current, id].slice(0, FORMATION_OFFICER_MAX))}
         onConfirm={() => setOfficerPickerOpen(false)}
         onBack={() => setOfficerPickerOpen(false)}
         audio={audio}
@@ -506,7 +341,7 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
         </section>
 
         <aside className="deploy-right" aria-label="部队能力">
-          <h3>部队能力 · 主将统率 {activeOfficer ? effectiveStat(activeOfficer, 'leadership') : 0}</h3>
+          <h3>部队能力 · 部队最高统率 {ability.leadership}</h3>
           <div className="deploy-ability">
             <span>攻击</span><strong data-testid="deploy-attack">{ability.attack}</strong>
             <span>防御</span><strong data-testid="deploy-defense">{ability.defense}</strong>

@@ -256,6 +256,10 @@ interface StrategicMapProps {
   attackTargetUnitIds?: string[];
   /** 可攻击的开发设施：`cityId:plotIndex` 集合，命中时高亮为攻击目标 */
   attackTargetPlotKeys?: Set<string>;
+  /** 运输队补给选目标：头顶显示箭头的可补给部队 id 集合 */
+  supplyTargetUnitIds?: string[];
+  /** 点击带箭头的可补给部队：打开补给页 */
+  onSupplyTargetSelect?(unitId: string): void;
   damageReports?: BattleDamageReport[];
   strategyResultReports?: StrategyResultReport[];
   cityEffectReports?: CityEffectReport[];
@@ -324,6 +328,7 @@ export function StrategicMap({
   attackTargetFacilityIds = [],
   attackTargetUnitIds = [],
   attackTargetPlotKeys,
+  supplyTargetUnitIds = [],
   damageReports = [],
   strategyResultReports = [],
   cityEffectReports = [],
@@ -351,6 +356,7 @@ export function StrategicMap({
   onCityHover,
   onCityLeave,
   onAttackTargetSelect,
+  onSupplyTargetSelect,
   onAttackCityTargetSelect,
   onAttackPassTargetSelect,
   onFacilityTargetSelect,
@@ -787,6 +793,7 @@ export function StrategicMap({
   const attackTargetPassIdSet = new Set(attackTargetPassIds);
   const attackTargetFacilityIdSet = new Set(attackTargetFacilityIds);
   const attackTargetUnitIdSet = new Set(attackTargetUnitIds);
+  const supplyTargetUnitIdSet = new Set(supplyTargetUnitIds);
   const facilityOccupiedKeys = new Set(Object.values(state.facilities ?? {}).map((facility) => `${facility.q},${facility.r}`));
   const cityFootprintByKey = new Map<string, CityId>();
   if (!editorMode) {
@@ -922,6 +929,7 @@ export function StrategicMap({
     const centerY = position.y + CELL_SIZE / 2;
     const canActThisTurn = unit.forceId === state.turnForceId && !unit.moved && !unit.acted && !unitIsIncapacitated(unit) && unit.movementRemaining > 0;
     const isAttackTarget = attackTargetUnitIdSet.has(unit.id);
+    const isSupplyTarget = !preview && supplyTargetUnitIdSet.has(unit.id);
     const isFirePlotTarget = firePlotTargetKeys.has(`${unit.q},${unit.r}`);
     const forceColor = state.forces[unit.forceId].color;
     const statusFlags = [
@@ -941,7 +949,7 @@ export function StrategicMap({
         data-force-id={unit.forceId}
         data-unit-status={statusFlags || undefined}
         data-preview={preview ? 'true' : undefined}
-        className={`battle-unit-marker troop-${troopType} unit-${unitKind}${onWater && vehicle ? ` vehicle-${vehicle}` : ''}${selectedUnitId === unit.id ? ' is-selected' : ''}${statusFlags ? ' has-status' : ''}${preview ? ' is-deploy-preview' : ''}`}
+        className={`battle-unit-marker troop-${troopType} unit-${unitKind}${onWater && vehicle ? ` vehicle-${vehicle}` : ''}${selectedUnitId === unit.id ? ' is-selected' : ''}${statusFlags ? ' has-status' : ''}${isSupplyTarget ? ' is-supply-target' : ''}${preview ? ' is-deploy-preview' : ''}`}
         style={{ '--force-color': forceColor, ...(preview ? { pointerEvents: 'none' } : {}) } as CSSProperties}
         aria-label={`${leaderName} ${texture.label}`}
         onPointerDown={(event) => {
@@ -950,6 +958,10 @@ export function StrategicMap({
           event.stopPropagation();
           if (isFirePlotTarget) {
             onFirePlotTargetSelect?.({ q: unit.q, r: unit.r });
+            return;
+          }
+          if (isSupplyTarget) {
+            onSupplyTargetSelect?.(unit.id);
             return;
           }
           if (isAttackTarget) {
@@ -980,6 +992,13 @@ export function StrategicMap({
         >
           {leaderName}
         </text>
+        {isSupplyTarget && (
+          <g className="supply-target-arrow" data-testid="supply-target-arrow">
+            <polygon
+              points={`${centerX - 10},${Math.max(12, position.y - 5) - 30} ${centerX + 10},${Math.max(12, position.y - 5) - 30} ${centerX},${Math.max(12, position.y - 5) - 12}`}
+            />
+          </g>
+        )}
         {unitKind === 'combat' && unit.stamina !== undefined && (
           <g className="battle-unit-stamina-bar">
             <rect

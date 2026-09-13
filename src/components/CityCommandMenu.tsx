@@ -3,9 +3,10 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { COMMAND_AP, OFFICER_COMMANDS, cityAvailableOfficers, passAvailableOfficers } from '../game/commands';
+import { ALLIED_ONLY_ACTIONS, DIPLOMACY_ACTIONS, DIPLOMACY_ACTION_LABELS } from '../game/diplomacy';
 import { ARMAMENT_FACILITY, hasPlotFacility, isCityBlocked } from '../game/innerAffairs';
 import { useGame } from '../game/store/GameProvider';
-import type { CityId, GameCommand, GameState, PassId } from '../game/types';
+import type { CityId, DiplomacyAction, GameCommand, GameState, PassId } from '../game/types';
 import type { CultivateCategory } from './CultivateDialog';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -48,9 +49,9 @@ const SECTIONS: Array<{ id: MenuSection; label: string; Icon: typeof Building2 }
 ];
 
 type SubItem =
-  | { label: string; command?: GameCommand['type']; action?: 'deploy' | 'transport'; cultivate?: undefined; opens?: undefined }
-  | { label: string; cultivate: CultivateCategory; command?: undefined; action?: undefined; opens?: undefined }
-  | { label: string; opens: 'cultivate' | 'relate'; command?: undefined; action?: undefined; cultivate?: undefined };
+  | { label: string; command?: GameCommand['type']; action?: 'deploy' | 'transport'; diplomacyAction?: DiplomacyAction; cultivate?: undefined; opens?: undefined }
+  | { label: string; cultivate: CultivateCategory; command?: undefined; action?: undefined; diplomacyAction?: undefined; opens?: undefined }
+  | { label: string; opens: 'cultivate' | 'relate'; command?: undefined; action?: undefined; diplomacyAction?: undefined; cultivate?: undefined };
 
 /** 仲介三级菜单：义兄弟 / 婚姻 */
 type SubMenuId = 'relate';
@@ -91,8 +92,12 @@ const SUB_COMMANDS: Record<MenuSection, SubItem[]> = {
   ],
   diplomacy: [
     { label: '流言', command: 'rumor' },
-    { label: '挖角', command: 'poach' },
-    { label: '亲善', command: 'diplomacy' },
+    // 外交子行动直接列在二级菜单，点击即以该行动打开外交对话框（不再走页内下拉）
+    ...DIPLOMACY_ACTIONS.map((diplomacyAction) => ({
+      label: DIPLOMACY_ACTION_LABELS[diplomacyAction],
+      command: 'diplomacy' as const,
+      diplomacyAction,
+    })),
   ],
   monarch: [
     { label: '官职', command: 'appointPosition' },
@@ -111,7 +116,7 @@ interface CityCommandMenuProps {
   /** 商人本旬是否到访且未交易（无商人时禁用交易项） */
   merchantAvailable: boolean;
   position: { x: number; y: number };
-  onCommand(type: GameCommand['type'], passId?: PassId): void;
+  onCommand(type: GameCommand['type'], passId?: PassId, diplomacyAction?: DiplomacyAction): void;
   /** 右键"官职"项：打开独立拖拽面板而非原 select 对话框 */
   onAppointPosition?(): void;
   onCultivate(category: CultivateCategory, passId?: PassId): void;
@@ -148,6 +153,11 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
 
   const isDisabled = (item: SubItem) => {
     if ('opens' in item && item.opens) return false;
+    // 请求援军/破弃同盟：己方尚无任何同盟势力时不可用（没盟友可求援、也没盟可破）
+    if (state && item.diplomacyAction && ALLIED_ONLY_ACTIONS.includes(item.diplomacyAction)
+      && (state.forces[state.playerForceId]?.allies ?? []).length === 0) {
+      return true;
+    }
     // 本据点无可行动武将：所有需要武将执行的命令置灰
     const noOfficers = availableOfficers.length === 0;
     if (state && item.command && OFFICER_COMMANDS.has(item.command) && noOfficers) {
@@ -199,6 +209,10 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
   /** 禁用原因提示（悬停显示） */
   const disabledTitle = (item: SubItem): string | undefined => {
     if (!isDisabled(item)) return undefined;
+    if (item.diplomacyAction && ALLIED_ONLY_ACTIONS.includes(item.diplomacyAction)
+      && (state?.forces[state.playerForceId]?.allies ?? []).length === 0) {
+      return '尚无同盟势力';
+    }
     const menuPass = state && passId ? state.passes?.[passId] : undefined;
     const menuCity = state && !menuPass ? state.cities[cityId] : undefined;
     if (availableOfficers.length === 0
@@ -242,7 +256,7 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
     if (item.command === 'appointPosition' && onAppointPosition) {
       onAppointPosition();
     } else if (item.command) {
-      onCommand(item.command, passId);
+      onCommand(item.command, passId, item.diplomacyAction);
     }
     onClose();
   };
@@ -315,7 +329,7 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
               <button
                 key={item.label}
                 type="button"
-                data-testid={item.action ? `city-command-action-${item.action}` : ('cultivate' in item && item.cultivate) ? `city-command-cultivate-${item.cultivate}` : ('opens' in item && item.opens) ? `city-command-submenu-${item.opens}` : item.command ? `city-command-command-${item.command}` : undefined}
+                data-testid={item.diplomacyAction ? `city-command-diplomacy-${item.diplomacyAction}` : item.action ? `city-command-action-${item.action}` : ('cultivate' in item && item.cultivate) ? `city-command-cultivate-${item.cultivate}` : ('opens' in item && item.opens) ? `city-command-submenu-${item.opens}` : item.command ? `city-command-command-${item.command}` : undefined}
                 className={isDisabled(item) ? 'is-disabled' : ('opens' in item && item.opens === activeSubmenu) ? 'is-active' : undefined}
                 disabled={isDisabled(item)}
                 title={disabledTitle(item)}

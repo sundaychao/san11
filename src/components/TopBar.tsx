@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LogOut } from 'lucide-react';
 import { useGame } from '../game/store/GameProvider';
+import { GameRulesDialog } from './GameRulesDialog';
 import { SkillCatalogDialog } from './SkillCatalogDialog';
 
 const MONTH_NAMES = ['四月', '五月', '六月', '七月', '八月', '九月', '十月', '冬月', '腊月', '正月', '二月', '三月'];
@@ -9,11 +10,12 @@ const TEN_DAY_LABELS = { 1: '上旬', 2: '中旬', 3: '下旬' } as const;
 /**
  * 顶部信息条：只保留日期/旬/势力/行动力/技巧P 等信息展示。
  * 武将一览、存档、结束本旬、进行下月等操作改由地图右键菜单承载，这里不再重复放置按钮。
- * 右上角的「查看特技」为临时面板入口，仅用于开发期查阅特技清单。
+ * 右上角的「游戏规则」「查看特技」为临时面板入口，仅用于开发期查阅。
  */
 export function TopBar() {
   const { state, disconnectOnline, online } = useGame();
   const [showSkillCatalog, setShowSkillCatalog] = useState(false);
+  const [showGameRules, setShowGameRules] = useState(false);
   if (!state) return null;
   const force = state.forces[state.playerForceId];
   const year = 13 + Math.floor((state.month + 2) / 12);
@@ -46,6 +48,14 @@ export function TopBar() {
           <button
             className="skill-catalog-trigger"
             type="button"
+            data-testid="open-game-rules-button"
+            onClick={() => setShowGameRules(true)}
+          >
+            游戏规则
+          </button>
+          <button
+            className="skill-catalog-trigger"
+            type="button"
             data-testid="open-skill-catalog-button"
             onClick={() => setShowSkillCatalog(true)}
           >
@@ -57,6 +67,7 @@ export function TopBar() {
         </div>
       </header>
       {showSkillCatalog && <SkillCatalogDialog onClose={() => setShowSkillCatalog(false)} />}
+      {showGameRules && <GameRulesDialog onClose={() => setShowGameRules(false)} />}
     </>
   );
 }

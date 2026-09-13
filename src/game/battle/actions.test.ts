@@ -10,12 +10,14 @@ import { territoryCityAt, territoryForceAt } from '../territory';
 import { settleTenDay } from '../turn';
 import type { FacilityType, TroopType } from '../types';
 import * as skillHandlers from '../skills/handlers';
+import { tacticCriticalMode } from '../skills';
 import { applyCatapultSplash, attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackPlot, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, reconcileFacilityUpgrades, repairableFacilities, repairFacility, resolveFacilityUpgrade, settleBattleFacilities, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitFacilityMenuOptions, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
 import { attackablePlots } from './targetRules';
 import { applyGroundFireDamageToCities, applyImmediateFireDamageToCityAndPlot, GROUND_FIRE_CITY_DURABILITY } from './fire';
 import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 import { damageRoll } from './shared';
+import { unitCombatRating } from './officerAbilities';
 import { strategyEnergyCostForUnit } from './strategies';
 import { executeCommand } from '../commands';
 import { isGameState } from '../persistence';
@@ -1558,29 +1560,32 @@ describe('battle deployment and movement actions', () => {
     expect(highDamage).toBeLessThan(lowDamage);
   });
 
-  it('scales the flat base damage down for under-strength units', () => {
+  it('scales damage with committed troops and keeps remnants below their own size', () => {
     // 出征下限为 1000 兵，但部队被打残后仍可继续攻击。
-    // 固定基数与伤害地板必须随兵力等比衰减，否则残兵会打出远超自身兵力的伤害。
+    // 基础伤害与投入兵力严格成正比（已无固定基数），残兵段再被残兵系数二次衰减。
     const damageAt = (troops: number) => {
       const state = deployUnit(createGame('liu', 77), 'liu', {
         cityId: 'jiangling', officerId: 'guan-yu', troops: 4000, food: 5000,
       });
       const attacker = Object.values(state.units)[0];
       readyUnitAt(state, attacker.id, { q: 10, r: 10 });
+      setUniformTerrain(state, 'plain');
       attacker.troops = troops;
       addEnemyUnit(state, 'enemy-remnant', { q: 11, r: 10 }, 10_000);
       return attackUnit(state, 'liu', attacker.id, 'enemy-remnant').battleDamageReports![0].amount;
     };
 
     const remnant = damageAt(200);
-    const full = damageAt(1000);
+    const half = damageAt(1000);
+    const full = damageAt(4000);
 
     // 200 兵打出的伤害必须低于自身兵力（旧公式约为 270，会超过自身兵力）
     expect(remnant).toBeLessThan(200);
-    // 满编兵力下固定基数完整生效
-    expect(full).toBeGreaterThan(240);
+    expect(half).toBeGreaterThan(remnant);
     // 兵力回到满编后恢复正常量级
-    expect(full).toBeGreaterThan(remnant);
+    expect(full).toBeGreaterThan(half);
+    // 去掉固定基数后伤害与投入兵力成正比：1000 → 4000（同一随机种子）约 4 倍
+    expect(full / half).toBeGreaterThan(3);
   });
 
   it('uses the highest-war deputy without changing leader leadership', () => {
@@ -1606,16 +1611,20 @@ describe('battle deployment and movement actions', () => {
   it('applies B, A, and S tactic damage multipliers before rounding', () => {
     const criticalChance = tacticCriticalChance(97, 'S') / 100;
     const seed = seedForFirstRoll((value) => value >= criticalChance);
-    const damages = (['B', 'A', 'S'] as const).map((grade) => {
+    // 适性现在同时参与「部队攻防力」，三个等级的基础伤害并不相同，故各自取一次基准
+    const cases = (['B', 'A', 'S'] as const).map((grade) => {
       const { state, attacker } = spearTacticState(grade, seed);
-      return useUnitTactic(state, 'liu', attacker.id, 'enemy-tactic', 'spear-thrust').battleDamageReports![0].amount;
+      const amount = useUnitTactic(state, 'liu', attacker.id, 'enemy-tactic', 'spear-thrust').battleDamageReports![0].amount;
+      const { state: baseline, attacker: baselineAttacker } = spearTacticState(grade, seed);
+      baseline.rngCursor = nextRandom(seed, baseline.rngCursor).cursor;
+      // 防守方曹仁统率被对齐为95，自身带光环（范围1、相邻）→ 伤害×0.95，需传入防守方
+      const baseDamage = damageRoll(baseline, baselineAttacker, 'plain', false, baseline.units['enemy-tactic']);
+      return { amount, baseDamage };
     });
-    const { state, attacker } = spearTacticState('B', seed);
-    state.rngCursor = nextRandom(seed, state.rngCursor).cursor;
-    // 防守方曹仁统率被对齐为95，自身带光环（范围1、相邻）→ 伤害×0.95，需传入防守方
-    const baseDamage = damageRoll(state, attacker, 'plain', false, state.units['enemy-tactic']);
 
-    expect(damages).toEqual([1, 1.1, 1.2].map((multiplier) => Math.round(baseDamage * 1.18 * multiplier)));
+    expect(cases.map((entry) => entry.amount)).toEqual(
+      cases.map((entry, index) => Math.round(entry.baseDamage * 1.18 * [1, 1.1, 1.2][index])),
+    );
   });
 
   it('uses one tactic critical roll and reports a 135 percent critical hit', () => {
@@ -3586,5 +3595,212 @@ describe('strategy officer skills', () => {
     } finally {
       applySpy.mockRestore();
     }
+  });
+});
+
+describe('兵种相克在伤害结算中生效', () => {
+  const S_APTITUDES = { spear: 'S', halberd: 'S', crossbow: 'S', cavalry: 'S', siege: 'C', navy: 'C' } as const;
+
+  /**
+   * 每个场景都把攻方攻击力与守方防御力对齐到同一个值（74），
+   * 使统率修正恒为 1.0，从而让伤害差异**只**来自相克系数。
+   * 统率一律低于 90，避免武将光环介入破坏对照。
+   *
+   * 攻方攻击力 = floor(统率 × 基础攻 / 100)：
+   *   枪 95 → 统率 78；骑 105 → 统率 71。
+   * 守方防御力 = floor(统率 × 基础防 / 100)：
+   *   枪 85 → 统率 88；戟 105 → 统率 71；骑 95 → 统率 78。
+   */
+  function matchupState(input: {
+    attackerTroop: TroopType;
+    attackerLeadership: number;
+    defenderTroop: TroopType;
+    defenderLeadership: number;
+    attackerSkill?: string;
+    defenderSkill?: string;
+  }) {
+    const state = createGame('liu', 7);
+    setUniformTerrain(state, 'plain');
+    state.officers['guan-yu'].skill = input.attackerSkill ?? '无';
+    state.officers['guan-yu'].stats.leadership = input.attackerLeadership;
+    state.officers['guan-yu'].stats.war = 60;
+    state.officers['guan-yu'].aptitudes = { ...S_APTITUDES };
+    state.officers['guan-yu'].location = { kind: 'unit', unitId: 'matchup-attacker' };
+    state.officers['cao-ren'].skill = input.defenderSkill ?? '无';
+    state.officers['cao-ren'].stats.leadership = input.defenderLeadership;
+    state.officers['cao-ren'].stats.war = 60;
+    state.officers['cao-ren'].aptitudes = { ...S_APTITUDES };
+    state.officers['cao-ren'].location = { kind: 'unit', unitId: 'matchup-target' };
+    state.units = {
+      'matchup-attacker': {
+        id: 'matchup-attacker', kind: 'combat', forceId: 'liu', leaderId: 'guan-yu', officerIds: ['guan-yu'],
+        homeCityId: 'jiangling', troopType: input.attackerTroop, q: 10, r: 10, troops: 10_000, food: 10_000,
+        stamina: 100, energy: 100, movementRemaining: 20, moved: false, acted: false,
+      },
+      'matchup-target': {
+        id: 'matchup-target', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
+        homeCityId: 'xiangyang', troopType: input.defenderTroop, q: 11, r: 10, troops: 10_000, food: 10_000,
+        stamina: 100, energy: 100, movementRemaining: 20, moved: false, acted: false,
+      },
+    };
+    return state;
+  }
+
+  function damageOf(input: Parameters<typeof matchupState>[0]) {
+    const state = matchupState(input);
+    return damageRoll(state, state.units['matchup-attacker'], 'plain', false, state.units['matchup-target']);
+  }
+
+  it('同一攻击力对同一防御力时，伤害比严格等于相克系数比', () => {
+    // 三组 state 用同一个 seed，随机修正一致
+    const baseline = damageOf({ attackerTroop: 'spear', attackerLeadership: 78, defenderTroop: 'spear', defenderLeadership: 88 });
+    const vsHalberd = damageOf({ attackerTroop: 'spear', attackerLeadership: 78, defenderTroop: 'halberd', defenderLeadership: 71 });
+    const vsCavalry = damageOf({ attackerTroop: 'spear', attackerLeadership: 78, defenderTroop: 'cavalry', defenderLeadership: 78 });
+
+    expect(baseline).toBeGreaterThan(0);
+    expect(vsHalberd / baseline).toBeCloseTo(0.85, 2);
+    expect(vsCavalry / baseline).toBeCloseTo(1.15, 2);
+  });
+
+  it('骑兵侧：对骑 1.0、对枪与对戟 1.10、对弩 1.20', () => {
+    // 攻方固定为骑兵、统率 63 → 攻击力 floor(63 × 1.05) = 66，
+    // attackScore 与统率修正对四组完全一致，差异只来自守方兵种的相克系数。
+    // 守方统率按各自基础防御回推，使防御力同样落在 66：
+    //   骑 95 → 70；枪 85 → 78；戟 105 → 63；弩 75 → 88（全部低于 90，不触发光环）。
+    const attacker = { attackerTroop: 'cavalry' as TroopType, attackerLeadership: 63 };
+    const baseline = damageOf({ ...attacker, defenderTroop: 'cavalry', defenderLeadership: 70 });
+    const vsSpear = damageOf({ ...attacker, defenderTroop: 'spear', defenderLeadership: 78 });
+    const vsHalberd = damageOf({ ...attacker, defenderTroop: 'halberd', defenderLeadership: 63 });
+    const vsCrossbow = damageOf({ ...attacker, defenderTroop: 'crossbow', defenderLeadership: 88 });
+
+    expect(baseline).toBeGreaterThan(0);
+    expect(vsSpear / baseline).toBeCloseTo(1.1, 2);
+    expect(vsHalberd / baseline).toBeCloseTo(1.1, 2);
+    expect(vsCrossbow / baseline).toBeCloseTo(1.2, 2);
+  });
+
+  it('「布阵」规避不利相克，但保留有利加成', () => {
+    // 枪打戟 0.85：攻方吃亏 → 攻方带布阵则归 1.0
+    const spearVsHalberd = {
+      attackerTroop: 'spear' as TroopType, attackerLeadership: 78,
+      defenderTroop: 'halberd' as TroopType, defenderLeadership: 71,
+    };
+    expect(damageOf({ ...spearVsHalberd, attackerSkill: '布阵' }) / damageOf(spearVsHalberd))
+      .toBeCloseTo(1 / 0.85, 2);
+
+    // 枪打骑 1.15：守方吃亏 → 守方带布阵则归 1.0
+    const spearVsCavalry = {
+      attackerTroop: 'spear' as TroopType, attackerLeadership: 78,
+      defenderTroop: 'cavalry' as TroopType, defenderLeadership: 78,
+    };
+    expect(damageOf({ ...spearVsCavalry, defenderSkill: '布阵' }) / damageOf(spearVsCavalry))
+      .toBeCloseTo(1 / 1.15, 2);
+
+    // 骑打枪 1.10：攻方占优 → 带布阵不改变任何东西（有利加成保留）
+    const cavalryVsSpear = {
+      attackerTroop: 'cavalry' as TroopType, attackerLeadership: 63,
+      defenderTroop: 'spear' as TroopType, defenderLeadership: 78,
+    };
+    expect(damageOf({ ...cavalryVsSpear, attackerSkill: '布阵' })).toBe(damageOf(cavalryVsSpear));
+  });
+
+  it('「布阵」使目标完全免疫战法暴击', () => {
+    const withoutSkill = matchupState({
+      attackerTroop: 'spear', attackerLeadership: 78, defenderTroop: 'spear', defenderLeadership: 88,
+    });
+    expect(tacticCriticalMode(
+      withoutSkill, withoutSkill.units['matchup-attacker'], withoutSkill.units['matchup-target'], 'spear-thrust',
+    )).not.toBe('none');
+
+    const withSkill = matchupState({
+      attackerTroop: 'spear', attackerLeadership: 78, defenderTroop: 'spear', defenderLeadership: 88,
+      defenderSkill: '布阵',
+    });
+    expect(tacticCriticalMode(
+      withSkill, withSkill.units['matchup-attacker'], withSkill.units['matchup-target'], 'spear-thrust',
+    )).toBe('none');
+  });
+});
+
+describe('基础伤害不含攻击方武力，精造加在基础攻防上', () => {
+  const S_APTITUDES = { spear: 'S', halberd: 'S', crossbow: 'S', cavalry: 'S', siege: 'C', navy: 'C' } as const;
+
+  /** 攻方枪兵统率 78（攻击力 floor(78×1.0×95/100)=74），守方枪兵统率 88（防御力同样 74）→ 统率修正恒为 1.0 */
+  function duelState(mutate?: (state: ReturnType<typeof createGame>) => void) {
+    const state = createGame('liu', 7);
+    setUniformTerrain(state, 'plain');
+    for (const [id, leadership] of [['guan-yu', 78], ['cao-ren', 88]] as const) {
+      const officer = state.officers[id];
+      officer.stats.leadership = leadership;
+      officer.stats.war = 60;
+      officer.aptitudes = { ...S_APTITUDES };
+      officer.location = { kind: 'unit', unitId: id === 'guan-yu' ? 'duel-attacker' : 'duel-target' };
+    }
+    state.units = {
+      'duel-attacker': {
+        id: 'duel-attacker', kind: 'combat', forceId: 'liu', leaderId: 'guan-yu', officerIds: ['guan-yu'],
+        homeCityId: 'jiangling', troopType: 'spear', q: 10, r: 10, troops: 10_000, food: 10_000,
+        stamina: 100, energy: 100, movementRemaining: 20, moved: false, acted: false,
+      },
+      'duel-target': {
+        id: 'duel-target', kind: 'combat', forceId: 'cao', leaderId: 'cao-ren', officerIds: ['cao-ren'],
+        homeCityId: 'xiangyang', troopType: 'spear', q: 11, r: 10, troops: 10_000, food: 10_000,
+        stamina: 100, energy: 100, movementRemaining: 20, moved: false, acted: false,
+      },
+    };
+    mutate?.(state);
+    return state;
+  }
+
+  const damageOf = (mutate?: Parameters<typeof duelState>[0]) => {
+    const state = duelState(mutate);
+    return damageRoll(state, state.units['duel-attacker'], 'plain', false, state.units['duel-target']);
+  };
+
+  it('攻击方武力高低不改变普攻伤害', () => {
+    const low = damageOf((state) => { state.officers['guan-yu'].stats.war = 1; });
+    const high = damageOf((state) => { state.officers['guan-yu'].stats.war = 100; });
+
+    expect(low).toBeGreaterThan(0);
+    // 旧公式里武力走 war/3000，100 与 1 之间会让伤害差出 3% 以上
+    expect(high).toBe(low);
+  });
+
+  it('守方武力高低同样不改变所受伤害', () => {
+    const low = damageOf((state) => { state.officers['cao-ren'].stats.war = 1; });
+    const high = damageOf((state) => { state.officers['cao-ren'].stats.war = 100; });
+    expect(high).toBe(low);
+  });
+
+  it('武器精造把 +10 加在基础攻击上（研究后攻击力上升、伤害上升）', () => {
+    const plain = duelState();
+    const ratingBefore = unitCombatRating(plain, plain.units['duel-attacker']).attack;
+    const withTech = duelState((state) => { state.forces.liu.techNodes = ['wuqijingzao']; });
+    const ratingAfter = unitCombatRating(withTech, withTech.units['duel-attacker']).attack;
+
+    // 攻击力 = floor(78 × 1.0 × (95 + 10) / 100) = 81，研究前 floor(78 × 95 / 100) = 74
+    expect(ratingBefore).toBe(74);
+    expect(ratingAfter).toBe(81);
+    expect(ratingAfter - ratingBefore).toBe(7);
+
+    const before = damageOf();
+    const after = damageOf((state) => { state.forces.liu.techNodes = ['wuqijingzao']; });
+    // 攻击力 74 → 81，守方防御力仍为 74，统率修正 1.0 → 1.028
+    expect(after / before).toBeCloseTo(1 + 7 / 250, 2);
+  });
+
+  it('防具精造把 +10 加在基础防御上（研究后防御力上升、伤害下降）', () => {
+    const plain = duelState();
+    const ratingBefore = unitCombatRating(plain, plain.units['duel-target']).defense;
+    const withTech = duelState((state) => { state.forces.cao.techNodes = ['fangjujingzao']; });
+    const ratingAfter = unitCombatRating(withTech, withTech.units['duel-target']).defense;
+
+    // 防御力 = floor(88 × 1.0 × (85 + 10) / 100) = 83，研究前 floor(88 × 85 / 100) = 74
+    expect(ratingBefore).toBe(74);
+    expect(ratingAfter).toBe(83);
+
+    const before = damageOf();
+    const after = damageOf((state) => { state.forces.cao.techNodes = ['fangjujingzao']; });
+    expect(after / before).toBeCloseTo(1 - 9 / 250, 2);
   });
 });

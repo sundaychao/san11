@@ -5,15 +5,17 @@ import {
   AUTO_SAVE_KEY,
   MANUAL_SAVE_KEY,
   loadSave,
+  migrateSaveToCurrent,
   type SaveAdapter,
   writeSave,
 } from './persistence';
+import { relationTierOf } from './diplomacy';
 import { createGame } from './scenario/jingxiang208';
 import { createGameFromMap } from './scenario/customMap';
 import type { EditorMapPayload } from './map-editor/editor';
 import china42Data from './scenario/china42.json';
 import china42xData from './scenario/maps/china42x.json';
-import type { GridCell } from './types';
+import type { ForceId, GridCell, OfficerLocation } from './types';
 import { createMobileDuelGame } from './scenario/mobileDuel';
 
 class MemoryStorage implements SaveAdapter {
@@ -23,12 +25,26 @@ class MemoryStorage implements SaveAdapter {
   removeItem(key: string) { this.values.delete(key); }
 }
 
+/** 在途外交使者位置（江陵出使宛，去程第 5 旬） */
+function envoyLocation(): OfficerLocation {
+  return {
+    kind: 'envoy',
+    fromCityId: 'jiangling',
+    targetForceId: 'cao',
+    action: 'goodwill',
+    outboundTenDays: 5,
+    returnTenDays: 5,
+    phase: 'outbound',
+    remainingTenDays: 5,
+  };
+}
+
 describe('persistence', () => {
   let storage: MemoryStorage;
 
   beforeEach(() => { storage = new MemoryStorage(); });
 
-  it('round-trips a valid v2 autosave', () => {
+  it('round-trips a valid v3 autosave', () => {
     const state = createGame('liu', 9);
 
     writeSave(storage, 'auto', state);
@@ -232,7 +248,7 @@ describe('persistence', () => {
     expect(assignedOfficerIds.map((officerId) => loaded.state.officers[officerId].skill)).toEqual(skillNames);
 
     const serialized = storage.getItem(AUTO_SAVE_KEY)!;
-    expect((JSON.parse(serialized) as { schemaVersion: number }).schemaVersion).toBe(2);
+    expect((JSON.parse(serialized) as { schemaVersion: number }).schemaVersion).toBe(3);
     for (const derivedKey of [
       'ActiveSkill',
       'sourceOfficerIds',
@@ -289,6 +305,47 @@ describe('persistence', () => {
     writeSave(storage, 'auto', state);
 
     expect(loadSave(storage, 'auto')).toEqual({ ok: true, state });
+  });
+
+  it('round-trips an in-transit diplomacy envoy location', () => {
+    const state = createGame('liu', 1);
+    const envoy = envoyLocation();
+    const officer = Object.values(state.officers).find((o) => o.forceId === 'liu' && o.location.kind === 'city')!;
+    officer.location = envoy;
+    officer.acted = true;
+
+    writeSave(storage, 'auto', state);
+    const restored = loadSave(storage, 'auto');
+
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.state.officers[officer.id].location).toEqual(envoy);
+  });
+
+  it('accepts an envoy whose origin city was captured mid-journey', () => {
+    const state = createGame('liu', 1);
+    const officer = Object.values(state.officers).find((o) =>
+      o.forceId === 'liu' && o.location.kind === 'city' && o.location.cityId === 'jiangling')!;
+    // 出发城（宛）已在出使途中被敌方攻占：使者仍在返程，存档不能因此被判无效
+    // —— 返程时由 settleEnvoys 改回本方仍持有的城池
+    officer.location = { ...envoyLocation(), fromCityId: 'wan' } as OfficerLocation;
+    officer.acted = true;
+
+    writeSave(storage, 'auto', state);
+
+    const restored = loadSave(storage, 'auto');
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.state.officers[officer.id].location.kind).toBe('envoy');
+  });
+
+  it('rejects an envoy location with an unknown diplomacy action', () => {
+    const state = createGame('liu', 1);
+    const officer = Object.values(state.officers).find((o) => o.forceId === 'liu' && o.location.kind === 'city')!;
+    officer.location = { ...envoyLocation(), action: 'bribe' } as unknown as typeof officer.location;
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify(state));
+
+    expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '存档无法读取' });
   });
 
   it('rejects an invalid strategy result report', () => {
@@ -387,6 +444,64 @@ describe('persistence', () => {
     storage.setItem(AUTO_SAVE_KEY, JSON.stringify(state));
 
     expect(loadSave(storage, 'auto')).toEqual({ ok: false, reason: '存档版本不兼容' });
+  });
+
+  it('migrates v2 diplomacy (−100~100) into the original 0~100 range', () => {
+    const state = createGame('liu', 1);
+    const other = (Object.keys(state.forces) as ForceId[]).find((id) => id !== state.playerForceId)!;
+    // 伪造旧档：破盟一次后双方都是 −60
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify({
+      ...state,
+      schemaVersion: 2,
+      forces: {
+        ...state.forces,
+        [state.playerForceId]: { ...state.forces[state.playerForceId], diplomacy: { [other]: -60 } },
+        [other]: { ...state.forces[other], diplomacy: { [state.playerForceId]: -60 } },
+      },
+    }));
+
+    const result = loadSave(storage, 'auto');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.schemaVersion).toBe(3);
+    // −60 / 2 + 50 = 20（「不和」档）
+    expect(result.state.forces[state.playerForceId].diplomacy?.[other]).toBe(20);
+    expect(result.state.forces[other].diplomacy?.[state.playerForceId]).toBe(20);
+  });
+
+  it('migrates v2 neutral 0 to 50 so old saves do not fall into 险恶', () => {
+    const state = createGame('liu', 1);
+    const other = (Object.keys(state.forces) as ForceId[]).find((id) => id !== state.playerForceId)!;
+    storage.setItem(AUTO_SAVE_KEY, JSON.stringify({
+      ...state,
+      schemaVersion: 2,
+      forces: {
+        ...state.forces,
+        [state.playerForceId]: { ...state.forces[state.playerForceId], diplomacy: { [other]: 0 } },
+      },
+    }));
+
+    const result = loadSave(storage, 'auto');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.forces[state.playerForceId].diplomacy?.[other]).toBe(50);
+    expect(relationTierOf(50)).toBe('neutral');
+  });
+
+  it('maps the v2 extremes onto the v3 bounds and leaves v3 untouched', () => {
+    const upgraded = migrateSaveToCurrent({
+      schemaVersion: 2,
+      forces: { cao: { diplomacy: { liu: -100, sun: 100, biao: 0 } } },
+    }) as { schemaVersion: number; forces: { cao: { diplomacy: Record<string, number> } } };
+    expect(upgraded.schemaVersion).toBe(3);
+    expect(upgraded.forces.cao.diplomacy).toEqual({ liu: 0, sun: 100, biao: 50 });
+
+    const current = migrateSaveToCurrent({
+      schemaVersion: 3,
+      forces: { cao: { diplomacy: { liu: 70 } } },
+    }) as { forces: { cao: { diplomacy: Record<string, number> } } };
+    expect(current.forces.cao.diplomacy).toEqual({ liu: 70 });
+    expect(migrateSaveToCurrent({ schemaVersion: 1 })).toBeNull();
   });
 
   it('rejects negative resources and invalid percentages', () => {

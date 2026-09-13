@@ -1,4 +1,4 @@
-import { isBattleShip, TRANSPORT_MOVEMENT, TROOP_MOVEMENT } from '../armaments';
+import { isBattleShip, siegeWeaponKindOf, TRANSPORT_MOVEMENT, TROOP_MOVEMENT } from '../armaments';
 import type { AptitudeGrade, ArmyUnit, FacilityType, GameState, GridCell, TerrainType, TroopType } from '../types';
 import type { GridCoord } from './grid';
 
@@ -8,14 +8,21 @@ export const BASE_MOVEMENT = TROOP_MOVEMENT.sword;
 export const DEFENSE_MIN_TROOPS = 1000;
 export const DEFENSE_MAX_TROOPS = 3000;
 /**
- * 普攻/战法的固定伤害基数与伤害地板（满编兵力下生效）。
- * 两者配套校准：240 × 最惨乘区(≈0.503) ≈ 120。
+ * 伤害地板（满编兵力下生效）：最终伤害 = clamp(基础伤害 × 各乘区, MIN_ATTACK_DAMAGE × 残兵系数, 2200)。
+ *
+ * 设 k = 0.08 + 统率 / 2000 ∈ 0.08~0.13（攻击方武力不计入，见 legacyCore 的 coefficient）。
+ * 基础伤害与投入兵力**严格成正比**、没有固定基数（原 240 已移除，2026-09-13），
+ * 因此投入兵力 ≤ 1000 时基础伤害只有 80~130，与地板 120 同量级 ——
+ * 只要乘区连乘 < ~1 就会触底。即此段基本表现为「小部队保底 120 伤害」的固定值，
+ * 兵力再多也不变；兵力更少时地板随残兵系数同步缩小（200 兵 → 地板 24）。
+ *
+ * 调整 k 的系数、相克幅度或地形倍率时，要一并复核这个值。
  */
-export const BASE_ATTACK_DAMAGE = 240;
 export const MIN_ATTACK_DAMAGE = 120;
 /**
- * 满编兵力。部队兵力低于此值时，固定基数与伤害地板按 兵力/满编 等比衰减，
- * 避免被打残的部队凭空打出远超自身兵力的伤害（出征下限为 1000 兵）。
+ * 满编兵力。部队兵力低于此值时，基础伤害与伤害地板按 兵力/满编 等比衰减，
+ * 避免被打残的部队打出与其兵力不相称的伤害（出征下限为 1000 兵）。
+ * 因为基础伤害本身已与兵力成正比，这一段的衰减实际是二次的（∝ 兵力²）。
  */
 export const FULL_DAMAGE_TROOPS = 1000;
 /**
@@ -71,6 +78,9 @@ export const WATER_TERRAINS: ReadonlySet<TerrainType> = new Set<TerrainType>(['w
 export function isWaterTerrain(terrain: TerrainType | undefined): boolean {
   return terrain !== undefined && WATER_TERRAINS.has(terrain);
 }
+
+/** 通用钳制：把 value 限制在 [min, max] 区间内（战斗模块的公共实现，避免各处重复内联） */
+export const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 /** 不可通行地形（川/崖/山；原版 baseCost=999）。
  * 岸边(shore)不在其中：本作按「岸边停靠」规则放开——岸是水陆交接的陆地格，
@@ -238,6 +248,8 @@ export const TACTIC_APTITUDE_DAMAGE: Record<AptitudeGrade, number> = {
   B: 1,
   A: 1.1,
   S: 1.2,
+  'S+': 1.3,
+  'S++': 1.4,
 };
 
 export const TROOP_LABEL: Partial<Record<TroopType, string>> = {
@@ -246,6 +258,119 @@ export const TROOP_LABEL: Partial<Record<TroopType, string>> = {
   crossbow: '弩兵',
   cavalry: '骑兵',
 };
+
+/**
+ * 部队的「战斗形态」：兵种 / 攻城器械形态 / 舰船形态，三选一。
+ * 与显示名同源、同样吃势力科技：冲车→木兽、井阑→投石车、楼船→斗舰。
+ * 器械与舰船优先于基础兵种——上了船就不再按骑兵/枪兵的基础攻防算。
+ */
+export type TroopCombatForm =
+  | 'sword' | 'spear' | 'halberd' | 'crossbow' | 'cavalry'
+  | 'ram' | 'woodenBeast' | 'tower' | 'catapult'
+  | 'boat' | 'ship' | 'battleShip';
+
+/** 各战斗形态的基础攻击力（出征界面「攻击」的乘数之一） */
+export const TROOP_BASE_ATTACK: Record<TroopCombatForm, number> = {
+  sword: 40,
+  spear: 95,
+  halberd: 75,
+  crossbow: 85,
+  cavalry: 105,
+  ram: 70,
+  woodenBeast: 90,
+  tower: 80,
+  catapult: 95,
+  boat: 75,
+  ship: 90,
+  battleShip: 100,
+};
+
+/** 各战斗形态的基础防御力（出征界面「防御」的乘数之一） */
+export const TROOP_BASE_DEFENSE: Record<TroopCombatForm, number> = {
+  sword: 40,
+  spear: 85,
+  halberd: 105,
+  crossbow: 75,
+  cavalry: 95,
+  ram: 90,
+  woodenBeast: 90,
+  tower: 80,
+  catapult: 85,
+  boat: 75,
+  ship: 85,
+  battleShip: 85,
+};
+
+/**
+ * 兵种相克系数（行 = 攻方，列 = 守方），《血色衣冠 6.0》口径。
+ *
+ * 与《三国志11》原版的对称三角（1.15 / 0.85）不同，血色衣冠是**不对称**的，
+ * 且枪骑为**互克**：枪打骑 ×1.15、骑打枪 ×1.10，双方都增伤。
+ * 未登记的组合同为 1.0 —— 剑兵、攻城器械、舰船都不参与相克。
+ * 反击时攻守互换，本表自动取到反向系数，无需额外处理。
+ *
+ * 数据来源：《血色衣冠 6.0》相克参数表（枪对戟 0.85、戟对枪 1.2、戟对戟 0.8、
+ * 枪对骑 1.15、骑对枪 1.10、骑对弩 1.20、弩对戟 0.70、戟对弩 0.95、骑对枪戟 1.10）。
+ */
+export const TROOP_MATCHUP: Partial<Record<TroopCombatForm, Partial<Record<TroopCombatForm, number>>>> = {
+  spear: { halberd: 0.85, cavalry: 1.15 },
+  halberd: { spear: 1.2, halberd: 0.8, crossbow: 0.95, cavalry: 0.85 },
+  cavalry: { spear: 1.1, halberd: 1.1, crossbow: 1.2 },
+  crossbow: { halberd: 0.7 },
+};
+
+/** 相克系数的缺省值：未登记的兵种组合，以及不参与相克的剑兵 / 器械 / 舰船 */
+export const NEUTRAL_MATCHUP_MULTIPLIER = 1;
+
+/** 攻方战斗形态对守方战斗形态的相克系数 */
+export function troopMatchupModifier(attacker: TroopCombatForm, defender: TroopCombatForm): number {
+  return TROOP_MATCHUP[attacker]?.[defender] ?? NEUTRAL_MATCHUP_MULTIPLIER;
+}
+
+/**
+ * 兵种适性对部队攻防力的乘数。
+ * 注意与 `TACTIC_APTITUDE_DAMAGE` 区分：本表作用于攻防力（进而影响普攻与战法的统率修正），
+ * 后者只作用于战法威力倍率。
+ */
+export const APTITUDE_COMBAT_MULTIPLIER: Record<AptitudeGrade, number> = {
+  'S++': 1.2,
+  'S+': 1.1,
+  S: 1.0,
+  A: 0.9,
+  B: 0.8,
+  C: 0.6,
+};
+
+/** 无适性部队（剑兵、运输队）的适性乘数 */
+export const NEUTRAL_APTITUDE_MULTIPLIER = 1;
+
+/**
+ * 运输队的攻防力：**固定 20**，不吃统率、适性、兵种基础值与武器/防具精造。
+ *
+ * 运输队是辎重队而非战斗编制（原版同样极弱），若按 `floor(统率 × 适性乘数 × 剑兵基础攻防 / 100)`
+ * 计算，一支由高统率武将押运的输送队会突然打出接近剑兵部队的伤害。固定 20 让它
+ * 「能打但打不动」——这也是「运输队也可以攻击敌方部队」这一条的前提。
+ * 攻防同值：作为攻击方进 `LEADERSHIP_MODIFIER` 的分子，作为防守方进分母。
+ */
+export const TRANSPORT_COMBAT_RATING = 20;
+
+/** 攻防力 = floor(最高统率 × 适性乘数 × 基础攻防 / COMBAT_RATING_SCALE) */
+export const COMBAT_RATING_SCALE = 100;
+
+/**
+ * 作战部队随身携带的**资金上限（10000）**与**兵粮上限（50000）**。
+ *
+ * 运输队「补给」命令的接收方容量口径：兵力上限另有出处 —— 是主将的带兵上限
+ * （`ranks.unitTroopCapOf`，官职/爵位 + 科技加成），不在这里。资金与兵粮没有
+ * 随武将成长的自然解释，直接规定死数（用户口径）。
+ */
+export const COMBAT_UNIT_GOLD_CAP = 10000;
+export const COMBAT_UNIT_FOOD_CAP = 50000;
+
+/** 统率修正 = clamp(1 + (攻方攻击力 − 守方防御力) / DIVISOR, MIN, MAX) */
+export const LEADERSHIP_MODIFIER_DIVISOR = 250;
+export const LEADERSHIP_MODIFIER_MIN = 0.8;
+export const LEADERSHIP_MODIFIER_MAX = 1.2;
 
 export interface UnitStrategy {
   id: StrategyId;

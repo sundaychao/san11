@@ -128,6 +128,8 @@ export function SaveLoadDialog({ mode, getCamera, onClose }: SaveLoadDialogProps
       audio.emit({ type: 'menu-click-on' });
       setPendingSave(null);
       setSelectedSlot(pendingSave.slot);
+      // 存档完成直接回到游戏界面，不再停留在存档列表页
+      onClose();
     }
   };
 

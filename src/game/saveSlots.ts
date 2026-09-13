@@ -1,5 +1,5 @@
 import { CITY_IDS } from './scenario/jingxiang208';
-import { isGameState, type SaveAdapter } from './persistence';
+import { isGameState, migrateSaveToCurrent, type SaveAdapter } from './persistence';
 import type { CityId, ForceId, GameState, GridCell, TerrainType } from './types';
 
 /** 单机模式存档槽总数（原版三国志11 为 32 个，分 4 页每页 8 个） */
@@ -290,8 +290,9 @@ export async function decodeSaveBlob(raw: string): Promise<DecodeSaveResult> {
       json = raw;
     }
     const parsed = JSON.parse(json) as { schemaVersion?: unknown; grid?: unknown };
-    if (parsed?.schemaVersion !== 2) return { ok: false, reason: '存档版本不兼容' };
-    const restored = { ...(parsed as unknown as GameState), grid: decodeGrid(parsed.grid) };
+    const upgraded = migrateSaveToCurrent(parsed) as { grid?: unknown } | null;
+    if (!upgraded) return { ok: false, reason: '存档版本不兼容' };
+    const restored = { ...(upgraded as unknown as GameState), grid: decodeGrid(upgraded.grid) };
     if (!isGameState(restored)) return { ok: false, reason: '存档无法读取' };
     return { ok: true, state: restored };
   } catch {

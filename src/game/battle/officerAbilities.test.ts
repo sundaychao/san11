@@ -77,8 +77,8 @@ describe('effectiveUnitAbilities', () => {
   });
 
   it('maps aptitude and probability formulas exactly', () => {
-    const aptitudeGrades = ['C', 'B', 'A', 'S'] as const satisfies readonly AptitudeGrade[];
-    expect(aptitudeGrades.map(maxTacticTier)).toEqual([0, 1, 2, 3]);
+    const aptitudeGrades = ['C', 'B', 'A', 'S', 'S+', 'S++'] as const satisfies readonly AptitudeGrade[];
+    expect(aptitudeGrades.map(maxTacticTier)).toEqual([0, 1, 2, 3, 3, 3]);
     expect(tacticCriticalChance(60, 'B')).toBe(5);
     expect(tacticCriticalChance(100, 'S')).toBe(27);
     expect(harmfulStrategySuccessChance(100, 40)).toBe(95);

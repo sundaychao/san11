@@ -122,9 +122,16 @@ function isActionableFriendlyUnit(unit: ArmyUnit, forceId: ArmyUnit['forceId']) 
   return unit.forceId === forceId && unit.kind !== 'transport' && !unit.moved && !unit.acted && !unitIsIncapacitated(unit) && unit.movementRemaining > 0;
 }
 
+/**
+ * 射程内的敌方部队。
+ *
+ * 运输队**可以**攻击敌方部队（攻防力固定 20，见 `TRANSPORT_COMBAT_RATING`），因此这里不再按
+ * `kind` 过滤攻击方；但运输队仍然不能攻城 / 攻关 / 打设施 / 打开发地格 —— 那四个入口各自保留
+ * `kind === 'transport'` 的拦截，避免辎重队去拆城墙。
+ */
 export function attackableUnits(state: GameState, attackerId: string, origin?: GridCoord): ArmyUnit[] {
   const attacker = state.units[attackerId];
-  if (!attacker || attacker.kind === 'transport') return [];
+  if (!attacker) return [];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
   const range = unitAttackRange(state, attackerAtOrigin);
   return Object.values(state.units)

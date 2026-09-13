@@ -20,7 +20,7 @@ import { executeCommand, validateCommand } from './commands';
 import { createGame } from './scenario/jingxiang208';
 import type { CityId, GameState, Officer } from './types';
 
-/** 在指定城池注入一名在野武将（供登庸舌战测试）；置于 officers 首位确保被 findLocalTalent 优先选中 */
+/** 在指定城池注入一名在野武将（供登庸舌战测试） */
 function injectUnaffiliated(state: GameState, cityId: string): Officer {
   const officer: Officer = {
     id: `uto-${cityId}`,
@@ -56,9 +56,9 @@ describe('舌战系统（移植小程序引擎）', () => {
     const state = createGame('cao', 1);
     const wan = state.cities.wan;
     wan.gold = 2000;
-    injectUnaffiliated(state, 'wan');
+    const injectTarget = injectUnaffiliated(state, 'wan');
 
-    const command = { type: 'talent' as const, cityId: 'wan' as CityId, officerId: 'cao-cao' };
+    const command = { type: 'talent' as const, cityId: 'wan' as CityId, officerId: 'cao-cao', targetOfficerId: injectTarget.id };
     expect(validateCommand(state, 'cao', command)).toEqual([]);
     const next = executeCommand(state, 'cao', command);
 

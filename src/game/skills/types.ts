@@ -20,6 +20,12 @@ export type SkillEffect =
   | { kind: 'normalAttackCritical'; condition: SkillCondition }
   | { kind: 'repeatNormalAttack'; chance: number }
   | { kind: 'negateIncomingDamage'; chance: number; condition: SkillCondition; sources: Array<'normalAttack' | 'counter' | 'tactic'> }
+  /**
+   * 规避兵种相克带来的**负面**效果，但保留有利加成（血色衣冠「布阵」）。
+   * 持有者自己吃亏的那一侧系数归 1.0，占便宜的那一侧照常生效。
+   */
+  | { kind: 'ignoreMatchupPenalty' }
+  | { kind: 'tacticCriticalImmune' }
   | { kind: 'noCounterAttack'; chance: number; terrain: 'land' | 'water' }
   | { kind: 'strategyEnergyCost'; set: number }
   | { kind: 'strategyGuaranteed'; strategyIds: StrategyId[]; condition: SkillCondition }

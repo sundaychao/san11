@@ -4,10 +4,10 @@ import { createBattleGrid, GRID_HEIGHT, GRID_WIDTH } from './scenario';
 import { createGame } from '../scenario/jingxiang208';
 
 describe('battle scenario state', () => {
-  it('creates a schema v2 game with ten-day battle fields', () => {
+  it('creates a schema v3 game with ten-day battle fields', () => {
     const game = createGame('liu', 20804);
 
-    expect(game.schemaVersion).toBe(2);
+    expect(game.schemaVersion).toBe(3);
     expect(game.tenDay).toBe(1);
     expect(game.turnForceId).toBe('liu');
     expect(game.units).toEqual({});

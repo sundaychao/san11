@@ -149,6 +149,7 @@ describe('battle queries', () => {
       strategy: false,
       facility: false,
       repair: false,
+      supply: false,
     });
   });
 });

@@ -224,7 +224,7 @@ export function availableAbilityNodes(state: GameState, forceId: ForceId): Abili
   return ABILITY_NODES.filter((node) => abilityNodeStatus(state, forceId, node) === 'available');
 }
 
-const GRADE_ORDER: AptitudeGrade[] = ['C', 'B', 'A', 'S'];
+const GRADE_ORDER: AptitudeGrade[] = ['C', 'B', 'A', 'S', 'S+', 'S++'];
 
 function aptitudeGrade(officer: Officer, key: keyof OfficerAptitudes): AptitudeGrade {
   return officer.aptitudes?.[key] ?? 'C';
@@ -238,8 +238,8 @@ export function canCultivateOfficer(officer: Officer, node: AbilityNodeDef): boo
   }
   if (node.kind === 'aptitude' && node.aptitude && node.toGrade) {
     const current = aptitudeGrade(officer, node.aptitude);
-    // B节点要求当前为C，A节点要求当前为B
-    const required: AptitudeGrade = node.toGrade === 'A' ? 'B' : 'C';
+    // 培育节点要求「当前比目标低一级」：B 节点要 C、A 节点要 B、S 节点要 A，依此类推
+    const required = GRADE_ORDER[Math.max(0, GRADE_ORDER.indexOf(node.toGrade) - 1)];
     return current === required;
   }
   if (node.kind === 'stat' && node.stat && node.cap) {

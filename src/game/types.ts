@@ -82,7 +82,7 @@ export interface Stats {
   charisma: number;
 }
 
-export type AptitudeGrade = 'S' | 'A' | 'B' | 'C';
+export type AptitudeGrade = 'S++' | 'S+' | 'S' | 'A' | 'B' | 'C';
 
 export interface OfficerAptitudes {
   spear: AptitudeGrade;
@@ -130,6 +130,8 @@ export interface Officer {
   health?: OfficerHealth;
   /** 禁止仕官到期月份（被释放或登用失败后，约6个月/3个月） */
   bannedUntilMonth?: number;
+  /** 仕龄（整年数，血色衣冠6.0新忠诚系统）：换主时重置为0、被俘仍累计；在仕武将缺省视为已仕1年 */
+  serviceYears?: number;
   /** 性别：婚姻/配偶系统（默认男性） */
   gender?: 'male' | 'female';
   /** 武将性格（单挑/舌战愤怒模式）：莽撞/刚胆/冷静/胆小 */
@@ -167,7 +169,29 @@ export type OfficerLocation =
   | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'research'; nodeId: TechNodeId; remainingTenDays: number; lead?: boolean }
   | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'cultivate'; nodeId: string; remainingTenDays: number }
   | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'construction'; facility: string; plotIndex: number; remainingTenDays: number }
-  | { kind: 'captive'; cityId: CityId; captorForceId: ForceId; capturedTenDays: number };
+  | { kind: 'captive'; cityId: CityId; captorForceId: ForceId; capturedTenDays: number }
+  | {
+    /**
+     * 外交使者：奉命出使对方势力。去程/返程各按「出发据点 → 对方势力君主所在城池」的移动旬数计，
+     * 去程到点当旬结算外交效果（亲善/同盟/停战/请求援军/破弃），随后自动转返程，回到出发据点才恢复可用。
+     */
+    kind: 'envoy';
+    /** 出发城池（关隘宿主时为该关隘的所属城，也是返程落点依据） */
+    fromCityId: CityId;
+    /** 出发据点为关隘时的关隘 id；返程回到这个关隘而不是城池 */
+    fromPassId?: PassId;
+    targetForceId: ForceId;
+    action: DiplomacyAction;
+    /** 随行礼金（同盟/停战用，出发时已从出发据点扣除） */
+    gold?: number;
+    /** 停战期限（月） */
+    months?: number;
+    /** 去程与返程旬数：出发当刻定格，避免途中对方迁都导致行程中途变化 */
+    outboundTenDays: number;
+    returnTenDays: number;
+    phase: 'outbound' | 'return';
+    remainingTenDays: number;
+  };
 
 export interface City {
   id: CityId;
@@ -277,7 +301,7 @@ export interface Force {
   abilityResearch?: AbilityResearchState;
   /** 当前爵位（随城市数量每月自动晋升） */
   rank?: RankId;
-  /** 外交关系：对方势力id → 好感度（-100~100，亲善/流言会影响） */
+  /** 外交关系：对方势力id → 友好度（0~100，50 为中立；亲善与同盟成败/破盟会改变它） */
   diplomacy?: Partial<Record<ForceId, number>>;
   /** 同盟势力（互相不攻击、可请求援军） */
   allies?: ForceId[];
@@ -467,7 +491,11 @@ export interface Facility {
 }
 
 export interface GameState {
-  schemaVersion: 2;
+  /**
+   * 存档结构版本。改动字段的语义（如友好度区间）时必须递增，
+   * 并在 `persistence.migrateSaveToCurrent` 里补上对应迁移。
+   */
+  schemaVersion: 3;
   scenarioId: 'jingxiang-208' | 'mobile-duel' | 'custom-map';
   gridWidth?: number;
   gridHeight?: number;
@@ -557,8 +585,9 @@ export interface ArmyUnit {
   gold?: number;
   /**
    * 出征时从据点带走的兵装（枪戟弩马按兵力 1:1，楼船/冲车/井阑各 1）。
-   * 部队回城/进关并账时按实际并入兵力返还（枪戟弩马）或整件返还（楼船/冲车/井阑），
-   * 见 `mergeUnitIntoStronghold`。未记录该字段的部队（疆域防御队、输送队、旧存档）不返还。
+   * 战斗部队回城/进关并账时按实际并入兵力返还（枪戟弩马）或整件返还（楼船/冲车/井阑）；
+   * **输送队押运的是货物**，一律整件返还 —— 两种口径见 `strongholds.mergeUnitIntoStronghold`
+   * 与 `returnArmamentsToStronghold`。未记录该字段的部队（疆域防御队、旧存档）不返还。
    */
   armaments?: Partial<CityArmaments>;
   q: number;
@@ -581,12 +610,15 @@ export interface ArmyUnit {
   delegate?: UnitDelegate;
 }
 
+/** 外交子行动：命令菜单「外交」段的各项，也是 diplomacy 指令的 action 取值 */
+export type DiplomacyAction = 'goodwill' | 'alliance' | 'truce' | 'requestTroops' | 'break';
+
 export type GameCommand =
   | { type: 'recruit'; cityId: CityId; passId?: PassId; officerIds: string[] }
   | { type: 'produceArmament'; cityId: CityId; passId?: PassId; officerIds: string[]; armamentType: ArmamentType }
   | { type: 'train'; cityId: CityId; passId?: PassId; officerIds: string[] }
   | { type: 'patrol'; cityId: CityId; passId?: PassId; officerIds: string[] }
-  | { type: 'talent'; cityId: CityId; passId?: PassId; officerId: string }
+  | { type: 'talent'; cityId: CityId; passId?: PassId; officerId: string; targetOfficerId: string }
   | { type: 'explore'; cityId: CityId; passId?: PassId; officerIds: string[] }
   | { type: 'grantTreasure'; cityId: CityId; passId?: PassId; treasureId: string; officerId: string | null }
   | { type: 'research'; cityId: CityId; passId?: PassId; officerIds: string[]; nodeId: TechNodeId }
@@ -611,7 +643,7 @@ export type GameCommand =
       passId?: PassId;
       officerId: string;
       targetForceId: ForceId;
-      action: 'goodwill' | 'alliance' | 'truce' | 'requestTroops' | 'break';
+      action: DiplomacyAction;
       months?: number;
       gold?: number;
     }

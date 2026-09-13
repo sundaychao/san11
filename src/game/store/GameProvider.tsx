@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { runAiTurn } from '../ai';
 import { autoResolveDebate } from '../debate';
-import type { StrategyId, StrategySelection, TacticId } from '../battle/actions';
+import type { StrategyId, StrategySelection, SupplyArmament, TacticId } from '../battle/actions';
 import type { ActionGameIntent } from '../network/intentReducer';
 import type { DeployFollowupAction } from '../network/intents';
 import {
@@ -40,7 +40,7 @@ import { createGameFromMap } from '../scenario/customMap';
 import { BUILTIN_MAP_CHINA42_ID, getMap } from '../mapRegistry';
 import { settleForceTurnStart } from '../skills/rules/turn';
 import type { EditableCityMarker, EditorMapPayload } from '../map-editor/editor';
-import type { City, CityId, FacilityType, ForceId, GameCommand, GameState, GridCell, PassId, TroopType } from '../types';
+import type { City, CityArmaments, CityId, FacilityType, ForceId, GameCommand, GameState, GridCell, PassId, TroopType } from '../types';
 import { createGameEngine, type GameEngine } from '../engine';
 import {
   type AuthClientState,
@@ -87,7 +87,7 @@ interface GameContextValue {
   deployUnit(input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }): void;
   deployUnitDelegate(input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, target: { q: number; r: number }, facility?: FacilityType): void;
   deployUnitAction(input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; targetCityId?: CityId; troopType?: TroopType; vehicle?: 'boat' | 'ship'; siegeWeapon?: 'ram' | 'tower'; destination?: GridCoord; troops: number; gold?: number; food: number }, action: DeployFollowupAction): void;
-  deployTransportUnit(input: { cityId?: CityId; passId?: PassId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }): void;
+  deployTransportUnit(input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; destination?: GridCoord; troops: number; gold: number; food: number; armaments?: Partial<CityArmaments> }, action?: DeployFollowupAction): void;
   moveUnit(unitId: string, destination: { q: number; r: number }): void;
   setMoveDelegate(unitId: string, target: { q: number; r: number }): void;
   setBuildDelegate(unitId: string, target: { q: number; r: number }, facility: FacilityType): void;
@@ -101,6 +101,7 @@ interface GameContextValue {
   useFirePlot(unitId: string, target: GridCoord, destination?: GridCoord): void;
   buildFacility(unitId: string, facilityType: FacilityType, target: GridCoord, destination?: GridCoord): void;
   repairFacility(unitId: string, facilityId: string, destination?: GridCoord): void;
+  supplyUnit(unitId: string, targetId: string, amount: { troops: number; gold: number; food: number }, destination?: GridCoord): void;
   dismantleFacility(facilityId: string): void;
   attackCity(attackerId: string, cityId: CityId, destination?: GridCoord): void;
   attackPass(attackerId: string, passId: PassId, destination?: GridCoord): void;
@@ -398,9 +399,10 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     dispatchIntent({ type: 'deployUnitAction', input, action }, afterSuccess);
   }, [afterDeployActionAudio, dispatchIntent]);
 
-  const deployTransport = useCallback((input: { cityId?: CityId; passId?: PassId; officerId: string; destination?: GridCoord; troops: number; gold: number; food: number }) => {
-    dispatchIntent({ type: 'deployTransportUnit', input });
-  }, [dispatchIntent]);
+  const deployTransport = useCallback((input: { cityId?: CityId; passId?: PassId; officerId?: string; officerIds?: string[]; destination?: GridCoord; troops: number; gold: number; food: number; armaments?: Partial<CityArmaments> }, action?: DeployFollowupAction) => {
+    // 带跟随动作（落位菜单里的攻击等）与纯待命出城共用同一意图；音频按动作区分
+    dispatchIntent({ type: 'deployTransportUnit', input, action }, action ? () => afterDeployActionAudio(action) : undefined);
+  }, [afterDeployActionAudio, dispatchIntent]);
 
   const moveBattleUnit = useCallback((unitId: string, destination: { q: number; r: number }) => {
     dispatchIntent({ type: 'moveUnit', unitId, destination }, () => emitAudioEvent({ type: 'unit-moved' }));
@@ -455,6 +457,10 @@ export function GameProvider({ children, initialState = null, storage: storagePr
 
   const repairBattleFacility = useCallback((unitId: string, facilityId: string, destination?: GridCoord) => {
     dispatchIntent({ type: 'repairFacility', unitId, facilityId, destination }, () => emitAudioEvent({ type: 'project-started' }));
+  }, [dispatchIntent, emitAudioEvent]);
+
+  const supplyBattleUnit = useCallback((unitId: string, targetId: string, amount: { troops: number; gold: number; food: number; armaments?: Partial<SupplyArmament> }, destination?: GridCoord) => {
+    dispatchIntent({ type: 'supplyUnit', unitId, targetId, ...amount, destination }, () => emitAudioEvent({ type: 'unit-waited' }));
   }, [dispatchIntent, emitAudioEvent]);
 
   const dismantleBattleFacility = useCallback((facilityId: string) => {
@@ -626,6 +632,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     useFirePlot: useBattleFirePlot,
     buildFacility: buildBattleFacility,
     repairFacility: repairBattleFacility,
+  supplyUnit: supplyBattleUnit,
     dismantleFacility: dismantleBattleFacility,
     attackCity: attackBattleCity,
     attackPass: attackBattlePass,

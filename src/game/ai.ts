@@ -6,9 +6,10 @@ import { ABILITY_NODES, ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, abilityNodeStat
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition } from './treasures';
 import { POSITIONS, forceRankOf, officerMerit, positionDefinition, rankIndex } from './ranks';
 import { RUMOR_AP_COST, RUMOR_GOLD_COST } from './rumor';
-import { DIPLOMACY_AP_COST, GOODWILL_GOLD_COST, areAllies, areNonAggressed, forceDiplomacy } from './diplomacy';
+import { DIPLOMACY_AP_COST, FRIENDLY_TIER_MIN, GOODWILL_GOLD_COST, areAllies, areNonAggressed, forceDiplomacy } from './diplomacy';
 import { CAPTIVE_DISPOSE_AP_COST, canBuildPlot, cityPlots, COMMAND_OFFICER_MAX, hasPlotFacility, plotCost } from './innerAffairs';
 import { capturableByLoyalty } from './captives';
+import { recruitWillOf } from './loyalty';
 import { legionsOf } from './innerAffairs';
 import { nextRandom } from './random';
 import type { City, CityId, ForceId, GameCommand, GameState, Officer } from './types';
@@ -42,7 +43,19 @@ function cityCommand(
   const officers = availableOfficers(state, forceId, city);
   if (type === 'talent') {
     const officer = bestOfficer(officers, stat);
-    return officer ? commandIfLegal(state, forceId, { type, cityId: city.id, officerId: officer.id }) : null;
+    if (!officer) return null;
+    // 登庸目标：同城在野优先，其次他城在野（AI 不主动策反他势力武将），须登用意愿可行且未被禁仕
+    const unaffiliated = Object.values(state.officers).filter((candidate) =>
+      candidate.forceId === null && !candidate.deathMonth
+      && !(candidate.bannedUntilMonth && candidate.bannedUntilMonth > state.month));
+    const sameCity = unaffiliated.filter((candidate) => candidate.location.kind === 'unaffiliated' && candidate.location.cityId === city.id);
+    const willOk = (candidate: Officer) => {
+      const will = recruitWillOf(state, officer, candidate);
+      return will.verdict === 'accept' || (will.verdict !== 'refuse' && will.will > 0);
+    };
+    const target = sameCity.find(willOk) ?? unaffiliated.find(willOk);
+    if (!target) return null;
+    return commandIfLegal(state, forceId, { type, cityId: city.id, officerId: officer.id, targetOfficerId: target.id });
   }
   // 多人执行指令：按相关能力取至多3名武将
   const picked = bestOfficers(officers, stat, COMMAND_OFFICER_MAX);
@@ -303,15 +316,15 @@ function chooseAiDiplomacyCommand(state: GameState, forceId: ForceId): GameComma
 
   // 3. 好感度较高的势力尝试结盟（双方实力相近且未结盟）
   const friendly = others
-    .filter((o) => !areAllies(state, forceId, o.force.id) && forceDiplomacy(state, forceId, o.force.id) >= 50)
+    .filter((o) => !areAllies(state, forceId, o.force.id) && forceDiplomacy(state, forceId, o.force.id) >= FRIENDLY_TIER_MIN)
     .sort((a, b) => forceDiplomacy(state, forceId, b.force.id) - forceDiplomacy(state, forceId, a.force.id))[0];
   if (friendly && Math.abs(cities.length - friendly.cityCount) <= 2) {
     const gold = Math.min(5000, Math.max(2000, richest.gold));
     return attempt({ type: 'diplomacy', cityId: richest.id, officerId: officer.id, targetForceId: friendly.force.id, action: 'alliance', gold });
   }
 
-  // 4. 有钱没仗打时面向最强势力亲善，为后续结盟铺垫
-  if (strongestCity && richest.gold >= GOODWILL_GOLD_COST + 4000 && forceDiplomacy(state, forceId, strongest.force.id) < 60) {
+  // 4. 有钱没仗打时面向最强势力亲善，为后续结盟铺垫（一律刷到「友好」档为止）
+  if (strongestCity && richest.gold >= GOODWILL_GOLD_COST + 4000 && forceDiplomacy(state, forceId, strongest.force.id) < FRIENDLY_TIER_MIN) {
     return attempt({ type: 'diplomacy', cityId: richest.id, officerId: officer.id, targetForceId: strongest.force.id, action: 'goodwill' });
   }
   return null;
@@ -380,9 +393,14 @@ function chooseAiDecision(state: GameState, forceId: ForceId): AiDecision {
     }
   }
   for (const city of cities) {
-    const hasTalent = Object.values(state.officers).some((officer) =>
-      officer.forceId === null && officer.location.kind === 'unaffiliated' && officer.location.cityId === city.id,
-    );
+    // 血色衣冠 6.0：只有当城中存在「登用接受意愿 >0」的在野武将时才派人说降
+    const executor = bestOfficers(availableOfficers(state, forceId, city), 'intelligence', 1)[0];
+    if (!executor) continue;
+    const hasTalent = Object.values(state.officers).some((officer) => {
+      if (officer.forceId !== null || officer.location.kind !== 'unaffiliated' || officer.location.cityId !== city.id) return false;
+      const will = recruitWillOf(state, executor, officer);
+      return will.verdict === 'accept' || (will.verdict === 'maybe' && will.will > 0);
+    });
     if (hasTalent) {
       const command = cityCommand(state, forceId, city, 'talent', 'intelligence');
       if (command) return selected(command);

@@ -13,12 +13,20 @@ export function normalAttackIsCritical(state: GameState, attacker: ArmyUnit, tar
     .some(({ effect }) => skillConditionMatches(state, effect.condition, attacker, target));
 }
 
+/**
+ * 战法暴击模式。
+ * - `guaranteed`：特技条件命中，必定暴击（不掷骰）
+ * - `normal`：掷一次概率骰
+ * - `none`：目标持有「布阵」，完全不会被战法暴击，且**不消耗随机数**
+ */
 export function tacticCriticalMode(
   state: GameState,
   attacker: ArmyUnit,
   target: ArmyUnit,
   tacticId: TacticId,
-): 'normal' | 'guaranteed' {
+): 'none' | 'normal' | 'guaranteed' {
+  // 布阵：防止被战法暴击
+  if (effectsOfKind(resolveUnitSkills(state, target), 'tacticCriticalImmune').length > 0) return 'none';
   const troopType = attacker.troopType ?? 'sword';
   const isNavalTactic = (NAVAL_TACTIC_IDS as readonly string[]).includes(tacticId);
   const guaranteed = effectsOfKind(resolveUnitSkills(state, attacker), 'tacticCritical')

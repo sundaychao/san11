@@ -3,11 +3,13 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   attackUnit,
+  deployTransportUnitWithId,
   deployUnitWithId,
   deploymentCells,
   moveUnit,
   movementAllowanceForUnit,
   movementCells,
+  supplyUnit,
 } from '../battle/actions';
 import { neighborsOf } from '../battle/grid';
 import { createGame } from '../scenario/jingxiang208';
@@ -289,5 +291,117 @@ describe('reduceGameIntent', () => {
       input,
       action: { type: 'wait' },
     })).toEqual(expected.state);
+  });
+
+  it('keeps transport deployment plus its follow-up action atomic (落位菜单出城即攻击)', () => {
+    expect(typeof reduceGameIntent).toBe('function');
+    if (!reduceGameIntent) return;
+
+    const state = createGame('liu', 1);
+    const destination = deploymentCells(state, 'jiangling', undefined, 'transport')[0]!;
+    const input = {
+      cityId: 'jiangling' as const,
+      officerIds: ['guan-yu'],
+      destination,
+      troops: 4000,
+      gold: 0,
+      food: 6000,
+    };
+    // 在落位格相邻处放一支敌部队（出城后立即攻击的目标）
+    const adjacent = neighborsOf(destination.q, destination.r)
+      .find((coord) => coord.q !== destination.q || coord.r !== destination.r)!;
+    state.units['enemy-near'] = {
+      id: 'enemy-near',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'xiahou-dun',
+      officerIds: ['xiahou-dun'],
+      homeCityId: 'xuchang',
+      troopType: 'sword',
+      vehicle: 'boat',
+      q: adjacent.q,
+      r: adjacent.r,
+      troops: 4000,
+      gold: 0,
+      food: 2000,
+      energy: 100,
+      stamina: 100,
+      movementRemaining: 0,
+      moved: true,
+      acted: false,
+    };
+
+    // 待命跟随 = 纯部署
+    const deployed = deployTransportUnitWithId(state, 'liu', input);
+    expect(reduceGameIntent(state, 'liu', {
+      type: 'deployTransportUnit',
+      input,
+      action: { type: 'wait' },
+    })).toEqual(deployed.state);
+
+    // 攻击跟随：与「部署 → attackUnit」同口径 —— 部署出的输送队直接攻击相邻敌部队
+    const expected = attackUnit(deployed.state, 'liu', deployed.unitId, 'enemy-near');
+    const result = reduceGameIntent(state, 'liu', {
+      type: 'deployTransportUnit',
+      input,
+      action: { type: 'attackUnit', targetId: 'enemy-near' },
+    });
+    expect(result.units[deployed.unitId]).toBeDefined();
+    expect(result.units['enemy-near'].troops).toBe(expected.units['enemy-near'].troops);
+    expect(result.units['enemy-near'].troops).toBeLessThan(4000);
+  });
+
+  it('keeps transport deployment plus supply follow-up atomic (落位菜单出城即补给)', () => {
+    expect(typeof reduceGameIntent).toBe('function');
+    if (!reduceGameIntent) return;
+
+    const state = createGame('liu', 1);
+    const destination = deploymentCells(state, 'jiangling', undefined, 'transport')[0]!;
+    const input = {
+      cityId: 'jiangling' as const,
+      officerIds: ['guan-yu'],
+      destination,
+      troops: 4000,
+      gold: 3000,
+      food: 6000,
+    };
+    // 在落位格相邻处放一支己方作战部队（出城后立即补给的目标）
+    const adjacent = neighborsOf(destination.q, destination.r)
+      .find((coord) => coord.q !== destination.q || coord.r !== destination.r)!;
+    state.units['friend-near'] = {
+      id: 'friend-near',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'liu-bei',
+      officerIds: ['liu-bei'],
+      homeCityId: 'jiangling',
+      troopType: 'sword',
+      q: adjacent.q,
+      r: adjacent.r,
+      troops: 3000,
+      gold: 0,
+      food: 3000,
+      energy: 100,
+      movementRemaining: 0,
+      moved: true,
+      acted: false,
+    };
+
+    // 补给跟随 = 「部署 → supplyUnit」两步的合成结果
+    const deployed = deployTransportUnitWithId(state, 'liu', input);
+    const expected = supplyUnit(deployed.state, 'liu', deployed.unitId, 'friend-near', {
+      troops: 1000,
+      gold: 1500,
+      food: 2000,
+    });
+    const result = reduceGameIntent(state, 'liu', {
+      type: 'deployTransportUnit',
+      input,
+      action: { type: 'supplyUnit', targetId: 'friend-near', troops: 1000, gold: 1500, food: 2000 },
+    });
+    expect(result).toEqual(expected);
+    // 落位即补给一步到位：运输队已行动、资源转清
+    expect(result.units[deployed.unitId]).toMatchObject({ troops: 3000, gold: 1500, acted: true });
+    expect(result.units['friend-near']).toMatchObject({ troops: 4000, gold: 1500, food: 5000, acted: false });
   });
 });

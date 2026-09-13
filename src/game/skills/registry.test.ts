@@ -64,8 +64,20 @@ describe('skill registry', () => {
   });
 
   it('keeps known custom skills displayable without activating an undefined effect', () => {
-    expect(CUSTOM_SKILLS.every((skill) => skill.implementationStatus === 'planned' && skill.effects.length === 0)).toBe(true);
+    const planned = CUSTOM_SKILLS.filter((skill) => skill.implementationStatus === 'planned');
+    expect(planned.every((skill) => skill.effects.length === 0)).toBe(true);
     expect(skillDefinition('奸雄')).toMatchObject({ name: '奸雄', implementationStatus: 'planned', effects: [] });
     expect(skillDefinition('不存在的特技')).toBeUndefined();
+  });
+
+  it('activates 布阵 as a 血色衣冠 custom skill with real effects', () => {
+    // 原版没有「布阵」，它是血色衣冠新增的防御特技，故登记在 CUSTOM_SKILLS 而非 DEFENSE_SKILLS
+    expect(skillDefinition('布阵')).toMatchObject({
+      name: '布阵',
+      displayCategory: '防御',
+      implementationStatus: 'active',
+    });
+    expect(skillDefinition('布阵')!.effects.map((effect) => effect.kind))
+      .toEqual(['ignoreMatchupPenalty', 'tacticCriticalImmune']);
   });
 });

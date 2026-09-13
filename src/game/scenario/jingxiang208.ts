@@ -366,6 +366,8 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
       merit: officer.merit ?? INITIAL_OFFICER_MERIT,
       ambition: personality?.ambition ?? 50,
       righteousness: personality?.righteousness ?? 55,
+      // 血色衣冠 6.0 新忠诚系统：开局在仕武将视为已仕 1 年（在野为 0）
+      serviceYears: officer.forceId === null ? 0 : 1,
       location: { kind: officer.forceId === null ? 'unaffiliated' : 'city', cityId: officer.cityId } as Officer['location'],
       stats: { ...officer.stats },
       personality: derivePersonality(officer.stats),
@@ -384,7 +386,7 @@ export function createGame(playerForceId: ForceId, seed = Date.now()): GameState
 
   const grid = getChina42Grid();
   const state: GameState = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     scenarioId: 'jingxiang-208',
     seed: seed >>> 0,
     rngCursor: 0,

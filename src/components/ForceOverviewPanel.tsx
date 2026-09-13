@@ -24,6 +24,7 @@ function officerLocationText(officer: Officer, state: GameState) {
   if (location.kind === 'unit') return '部队';
   if (location.kind === 'transfer') return '在途';
   if (location.kind === 'captive') return '被俘';
+  if (location.kind === 'envoy') return `出使${state.forces[location.targetForceId]?.name ?? ''}`;
   if (location.kind === 'task') return state.cities[location.cityId]?.name ?? '执行中';
   return state.cities[location.cityId]?.name ?? '未任官';
 }
@@ -42,6 +43,8 @@ function officerCell(officer: Officer, state: GameState): GridCoord | null {
     return unit ? { q: unit.q, r: unit.r } : null;
   }
   if (location.kind === 'transfer') return cityCell(state, location.targetCityId);
+  // 外交使者在途：不在本方地图上落点（去程在对方境内、返程未归）
+  if (location.kind === 'envoy') return null;
   return cityCell(state, location.cityId);
 }
 

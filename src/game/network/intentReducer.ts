@@ -6,12 +6,14 @@ import {
   attackUnit,
   buildFacility,
   deployTransportUnit,
+  deployTransportUnitWithId,
   deployUnit,
   deployUnitWithId,
   dismantleFacility,
   jointAttackUnit,
   moveUnit,
   repairFacility,
+  supplyUnit,
   useFirePlot,
   useUnitStrategy,
   useUnitTactic,
@@ -19,6 +21,7 @@ import {
 } from '../battle/actions';
 import { setBuildDelegate, setMoveDelegate, setRepairDelegate } from '../battle/delegate';
 import type { GridCoord } from '../battle/grid';
+import type { DeployFollowupAction } from './intents';
 import { executeCommand } from '../commands';
 import { dismissDebate, resolveDebateAbandon, resolveDebateRethink, resolveDebateRound } from '../debate';
 import { executeDuel } from '../duel';
@@ -65,6 +68,44 @@ export function reduceGameIntent(
   return clampStrongholdResources(reduceIntent(state, forceId, intent));
 }
 
+/** 部署后的跟随动作：出征（deployUnitAction）与输送（deployTransportUnit + action）共用同一份口径 */
+function applyDeployFollowup(
+  state: GameState,
+  forceId: ForceId,
+  unitId: string,
+  action: DeployFollowupAction,
+): GameState {
+  switch (action.type) {
+    case 'wait':
+      return state;
+    case 'attackUnit':
+      return attackUnit(state, forceId, unitId, action.targetId);
+    case 'jointAttackUnit':
+      return jointAttackUnit(state, forceId, unitId, action.targetId);
+    case 'attackFacility':
+      return attackFacility(state, forceId, unitId, action.facilityId);
+    case 'attackPlot':
+      return attackPlot(state, forceId, unitId, action.cityId, action.plotIndex);
+    case 'attackCity':
+      return attackCity(state, forceId, unitId, action.cityId);
+    case 'attackPass':
+      return attackPass(state, forceId, unitId, action.passId);
+    case 'useUnitTactic':
+      return useUnitTactic(state, forceId, unitId, action.targetId, action.tacticId);
+    case 'useUnitStrategy':
+      return useUnitStrategy(state, forceId, unitId, action.strategyId, action.selection);
+    case 'buildFacility':
+      return buildFacility(state, forceId, unitId, action.facilityType, action.target);
+    case 'repairFacility':
+      return repairFacility(state, forceId, unitId, action.facilityId);
+    case 'supplyUnit':
+      // 出城即补给：输送队落位后直接对相邻部队结算补给（补给内部自己清 delegate、置 acted）
+      return supplyUnit(state, forceId, unitId, action.targetId, action);
+    default:
+      return assertNever(action);
+  }
+}
+
 function reduceIntent(
   state: GameState,
   forceId: ForceId,
@@ -99,35 +140,14 @@ function reduceIntent(
     }
     case 'deployUnitAction': {
       const deployed = deployUnitWithId(state, forceId, intent.input);
-      switch (intent.action.type) {
-        case 'wait':
-          return deployed.state;
-        case 'attackUnit':
-          return attackUnit(deployed.state, forceId, deployed.unitId, intent.action.targetId);
-        case 'jointAttackUnit':
-          return jointAttackUnit(deployed.state, forceId, deployed.unitId, intent.action.targetId);
-        case 'attackFacility':
-          return attackFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityId);
-        case 'attackPlot':
-          return attackPlot(deployed.state, forceId, deployed.unitId, intent.action.cityId, intent.action.plotIndex);
-        case 'attackCity':
-          return attackCity(deployed.state, forceId, deployed.unitId, intent.action.cityId);
-        case 'attackPass':
-          return attackPass(deployed.state, forceId, deployed.unitId, intent.action.passId);
-        case 'useUnitTactic':
-          return useUnitTactic(deployed.state, forceId, deployed.unitId, intent.action.targetId, intent.action.tacticId);
-        case 'useUnitStrategy':
-          return useUnitStrategy(deployed.state, forceId, deployed.unitId, intent.action.strategyId, intent.action.selection);
-        case 'buildFacility':
-          return buildFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityType, intent.action.target);
-        case 'repairFacility':
-          return repairFacility(deployed.state, forceId, deployed.unitId, intent.action.facilityId);
-        default:
-          return assertNever(intent.action);
-      }
+      return applyDeployFollowup(deployed.state, forceId, deployed.unitId, intent.action);
     }
-    case 'deployTransportUnit':
-      return deployTransportUnit(state, forceId, intent.input);
+    case 'deployTransportUnit': {
+      if (!intent.action) return deployTransportUnit(state, forceId, intent.input);
+      // 输送队落位后从命令菜单发起的攻击等跟随动作：先真正出城，再对同一支部队结算动作
+      const deployed = deployTransportUnitWithId(state, forceId, intent.input);
+      return applyDeployFollowup(deployed.state, forceId, deployed.unitId, intent.action);
+    }
     case 'moveUnit':
       return cancelUnitDelegate(moveUnit(state, forceId, intent.unitId, intent.destination), intent.unitId);
     case 'setMoveDelegate':
@@ -173,6 +193,16 @@ function reduceIntent(
     case 'repairFacility': {
       const moved = moveIfRequested(state, forceId, intent.unitId, intent.destination);
       return repairFacility(moved, forceId, intent.unitId, intent.facilityId);
+    }
+    case 'supplyUnit': {
+      // 补给内部自己清 delegate（与修补同口径），这里只负责先走完菜单落点
+      const moved = moveIfRequested(state, forceId, intent.unitId, intent.destination);
+      return supplyUnit(moved, forceId, intent.unitId, intent.targetId, {
+        troops: intent.troops,
+        gold: intent.gold,
+        food: intent.food,
+        armaments: intent.armaments,
+      });
     }
     case 'dismantleFacility':
       return dismantleFacility(state, forceId, intent.facilityId);

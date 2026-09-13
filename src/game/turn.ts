@@ -1,4 +1,5 @@
-import { clamp, rollGrainPrices, rollMerchants, appointStrongholdSuccessor, officerIsBusy } from './commands';
+import { clamp, rollGrainPrices, rollMerchants, appointStrongholdSuccessor, officerIsBusy, resolveDiplomacyMission, type DiplomacyMission } from './commands';
+import { leaderCityOf } from './diplomacy';
 import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
 import { TECHP_CITY_POP_DIVISOR, TECHP_RURAL_POP_DIVISOR, addTechP, completeTechResearch, energyCapOf, maxDurabilityBonus, movementTechBonus, orderDropResist, populationGrowthMultiplier } from './techs';
@@ -14,7 +15,7 @@ import { territoryCityAt } from './territory';
 import { movementAllowanceBonus } from './skills/rules/movement';
 import { cityPopulationOf, ruralPopulationOf } from './innerAffairs';
 import { appointSuccessorGovernor, applyFacilityLevelTech, settleDurabilityRecovery } from './innerAffairs';
-import { settleLoyaltyDrift } from './loyalty';import { settleCaptives } from './captives';
+import { settleLoyaltyDrift, settleServiceYears } from './loyalty';import { settleCaptives } from './captives';
 import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
 import { settleLegionAutomation, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, cityQuarterlyFoodIncome, DEFAULT_OFFICER_SALARY } from './innerAffairs';
 import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
@@ -26,7 +27,7 @@ import { cityIncomeMultiplier } from './skills/rules/city';
 import { tenDayIndex } from './diplomacy';
 import { passIncomeMultiplierByBlockade, passQuarterlyFoodIncome, passMonthlyGoldIncome } from './passes';
 import { cityResourceCaps, clampStrongholdsInPlace, passResourceCaps } from './strongholdCapacity';
-import type { ArmyUnit, City, CityId, FacilityRepairReport, ForceId, GameState, Pass } from './types';
+import type { ArmyUnit, City, CityId, FacilityRepairReport, ForceId, GameState, OfficerLocation, Pass } from './types';
 
 interface CityEvent {
   name: string;
@@ -46,7 +47,11 @@ const EVENTS: CityEvent[] = [
 
 const BASE_TEN_DAY_ACTION_POINTS = 80;
 const CITY_FOOD_PER_TEN_THOUSAND_TROOPS = 500;
-const UNIT_FOOD_PER_TEN_THOUSAND_TROOPS = 1000;
+/**
+ * 野外部队每旬兵粮消耗：每 1 万兵 1000 粮（`settleUnitSupply` 用）。
+ * 导出是为了让输送编制界面能预告「押运的兵粮可支撑多少日」，两处同一口径。
+ */
+export const UNIT_FOOD_PER_TEN_THOUSAND_TROOPS = 1000;
 
 function isQuarterStartMonth(month: number) {
   return (month - 1) % 3 === 0;
@@ -261,6 +266,8 @@ export function settleMonth(state: GameState): GameState {
   // 每年正月（农历新年）：黑市自动拆除（含建设中黑市）
   // 剧本为建安十三年四月开局，month 1=四月、9=腊月、10=正月，故正月对应 month % 12 === 10（10/22…）
   if (enteringMonth % 12 === 10) {
+    // 血色衣冠 6.0 新忠诚系统：新年全体在仕武将（含被俘者）仕龄 +1
+    settleServiceYears(next);
     for (const city of Object.values(next.cities)) {
       for (const plot of city.plots ?? []) {
         const isBlackMarketPlot = plot.type === 'blackmarket' || (plot.constructing?.facility ?? null) === 'blackmarket';
@@ -530,6 +537,76 @@ function settleOfficerTransfers(next: GameState) {
   }
 }
 
+/**
+ * 外交使者推进：
+ * - 去程到点 → 结算外交效果（亲善/同盟/停战/请求援军/破弃）并写入战报，当旬转入返程；
+ * - 返程到点 → 回到出发据点（关隘宿主回关隘）并解除占用（acted=false），下个旬初起可再被指派。
+ * 目标势力在途中灭亡（已无城池）时不结算，使者直接无功而返。
+ */
+function settleEnvoys(next: GameState) {
+  for (const officer of Object.values(next.officers)) {
+    const location = officer.location;
+    if (location.kind !== 'envoy') continue;
+    location.remainingTenDays -= 1;
+    if (location.remainingTenDays > 0) continue;
+
+    if (location.phase === 'outbound') {
+      const forceId = officer.forceId;
+      const destination = forceId ? leaderCityOf(next, location.targetForceId) : null;
+      const targetName = next.forces[location.targetForceId]?.name ?? '目标势力';
+      const message = forceId && destination
+        ? resolveDiplomacyMission(next, officer, {
+          forceId,
+          cityId: location.fromCityId,
+          passId: location.fromPassId,
+          targetForceId: location.targetForceId,
+          action: location.action,
+          gold: location.gold,
+          months: location.months,
+        } satisfies DiplomacyMission)
+        : `出使途中${targetName}已不复存在，${officer.name}无功而返`;
+      next.logs.push({
+        id: `envoy-arrive-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+        month: next.month,
+        forceId: officer.forceId,
+        message,
+      });
+      officer.location = { ...location, phase: 'return', remainingTenDays: location.returnTenDays };
+      continue;
+    }
+
+    // 回到出发据点；出发据点若已易主，则改回本方仍持有的城池（不能把武将送进敌城）
+    const originPass = location.fromPassId ? next.passes?.[location.fromPassId] : undefined;
+    const originCity = next.cities[location.fromCityId];
+    const forceId = officer.forceId;
+    let destination: OfficerLocation;
+    let destinationCityId: CityId;
+    if (originPass && originPass.ownerId === forceId) {
+      destination = { kind: 'pass', passId: originPass.id };
+      destinationCityId = originPass.homeCityId;
+    } else if (originCity && originCity.ownerId === forceId) {
+      destination = { kind: 'city', cityId: originCity.id };
+      destinationCityId = originCity.id;
+    } else {
+      const friendly = Object.values(next.cities).find((city) => city.ownerId === forceId);
+      destination = friendly ? { kind: 'city', cityId: friendly.id } : { kind: 'unaffiliated', cityId: location.fromCityId };
+      destinationCityId = friendly ? friendly.id : location.fromCityId;
+    }
+    officer.location = destination;
+    officer.cityId = destinationCityId;
+    officer.acted = false;
+    const placeName = destination.kind === 'pass'
+      ? next.passes?.[destination.passId]?.name
+      : next.cities[destinationCityId]?.name;
+    next.logs.push({
+      id: `envoy-return-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+      month: next.month,
+      forceId: officer.forceId,
+      message: `${officer.name}出使归来，回到${placeName ?? '我方据点'}`,
+    });
+  }
+}
+
 function settleAbilityResearch(next: GameState) {
   for (const force of Object.values(next.forces)) {
     const research = force.abilityResearch;
@@ -711,6 +788,8 @@ export function settleTenDay(state: GameState): GameState {
   // 伤病按旬恢复、停战旬数递减、委任军团自动内政、援军到时撤退
   settleOfficerHealth(next);
   settleTruces(next);
+  // 外交使者：抵达当旬结算并转返程（放在停战递减之后，新签的停战期不在同一旬被扣掉一旬）
+  settleEnvoys(next);
   settleLegionAutomation(next);
   settleExpiringUnits(next);
   // 建设用地建设进度推进（完成则立即转为已建成设施）

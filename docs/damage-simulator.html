@@ -157,7 +157,21 @@
         <option value="halberd">戟兵</option>
         <option value="crossbow">弩兵</option>
         <option value="cavalry" selected>骑兵</option>
-        <option value="siege">兵器（无适性）</option>
+        <option value="ram">冲车</option>
+        <option value="woodenBeast">木兽</option>
+        <option value="tower">井阑</option>
+        <option value="catapult">投石车</option>
+        <option value="boat">走舸</option>
+        <option value="ship">楼船</option>
+        <option value="battleShip">斗舰</option>
+      </select><span></span></div>
+      <div class="row"><label>适性</label><select id="aApt">
+        <option value="C">C ×0.6</option>
+        <option value="B">B ×0.8</option>
+        <option value="A">A ×0.9</option>
+        <option value="S" selected>S ×1.0</option>
+        <option value="S+">S+ ×1.1</option>
+        <option value="S++">S++ ×1.2</option>
       </select><span></span></div>
       <div class="row"><label>所在地形</label><select id="aTerrain"></select><span></span></div>
       <div class="row"><label>战线数</label><input type="range" id="aFront" min="1" max="5" step="1" value="1"><span class="val" id="aFrontV"></span></div>
@@ -167,9 +181,12 @@
         <label class="chk"><input type="checkbox" id="aShip"> 在船上</label>
         <label class="chk"><input type="checkbox" id="aAura"> 在统率光环内</label>
         <label class="chk"><input type="checkbox" id="aDrum"> 3格内有鼓楼</label>
+        <label class="chk"><input type="checkbox" id="aBraced"> 布阵（规避不利相克）</label>
       </div>
-      <div class="note"><b>武器精造</b>（水军为「装甲」）给枪/戟/弩/骑 +10 攻击，<b>折算进武力</b>，不是倍率。
-      <br><b>适性不参与普攻</b>——剑兵与兵器也没有适性。</div>
+      <div class="note"><b>攻击力 = floor(最高统率 × 兵种适性乘数 × (基础攻 + 精造) / 100)</b>，适性乘数 S++ 1.2 / S+ 1.1 / S 1.0 / A 0.9 / B 0.8 / C 0.6。
+      <br><b>武器精造</b>（水军为「装甲」）给枪/戟/弩/骑 +10 攻击，<b>直接加在基础攻上</b>（与基础值同层，在乘适性和 ÷100 之前），不是倍率。
+      <br><b>攻击方武力不参与基础伤害</b>：武力只影响战法暴击率与部分特技判定。
+      <br>剑兵与兵器没有适性，乘数按 1.0 计。冲车 70 / 木兽 90、井阑 80 / 投石车 95 是同一存储类型吃科技后的不同基础攻。</div>
     </div>
 
     <div class="card def">
@@ -177,6 +194,28 @@
       <div class="row"><label>兵力</label><input type="range" id="dTroops" min="10" max="20000" step="10" value="8000"><span class="val" id="dTroopsV"></span></div>
       <div class="row"><label>统率</label><input type="range" id="dLead" min="1" max="100" step="1" value="80"><span class="val" id="dLeadV"></span></div>
       <div class="row"><label>武力</label><input type="range" id="dWar" min="1" max="100" step="1" value="80"><span class="val" id="dWarV"></span></div>
+      <div class="row"><label>兵种</label><select id="dTroopType">
+        <option value="sword">剑兵（无适性）</option>
+        <option value="spear" selected>枪兵</option>
+        <option value="halberd">戟兵</option>
+        <option value="crossbow">弩兵</option>
+        <option value="cavalry">骑兵</option>
+        <option value="ram">冲车</option>
+        <option value="woodenBeast">木兽</option>
+        <option value="tower">井阑</option>
+        <option value="catapult">投石车</option>
+        <option value="boat">走舸</option>
+        <option value="ship">楼船</option>
+        <option value="battleShip">斗舰</option>
+      </select><span></span></div>
+      <div class="row"><label>适性</label><select id="dApt">
+        <option value="C">C ×0.6</option>
+        <option value="B">B ×0.8</option>
+        <option value="A">A ×0.9</option>
+        <option value="S" selected>S ×1.0</option>
+        <option value="S+">S+ ×1.1</option>
+        <option value="S++">S++ ×1.2</option>
+      </select><span></span></div>
       <div class="row"><label>所在地形</label><select id="dTerrain"></select><span></span></div>
       <div class="row"><label>据点防护</label><select id="dFort">
         <option value="none">无</option>
@@ -196,10 +235,12 @@
         <label class="chk" id="dFangjuWrap"><input type="checkbox" id="dFangju"> 防具精造（防+10）</label>
         <label class="chk"><input type="checkbox" id="dShip"> 在船上</label>
         <label class="chk"><input type="checkbox" id="dAura"> 在统率光环内</label>
+        <label class="chk"><input type="checkbox" id="dBraced"> 布阵（规避不利相克）</label>
       </div>
-      <div class="note"><b>防具精造</b>给枪/戟/弩/骑 +10 防御，<b>折算进守方统率</b>，直接影响统率差乘区。
+      <div class="note"><b>防御力 = floor(最高统率 × 兵种适性乘数 × (基础防 + 精造) / 100)</b>。<b>防具精造</b>给枪/戟/弩/骑 +10 防御，<b>加在基础防御上</b>再一起乘算。
+      <br>统率修正 = clamp(1 + (攻方攻击力 − 守方防御力) / 250, 0.8, 1.2) —— 兵种基础攻防的差异也进这个乘区。
       <br>据点防护多重覆盖时取减伤最强的一档。免伤概率来自「金刚」或戟兵矢盾/连锁防御（1/3）。判定值 &lt; 概率则本次伤害归零。
-      <br>守方的<b>武力与武器精造只在「反击」页签用到</b>——那时守方是反击的发起者。</div>
+      <br>守方的<b>武力与武器精造只在「反击」页签用到</b>——那时守方是反击的发起者（武力不再进基础伤害，但「装甲」+10 仍加在其攻击力上）。</div>
     </div>
   </div>
 
@@ -296,10 +337,11 @@
         <p>但差距超过 ±50 点后被钳制吃掉——<code>clamp(1+差/250, 0.8, 1.2)</code>，再堆也没用。</p>
       </div>
       <div class="ex">
-        <h3>例 2 · 240 基数让兵力收益递减</h3>
-        <p>投入兵力 1000 → 伤害 385；4000 → 820。兵力翻 4 倍，伤害只涨 <span class="hl">2.13 倍</span>。</p>
-        <p>去掉 240 基数就变成完全线性（4 倍兵力 = 4 倍伤害）。240 的作用就是抑制兵力碾压，让武将能力更重要。</p>
-        <p>而残兵衰减 <code>α = min(1, 投入兵力/1000)</code> 让 240 和地板 120 同步缩小——40 兵时基础伤害从 246 掉到 <span class="hl">15</span>。</p>
+        <h3>例 2 · 没有固定基数后，兵力收益完全线性</h3>
+        <p>同一武将（统率 85 → k = 0.1225）：投入兵力 1000 → 基础伤害 <span class="hl">122.5</span>；4000 → <span class="hl">490</span>，正好 <span class="hl">4 倍</span>。</p>
+        <p>旧公式 <code>240 + 投入兵力 × k</code> 是 362.5 → 730，只有 2.01 倍 —— 那个 240 就是稀释兵力差距的平滑项，现已移除（2026-09-13）。</p>
+        <p>代价在低兵力段：k 只有 0.08~0.13，1000 兵的 raw 仅 80~130，与地板 120 同量级，只要乘区连乘不超过约 1 就恒为 <span class="hl">120</span>（小部队保底值，与相克/地形无关）。</p>
+        <p>残兵衰减 <code>α = min(1, 投入兵力/1000)</code> 现在让 raw 二次衰减：40 兵 raw ≈ <span class="hl">0.19</span>（旧公式 14.4）、地板 ⌊120×0.04⌋ = <span class="hl">5</span>，最终伤害 5（旧公式约 12）。</p>
       </div>
       <div class="ex">
         <h3>例 3 · 为什么齐攻比逐个打更划算</h3>
@@ -342,10 +384,45 @@ const TACTICS = {
 };
 const TACTIC_POWER = {'spear-thrust':1.18,'spear-spiral':1.23,'spear-double':1.27,'halberd-hook':1.18,'halberd-sweep':1.23,'halberd-whirlwind':1.27,'crossbow-fire':1.12,'crossbow-pierce':1.18,'crossbow-volley':1.22,'cavalry-charge':1.4,'cavalry-breakthrough':1.45,'cavalry-rush':1.5};
 const TACTIC_TIER = {'spear-thrust':1,'spear-spiral':2,'spear-double':3,'halberd-hook':1,'halberd-sweep':2,'halberd-whirlwind':3,'crossbow-fire':1,'crossbow-pierce':2,'crossbow-volley':3,'cavalry-charge':1,'cavalry-breakthrough':2,'cavalry-rush':3};
-const APT = {C:1,B:1,A:1.1,S:1.2};
-const APT_RANK = {C:0,B:1,A:2,S:3};
+/** 战法适性倍率（只影响战法威力） */
+const APT = {C:1,B:1,A:1.1,S:1.2,'S+':1.3,'S++':1.4};
+const APT_RANK = {C:0,B:1,A:2,S:3,'S+':4,'S++':5};
 const TACTIC_REQUIRED_APTITUDE = {1:'B',2:'A',3:'S'};
-const TACTIC_APTITUDE_DAMAGE = {C:1,B:1,A:1.1,S:1.2};
+const TACTIC_APTITUDE_DAMAGE = {C:1,B:1,A:1.1,S:1.2,'S+':1.3,'S++':1.4};
+/** 战法暴击率加成（按档位） */
+const CRIT_BONUS_BY_RANK = [0,0,4,8,10,12];
+/**
+ * 兵种适性对「部队攻防力」的乘数 —— 与上面的战法倍率 APT 是两回事。
+ * 攻防力 = floor(最高统率 × 本乘数 × 基础攻防 / 100)，再进统率修正。
+ */
+const APT_COMBAT = {'S++':1.2,'S+':1.1,S:1.0,A:0.9,B:0.8,C:0.6};
+/** 各战斗形态的基础攻防（与 catalog.ts 的 TROOP_BASE_ATTACK / TROOP_BASE_DEFENSE 一致） */
+const TROOP_BASE_ATK = {sword:40,spear:95,halberd:75,crossbow:85,cavalry:105,ram:70,woodenBeast:90,tower:80,catapult:95,boat:75,ship:90,battleShip:100};
+const TROOP_BASE_DEF = {sword:40,spear:85,halberd:105,crossbow:75,cavalry:95,ram:90,woodenBeast:90,tower:80,catapult:85,boat:75,ship:85,battleShip:85};
+/** 统率修正的除数与上下限 */
+const LEAD_DIVISOR = 250, LEAD_MIN = 0.8, LEAD_MAX = 1.2;
+/**
+ * 兵种相克（血色衣冠 6.0）：行 = 攻方，列 = 守方。
+ * 与《三国志11》原版的对称三角不同，血色衣冠不对称，且枪骑互克。
+ * 未登记的组合同为 1.0 —— 剑兵、器械、舰船不参与相克。
+ */
+const TROOP_MATCHUP = {
+  spear: {halberd:0.85, cavalry:1.15},
+  halberd: {spear:1.2, halberd:0.8, crossbow:0.95, cavalry:0.85},
+  cavalry: {spear:1.1, halberd:1.1, crossbow:1.2},
+  crossbow: {halberd:0.7},
+};
+function matchupModifier(attacker, defender){
+  return (TROOP_MATCHUP[attacker] && TROOP_MATCHUP[attacker][defender]) || 1;
+}
+/**
+ * 「布阵」：持有者自己吃亏的那一侧系数归 1.0，占便宜的一侧照常保留。
+ * 系数 > 1 表示攻方占优（守方吃亏），< 1 表示攻方吃亏。
+ */
+function matchupWithSkill(raw, attackerBraced, defenderBraced){
+  if(raw === 1) return 1;
+  return (raw > 1 ? defenderBraced : attackerBraced) ? 1 : raw;
+}
 
 const $ = id => document.getElementById(id);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -366,9 +443,11 @@ function tacticTechMult(troop, train, elite, madeng, moved){
   return m;
 }
 function critChanceOf(war, apt){
-  const bonus = apt==='S'?8:apt==='A'?4:0;
+  const bonus = CRIT_BONUS_BY_RANK[APT_RANK[apt]];
   return clamp(Math.round(5 + Math.max(0,war-60)*0.35 + bonus), 5, 30);
 }
+/** 攻防力 = floor(统率 × 适性乘数 × 基础攻防 / 100) */
+function combatRating(lead, aptMult, base){ return Math.floor(lead * aptMult * base / 100); }
 function rangedDecay(distance, banzhi){
   if(distance < 2) return 1;
   const per = banzhi ? 0.05 : 0.1;
@@ -387,10 +466,18 @@ function coreRoll(o){
   const scale = Math.min(1, committed / 1000);
   const techAtk = o.aTechAtk || 0;
   const techDef = o.dTechDef || 0;
-  const leadMod = clamp(1 + (o.aLead - (o.dLead + techDef)) / 250, 0.8, 1.2);
-  const coefficient = 0.08 + o.aLead/2000 + (o.aWar + techAtk)/3000;
-  const attackScore = committed * coefficient;
-  const raw = 240 * scale + attackScore;
+  // 统率修正 = clamp(1 + (攻方攻击力 − 守方防御力) / 250, 0.8, 1.2)
+  // 攻防力 = floor(统率 × 兵种适性乘数 × 基础攻防 / 100)；武器/防具精造直接加在基础攻防上
+  const atkRating = combatRating(o.aLead, o.aAptMult, TROOP_BASE_ATK[o.aTroopType] + techAtk);
+  const defRating = combatRating(o.dLead, o.dAptMult, TROOP_BASE_DEF[o.dTroopType] + techDef);
+  const leadMod = clamp(1 + (atkRating - defRating) / LEAD_DIVISOR, LEAD_MIN, LEAD_MAX);
+  // 兵种相克：反击时攻守互换，这里取到的就是反向系数；「布阵」规避不利一侧
+  const rawMatchup = matchupModifier(o.aTroopType, o.dTroopType);
+  const matchup = matchupWithSkill(rawMatchup, o.aBraced, o.dBraced);
+  // 攻击方武力不参与基础伤害（已由攻击力与战法暴击率吸收）
+  const coefficient = 0.08 + o.aLead/2000;
+  // 无固定基数（原 240 已移除）：基础伤害与投入兵力严格成正比，残兵段再被 scale 二次衰减
+  const raw = committed * coefficient * scale;
   const randMod = 0.92 + o.rnd*0.16;
   const drumMod = o.drum ? 1.15 : 1;
   const atkShip = o.aShip ? 1.1 : 1;
@@ -399,24 +486,27 @@ function coreRoll(o){
   const auraD = o.dAura ? 0.95 : 1;
   const terrDef = TERRAIN_DEFENSE[o.dTerrain];
   const counterMod = o.counter ? 0.6 : 1;
-  const before = raw*leadMod*terrDef*randMod*drumMod*atkShip*defShip*auraA*auraD*counterMod;
+  const before = raw*leadMod*matchup*terrDef*randMod*drumMod*atkShip*defShip*auraA*auraD*counterMod;
   const floor = Math.round(120 * scale);
   const value = clamp(Math.round(before), floor, 2200);
-  return {width,frontCount,committed,scale,techAtk,techDef,leadMod,coefficient,attackScore,raw,
+  return {width,frontCount,committed,scale,techAtk,techDef,atkRating,defRating,leadMod,matchup,rawMatchup,coefficient,raw,
     randMod,drumMod,atkShip,defShip,auraA,auraD,terrDef,counterMod,before,floor,value};
 }
 
 function readAll(){
   return {
     aTroops:+$('aTroops').value, aLead:+$('aLead').value, aWar:+$('aWar').value,
-    aTroopType:$('aTroopType').value, aTerrain:$('aTerrain').value,
+    aTroopType:$('aTroopType').value, aApt:$('aApt').value, aTerrain:$('aTerrain').value,
     aFront:+$('aFront').value, wuqi:$('wuqi').checked, aFangju:$('aFangju').checked,
     aShip:$('aShip').checked, aAura:$('aAura').checked, aDrum:$('aDrum').checked,
+    aBraced:$('aBraced').checked,
     dTroops:+$('dTroops').value, dLead:+$('dLead').value, dWar:+$('dWar').value,
+    dTroopType:$('dTroopType').value, dApt:$('dApt').value,
     dTerrain:$('dTerrain').value,
     dFort:$('dFort').value, dWuqi:$('dWuqi').checked, dFangju:$('dFangju').checked,
     dShield:+$('dShield').value/100, dShieldRoll:+$('dShieldRoll').value/100,
     dTengjia:+$('dTengjia').value, dShip:$('dShip').checked, dAura:$('dAura').checked,
+    dBraced:$('dBraced').checked,
     aFort:$('aFort').value,
     aShield:+$('aShield').value/100, aShieldRoll:+$('aShieldRoll').value/100,
     aTengjia:+$('aTengjia').value,
@@ -465,22 +555,29 @@ function render(){
 
   o.aTechAtk = techAttackBonus(o.aTroopType, o.wuqi);
   o.dTechDef = o.dFangju ? 10 : 0;
-  o.dTechAtk = techAttackBonus(o.aTroopType, o.dWuqi);
+  o.dTechAtk = techAttackBonus(o.dTroopType, o.dWuqi);
+  o.aAptMult = APT_COMBAT[o.aApt];
+  o.dAptMult = APT_COMBAT[o.dApt];
 
-  // 反击由「守方」发起打「攻方」，所以角色互换
+  // 反击由「守方」发起打「攻方」，所以角色互换（兵种与适性也跟着换）
   const isCounter = o.mode === 'counter';
   const r = isCounter ? coreRoll({
-    aTroops:o.dTroops, aLead:o.dLead, aWar:o.dWar, aTroopType:o.aTroopType,
+    aTroops:o.dTroops, aLead:o.dLead, aWar:o.dWar,
+    aTroopType:o.dTroopType, aAptMult:o.dAptMult,
     aTerrain:o.dTerrain, aFront:1,
-    dLead:o.aLead, dTerrain:o.aTerrain,
+    dLead:o.aLead, dTroopType:o.aTroopType, dAptMult:o.aAptMult, dTerrain:o.aTerrain,
     rnd:o.rnd, drum:false, aShip:o.dShip, dShip:o.aShip,
     aAura:o.dAura, dAura:o.aAura, counter:true,
+    aBraced:o.dBraced, dBraced:o.aBraced,
     aTechAtk:o.dTechAtk, dTechDef:o.aFangju ? 10 : 0
   }) : coreRoll({
-    aTroops:o.aTroops, aLead:o.aLead, aWar:o.aWar, aTroopType:o.aTroopType,
-    aTerrain:o.aTerrain, aFront:o.aFront, dLead:o.dLead, dTerrain:o.dTerrain,
+    aTroops:o.aTroops, aLead:o.aLead, aWar:o.aWar,
+    aTroopType:o.aTroopType, aAptMult:o.aAptMult,
+    aTerrain:o.aTerrain, aFront:o.aFront,
+    dLead:o.dLead, dTroopType:o.dTroopType, dAptMult:o.dAptMult, dTerrain:o.dTerrain,
     rnd:o.rnd, drum:o.aDrum, aShip:o.aShip, dShip:o.dShip,
     aAura:o.aAura, dAura:o.dAura, counter:false,
+    aBraced:o.aBraced, dBraced:o.dBraced,
     aTechAtk:o.aTechAtk, dTechDef:o.dTechDef
   });
 
@@ -499,14 +596,27 @@ function render(){
   push('战线宽度', r.width.toLocaleString(), isCounter ? '由守方地形决定' : '由攻击方地形决定');
   push('投入兵力 committed', Math.round(r.committed).toLocaleString(),
     `min(兵力÷${r.frontCount}, ${r.width})${!isCounter && o.aTroopType==='cavalry'?'　骑兵不分摊战线':''}`);
-  if(r.scale < 1) push('残兵衰减 α', '×'+r.scale.toFixed(3), `min(1, ${Math.round(r.committed)}÷1000)，240 基数与 120 地板同步缩小`);
-  push('基础伤害 raw', Math.round(r.raw).toLocaleString(),
-    `240${r.scale<1?'×'+r.scale.toFixed(3):''} + ${Math.round(r.committed)}×${r.coefficient.toFixed(4)}`);
-  if(r.techAtk) push('武器精造', '+'+r.techAtk+' 武力',
-    isCounter ? `守方武力 ${o.dWar} → ${o.dWar+r.techAtk}，折算进系数` : `武力 ${o.aWar} → ${o.aWar+r.techAtk}，折算进系数`);
-  push('× 统率差修正', '×'+r.leadMod.toFixed(3), isCounter
-    ? `clamp(1+(${o.dLead}−${o.aLead}${r.techDef?'−'+r.techDef:''})/250, 0.8, 1.2)　守方统率 − 攻方统率`
-    : `clamp(1+(${o.aLead}−${o.dLead}${r.techDef?'−'+r.techDef:''})/250, 0.8, 1.2)`);
+  if(r.scale < 1) push('残兵衰减 α', '×'+r.scale.toFixed(3), `min(1, ${Math.round(r.committed)}÷1000)，基础伤害与 120 地板同步缩小（raw ∝ 兵力²）`);
+  push('基础伤害 raw', r.raw < 10 ? r.raw.toFixed(2) : Math.round(r.raw).toLocaleString(),
+    `${r.scale<1?'α'+r.scale.toFixed(3)+' × ':''}${Math.round(r.committed)} × ${r.coefficient.toFixed(4)}　无固定基数`);
+  const aLabel = $(isCounter?'dTroopType':'aTroopType').selectedOptions[0].text.split('（')[0];
+  const dLabel = $(isCounter?'aTroopType':'dTroopType').selectedOptions[0].text.split('（')[0];
+  const aLead = isCounter ? o.dLead : o.aLead;
+  const dLead = isCounter ? o.aLead : o.dLead;
+  const aApt = isCounter ? o.dApt : o.aApt;
+  const dApt = isCounter ? o.aApt : o.dApt;
+  const aBase = TROOP_BASE_ATK[isCounter?o.dTroopType:o.aTroopType];
+  const dBase = TROOP_BASE_DEF[isCounter?o.aTroopType:o.dTroopType];
+  push('攻方攻击力', r.atkRating,
+    `floor(${aLead} × ${aApt}适性${APT_COMBAT[aApt]} × ${aBase}${r.techAtk?'+'+r.techAtk+'精造':''}) ÷ 100　${aLabel}`);
+  push('守方防御力', r.defRating,
+    `floor(${dLead} × ${dApt}适性${APT_COMBAT[dApt]} × ${dBase}${r.techDef?'+'+r.techDef+'防具':''}) ÷ 100　${dLabel}`);
+  push('× 统率修正', '×'+r.leadMod.toFixed(3),
+    `clamp(1 + (${r.atkRating} − ${r.defRating}) / 250, 0.8, 1.2)${r.leadMod>=1.2?'　※ 已触顶':r.leadMod<=0.8?'　※ 已触底':''}`, 'hl');
+  if(r.matchup!==1) push('× 兵种相克', '×'+r.matchup.toFixed(2),
+    `${aLabel} → ${dLabel}（血色衣冠 6.0）${r.matchup>1?'　※ 克制':r.matchup<0.8?'　※ 被重克':''}`, r.matchup>1?'hl':'');
+  else if(r.rawMatchup!==1) push('× 兵种相克', '×1.00',
+    `${aLabel} → ${dLabel} 原本 ×${r.rawMatchup.toFixed(2)}，已被「布阵」规避（有利加成不受影响）`, 'hl');
   push('× 地形防御', '×'+r.terrDef.toFixed(2),
     `${$(isCounter?'aTerrain':'dTerrain').selectedOptions[0].text.split('（')[0]} 受伤倍率${isCounter?'（攻方所在地形）':''}`);
   push('× 随机修正', '×'+r.randMod.toFixed(3), '0.92 + 随机值×0.16');
@@ -616,10 +726,12 @@ function render(){
 
     // 回敬反击：守方打攻方
     const cb = coreRoll({
-      aTroops:o.dTroops, aLead:o.dLead, aWar:o.dWar, aTroopType:o.aTroopType,
-      aTerrain:o.dTerrain, aFront:1, dLead:o.aLead, dTerrain:o.aTerrain,
+      aTroops:o.dTroops, aLead:o.dLead, aWar:o.dWar,
+      aTroopType:o.dTroopType, aAptMult:o.dAptMult,
+      aTerrain:o.dTerrain, aFront:1,
+      dLead:o.aLead, dTroopType:o.aTroopType, dAptMult:o.aAptMult, dTerrain:o.aTerrain,
       rnd:o.rnd, drum:false, aShip:o.dShip, dShip:o.aShip,
-      aAura:o.dAura, dAura:o.aAura, counter:true, aTechAtk:o.dTechAtk, dTechDef:0
+      aAura:o.dAura, dAura:o.aAura, counter:true, aBraced:o.dBraced, dBraced:o.aBraced, aTechAtk:o.dTechAtk, dTechDef:0
     });
     let cbDmg = reduceByFortress(cb.value, o.aFort, o.aTroops);
     if(o.aShield>0 && o.aShieldRoll < o.aShield) cbDmg = 0;
@@ -653,8 +765,9 @@ function render(){
     const tier = TACTIC_TIER[o.tactic] || 1;
     const need = TACTIC_REQUIRED_APTITUDE[tier];
     const usable = APT_RANK[o.aptitude] >= APT_RANK[need];
-    $('tacticNote').innerHTML = `适性决定三件事：<b>可用战法等级</b>（B→1级 / A→2级 / S→3级 / C 完全不可用）、
-      <b>战法伤害倍率</b>（1.0 / 1.1 / 1.2）、<b>战法暴击率</b>（+0 / +4 / +8）。
+    $('tacticNote').innerHTML = `适性决定四件事：<b>可用战法等级</b>（B→1级 / A→2级 / S→3级 / C 完全不可用）、
+      <b>战法伤害倍率</b>（1.0 / 1.1 / 1.2 / 1.3 / 1.4）、<b>战法暴击率</b>（+0 / +4 / +8 / +10 / +12）、
+      <b>部队攻防力乘数</b>（0.6 / 0.8 / 0.9 / 1.0 / 1.1 / 1.2，见左侧面板的适性选择）。
       <br>${tier} 级战法需要 ${need} 适性，当前选 ${o.aptitude} —— ${usable?'<b>可发动</b>':'<b style="color:var(--red)">不可发动</b>'}。`;
   }
 }
@@ -696,7 +809,8 @@ const PRESETS = {
     rnd:50,distance:1,banzhi:false,aCrit:false,aCritJ:false,tiebi:false,jointN:3,moved:0,train:false,elite:false,madeng:false,aptitude:'B',mode:'joint'},
 };
 function applyPreset(p){
-  const d = PRESETS[p];
+  // 攻防适性沿用预设的战法适性（游戏里是同一个兵种适性）；守方兵种未给出时按枪兵
+  const d = { aApt: PRESETS[p]?.aptitude ?? 'S', dTroopType:'spear', dApt:'S', ...PRESETS[p] };
   for(const [k,v] of Object.entries(d)){
     if(k==='mode') continue;
     const el = $(k); if(!el) continue;
@@ -732,6 +846,9 @@ document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',
 document.querySelectorAll('input,select').forEach(el=>{
   el.addEventListener('input',()=>{
     if(el.id==='aTroopType'){ buildTactics(); updateTechEnabled(); }
+    // 兵种适性只有一个：攻方面板的适性与战法卡片的适性下拉互相同步
+    if(el.id==='aApt') $('aptitude').value = el.value;
+    if(el.id==='aptitude') $('aApt').value = el.value;
     render();
   });
   el.addEventListener('change',render);

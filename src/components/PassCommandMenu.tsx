@@ -1,5 +1,5 @@
 import { useGame } from '../game/store/GameProvider';
-import type { CityId, GameCommand, PassId } from '../game/types';
+import type { CityId, DiplomacyAction, GameCommand, PassId } from '../game/types';
 import type { CultivateCategory } from './CultivateDialog';
 import { CityCommandMenu } from './CityCommandMenu';
 
@@ -7,7 +7,7 @@ interface PassCommandMenuProps {
   passId: PassId;
   actionPoints: number;
   position: { x: number; y: number };
-  onCommand(type: GameCommand['type'], passId?: PassId): void;
+  onCommand(type: GameCommand['type'], passId?: PassId, diplomacyAction?: DiplomacyAction): void;
   onAppointPosition?(): void;
   onCultivate(category: CultivateCategory, passId?: PassId): void;
   onOpenCultivatePicker?(passId?: PassId): void;

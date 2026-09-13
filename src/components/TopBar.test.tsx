@@ -93,4 +93,28 @@ describe('TopBar online turn prompts', () => {
     await user.click(screen.getByRole('button', { name: '关闭' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('「游戏规则」按钮打开左目录右内容面板，可切换规则项', async () => {
+    const user = userEvent.setup();
+    render(<TopBar />);
+
+    await user.click(screen.getByTestId('open-game-rules-button'));
+    const dialog = screen.getByRole('dialog', { name: '游戏规则' });
+    expect(dialog).toBeInTheDocument();
+
+    // 默认选中第一条：钱粮收入规则
+    expect(screen.getByTestId('game-rule-content')).toHaveTextContent('城池月度资金收入');
+    expect(screen.getByTestId('game-rule-tab-income')).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('game-rule-tab-damage')).not.toHaveAttribute('aria-current');
+
+    // 切到伤害判定规则
+    await user.click(screen.getByTestId('game-rule-tab-damage'));
+    expect(screen.getByTestId('game-rule-content')).toHaveTextContent('完整公式');
+    expect(screen.getByTestId('game-rule-content')).toHaveTextContent('逐项参数解释');
+    expect(screen.getByTestId('game-rule-content')).toHaveTextContent('战线宽度');
+    expect(screen.getByTestId('game-rule-tab-damage')).toHaveAttribute('aria-current', 'true');
+
+    await user.click(screen.getByRole('button', { name: '返回' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
 });
