@@ -3,6 +3,7 @@ import { GAME_RULES } from './gameRulesContent';
 import {
   DIPLOMACY_AP_COST,
   DIPLOMACY_GOLD_MAX,
+  DIPLOMACY_GOLD_STEP,
   GOODWILL_GOLD_COST,
   RELATION_TIER_LABELS,
   TRUCE_MONTHS_MAX,
@@ -18,6 +19,8 @@ import {
   REWARD_GOLD_COST,
   REWARD_LOYALTY_GAIN,
 } from '../game/loyalty';
+import { RUMOR_BASE_CHANCE, RUMOR_GOLD_COST, RUMOR_MAX_CHANCE, RUMOR_MIN_CHANCE } from '../game/rumor';
+import { RUMOR_ADVICE_MIN_CHANCE } from '../game/strategist';
 
 /** 把某章节的全部展示文案拍平成一个字符串，便于做「数值是否抄对」的包含断言 */
 function flatten(id: string): string {
@@ -73,9 +76,25 @@ describe('游戏规则面板内容', () => {
     expectStandaloneNumber(text, GOODWILL_GOLD_COST);
     expectStandaloneNumber(text, DIPLOMACY_AP_COST);
     expectStandaloneNumber(text, DIPLOMACY_GOLD_MAX);
+    expectStandaloneNumber(text, DIPLOMACY_GOLD_STEP);
     expectStandaloneNumber(text, TRUCE_MONTHS_MIN);
     expectStandaloneNumber(text, TRUCE_MONTHS_MAX);
     expect(text).toContain('行动力');
+  });
+
+  it('外交章节写清交涉页次序与军师提示：先势力后使者、默认不预选、拖礼金后才出提示', () => {
+    const text = flatten('diplomacy');
+    // 次序与默认值（用户明确要求：对象势力与执行武将互换，且开始时都不预选）
+    expect(text).toContain('先「对象势力」、后「执行武将」');
+    expect(text).toContain('选定势力后才出现');
+    expect(text).toContain('选择势力');
+    expect(text).toContain('选择武将');
+    // 军师提示（同盟/停战）：触发条件、两档台词与推举使者
+    expect(text).toContain('同盟 / 停战交涉的军师提示');
+    expect(text).toContain('拖动过礼金');
+    expect(text).toContain('此条件足以成事');
+    expect(text).toContain('礼金至少需');
+    expect(text).toContain('纵是倾尽礼金');
   });
 
   it('外交章节列出全部交情档位，且与源码切分一致', () => {
@@ -104,6 +123,18 @@ describe('游戏规则面板内容', () => {
     }
     expect(text).toContain('相性差');
     expect(text).toContain('互不侵犯');
+  });
+
+  it('流言章节抄录判定公式常量，与源码常量一致', () => {
+    const text = flatten('diplomacy');
+    expectStandaloneNumber(text, RUMOR_BASE_CHANCE);
+    expectStandaloneNumber(text, RUMOR_MIN_CHANCE);
+    expectStandaloneNumber(text, RUMOR_MAX_CHANCE);
+    expect(text).toContain('+1.5%');
+    expect(text).toContain(`${RUMOR_ADVICE_MIN_CHANCE}%`);
+    expect(text).toContain('rand(100)');
+    expect(text).toContain('防御智力');
+    expectStandaloneNumber(text, RUMOR_GOLD_COST);
   });
 
   it('武将关系章节抄录仲介消耗并覆盖三项实际效果', () => {

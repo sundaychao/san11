@@ -2,9 +2,9 @@ import { Building2, ChevronRight, Crown, FlaskConical, Globe, Swords, Users } fr
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
-import { COMMAND_AP, OFFICER_COMMANDS, cityAvailableOfficers, passAvailableOfficers } from '../game/commands';
+import { COMMAND_AP, OFFICER_COMMANDS, banishCandidatesOf, cityAvailableOfficers, passAvailableOfficers } from '../game/commands';
 import { ALLIED_ONLY_ACTIONS, DIPLOMACY_ACTIONS, DIPLOMACY_ACTION_LABELS } from '../game/diplomacy';
-import { ARMAMENT_FACILITY, hasPlotFacility, isCityBlocked } from '../game/innerAffairs';
+import { ARMAMENT_FACILITY, hasEmptyPlot, hasPlotFacility, isCityBlocked } from '../game/innerAffairs';
 import { useGame } from '../game/store/GameProvider';
 import type { CityId, DiplomacyAction, GameCommand, GameState, PassId } from '../game/types';
 import type { CultivateCategory } from './CultivateDialog';
@@ -103,6 +103,7 @@ const SUB_COMMANDS: Record<MenuSection, SubItem[]> = {
     { label: '官职', command: 'appointPosition' },
     { label: '军师', command: 'appointStrategist' },
     { label: '委任军团', command: 'legion' },
+    { label: '流放', command: 'banish' },
   ],
 };
 
@@ -119,6 +120,8 @@ interface CityCommandMenuProps {
   onCommand(type: GameCommand['type'], passId?: PassId, diplomacyAction?: DiplomacyAction): void;
   /** 右键"官职"项：打开独立拖拽面板而非原 select 对话框 */
   onAppointPosition?(): void;
+  /** 君主「流放」：直接打开全势力武将选择页（多选），不经命令对话框 */
+  onBanish?(cityId: CityId): void;
   onCultivate(category: CultivateCategory, passId?: PassId): void;
   onOpenCultivatePicker?(passId?: PassId): void;
   onDeploy(strongholdId: CityId | PassId): void;
@@ -126,7 +129,7 @@ interface CityCommandMenuProps {
   onClose(): void;
 }
 
-export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoints, merchantAvailable, position, onClose, onCommand, onAppointPosition, onCultivate, onOpenCultivatePicker, onDeploy, onTransport }: CityCommandMenuProps) {
+export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoints, merchantAvailable, position, onClose, onCommand, onAppointPosition, onBanish, onCultivate, onOpenCultivatePicker, onDeploy, onTransport }: CityCommandMenuProps) {
   const audio = useAudioEventAdapter();
   const { state } = useGame();
   const [activeSection, setActiveSection] = useState<MenuSection | null>(null);
@@ -172,6 +175,8 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
       return true;
     }
     if (item.command === 'trade') return !merchantAvailable || actionPoints < COMMAND_AP.trade;
+    // 流放：本势力没有可流放的武将（除君主外的驻城/驻关武将）时置灰
+    if (item.command === 'banish' && state) return banishCandidatesOf(state, state.playerForceId).length === 0;
     // 婚姻：需本据点同时存在一男一女可用武将，否则不可点击
     if (item.command === 'marry' && state) {
       const leader = state.forces[state.playerForceId]?.leaderId;
@@ -187,6 +192,8 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
         if (item.command === 'transfer') return true;
         if (item.command === 'buildFacilityPlot') return true;
       }
+      // 开发：城中已无空闲建设用地（全部已建成或建设中）时直接置灰
+      if (item.command === 'buildFacilityPlot' && menuCity && !hasEmptyPlot(menuCity)) return true;
       if (item.command === 'train') return Boolean(menuPass?.trainedThisTenDay ?? menuCity?.trainedThisTenDay) || actionPoints < COMMAND_AP.train;
       if (item.command === 'patrol') return Boolean(menuPass?.patrolledThisTenDay ?? menuCity?.patrolledThisTenDay) || actionPoints < COMMAND_AP.patrol;
       if (item.command === 'recruit') {
@@ -222,9 +229,11 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
     if ((item.action === 'deploy' || item.action === 'transport') && passId && availableOfficers.length === 0) return '关内没有可行动的武将';
     if (item.command === 'transfer' && state && menuCity && isCityBlocked(state, menuCity)) return '城池被敌方封锁，无法调动武将';
     if (item.command === 'buildFacilityPlot' && state && menuCity && isCityBlocked(state, menuCity)) return '城池被敌方封锁，无法开发建设';
+    if (item.command === 'buildFacilityPlot' && menuCity && !hasEmptyPlot(menuCity)) return '城中已无空闲的建设用地';
     if (item.command && actionPoints < COMMAND_AP[item.command]) return `行动力不足 ${COMMAND_AP[item.command]}`;
     if ((item.action === 'deploy' || item.action === 'transport') && actionPoints < DEPLOY_AP_COST) return `行动力不足 ${DEPLOY_AP_COST}`;
     if (item.command === 'trade' && !merchantAvailable) return '商人本旬未到访';
+    if (item.command === 'banish' && state && banishCandidatesOf(state, state.playerForceId).length === 0) return '没有可流放的武将';
     if (item.command === 'train' && (menuPass?.trainedThisTenDay ?? menuCity?.trainedThisTenDay)) return passId ? '本旬该关已训练' : '本旬该城已训练';
     if (item.command === 'patrol' && (menuPass?.patrolledThisTenDay ?? menuCity?.patrolledThisTenDay)) return passId ? '本旬该关已巡查' : '本旬该城已巡查';
     if (item.command === 'recruit') {
@@ -255,6 +264,9 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
     if (item.action === 'transport') onTransport(passId ?? cityId);
     if (item.command === 'appointPosition' && onAppointPosition) {
       onAppointPosition();
+    } else if (item.command === 'banish') {
+      // 流放：直接进入武将选择页（多选），确认后经二次提示执行
+      if (onBanish) onBanish(cityId);
     } else if (item.command) {
       onCommand(item.command, passId, item.diplomacyAction);
     }

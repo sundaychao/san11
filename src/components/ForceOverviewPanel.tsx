@@ -25,6 +25,22 @@ function officerLocationText(officer: Officer, state: GameState) {
   if (location.kind === 'transfer') return '在途';
   if (location.kind === 'captive') return '被俘';
   if (location.kind === 'envoy') return `出使${state.forces[location.targetForceId]?.name ?? ''}`;
+  if (location.kind === 'recruitJourney') {
+    const end = location.phase === 'outbound'
+      ? `前往${state.cities[location.targetCityId]?.name ?? '目标城'}`
+      : `返回${state.cities[location.fromCityId]?.name ?? '出发城'}`;
+    return `登庸中（${end}，剩余${location.remainingTenDays}旬）`;
+  }
+  if (location.kind === 'rumorJourney') {
+    const targetPassId = location.targetPassId;
+    const targetName = location.targetCityId
+      ? state.cities[location.targetCityId]?.name
+      : (targetPassId ? state.passes?.[targetPassId]?.name : undefined);
+    const end = location.phase === 'outbound'
+      ? `前往${targetName ?? '目标据点'}`
+      : `返回${state.cities[location.fromCityId]?.name ?? '出发城'}`;
+    return `流言中（${end}，剩余${location.remainingTenDays}旬）`;
+  }
   if (location.kind === 'task') return state.cities[location.cityId]?.name ?? '执行中';
   return state.cities[location.cityId]?.name ?? '未任官';
 }
@@ -45,6 +61,10 @@ function officerCell(officer: Officer, state: GameState): GridCoord | null {
   if (location.kind === 'transfer') return cityCell(state, location.targetCityId);
   // 外交使者在途：不在本方地图上落点（去程在对方境内、返程未归）
   if (location.kind === 'envoy') return null;
+  // 登庸差旅在途：未在据点也非部队，点击时无需聚焦
+  if (location.kind === 'recruitJourney') return null;
+  // 流言差旅在途：同上（在对方境内，不在本方地图上落点）
+  if (location.kind === 'rumorJourney') return null;
   return cityCell(state, location.cityId);
 }
 
@@ -186,8 +206,10 @@ export function ForceOverviewPanel({ onFocus }: ForceOverviewPanelProps = {}) {
                 title={`${officer.name}：居中显示所在位置`}
                 onClick={() => focusOn(officerCell(officer, state))}
               >
-                <strong>{officer.name}</strong>
-                <small>{officerLocationText(officer, state)} / {officerHasActed(officer, state) ? '已行动' : '未行动'}</small>
+                <span className="force-overview-row-text">
+                  <strong>{officer.name}</strong>
+                  <small>{officerLocationText(officer, state)} / {officerHasActed(officer, state) ? '已行动' : '未行动'}</small>
+                </span>
               </button>
             </li>
           ))}

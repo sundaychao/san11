@@ -9,6 +9,7 @@ interface PassCommandMenuProps {
   position: { x: number; y: number };
   onCommand(type: GameCommand['type'], passId?: PassId, diplomacyAction?: DiplomacyAction): void;
   onAppointPosition?(): void;
+  onBanish?(cityId: CityId): void;
   onCultivate(category: CultivateCategory, passId?: PassId): void;
   onOpenCultivatePicker?(passId?: PassId): void;
   onDeploy(strongholdId: CityId | PassId): void;
@@ -21,7 +22,7 @@ interface PassCommandMenuProps {
  * 除都市相关操作外，其余各段（军事/人才/科技树/外交/君主）均以关隘自身为宿主执行
  * （武将/训练/巡查/钱粮等判断与结算均落在关隘驻军与关隘资源上）。
  */
-export function PassCommandMenu({ passId, actionPoints, position, onCommand, onAppointPosition, onCultivate, onOpenCultivatePicker, onDeploy, onTransport, onClose }: PassCommandMenuProps) {
+export function PassCommandMenu({ passId, actionPoints, position, onCommand, onAppointPosition, onBanish, onCultivate, onOpenCultivatePicker, onDeploy, onTransport, onClose }: PassCommandMenuProps) {
   const { state } = useGame();
   const pass = state?.passes?.[passId];
   if (!pass) return null;
@@ -35,6 +36,7 @@ export function PassCommandMenu({ passId, actionPoints, position, onCommand, onA
       position={position}
       onCommand={onCommand}
       onAppointPosition={onAppointPosition}
+      onBanish={onBanish}
       onCultivate={onCultivate}
       onOpenCultivatePicker={onOpenCultivatePicker}
       onDeploy={onDeploy}

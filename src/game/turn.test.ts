@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { armamentProductionTenDays } from './armaments';
-import { executeCommand } from './commands';
+import { executeCommand, strongholdTransferDuration } from './commands';
+import { resolveDebateAbandon, resolveDebateRound } from './debate';
 import { hasCityTrait } from './cityTraits';
 import { cityMonthlyGoldIncome, cityMonthlyOfficerSalary, cityQuarterlyFoodIncome, cityPlots } from './innerAffairs';
 import { createGame } from './scenario/jingxiang208';
 import { resolveCitySkills } from './skills/sources';
 import { orderDropResist } from './techs';
 import { settleMonth, settleTenDay } from './turn';
+import type { CityId, GameState, Officer } from './types';
 
 describe('monthly settlement', () => {
   it('settles monthly gold and restores monthly actions without monthly food income', () => {
@@ -939,5 +941,161 @@ describe('ten-day settlement', () => {
     expect(next.officers['jian-yong'].skill).toBe('论客');
     expect(next.forces.liu.abilityResearch?.remaining['sk-lianji']).toBe(2);
     expect(next.officers['jian-yong'].location.kind).toBe('city');
+  });
+});
+
+describe('跨城登庸旬结算', () => {
+  /** 在指定城池注入在野武将（可选喜/恶，决定抵达当旬的登庸判定） */
+  function injectFieldOfficer(state: GameState, cityId: string, opts?: { likes?: string[]; hates?: string[] }): Officer {
+    const officer: Officer = {
+      id: `field-${cityId}`,
+      name: '田野在野',
+      forceId: null,
+      cityId: cityId as never,
+      location: { kind: 'unaffiliated', cityId: cityId as never },
+      stats: { leadership: 60, war: 60, intelligence: 70, politics: 65, charisma: 60 },
+      personality: 'calm',
+      acted: false,
+      ...(opts?.likes ? { likes: opts.likes } : {}),
+      ...(opts?.hates ? { hates: opts.hates } : {}),
+    };
+    state.officers[officer.id] = officer;
+    return officer;
+  }
+
+  function journeyLocOf(state: GameState, officerId: string): Extract<Officer['location'], { kind: 'recruitJourney' }> {
+    const location = state.officers[officerId].location;
+    if (location.kind !== 'recruitJourney') throw new Error('武将不在登庸差旅中');
+    return location;
+  }
+
+  /** 曹操（宛）→ 江陵跨城登庸的起点状态 */
+  function startJourney(opts?: { likes?: string[]; hates?: string[] }) {
+    const state = createGame('cao', 42);
+    const target = injectFieldOfficer(state, 'jiangling', opts);
+    const travel = Math.max(1, strongholdTransferDuration(state, state.cities.wan, state.cities.jiangling));
+    const next = executeCommand(state, 'cao', {
+      type: 'talent', cityId: 'wan', officerId: 'cao-cao', targetOfficerId: target.id,
+    } as never);
+    return { next, target, travel };
+  }
+
+  it('去程推进→抵达即允（亲善君主）：目标随行返程，两人按时同城归队', () => {
+    const { next: journey } = startJourney({ likes: ['cao-cao'] });
+    let state = journey;
+    const targetId = 'field-jiangling';
+    const techPBefore = state.forces.cao.techP ?? 0;
+
+    // 把去程压在最后一旬，一旬后抵达结算
+    journeyLocOf(state, 'cao-cao').remainingTenDays = 1;
+    state = settleTenDay(state);
+
+    // 抵达即允：目标换主、两人一同转入返程（技P +150）
+    expect(state.officers[targetId].forceId).toBe('cao');
+    expect(state.officers[targetId].location).toMatchObject({ kind: 'recruitJourney', phase: 'return' });
+    expect(state.officers['cao-cao'].location).toMatchObject({ kind: 'recruitJourney', phase: 'return' });
+    expect(journeyLocOf(state, targetId).fromCityId).toBe('wan');
+    // 同旬结算里其它系统（月度收入等）也可能入账技巧P，这里只断言登庸部分 ≥ +150
+    expect(state.forces.cao.techP).toBeGreaterThanOrEqual(techPBefore + 150);
+
+    // 返程在途逐旬推进（若行程大于 1 旬，两人剩余旬数始终同步）
+    const tramp = journeyLocOf(state, 'cao-cao');
+    if (tramp.remainingTenDays > 1) {
+      const next = settleTenDay(state);
+      expect(journeyLocOf(next, 'cao-cao').remainingTenDays).toBe(tramp.remainingTenDays - 1);
+      expect(state.officers[targetId].location).toMatchObject({ kind: 'recruitJourney', remainingTenDays: tramp.remainingTenDays - 1 });
+    }
+
+    // 返程到点：双双回到出发城（宛），恢复待命
+    journeyLocOf(state, 'cao-cao').remainingTenDays = 1;
+    state.officers[targetId].location = { kind: 'recruitJourney', fromCityId: 'wan', targetCityId: 'jiangling', targetOfficerId: targetId, remainingTenDays: 1, returnTenDays: 1, phase: 'return' };
+    state = settleTenDay(state);
+    expect(state.officers['cao-cao'].location).toEqual({ kind: 'city', cityId: 'wan' });
+    expect(state.officers['cao-cao'].cityId).toBe('wan');
+    expect(state.officers[targetId].location).toEqual({ kind: 'city', cityId: 'wan' });
+    expect(state.officers[targetId].cityId).toBe('wan');
+  });
+
+  it('抵达被拒：执行武将只身返程，目标依然在野', () => {
+    let state = startJourney({ hates: ['cao-cao'] }).next;
+    const targetId = 'field-jiangling';
+    journeyLocOf(state, 'cao-cao').remainingTenDays = 1;
+    state = settleTenDay(state);
+
+    expect(state.officers[targetId].forceId).toBeNull();
+    expect(state.officers['cao-cao'].location).toMatchObject({ kind: 'recruitJourney', phase: 'return' });
+
+    journeyLocOf(state, 'cao-cao').remainingTenDays = 1;
+    state = settleTenDay(state);
+    expect(state.officers['cao-cao'].location).toEqual({ kind: 'city', cityId: 'wan' });
+    expect(state.officers[targetId].forceId).toBeNull();
+  });
+
+  it('抵达可舌战：要么挂起抉择等待玩家，要么直接按意愿掷点结算返程', () => {
+    let state = startJourney().next;
+    journeyLocOf(state, 'cao-cao').remainingTenDays = 1;
+    state = settleTenDay(state);
+
+    const loc = journeyLocOf(state, 'cao-cao');
+    if (state.pendingRecruitDebate?.recruiterId === 'cao-cao') {
+      // 挂起抉择：去程 remaining=0 保持不动，等待玩家 accept/reject
+      expect(state.debateSession?.status).toBeUndefined();
+      expect(loc).toMatchObject({ phase: 'outbound', remainingTenDays: 0 });
+      // 等待期间旬推进不动程（不再重复结算抵达）
+      const stalled = settleTenDay(state);
+      expect(stalled.pendingRecruitDebate?.recruiterId).toBe('cao-cao');
+      expect(journeyLocOf(stalled, 'cao-cao').remainingTenDays).toBe(0);
+    } else {
+      // 未触发舌战：按意愿成功率直接判成败，执行武将至少进入返程
+      expect(loc.phase).toBe('return');
+    }
+  });
+
+  it('舌战占优：目标应允后随执行武将同行归来', () => {
+    let state = startJourney().next;
+    const targetId = 'field-jiangling';
+    journeyLocOf(state, 'cao-cao').remainingTenDays = 0;
+    state.pendingRecruitDebate = { recruiterId: 'cao-cao', targetId };
+    const techPBefore = state.forces.cao.techP ?? 0;
+
+    state = executeCommand(state, 'cao', { type: 'acceptRecruitDebate', cityId: 'wan', officerId: 'cao-cao', targetOfficerId: targetId } as never);
+    expect(state.debateSession?.status).toBe('ongoing');
+
+    // 直接裁定我方获胜：目标同程返程、归城后正式归队
+    state.debateSession!.p2.hp = 0;
+    state.debateSession!.p2.cards = state.debateSession!.p2.cards.filter((card) => card.type === 'topic');
+    state = resolveDebateRound(state, state.debateSession!.p1.cards[0].uid);
+    expect(state.debateSession?.winner).toBe('recruiter');
+    expect(state.forces.cao.techP).toBe(techPBefore + 150);
+
+    expect(state.officers[targetId].forceId).toBe('cao');
+    expect(state.officers[targetId].location).toMatchObject({ kind: 'recruitJourney', phase: 'return' });
+    expect(state.officers['cao-cao'].location).toMatchObject({ kind: 'recruitJourney', phase: 'return' });
+
+    journeyLocOf(state, 'cao-cao').remainingTenDays = 1;
+    journeyLocOf(state, targetId).remainingTenDays = 1;
+    state = settleTenDay(state);
+    expect(state.officers[targetId].location).toEqual({ kind: 'city', cityId: 'wan' });
+    expect(state.officers[targetId].cityId).toBe('wan');
+  });
+
+  it('舌战失利：目标禁仕 3 个月，执行武将只身返回', () => {
+    let state = startJourney().next;
+    const targetId = 'field-jiangling';
+    journeyLocOf(state, 'cao-cao').remainingTenDays = 0;
+    state.pendingRecruitDebate = { recruiterId: 'cao-cao', targetId };
+
+    state = executeCommand(state, 'cao', { type: 'acceptRecruitDebate', cityId: 'wan', officerId: 'cao-cao', targetOfficerId: targetId } as never);
+    state = resolveDebateAbandon(state);
+    expect(state.debateSession?.winner).toBe('target');
+
+    expect(state.officers[targetId].forceId).toBeNull();
+    expect(state.officers[targetId].bannedUntilMonth).toBeGreaterThan(state.month);
+    expect(state.officers['cao-cao'].location).toMatchObject({ kind: 'recruitJourney', phase: 'return' });
+
+    journeyLocOf(state, 'cao-cao').remainingTenDays = 1;
+    state = settleTenDay(state);
+    expect(state.officers['cao-cao'].location).toEqual({ kind: 'city', cityId: 'wan' });
+    expect(state.officers[targetId].forceId).toBeNull();
   });
 });

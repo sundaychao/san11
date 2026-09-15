@@ -208,10 +208,10 @@ export function isInAnyCityAttackRange(state: GameState, q: number, r: number): 
 /**
  * 旬结算：城池箭矢射击 + 封锁检测
  * 对每个城池，如果有敌方部队在攻击范围内，每旬造成箭矢伤害并封锁该城。
- * 返回事件消息数组。
+ * 返回事件消息数组（含归属势力：守方势力；被射部队属玩家时归玩家，确保玩家必能看到本方受创）。
  */
-export function settleCityRangedAttack(state: GameState): string[] {
-  const events: string[] = [];
+export function settleCityRangedAttack(state: GameState): Array<{ message: string; forceId: ForceId | null }> {
+  const events: Array<{ message: string; forceId: ForceId | null }> = [];
   for (const city of Object.values(state.cities)) {
     if (!city.ownerId) continue;
     // 劲弩：据点射程＋1（科技只影响箭雨范围，不影响建造区阻挡判定）
@@ -240,10 +240,16 @@ export function settleCityRangedAttack(state: GameState): string[] {
         kind: 'attack',
         label: `${city.name}箭矢`,
       });
-      events.push(`${city.name}向城外敌军射出箭矢，${damage}士兵被射杀（${state.officers[unit.leaderId]?.name ?? unit.id}部）`);
+      events.push({
+        forceId: unit.forceId === state.playerForceId ? state.playerForceId : city.ownerId,
+        message: `${city.name}向城外敌军射出箭矢，${damage}士兵被射杀（${state.officers[unit.leaderId]?.name ?? unit.id}部）`,
+      });
       if (unit.troops <= 0) {
         delete state.units[unit.id];
-        events.push(`${state.officers[unit.leaderId]?.name ?? unit.id}部被${city.name}箭矢全歼`);
+        events.push({
+          forceId: unit.forceId === state.playerForceId ? state.playerForceId : city.ownerId,
+          message: `${state.officers[unit.leaderId]?.name ?? unit.id}部被${city.name}箭矢全歼`,
+        });
       }
     }
   }
@@ -780,6 +786,15 @@ export function armamentYieldMultiplier(city: City | Pass, armamentType: Armamen
 export function plotValueFor(level: number): number {
   if (level < 1) return 0;
   return PLOT_BASE_VALUE * Math.pow(PLOT_LEVEL_MULTIPLIER, level - 1);
+}
+
+/** 据点是否还有可建设的空地（存在「空地且未在建设」的建设用地）。
+ *  命令菜单与开发对话框共用同一判据：没有空地时「开发」在菜单层直接置灰，
+ *  不必等进入对话框才提示。关隘一般没有建设用地，恒为 false。 */
+export function hasEmptyPlot(stronghold: City | Pass): boolean {
+  return (stronghold.plots ?? []).some(
+    (plot) => plot.type === 'empty' && plot.level === 0 && !plot.constructing,
+  );
 }
 
 /** 校验能否在地格建设设施：地格须为空地（未建设/建设中/已有设施） */

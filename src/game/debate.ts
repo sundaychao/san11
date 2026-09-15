@@ -6,10 +6,10 @@ import type { CityId, ForceId, GameState, Officer } from './types';
  * 舌战系统（完整移植自水浒卡牌小程序 debate-engine.js）：
  * - 话题卡：故事/道理/时节 × 大/中/小；话术卡：无视/大喝一声/强词夺理/镇静/愤怒。
  * - 初始血量 67（按百分比显示），怒气 0~100，怒气满触发性格激愤。
- * - 手牌数按五维总和：≥335→6 张，≥301→5 张，≥275→4 张，否则 3 张。
+ * - 手牌数与攻击力只按智力决定：智力 ≥100→6 张，≥90→5 张，≥80→4 张，否则 3 张。
  * - 判定：当前话题的话题卡 > 其他话题卡；同话题按大>中>小；
  *   话术对拼按优先级，无视/大喝一声/强词夺理压过话题卡，镇静/愤怒偏守势。
- * - 伤害 = 12 + (攻方五维和-守方五维和)/25，钳制 8~33；大喝×1.5、小话题×0.5、中话题×0.75；
+ * - 伤害 = 12 + (攻方智力-守方智力)/25，钳制 8~33；大喝×1.5、小话题×0.5、中话题×0.75；
  *   冷静激愤×2、刚胆激愤×1.3，上限 35。
  * - 怒气：败方 +10+伤害/2（大喝额外+10）；平局双方+8；无视生效败方+25；愤怒自身+25。
  * - 激愤（怒气满）：莽撞=弃最大话题牌造成2.5倍伤害；小心=掷出全部话题牌逐张结算；
@@ -69,7 +69,7 @@ export interface DebatePlayerState {
   name: string;
   trait: DebateTrait;
   intel: number;
-  /** 五维总和（决定手牌数与伤害基数） */
+  /** 智力（决定手牌数与伤害基数） */
   power: number;
   hp: number;
   maxHp: number;
@@ -188,11 +188,11 @@ export function officerTrait(officer: Officer): DebateTrait {
   }
 }
 
-/** 手牌数：按五维总和 */
+/** 手牌数：只按智力决定 */
 export function getHandSize(power: number): number {
-  if (power >= 335) return 6;
-  if (power >= 301) return 5;
-  if (power >= 275) return 4;
+  if (power >= 100) return 6;
+  if (power >= 90) return 5;
+  if (power >= 80) return 4;
   return 3;
 }
 
@@ -203,7 +203,7 @@ function toPlayerState(officer: Officer): DebatePlayerState {
     name: officer.name,
     trait: officerTrait(officer),
     intel: s.intelligence,
-    power: s.leadership + s.war + s.intelligence + s.politics + s.charisma,
+    power: s.intelligence,
     hp: DEBATE_STARTING_HP,
     maxHp: DEBATE_STARTING_HP,
     anger: 0,
@@ -354,7 +354,7 @@ export function judgeRound(cardA: DebateCard, cardB: DebateCard, topic: DebateTo
   return { winner: 'draw', reason: '旗鼓相当', winnerCard: null };
 }
 
-/** 伤害计算：五维差基数 + 大喝/话题大小/激愤性格修正 */
+/** 伤害计算：攻守智力差基数 + 大喝/话题大小/激愤性格修正 */
 export function calcDamage(attacker: DebatePlayerState, defender: DebatePlayerState, result: RoundJudgement): number {
   if (result.winner === 'draw') return 0;
   let base = 12 + Math.floor((attacker.power - defender.power) / 25);
@@ -1116,8 +1116,12 @@ function settlePlayedRound(
   const damageToP1 = hpBefore.p1 - session.p1.hp;
   const angerAfterRound = snapshotAnger(session);
 
-  // 激愤结算（含我方愤怒/镇静自动反制）
+  // 激愤结算（含我方愤怒/镇静自动反制）：小心/莽撞爆发伤害在回合牌面伤害之后落地，
+  // 需按「激愤前血量」再补一次跌破阈值判定，否则爆发连续掉血跨过 1/4 等阈值时不会返还思考机会。
+  const hpBeforeFury = { p1: session.p1.hp, p2: session.p2.hp };
   const furyActions = applyPendingFury(session, result, random);
+  resetRethinkIfHpCrossed(session.p1, hpBeforeFury.p1);
+  resetRethinkIfHpCrossed(session.p2, hpBeforeFury.p2);
 
   const gameOver = isGameOver(session);
   let aiFirst: { card: DebateCard; rethought: boolean } | null = null;
@@ -1176,10 +1180,60 @@ function settleDebateOutcome(next: GameState, session: DebateSession): void {
   const recruiterForceId = recruiter.forceId as ForceId | undefined;
   if (!recruiterForceId) return;
 
+  // 跨城登庸：舌战在目标城进行，胜负不落地位置，而是结算后按返程差旅回程——
+  // 胜则两人同行返回出发据点，败则执行武将只身返回。
+  const journey = recruiter.location.kind === 'recruitJourney' ? recruiter.location : null;
+  if (journey) {
+    if (session.winner === 'recruiter') {
+      target.forceId = recruiterForceId;
+      // 与普通登庸（enlistTarget）一致：换主、忠诚重置、仕龄清零、禁仕清空、视作已行动。
+      // 新加入武将不直接落地出发城，而是与执行武将同程返程，抵城后才正式归队。
+      target.bannedUntilMonth = undefined;
+      target.loyalty = recruitmentInitialLoyalty(target);
+      target.serviceYears = 0;
+      target.acted = true;
+      target.cityId = journey.fromCityId;
+      target.location = {
+        kind: 'recruitJourney',
+        fromCityId: journey.fromCityId,
+        targetCityId: journey.targetCityId,
+        targetOfficerId: target.id,
+        remainingTenDays: journey.returnTenDays,
+        returnTenDays: journey.returnTenDays,
+        phase: 'return',
+      };
+      const force = next.forces[recruiterForceId];
+      if (force) force.techP = (force.techP ?? 0) + 150;
+      next.logs.push({
+        id: `debate-win-${next.month}-${next.rngCursor}`,
+        month: next.month,
+        forceId: recruiterForceId,
+        message: `舌战告捷！${recruiter.name}说服${target.name}加入${next.forces[recruiterForceId]?.name ?? ''}，两人将结伴返回${next.cities[journey.fromCityId]?.name ?? '出发城'}`,
+      });
+    } else {
+      const bannedMonths = 3;
+      target.bannedUntilMonth = next.month + bannedMonths;
+      next.logs.push({
+        id: `debate-lose-${next.month}-${next.rngCursor}`,
+        month: next.month,
+        forceId: recruiterForceId,
+        message: `舌战受挫，${target.name}拒绝了${recruiter.name}的招揽（约${bannedMonths}个月内不会再应允）`,
+      });
+    }
+    recruiter.location = { ...journey, phase: 'return', remainingTenDays: journey.returnTenDays };
+    return;
+  }
+
   if (session.winner === 'recruiter') {
     target.forceId = recruiterForceId;
-    const cityId: CityId = target.location.kind === 'unaffiliated' ? target.location.cityId : (target.location as { cityId: CityId }).cityId;
+    // 与普通登庸（enlistTarget）一致：跳槽到我方执行据点并同步 cityId，
+    // 否则新加入武将仍留在对方城池（城内武将列表按 cityId 归位，location 决定当前所在）。
+    const cityId: CityId =
+      recruiter.location.kind === 'city'
+        ? recruiter.location.cityId
+        : (target.location as { cityId: CityId }).cityId;
     target.location = { kind: 'city', cityId };
+    target.cityId = cityId;
     target.bannedUntilMonth = undefined;
     target.loyalty = recruitmentInitialLoyalty(target);
     // 血色衣冠 6.0：换主后仕龄从 0 重新计算（出仕第一年）

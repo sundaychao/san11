@@ -1051,6 +1051,11 @@ button { color: inherit; }
 .officer-table tbody th { color: #fff6d6; font-size: 13px; }
 .officer-table .officer-skill-description { min-width: 280px; color: var(--muted); text-align: left; white-space: normal; }
 .officer-table td.is-elder { color: var(--danger); font-weight: 700; }
+/* 计略分类：军师推荐标记（○ 推荐 = 预估成功率超过门槛 / × 未推荐） */
+.officer-table .advice-cell { text-align: center; }
+.officer-table .advice-mark { display: inline-block; min-width: 1em; font-size: 15px; font-weight: 700; line-height: 1; }
+.officer-table .advice-mark.is-yes { color: #9fd8ff; text-shadow: 0 0 6px rgba(159, 216, 255, 0.45); }
+.officer-table .advice-mark.is-no { color: rgba(201, 193, 173, 0.42); }
 .officer-health-badge {
   display: inline-block;
   margin-left: 6px;
@@ -1069,6 +1074,53 @@ button { color: inherit; }
 .officer-table tbody tr:hover { background: rgba(197, 173, 111, 0.12); }
 .officer-table tbody tr.is-clickable { cursor: pointer; }
 .officer-table tbody tr.is-clickable.is-selected { background: rgba(197, 173, 111, 0.22); }
+/* ============ 武将头像 ============ */
+.officer-portrait {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid rgba(197, 173, 111, 0.55);
+  border-radius: 5px;
+  background: #271f14;
+  box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.55);
+  vertical-align: middle;
+}
+.officer-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* 头像填满头像框，不留白 */
+  display: block;
+}
+.officer-portrait.is-fallback {
+  color: #e6d3a4;
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  line-height: 1;
+}
+.officer-portrait.is-fallback::after { content: attr(data-name); }
+.officer-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.officer-name-cell .officer-name-button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.officer-detail-header > div { min-width: 0; flex: 1; }
+.force-overview-row-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.force-overview-row-text small { text-align: left; }
+.unit-info-officer-row { display: flex; align-items: center; gap: 6px; }
+.unit-info-officer-row .unit-info-officer-label { flex: none; }
 .event-log h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; letter-spacing: 0; }
 .city-heading { display: grid; grid-template-columns: 5px 1fr auto auto; gap: 10px; align-items: center; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
 .city-heading .force-line { align-self: stretch; min-height: 48px; }
@@ -1198,6 +1250,30 @@ button { color: inherit; }
 .force-select-dialog > header p { margin: 0 0 3px; color: var(--muted); font-size: 11px; }
 .force-select-dialog > header h2 { margin: 0; color: #efdba2; font-family: STKaiti, KaiTi, serif; font-size: 24px; }
 
+/* ── 军师提示框（流言等计略任务的建议；固定于游戏界面底部，仿原版忠告框） ───────────── */
+.strategist-hint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 5; display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: stretch; width: min(660px, calc(100vw - 72px)); padding: 10px 14px 10px 10px; border: 1px solid rgba(197, 173, 111, 0.55); border-radius: 3px; background: linear-gradient(180deg, rgba(36, 47, 52, 0.96), rgba(20, 30, 34, 0.97)); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55); text-align: left; cursor: default; }
+.strategist-hint::before { content: ''; position: absolute; inset: 3px; border: 1px solid rgba(197, 173, 111, 0.22); border-radius: 2px; pointer-events: none; }
+.strategist-hint.is-viable { border-color: var(--gold-line); cursor: pointer; }
+.strategist-hint.is-viable:hover { box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--gold-line); }
+.strategist-hint .strategist-hint-portrait { align-self: center; border: 1px solid rgba(197, 173, 111, 0.5); border-radius: 2px; }
+.strategist-hint-main { display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 0; }
+.strategist-hint-text { margin: 0; color: #f3ecdc; font-family: STKaiti, KaiTi, serif; font-size: 17px; letter-spacing: 1.5px; line-height: 1.55; }
+.strategist-hint-meta { display: flex; align-items: center; gap: 12px; }
+.strategist-hint-name { min-width: 112px; padding: 3px 18px; border: 1px solid rgba(197, 173, 111, 0.5); border-radius: 2px; background: linear-gradient(180deg, rgba(58, 66, 60, 0.92), rgba(32, 40, 42, 0.92)); color: #ffe9ae; font-family: STKaiti, KaiTi, serif; font-size: 14px; letter-spacing: 2px; text-align: center; }
+.strategist-hint-adopt { color: var(--muted); font-size: 11px; }
+.strategist-hint.is-viable .strategist-hint-adopt { color: #d8c48a; }
+
+/* ── 「进行」前的原版式确认横幅（尚有未行动的委任部队） ───────────────── */
+/* 横幅悬浮在界面最下方，只作提示：pointer-events 置灰，让鼠标处的「是 / 否」始终可点 */
+.strategy-end-banner { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 34; width: min(880px, calc(100vw - 56px)); padding: 14px 26px 16px; border: 1px solid rgba(206, 199, 178, 0.78); border-radius: 2px; background: linear-gradient(180deg, rgba(64, 62, 78, 0.94), rgba(30, 30, 42, 0.96)); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.62), inset 0 0 44px rgba(0, 0, 0, 0.35); color: #f4ecdd; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 19px; line-height: 1.62; letter-spacing: 1px; text-align: left; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85); pointer-events: none; animation: strategy-end-banner-in 150ms ease-out; }
+.strategy-end-banner::before { content: ''; position: absolute; inset: 4px; border: 1px solid rgba(206, 199, 178, 0.3); border-radius: 1px; pointer-events: none; }
+.strategy-end-banner p { margin: 0; }
+.strategy-end-force { color: #a8e259; }
+@keyframes strategy-end-banner-in {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
 /* ── 登庸「选择对象武将」列表（原版式全武将一览，在野置顶） ───────────── */
 .modal-backdrop:has(.talent-target-dialog) { z-index: 52; }
 .talent-target-dialog { width: min(880px, calc(100vw - 48px)); max-height: min(720px, calc(100dvh - 48px)); display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
@@ -1216,6 +1292,15 @@ button { color: inherit; }
 .talent-target-row { cursor: pointer; }
 .talent-target-row:hover:not(.is-monarch), .talent-target-row:focus-visible { background: rgba(197, 173, 111, 0.16); outline: none; }
 .talent-target-row.is-unaffiliated .talent-name { color: #ffd98a; }
+
+/* 登庸意愿四档名字着色（血色 sp10：深绿/浅绿/黄；「不能登庸」用默认白不另设） */
+.talent-target-table .talent-name.is-will-high { color: #2ea44f; }
+.talent-target-table .talent-name.is-will-mid { color: #7ee2b8; }
+.talent-target-table .talent-name.is-will-low { color: #d4a72c; }
+
+.talent-target-footer { flex-wrap: wrap; }
+.talent-target-legend { display: inline-flex; align-items: center; gap: 10px; font-size: 11px; color: var(--muted); }
+.talent-legend-item { display: inline-flex; align-items: center; gap: 4px; }
 .talent-target-row.is-monarch { cursor: not-allowed; opacity: 0.45; }
 .talent-target-row.is-selected { background: rgba(197, 173, 111, 0.24); box-shadow: inset 0 0 0 1px var(--gold-line); }
 .talent-target-empty { margin: 0; padding: 28px 0; color: var(--muted); text-align: center; font-size: 13px; }
@@ -1497,19 +1582,19 @@ button { color: inherit; }
 .command-executor-slots { display: flex; align-items: center; gap: 8px; }
 .command-executor-slot {
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  width: 58px; height: 66px; padding: 0; border: 1px dashed var(--line); border-radius: 4px;
+  width: 116px; height: 124px; padding: 0; border: 1px dashed var(--line); border-radius: 4px;
   background: rgba(15, 30, 29, 0.72); cursor: pointer;
 }
 .command-executor-slot:hover { border-color: var(--gold-line); outline: 1px solid var(--gold-line); outline-offset: -1px; }
 .command-executor-slot.is-filled { border-style: solid; border-color: var(--gold-line); background: #26362f; }
 .command-executor-portrait {
-  display: flex; align-items: center; justify-content: center; width: 46px; height: 46px;
+  display: flex; align-items: center; justify-content: center; width: 92px; height: 92px;
   border: 1px solid rgba(197, 173, 111, 0.7); border-radius: 3px; overflow: hidden;
-  background: rgba(197, 173, 111, 0.14); color: var(--gold); font-size: 13px; font-weight: 700;
+  background: rgba(197, 173, 111, 0.14); color: var(--gold); font-size: 24px; font-weight: 700;
 }
 .command-executor-slot.is-filled .command-executor-portrait { background: rgba(197, 173, 111, 0.22); }
-.command-executor-portrait.is-empty { border-color: var(--line); color: var(--muted); font-size: 22px; font-weight: 400; }
-.command-executor-caption { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1; }
+.command-executor-portrait.is-empty { border-color: var(--line); color: var(--muted); font-size: 44px; font-weight: 400; }
+.command-executor-caption { margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 1; }
 
 /* —— 执行武将勾选弹窗（OfficerPickerDialog，复用武将一览表格） —— */
 .executor-picker-dialog { width: min(760px, calc(100vw - 72px)); max-height: min(720px, calc(100dvh - 96px)); display: flex; flex-direction: column; gap: 10px; padding: 16px; overflow: hidden; background: rgba(18, 43, 45, 0.96); }
@@ -1969,6 +2054,9 @@ button { color: inherit; }
 .modal-btn.primary { border-color: #2c6e49; background: #2c6e49; color: #fff8ef; font-weight: 700; }
 .modal-btn.danger { border-color: #d84b3f; background: #d84b3f; color: #fff8ef; font-weight: 700; }
 .modal-btn:hover { filter: brightness(1.06); }
+.recruit-debate-prompt .settlement-text.hint { margin-top: 5px; color: #8d7d61; font-size: 10px; }
+.recruit-debate-actions { display: flex; justify-content: center; gap: 9px; margin-top: 15px; }
+.recruit-debate-actions .modal-btn.primary { min-width: 108px; }
 @keyframes furyDamagePop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
 @keyframes newBadgePop { 0% { transform: scale(0); opacity: 0; } 70% { transform: scale(1.25); } 100% { transform: scale(1); opacity: 1; } }
 .confirm-dialog > p:first-child { margin: 0 0 4px; color: var(--gold); font-size: 11px; }

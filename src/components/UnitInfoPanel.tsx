@@ -37,7 +37,7 @@ export function UnitInfoPanel({ unit, state, position, strategyChance, onPointer
         <span>{officerIds.length}</span>
       </header>
       <div className="unit-info-officers">
-        <div><span>主将</span><strong>{leader?.name ?? '未知'}</strong></div>
+        <div className="unit-info-officer-row"><span className="unit-info-officer-label">主将</span>{leader ? <strong>{leader.name}</strong> : <strong>未知</strong>}</div>
         <div><span>副将</span><strong>{deputies.join('、') || '—'}</strong></div>
       </div>
       <div className="unit-info-abilities" data-testid="unit-effective-abilities">

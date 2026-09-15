@@ -221,8 +221,8 @@ export function passCenterBlockedFor(state: Pick<GameState, 'passes'>, coord: Gr
  * 旬结算：关隘箭矢射击（对攻击区内敌方部队每旬造成伤害）。
  * 与城池一致：伤害 = 守军兵力 × 5%，最低 100；劲弩射程＋1，垛墙伤害＋50%。
  */
-export function settlePassRangedAttack(state: GameState): string[] {
-  const events: string[] = [];
+export function settlePassRangedAttack(state: GameState): Array<{ message: string; forceId: ForceId | null }> {
+  const events: Array<{ message: string; forceId: ForceId | null }> = [];
   for (const pass of Object.values(state.passes ?? {})) {
     if (!pass.ownerId) continue;
     const attackKeys = new Set(passAttackRangeCoords(pass, rangedRangeBonus(state, pass.ownerId)).map(gridKey));
@@ -246,10 +246,16 @@ export function settlePassRangedAttack(state: GameState): string[] {
         kind: 'attack',
         label: `${pass.name}箭矢`,
       });
-      events.push(`${pass.name}向关外敌军射出箭矢，${damage}士兵被射杀（${state.officers[unit.leaderId]?.name ?? unit.id}部）`);
+      events.push({
+        forceId: unit.forceId === state.playerForceId ? state.playerForceId : pass.ownerId,
+        message: `${pass.name}向关外敌军射出箭矢，${damage}士兵被射杀（${state.officers[unit.leaderId]?.name ?? unit.id}部）`,
+      });
       if (unit.troops <= 0) {
         delete state.units[unit.id];
-        events.push(`${state.officers[unit.leaderId]?.name ?? unit.id}部被${pass.name}箭矢全歼`);
+        events.push({
+          forceId: unit.forceId === state.playerForceId ? state.playerForceId : pass.ownerId,
+          message: `${state.officers[unit.leaderId]?.name ?? unit.id}部被${pass.name}箭矢全歼`,
+        });
       }
     }
   }

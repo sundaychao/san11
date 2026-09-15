@@ -95,7 +95,7 @@ function findRemoteLandCell(state: GameLike, from: { q: number; r: number }, min
   return undefined;
 }
 
-/** 火种陷阱需「火药 huoyao」科技才能建设：本文件的建设/修补委任用例统一为势力补上该科技 */
+/** 火种陷阱为基础档（无科技门槛也可建）；一并补上「火药」后势力可解析到更高级档位，用例行为不变 */
 function grantFireSeedTech(state: GameLike) {
   const force = state.forces.liu;
   if (!force) return;

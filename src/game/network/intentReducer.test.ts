@@ -12,6 +12,7 @@ import {
   supplyUnit,
 } from '../battle/actions';
 import { neighborsOf } from '../battle/grid';
+import { plotTargetKey } from '../battle/targetRules';
 import { createGame } from '../scenario/jingxiang208';
 import type { ForceId, GameState } from '../types';
 import type { GameIntent } from './intents';
@@ -403,5 +404,49 @@ describe('reduceGameIntent', () => {
     // 落位即补给一步到位：运输队已行动、资源转清
     expect(result.units[deployed.unitId]).toMatchObject({ troops: 3000, gold: 1500, acted: true });
     expect(result.units['friend-near']).toMatchObject({ troops: 4000, gold: 1500, food: 5000, acted: false });
+  });
+
+  it('routes a siege tactic aimed at a development plot down the structure channel', () => {
+    expect(typeof reduceGameIntent).toBe('function');
+    if (!reduceGameIntent) return;
+
+    const state = createGame('liu', 1);
+    for (const cell of state.grid) cell.terrain = 'plain';
+    // 冲车贴着一格敌方（襄阳）开发设施：意图里的目标用 `cityId:plotIndex` 标识这个地格
+    const plotCoord = neighborsOf(20, 20)[0];
+    state.officers['guan-yu'].location = { kind: 'unit', unitId: 'siege' };
+    state.units.siege = {
+      id: 'siege',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'guan-yu',
+      officerIds: ['guan-yu'],
+      homeCityId: 'jiangling',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      q: 20,
+      r: 20,
+      troops: 6000,
+      food: 6000,
+      stamina: 100,
+      energy: 100,
+      movementRemaining: 16,
+      moved: false,
+      acted: false,
+    };
+    state.cities.xiangyang.plots = [
+      { id: 'p-market', type: 'market', level: 1, value: 0, q: plotCoord.q, r: plotCoord.r, durability: 5000 },
+    ];
+
+    const after = reduceGameIntent(state, 'liu', {
+      type: 'useUnitTactic',
+      attackerId: 'siege',
+      targetId: plotTargetKey('xiangyang', 0),
+      tacticId: 'siege-break',
+    });
+
+    // 落到普攻的建筑通道：扣地格耐久 + 扣战力（不是打在部队上的兵力伤害）
+    expect(after.cities.xiangyang.plots![0].durability).toBeLessThan(5000);
+    expect(after.units.siege).toMatchObject({ stamina: 80, energy: 100, acted: true });
   });
 });

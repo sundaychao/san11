@@ -6,6 +6,8 @@ import type { City, Officer, Pass } from '../game/types';
 interface OfficerPickerDialogProps {
   /** 可选武将（本城待命、未行动，调用方已按相关能力排序） */
   officers: Officer[];
+  /** 弹窗标题（默认「选择执行武将」，流放等特殊场合可自定义） */
+  title?: string;
   /** 已选中的武将id */
   selectedIds: string[];
   /** 最多可选人数（默认3） */
@@ -31,6 +33,8 @@ interface OfficerPickerDialogProps {
   initialTab?: OfficerListTab;
   /** 召唤目标据点（启用"召唤"分类时用于计算各武将召唤日数） */
   summonTarget?: City | Pass;
+  /** 计略目标据点（启用"计略"分类时用于评估各武将流言成功率与军师推荐） */
+  tacticTarget?: City | Pass;
   /**
    * 选择方式：'multi'（默认，勾选框 + 确定按钮，可共同执行）
    * 或 'single'（无勾选框列，点击某一行即选定并立即返回，用于外交出使等只派一人的场合）。
@@ -41,7 +45,7 @@ interface OfficerPickerDialogProps {
 }
 
 /** 执行武将勾选弹窗：复用武将一览的 tab + 可排序列 + checkbox，勾选 1~3 名武将共同执行指令 */
-export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, genderRule, hint, disabledOfficerIds, selectAllable, selectAllLimit, tabs, initialTab, summonTarget, pickMode = 'multi', onConfirm, onClose }: OfficerPickerDialogProps) {
+export function OfficerPickerDialog({ officers, title = '选择执行武将', selectedIds, max = 3, min = 0, genderRule, hint, disabledOfficerIds, selectAllable, selectAllLimit, tabs, initialTab, summonTarget, tacticTarget, pickMode = 'multi', onConfirm, onClose }: OfficerPickerDialogProps) {
   const [picked, setPicked] = useState<string[]>(() => selectedIds.filter((id) => officers.some((officer) => officer.id === id)));
   const dialogRef = useRef<HTMLDivElement>(null);
   const single = pickMode === 'single';
@@ -95,11 +99,11 @@ export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, g
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div ref={dialogRef} className="executor-picker-dialog tool-panel" role="dialog" aria-modal="true" aria-label="选择执行武将" tabIndex={-1} onKeyDown={handleKeyDown}>
+      <div ref={dialogRef} className="executor-picker-dialog tool-panel" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onKeyDown={handleKeyDown}>
         <header>
           <div>
             <p>{single ? '点击武将即选定并返回' : '可共同执行，人数越多效果越强'}</p>
-            <h2>{single ? '选择执行武将' : `选择执行武将（${picked.length}/${max}）`}</h2>
+            <h2>{single ? title : `${title}（${picked.length}/${max}）`}</h2>
           </div>
           <button type="button" className="icon-button" aria-label="关闭选择" title="关闭" onClick={onClose}><X /></button>
         </header>
@@ -112,6 +116,7 @@ export function OfficerPickerDialog({ officers, selectedIds, max = 3, min = 0, g
             initialTab={initialTab ?? '能力'}
             tabs={tabs}
             summonTarget={summonTarget}
+            tacticTarget={tacticTarget}
             checkboxes={single ? undefined : {
               checked: pickedSet,
               max,

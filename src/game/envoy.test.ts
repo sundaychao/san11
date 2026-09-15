@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { envoyTravelTenDays, executeCommand, officerIsBusy, strongholdTransferDistance, strongholdTransferDuration } from './commands';
-import { DIPLOMACY_ACTIONS, NEUTRAL_DIPLOMACY, forceDiplomacy, leaderCityOf } from './diplomacy';
+import { DIPLOMACY_ACTIONS, DIPLOMACY_GOLD_STEP, NEUTRAL_DIPLOMACY, forceDiplomacy, leaderCityOf, requiredAllianceGold, requiredTruceGold, resolveAlliance, resolveTruce } from './diplomacy';
 import { createGame } from './scenario/jingxiang208';
+import { diplomacyAdviceOf } from './strategist';
 import { settleTenDay } from './turn';
 import type { ForceId, GameState, Officer, OfficerLocation } from './types';
 
@@ -277,5 +278,57 @@ describe('外交出使行程', () => {
       next = settleTenDay(next);
       expect(next.officers[officer.id].acted).toBe(true);
     }
+  });
+});
+
+/**
+ * 外交军师评估：同盟/停战判定式是确定式（无随机），军师据此报「能否谈成」与所需最低礼金。
+ * 这组用例守的是「报出的礼金 = 恰好能谈成的最小值」——判定式一改，这里必然报出来。
+ */
+describe('外交军师评估：所需礼金与判定式一致', () => {
+  /** 江陵待命武将中政治最高者（刘备 80）——军师未指定使者时用的就是他 */
+  function topEnvoy(state: GameState): Officer {
+    return Object.values(state.officers)
+      .filter((officer) => officer.forceId === PLAYER
+        && officer.location.kind === 'city' && officer.location.cityId === CITY)
+      .sort((a, b) => b.stats.politics - a.stats.politics)[0];
+  }
+
+  it('同盟：给足所需礼金即谈成，少一个滑块步长即谈不成', () => {
+    const state = createGame(PLAYER, 3);
+    const envoy = topEnvoy(state);
+    expect(envoy.name).toBe('刘备');
+    const needed = requiredAllianceGold(state, PLAYER, 'cao', envoy);
+    expect(needed).toBeGreaterThan(0);
+    expect(needed % DIPLOMACY_GOLD_STEP).toBe(0);
+
+    expect(resolveAlliance(state, PLAYER, 'cao', envoy, needed).success).toBe(true);
+    expect(resolveAlliance(state, PLAYER, 'cao', envoy, needed - DIPLOMACY_GOLD_STEP).success).toBe(false);
+  });
+
+  it('停战：期限越长所需礼金越多（24 个月比 1 个月贵），给足即谈成', () => {
+    const state = createGame(PLAYER, 3);
+    const envoy = topEnvoy(state);
+    const short = requiredTruceGold(state, PLAYER, 'biao', envoy, 1);
+    const long = requiredTruceGold(state, PLAYER, 'biao', envoy, 24);
+    expect(long).toBeGreaterThan(short);
+
+    expect(resolveTruce(state, PLAYER, 'biao', envoy, long, 24).success).toBe(true);
+    expect(resolveTruce(state, PLAYER, 'biao', envoy, long - DIPLOMACY_GOLD_STEP, 24).success).toBe(false);
+  });
+
+  it('军师评估：未指定使者即无从评估；礼金不足时报所需金额，给足则转为可行', () => {
+    const state = createGame(PLAYER, 3);
+    expect(diplomacyAdviceOf(state, PLAYER, 'cao', 'alliance', undefined, 0, 1)).toBeNull();
+
+    const envoy = topEnvoy(state);
+    const poor = diplomacyAdviceOf(state, PLAYER, 'cao', 'alliance', envoy, 0, 1)!;
+    expect(poor.viable).toBe(false);
+    expect(poor.requiredGold).toBe(requiredAllianceGold(state, PLAYER, 'cao', envoy));
+    expect(poor.executorName).toBe('刘备');
+
+    const rich = diplomacyAdviceOf(state, PLAYER, 'cao', 'alliance', envoy, poor.requiredGold, 1)!;
+    expect(rich.viable).toBe(true);
+    expect(rich.requiredGold).toBe(0);
   });
 });

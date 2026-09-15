@@ -23,6 +23,11 @@ export const ALLIANCE_GOODWILL_LOSS = 10;
 export const BREAK_GOODWILL_LOSS = 50;
 /** 同盟/停战可送出的资金上限 */
 export const DIPLOMACY_GOLD_MAX = 10000;
+/**
+ * 礼金滑块步长（对话框 `<input type="range">` 的 step）。
+ * 军师提示里的「所需礼金」也按此向上取整，保证报出的数能被拖到位。
+ */
+export const DIPLOMACY_GOLD_STEP = 500;
 /** 停战期限范围（月，1~24） */
 export const TRUCE_MONTHS_MIN = 1;
 export const TRUCE_MONTHS_MAX = 24;
@@ -206,6 +211,23 @@ function roll100(state: GameState): number {
 }
 
 /**
+ * 同盟判定式的「礼金以外」部分：执行者政治 − 相性差/5 + 亲疏加成（c*10）。
+ * 实判（resolveAlliance）与军师的「所需礼金」推导共用本式，别各写一份。
+ */
+export function allianceCheckBase(state: GameState, from: ForceId, to: ForceId, officer: Officer): number {
+  const c = relationshipCoefficient(state, from, to, officer);
+  return officer.stats.politics
+    - Math.ceil(compatDifference(state, from, to) / 5) + Math.round(c * 10);
+}
+
+/** 停战判定式的「礼金以外」部分：执行者政治 − 相性差/5 + 亲疏加成（义兄弟/配偶 20，否则 10） */
+export function truceCheckBase(state: GameState, from: ForceId, to: ForceId, officer: Officer): number {
+  const c = relationshipCoefficient(state, from, to, officer) === 1.5 ? 20 : 10;
+  return officer.stats.politics
+    - Math.ceil(compatDifference(state, from, to) / 5) + c;
+}
+
+/**
  * 同盟判定：
  * 判定值 = (金钱/150 + 执行者政治 − 相性差/5 + c*10) * t（t取1.0）
  * 判定值 > (100 − 友好度)*2 → 成功。
@@ -217,9 +239,7 @@ export function resolveAlliance(
   officer: Officer,
   gold: number,
 ): DiplomacyJudgment {
-  const c = relationshipCoefficient(state, from, to, officer);
-  const judgment = Math.floor(gold / 150) + officer.stats.politics
-    - Math.ceil(compatDifference(state, from, to) / 5) + Math.round(c * 10);
+  const judgment = Math.floor(gold / 150) + allianceCheckBase(state, from, to, officer);
   const friendly = forceDiplomacy(state, from, to);
   return {
     success: judgment > (100 - friendly) * 2,
@@ -241,15 +261,46 @@ export function resolveTruce(
   gold: number,
   months: number,
 ): DiplomacyJudgment {
-  const c = relationshipCoefficient(state, from, to, officer) === 1.5 ? 20 : 10;
-  const judgment = Math.floor(gold / 400) + officer.stats.politics
-    - Math.ceil(compatDifference(state, from, to) / 5) + c;
+  const judgment = Math.floor(gold / 400) + truceCheckBase(state, from, to, officer);
   const friendly = forceDiplomacy(state, from, to);
   return {
     success: judgment > 80 + months / 2 - friendly / 4,
     captured: false,
     judgment,
   };
+}
+
+/** 把「需要的判定值增量」换算成礼金，并按滑块步长向上取整（need ≤ 0 表示不给礼金也能成） */
+function goldForJudgmentNeed(need: number, unit: number): number {
+  if (need <= 0) return 0;
+  return Math.ceil((need * unit) / DIPLOMACY_GOLD_STEP) * DIPLOMACY_GOLD_STEP;
+}
+
+/**
+ * 同盟达成所需的**最低礼金**（以指定执行者的政治计算，已按滑块步长向上取整）。
+ * 判定值 > (100−友好度)*2 且两者皆整数 ⇒ 需要 floor(gold/150) ≥ 阈值+1−base。
+ * 返回 0 表示不给礼金即可谈成；超出 `DIPLOMACY_GOLD_MAX` 或本据点资金即为「谈不成」。
+ */
+export function requiredAllianceGold(state: GameState, from: ForceId, to: ForceId, officer: Officer): number {
+  const threshold = (100 - forceDiplomacy(state, from, to)) * 2;
+  const need = threshold + 1 - allianceCheckBase(state, from, to, officer);
+  return goldForJudgmentNeed(need, 150);
+}
+
+/**
+ * 停战达成所需的**最低礼金**：判定值 > 80 + 期限/2 − 友好度/4，
+ * 判定值为整数时等价于 ≥ floor(阈值)+1。期限越长、友好度越低，所需礼金越多。
+ */
+export function requiredTruceGold(
+  state: GameState,
+  from: ForceId,
+  to: ForceId,
+  officer: Officer,
+  months: number,
+): number {
+  const threshold = 80 + months / 2 - forceDiplomacy(state, from, to) / 4;
+  const need = Math.floor(threshold) + 1 - truceCheckBase(state, from, to, officer);
+  return goldForJudgmentNeed(need, 400);
 }
 
 /**

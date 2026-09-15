@@ -146,6 +146,7 @@ describe('vehicle deployment', () => {
 
   it('rejects a ship vehicle without ship armaments', () => {
     const state = createGame('liu', 1);
+    state.cities['jiangling'].armaments = { ...initialArmaments(), ship: 0 };
 
     expect(() => deployUnit(state, 'liu', {
       cityId: 'jiangling',
@@ -224,6 +225,7 @@ describe('vehicle deployment', () => {
 describe('siege weapon deployment', () => {
   it('rejects siege deployment without weapon stock', () => {
     const state = createGame('liu', 1);
+    state.cities['jiangling'].armaments = { ...initialArmaments(), ram: 0, tower: 0 };
 
     expect(() => deployUnit(state, 'liu', {
       cityId: 'jiangling',

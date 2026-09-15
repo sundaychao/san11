@@ -5,7 +5,7 @@ import { appointSuccessorGovernor, hasPlotFacility } from '../innerAffairs';
 import { appointStrongholdSuccessor } from '../strongholds';
 import { formationMovementAllowanceBonus } from '../skills/rules/movement';
 import type { City, CityArmaments, CityId, ForceId, GameState, Pass, PassId, TroopType } from '../types';
-import { battleShipMovementBonus, isWaterTerrain } from './catalog';
+import { battleShipMovementBonus, isWaterTerrain, MIN_TRANSPORT_TROOPS } from './catalog';
 import {
   DEPLOY_AP_COST,
   movementAllowanceForProfile,
@@ -244,8 +244,8 @@ export function deployTransportUnit(state: GameState, forceId: ForceId, input: T
   }
   if (officers.some((candidate) => candidate.acted)) throw new Error('选择的武将已经行动');
   if (state.actionPoints[forceId] < DEPLOY_AP_COST) throw new Error('行动力不足 20');
-  if (!Number.isInteger(input.troops) || input.troops < 0 || input.troops > TRANSPORT_TROOP_CAP) {
-    throw new Error(`输送士兵必须为 0-${TRANSPORT_TROOP_CAP}`);
+  if (!Number.isInteger(input.troops) || input.troops < MIN_TRANSPORT_TROOPS || input.troops > TRANSPORT_TROOP_CAP) {
+    throw new Error(`输送士兵必须为 ${MIN_TRANSPORT_TROOPS}-${TRANSPORT_TROOP_CAP}`);
   }
   if (!Number.isInteger(input.gold) || input.gold < 0 || input.gold > source.gold) throw new Error('资金不足');
   if (!Number.isInteger(input.food) || input.food < 0 || input.food > source.food) throw new Error('兵粮不足');

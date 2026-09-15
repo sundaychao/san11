@@ -168,7 +168,7 @@ if (item.command === 'recruit' && state && !hasPlotFacility(state.cities[cityId]
 **第五轮（`3dd4e07` feat: 武将寿命系统）**
 - 48 武将补出生年（建安十三年 208 开局）；`Officer.birthYear`
 - 老龄死亡：58 岁起每岁 +2%/月上限 30%，月结算 `settleAgingDeaths`，强运免死
-- `applyDeathConsequences` 死亡善后：主公由统率最高在世同势力武将继任、太守清空缺位待补任、部队副将继任或溃散
+- `applyDeathConsequences` 死亡善后：主公由魅力最高的在世同势力武将继任（魅力相同则比统率）、太守清空缺位待补任、部队副将继任或溃散
 - `markDeath` 重构为「记死亡日志 → 善后 → 清空归属」，统一战死/讨取/病逝/寿终/处决五条路径
 - 踩坑记录：health 曾 import 剧本年份常量形成 TDZ 循环（skills→turn/duel/captives→health→scenario→loyalty→skills），年份映射改内联解决
 

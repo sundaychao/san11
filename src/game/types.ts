@@ -191,6 +191,47 @@ export type OfficerLocation =
     returnTenDays: number;
     phase: 'outbound' | 'return';
     remainingTenDays: number;
+  }
+  | {
+    /**
+     * 登庸差旅：跨城登庸时执行武将先前往目标武将所在城（去程）。
+     * 抵达后当旬结算：亲善/必拒/无意愿直接出结果并转返程；
+     * 可能舌战时挂起等待玩家抉择（是否舌战劝说）；舌战胜负见分晓后，
+     * 成功则被登庸武将同行返程、失败则执行武将只身返回出发据点。
+     * remainingTenDays 为 0 且 phase 为 outbound 时表示「已抵达目标城，等待者」，
+     * 该状态下不再推进计时（等待舌战抉择或舌战进行中）。
+     */
+    kind: 'recruitJourney';
+    /** 出发据点（返程落点，目标武将最终归宿） */
+    fromCityId: CityId;
+    /** 目标武将所在城池 */
+    targetCityId: CityId;
+    /** 登庸目标武将 id */
+    targetOfficerId: string;
+    /** 返程所需旬数（去程/返程同距） */
+    returnTenDays: number;
+    phase: 'outbound' | 'return';
+    remainingTenDays: number;
+  }
+  | {
+    /**
+     * 流言差旅：奉命亲赴敌方据点（城池/关隘）散布流言。
+     * 去程/返程各按「出发据点 → 目标据点」的移动旬数计（去程=返程），
+     * 抵达当旬才散布流言并见分晓：成功后转返程，失败且被识破逮捕则就地成为该据点势力的俘虏（行程终止）。
+     */
+    kind: 'rumorJourney';
+    /** 出发城池（关隘宿主时为该关隘的所属城） */
+    fromCityId: CityId;
+    /** 出发据点为关隘时的关隘 id；返程回到这个关隘而不是城池 */
+    fromPassId?: PassId;
+    /** 目标据点为城池时的城池 id（与 targetPassId 二选一） */
+    targetCityId?: CityId;
+    /** 目标据点为关隘时的关隘 id（与 targetCityId 二选一） */
+    targetPassId?: PassId;
+    /** 返程所需旬数（去程/返程同距） */
+    returnTenDays: number;
+    phase: 'outbound' | 'return';
+    remainingTenDays: number;
   };
 
 export interface City {
@@ -447,7 +488,7 @@ export interface FirePlot {
  * - 阻挡型：earthwork 土垒（无门槛）→ stoneWall 石墙（石工术），只阻挡移动、可被任意势力修补；
  * - 攻击型：arrowTower 箭楼（无门槛）→ crossbowTower 连弩楼（建筑学）→ catapultTower 投石台（弹道，射程 2~3 格）；
  * - 辅助型：drum 太鼓台 / musicTower 军乐台；
- * - 陷阱型：fireSeed 火焰种 / fireBall 火焰球（火药）→ hellfireSeed 业火种 / hellfireBall 业火球（化学）。
+ * - 陷阱型：fireSeed 火种 / fireBall 火球（无门槛）→ flameSeed 火焰种 / flameBall 火焰球（火药）→ hellfireSeed 业火种 / hellfireBall 业火球（化学）。
  *
  * **升级链（catalog.FACILITY_UPGRADE_CHAIN）**：阵→砦、砦→城塞、土垒→石墙、箭楼→连弩楼 是「同一设施的档位」，
  * 高档不作为独立建造选项（建造菜单只列基础档这个入口，按科技解析成当前档），且研究完科技后场上已建成的
@@ -467,6 +508,8 @@ export type FacilityType =
   | 'stoneWall'
   | 'fireSeed'
   | 'fireBall'
+  | 'flameSeed'
+  | 'flameBall'
   | 'hellfireSeed'
   | 'hellfireBall';
 
@@ -518,6 +561,8 @@ export interface GameState {
   strategyResultReports?: StrategyResultReport[];
   /** 正在进行的舌战会话（登庸在野武将触发，结束后清空） */
   debateSession?: import('./debate').DebateSession | null;
+  /** 跨城登庸：执行武将已抵达目标城且可能触发舌战，等待玩家抉择是否舌战劝说（进行/放弃） */
+  pendingRecruitDebate?: { recruiterId: string; targetId: string } | null;
   /** 最近一次单挑结果（用于单挑弹窗逐回合展示，回合结束后清空） */
   lastDuelReport?: DuelReport | null;
   firePlots?: FirePlot[];
@@ -636,7 +681,7 @@ export type GameCommand =
   | { type: 'trade'; cityId: CityId; passId?: PassId; officerId: string; mode: 'buy' | 'sell'; amount: number }
   | { type: 'reward'; cityId: CityId; passId?: PassId; officerIds: string[] }
   | { type: 'appointPosition'; cityId: CityId; passId?: PassId; officerId: string; positionId: string | null }
-  | { type: 'rumor'; cityId: CityId; passId?: PassId; officerId: string; targetCityId: CityId }
+  | { type: 'rumor'; cityId: CityId; passId?: PassId; officerId: string; targetCityId?: CityId; targetPassId?: PassId }
   | { type: 'poach'; cityId: CityId; passId?: PassId; officerId: string; targetCityId: CityId; targetOfficerId: string }
   | { type: 'diplomacy';
       cityId: CityId;
@@ -650,9 +695,12 @@ export type GameCommand =
   | { type: 'captiveDispose'; cityId: CityId; passId?: PassId; targetOfficerId: string; action: 'release' | 'execute' | 'recruit' }
   | { type: 'marry'; cityId: CityId; passId?: PassId; officerIdA: string; officerIdB: string; relation?: 'spouse' | 'sworn' }
   | { type: 'legion'; cityId: CityId; passId?: PassId; commanderId: string | null; targetCityId: CityId | null; policy?: Legion['policy'] }
+  | { type: 'acceptRecruitDebate'; cityId: CityId; officerId: string; targetOfficerId: string }
+  | { type: 'rejectRecruitDebate'; cityId: CityId; officerId: string; targetOfficerId: string }
   | { type: 'buildFacilityPlot'; cityId: CityId; passId?: PassId; officerIds: string[]; plotIndex: number; facility: 'market' | 'farm' | 'barracks' | 'smithy' | 'forge' | 'stable' | 'shipyard' | 'mint' | 'granary' | 'blackmarket' | 'grandmarket' | 'fishmarket' | 'garrisonfarm' | 'hubu' | 'xingbu' | 'bingbu' | 'gongbu' | 'libu' | 'personnel' | 'taixue' | 'tongqueta' }
   | { type: 'cancelCityPlot'; cityId: CityId; passId?: PassId; plotIndex: number }
-  | { type: 'appointStrategist'; cityId: CityId; passId?: PassId; officerId: string | null };
+  | { type: 'appointStrategist'; cityId: CityId; passId?: PassId; officerId: string | null }
+  | { type: 'banish'; cityId: CityId; passId?: PassId; officerIds: string[] };
 
 export interface ForceRanking {
   forceId: ForceId;

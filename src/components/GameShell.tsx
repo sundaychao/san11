@@ -4,7 +4,8 @@ import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { effectiveUnitAbilities, harmfulStrategySuccessChance, deployUnitPreviewWithId, deployTransportUnitWithId, FACILITY_BUILD_COSTS, suppliableUnits, unitFacilities, unitFacilityMenuOptions, unitIsIncapacitated, unitStrategies, type StrategyId, type SupplyArmament, type TacticId } from '../game/battle/actions';
 import type { CSSProperties } from 'react';
 import { gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
-import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticFacilityTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
+import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticCityTargets, getTacticFacilityTargets, getTacticPassTargets, getTacticPlotTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
+import { plotTargetKey } from '../game/battle/targetRules';
 import { computeDelegatePath, hasExecutableDelegation } from '../game/battle/delegate';
 import { chooseDelegateSpawnCell } from '../game/battle/deployment';
 import { strategyEnergyCostForUnit } from '../game/battle/strategies';
@@ -33,12 +34,15 @@ import { CultivatePickerDialog } from './CultivatePickerDialog';
 import { DeployDialog, type DeployConfirmInput } from './DeployDialog';
 import { CityPlotInfoPanel } from './CityPlotInfoPanel';
 import { DebateDialog } from './DebateDialog';
+import { RecruitDebatePromptDialog } from './RecruitDebatePromptDialog';
 import { DuelDialog } from './DuelDialog';
 import { EventLog } from './EventLog';
 import { FacilityInfoPanel } from './FacilityInfoPanel';
 import { ForceOverviewPanel } from './ForceOverviewPanel';
 import { GlobalIntelDialog } from './GlobalIntelDialog';
 import { OfficerListDialog } from './OfficerListDialog';
+import { OfficerPickerDialog } from './OfficerPickerDialog';
+import { banishCandidatesOf } from '../game/commands';
 import { ResultOverlay } from './ResultOverlay';
 import { SaveLoadDialog, type SaveLoadDialogMode } from './SaveLoadDialog';
 import { StrategicMap } from './StrategicMap';
@@ -50,6 +54,17 @@ import { UnitInfoPanel } from './UnitInfoPanel';
 import { useUnitMenuInteraction } from './useUnitMenuInteraction';
 
 const UNIT_COMMANDS = ['待命', '攻击', '齐攻', '战法', '单挑', '计略', '设置', '修补', '补给'] as const;
+
+/** 兵器部队（冲车/木兽/井阑/投石）只有这四项：没有普攻/齐攻，也不能设置与修补（原版口径） */
+const SIEGE_UNIT_COMMANDS = ['待命', '战法', '单挑', '计略'] as const;
+
+/**
+ * 兵器部队判定：菜单裁剪与「战法」直达选目标共用同一口径。
+ * 只认作战兵种 `siege`，不含运输队（输送队也有 kind==='transport' 的独立菜单口径）。
+ */
+function isSiegeUnit(unit: { troopType?: string; kind?: string } | null | undefined): boolean {
+  return Boolean(unit && unit.troopType === 'siege' && unit.kind !== 'transport');
+}
 const UNIT_STRATEGIES = unitStrategies();
 const UNIT_FACILITIES = unitFacilities();
 const PENDING_DEPLOY_UNIT_ID = '__pending-deploy__';
@@ -115,6 +130,8 @@ export function GameShell() {
   const [activeDiplomacyAction, setActiveDiplomacyAction] = useState<DiplomacyAction | null>(null);
   const [activeCultivate, setActiveCultivate] = useState<CultivateCategory | null>(null);
   const [cultivatePickerOpen, setCultivatePickerOpen] = useState(false);
+  /** 君主「流放」：待流放武将的落位城（菜单所在城或关隘归辖城），非空时打开全势力武将多选页 */
+  const [banishTargetCityId, setBanishTargetCityId] = useState<CityId | null>(null);
   const [positionPanelOpen, setPositionPanelOpen] = useState(false);
   const [positionPanelLockForceId, setPositionPanelLockForceId] = useState<ForceId | undefined>(undefined);
   const [deployCityId, setDeployCityId] = useState<CityId | PassId | null>(null);
@@ -200,6 +217,12 @@ export function GameShell() {
     | { unitId: string; coord: GridCoord; label: string; position: { x: number; y: number }; occupying?: boolean }
     | null
   >(null);
+  /**
+   * 「进行」前的原版式确认弹窗（右键菜单点「进行」时本方尚有未行动的委任部队）：
+   * 界面最下方显示原版式横幅「有尚未行动的部队存在，请问是否确定？」，鼠标右键处弹「是 / 否」，
+   * 点「是」才推进一旬；点「否」或右键/点别处即取消。
+   */
+  const [proceedConfirm, setProceedConfirm] = useState<{ position: { x: number; y: number } } | null>(null);
   /** 委任修补确认弹窗（移动模式下点击未完成的己方设施后弹出） */
   const [repairConfirm, setRepairConfirm] = useState<
     | { unitId: string; facilityId: string; label: string; position: { x: number; y: number } }
@@ -224,6 +247,7 @@ export function GameShell() {
   const plotContextMenuRef = useRef<HTMLElement>(null);
   const cancelConfirmRef = useRef<HTMLElement>(null);
   const returnCityConfirmRef = useRef<HTMLElement>(null);
+  const proceedConfirmRef = useRef<HTMLElement>(null);
   const repairConfirmRef = useRef<HTMLElement>(null);
   const unitHoverCloseTimerRef = useRef<number | null>(null);
   const canOperateCurrentTurn = !state || state.turnForceId === state.playerForceId;
@@ -523,14 +547,19 @@ export function GameShell() {
   }, [attackTargetUnitIds, hoveredUnit, pendingDeployActionPreview, state, targetingUnitStrategy]);
   const attackTargetCityIds = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
-    if (!targetState || !targetingAttack || targetingAttack.joint) return [];
+    if (!targetState) return [];
+    // 兵器战法（破碎/放射/火矢/投石）可以打据点：高亮按战法自己的射程带算
+    if (targetingTactic) return getTacticCityTargets(targetState, targetingTactic.unitId, targetingTactic.tacticId, targetingTactic.origin).map((city) => city.id);
+    if (!targetingAttack || targetingAttack.joint) return [];
     return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackCities.map((city) => city.id);
-  }, [pendingDeployActionPreview, state, targetingAttack]);
+  }, [pendingDeployActionPreview, state, targetingAttack, targetingTactic]);
   const attackTargetPassIds = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
-    if (!targetState || !targetingAttack || targetingAttack.joint) return [];
+    if (!targetState) return [];
+    if (targetingTactic) return getTacticPassTargets(targetState, targetingTactic.unitId, targetingTactic.tacticId, targetingTactic.origin).map((pass) => pass.id);
+    if (!targetingAttack || targetingAttack.joint) return [];
     return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackPasses.map((pass) => pass.id);
-  }, [pendingDeployActionPreview, state, targetingAttack]);
+  }, [pendingDeployActionPreview, state, targetingAttack, targetingTactic]);
   const targetFacilityIds = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
     if (!targetState) return [];
@@ -541,9 +570,12 @@ export function GameShell() {
   }, [pendingDeployActionPreview, state, targetingAttack, targetingRepair, targetingTactic]);
   const attackTargetPlotKeys = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
-    if (!targetState || !targetingAttack || targetingAttack.joint) return new Set<string>();
-    return new Set(getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackPlots.map((plot) => `${plot.cityId}:${plot.plotIndex}`));
-  }, [pendingDeployActionPreview, state, targetingAttack]);
+    if (!targetState) return new Set<string>();
+    // 兵器战法（破碎/放射/火矢/投石）可以打开发设施：高亮同样按战法自己的射程带算
+    if (targetingTactic) return new Set(getTacticPlotTargets(targetState, targetingTactic.unitId, targetingTactic.tacticId, targetingTactic.origin).map((plot) => plotTargetKey(plot.cityId, plot.plotIndex)));
+    if (!targetingAttack || targetingAttack.joint) return new Set<string>();
+    return new Set(getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackPlots.map((plot) => plotTargetKey(plot.cityId, plot.plotIndex)));
+  }, [pendingDeployActionPreview, state, targetingAttack, targetingTactic]);
 
   const closeDeployDialog = useCallback(() => {
     setDeployCityId(null);
@@ -919,6 +951,27 @@ export function GameShell() {
     emitAudioEvent({ type: 'menu-click-on' });
     const deployAction = isPendingDeployCommandMenu ? beginPendingDeployAction() : null;
     setUnitStrategyMenu(null);
+    // 兵器部队只有一条战法（破碎/放射/火矢/投石）：跳过二级菜单直接进选目标。
+    // 注意：这里的判据必须是「兵器部队」本身，而不是「可用战法只有一种」——
+    // 普通部队常因适性/战力只解锁一种战法，那种情况仍要弹二级菜单把锁定项与原因显示出来。
+    const tactics = unitMenuQuery.availableTactics;
+    if (isSiegeUnit(unitMenuQuery.unit) && tactics.length === 1) {
+      setUnitTacticMenu(null);
+      setUnitFacilityMenu(null);
+      setSelectedUnitId(deployAction?.unitId ?? unitMenuUnitId);
+      setTargetingAttack(null);
+      setTargetingTactic({
+        unitId: deployAction?.unitId ?? unitMenuUnitId,
+        tacticId: tactics[0].id,
+        origin: deployAction ? undefined : unitMenuDestination,
+      });
+      setTargetingFirePlot(null);
+      setTargetingUnitStrategy(null);
+      setTargetingFacility(null);
+      setTargetingRepair(null);
+      setUnitCommandMenu(null);
+      return;
+    }
     setUnitTacticMenu({
       unitId: deployAction?.unitId ?? unitMenuUnitId,
       position: { x: unitCommandMenu.position.x + 108, y: unitCommandMenu.position.y },
@@ -1245,11 +1298,21 @@ export function GameShell() {
 
   const selectAttackCityTarget = useCallback((cityId: NonNullable<typeof selectedCityId>) => {
     if (!canOperateCurrentTurn) return;
-    if (!targetingAttack || !attackTargetCityIds.includes(cityId)) return;
-    if (pendingDeployAction?.unitId === targetingAttack.unitId) {
-      finishPendingDeployAction({ type: 'attackCity', cityId });
+    if (targetingTactic) {
+      // 兵器战法打据点：与部队战法同一入口，意图层按目标类型路由到建筑通道
+      if (!attackTargetCityIds.includes(cityId)) return;
+      const handled = pendingDeployAction?.unitId === targetingTactic.unitId &&
+        finishPendingDeployAction({ type: 'useUnitTactic', targetId: cityId, tacticId: targetingTactic.tacticId });
+      if (!handled) {
+        useUnitTactic(targetingTactic.unitId, cityId, targetingTactic.tacticId, targetingTactic.origin);
+      }
     } else {
-      attackCity(targetingAttack.unitId, cityId, targetingAttack.origin);
+      if (!targetingAttack || !attackTargetCityIds.includes(cityId)) return;
+      if (pendingDeployAction?.unitId === targetingAttack.unitId) {
+        finishPendingDeployAction({ type: 'attackCity', cityId });
+      } else {
+        attackCity(targetingAttack.unitId, cityId, targetingAttack.origin);
+      }
     }
     setTargetingAttack(null);
     setTargetingTactic(null);
@@ -1261,16 +1324,25 @@ export function GameShell() {
     setUnitCommandMenu(null);
     setUnitTacticMenu(null);
     setUnitStrategyMenu(null);
-  }, [attackCity, attackTargetCityIds, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, targetingAttack]);
+  }, [attackCity, attackTargetCityIds, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, targetingAttack, targetingTactic, useUnitTactic]);
 
   /** 关隘与城池同构：攻击目标阶段点关隘即确认攻击（此前漏接回调，导致点关隘攻击无反应） */
   const selectAttackPassTarget = useCallback((passId: PassId) => {
     if (!canOperateCurrentTurn) return;
-    if (!targetingAttack || !attackTargetPassIds.includes(passId)) return;
-    if (pendingDeployAction?.unitId === targetingAttack.unitId) {
-      finishPendingDeployAction({ type: 'attackPass', passId });
+    if (targetingTactic) {
+      if (!attackTargetPassIds.includes(passId)) return;
+      const handled = pendingDeployAction?.unitId === targetingTactic.unitId &&
+        finishPendingDeployAction({ type: 'useUnitTactic', targetId: passId, tacticId: targetingTactic.tacticId });
+      if (!handled) {
+        useUnitTactic(targetingTactic.unitId, passId, targetingTactic.tacticId, targetingTactic.origin);
+      }
     } else {
-      attackPass(targetingAttack.unitId, passId, targetingAttack.origin);
+      if (!targetingAttack || !attackTargetPassIds.includes(passId)) return;
+      if (pendingDeployAction?.unitId === targetingAttack.unitId) {
+        finishPendingDeployAction({ type: 'attackPass', passId });
+      } else {
+        attackPass(targetingAttack.unitId, passId, targetingAttack.origin);
+      }
     }
     setTargetingAttack(null);
     setTargetingTactic(null);
@@ -1282,7 +1354,7 @@ export function GameShell() {
     setUnitCommandMenu(null);
     setUnitTacticMenu(null);
     setUnitStrategyMenu(null);
-  }, [attackPass, attackTargetPassIds, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, targetingAttack]);
+  }, [attackPass, attackTargetPassIds, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, targetingAttack, targetingTactic, useUnitTactic]);
 
   const openFacilityContextMenu = useCallback((facilityId: string, position: { x: number; y: number }) => {
     if (!state || !canOperateCurrentTurn) return;
@@ -1355,12 +1427,22 @@ export function GameShell() {
 
   const selectPlotAttackTarget = useCallback((cityId: string, plotIndex: number) => {
     if (!canOperateCurrentTurn) return;
-    const plotKey = `${cityId}:${plotIndex}`;
-    if (!targetingAttack || targetingAttack.joint || !attackTargetPlotKeys.has(plotKey)) return;
-    if (pendingDeployAction?.unitId === targetingAttack.unitId) {
-      finishPendingDeployAction({ type: 'attackPlot', cityId: cityId as CityId, plotIndex });
+    const targetKey = plotTargetKey(cityId, plotIndex);
+    if (targetingTactic) {
+      // 兵器战法打开发设施：与部队/据点战法同一入口，意图层按目标类型路由到建筑通道
+      if (!attackTargetPlotKeys.has(targetKey)) return;
+      const handled = pendingDeployAction?.unitId === targetingTactic.unitId &&
+        finishPendingDeployAction({ type: 'useUnitTactic', targetId: targetKey, tacticId: targetingTactic.tacticId });
+      if (!handled) {
+        useUnitTactic(targetingTactic.unitId, targetKey, targetingTactic.tacticId, targetingTactic.origin);
+      }
     } else {
-      attackPlot(targetingAttack.unitId, cityId as CityId, plotIndex, targetingAttack.origin);
+      if (!targetingAttack || targetingAttack.joint || !attackTargetPlotKeys.has(targetKey)) return;
+      if (pendingDeployAction?.unitId === targetingAttack.unitId) {
+        finishPendingDeployAction({ type: 'attackPlot', cityId: cityId as CityId, plotIndex });
+      } else {
+        attackPlot(targetingAttack.unitId, cityId as CityId, plotIndex, targetingAttack.origin);
+      }
     }
     setTargetingAttack(null);
     setTargetingTactic(null);
@@ -1373,15 +1455,15 @@ export function GameShell() {
     setUnitTacticMenu(null);
     setUnitStrategyMenu(null);
     setUnitFacilityMenu(null);
-  }, [attackPlot, attackTargetPlotKeys, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, targetingAttack]);
+  }, [attackPlot, attackTargetPlotKeys, canOperateCurrentTurn, finishPendingDeployAction, pendingDeployAction, targetingAttack, targetingTactic, useUnitTactic]);
 
   const handleCityPlotSelect = useCallback((cityId: string, plotIndex: number, position: { x: number; y: number }) => {
-    if (targetingAttack && attackTargetPlotKeys.has(`${cityId}:${plotIndex}`)) {
+    if ((targetingAttack || targetingTactic) && attackTargetPlotKeys.has(plotTargetKey(cityId, plotIndex))) {
       selectPlotAttackTarget(cityId, plotIndex);
       return;
     }
     openCityPlotMenu(cityId, plotIndex, position);
-  }, [attackTargetPlotKeys, openCityPlotMenu, selectPlotAttackTarget, targetingAttack]);
+  }, [attackTargetPlotKeys, openCityPlotMenu, selectPlotAttackTarget, targetingAttack, targetingTactic]);
 
   const cancelCityPlotFromMenu = useCallback(() => {
     if (!plotContextMenu || !state) return;
@@ -1484,13 +1566,14 @@ export function GameShell() {
       return;
     }
     // 撤销菜单/确认弹窗打开时，右键空白处仅关闭它们，不弹地图主菜单（与城池菜单行为一致）
-    if (facilityContextMenu || plotContextMenu || cancelConfirm || returnCityConfirm || repairConfirm) {
+    if (facilityContextMenu || plotContextMenu || cancelConfirm || returnCityConfirm || repairConfirm || proceedConfirm) {
       emitAudioEvent({ type: 'menu-right-click' });
       setFacilityContextMenu(null);
       setPlotContextMenu(null);
       setCancelConfirm(null);
       setReturnCityConfirm(null);
       setRepairConfirm(null);
+      setProceedConfirm(null);
       return;
     }
     if (unitCommandMenu || unitTacticMenu || unitStrategyMenu || unitFacilityMenu || targetingSupply) {
@@ -1556,9 +1639,10 @@ export function GameShell() {
     setTargetingRepair(null);
     setShowMapIntelOptions(false);
     setMapContextMenu(position);
-  }, [cancelConfirm, cityMenu, delegateFacilityMenu, delegateMenu, delegatePath, deployCityId, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, plotContextMenu, returnCityConfirm, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingSupply, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
+  }, [cancelConfirm, cityMenu, delegateFacilityMenu, delegateMenu, delegatePath, deployCityId, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, plotContextMenu, proceedConfirm, returnCityConfirm, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingSupply, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
 
   const proceedTenDayFromMap = useCallback(() => {
+    const position = mapContextMenu;
     setMapContextMenu(null);
     setShowMapIntelOptions(false);
     setUnitCommandMenu(null);
@@ -1568,9 +1652,28 @@ export function GameShell() {
     setTargetingTactic(null);
     setTargetingFirePlot(null);
     setTargetingUnitStrategy(null);
-    if (canOperateCurrentTurn) endTenDay();
     setSelectedUnitId(null);
-  }, [canOperateCurrentTurn, endTenDay]);
+    if (!canOperateCurrentTurn) return;
+    // 尚有未行动的委任部队 → 先弹原版式确认（横幅在界面最下方、是/否在鼠标右键处），点「是」才推进
+    if (canExecuteDelegation) {
+      setProceedConfirm({ position: position ?? { x: 12, y: 12 } });
+      return;
+    }
+    endTenDay();
+  }, [canExecuteDelegation, canOperateCurrentTurn, endTenDay, mapContextMenu]);
+
+  /** 确认「进行」：原版式提示点「是」→ 直接推进一旬 */
+  const confirmProceedTenDay = useCallback(() => {
+    emitAudioEvent({ type: 'menu-click-on' });
+    setProceedConfirm(null);
+    endTenDay();
+  }, [emitAudioEvent, endTenDay]);
+
+  /** 取消「进行」确认（点「否」/ 右键 / 点别处）：不推进回合 */
+  const dismissProceedConfirm = useCallback(() => {
+    emitAudioEvent({ type: 'menu-left-click' });
+    setProceedConfirm(null);
+  }, [emitAudioEvent]);
 
   /** 右键菜单「委任部队行动」：让委任部队立刻行动一步，不推进回合、不结算旬末 */
   const executeDelegationFromMap = useCallback(() => {
@@ -1821,6 +1924,22 @@ export function GameShell() {
       document.removeEventListener('mousedown', closeOnLeftClickOutside);
     };
   }, [returnCityConfirm]);
+
+  useEffect(() => {
+    if (!proceedConfirm) return undefined;
+    const closeOnLeftClickOutside = (event: globalThis.MouseEvent) => {
+      if (event.button !== 0) return;
+      if (proceedConfirmRef.current?.contains(event.target as Node)) return;
+      setProceedConfirm(null);
+    };
+
+    // 弹窗在右键菜单的 click 中打开，延迟挂监听避免同一次点击立刻把它关掉
+    const timer = window.setTimeout(() => document.addEventListener('mousedown', closeOnLeftClickOutside), 0);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('mousedown', closeOnLeftClickOutside);
+    };
+  }, [proceedConfirm]);
 
   useEffect(() => {
     if (!repairConfirm) return undefined;
@@ -2127,7 +2246,7 @@ export function GameShell() {
         focusToken={mapFocus?.token ?? 0}
         freezeView={Boolean(
           mapContextMenu || unitIntelMenu || cityInfoMenu || facilityContextMenu
-          || plotContextMenu || cancelConfirm || saveDialogMode,
+          || plotContextMenu || cancelConfirm || proceedConfirm || saveDialogMode,
         )}
       />
       {state && hoveredCell && (
@@ -2185,6 +2304,10 @@ export function GameShell() {
             setPositionPanelOpen(true);
             setCityMenu(null);
           }}
+          onBanish={(targetCityId) => {
+            setBanishTargetCityId(targetCityId);
+            setCityMenu(null);
+          }}
           onCultivate={launchCultivate}
           onOpenCultivatePicker={openCultivatePicker}
           onDeploy={openDeployDialog}
@@ -2201,6 +2324,10 @@ export function GameShell() {
           onAppointPosition={() => {
             setPositionPanelLockForceId(state?.playerForceId);
             setPositionPanelOpen(true);
+            setPassMenu(null);
+          }}
+          onBanish={(targetCityId) => {
+            setBanishTargetCityId(targetCityId);
             setPassMenu(null);
           }}
           onCultivate={launchCultivate}
@@ -2413,6 +2540,44 @@ export function GameShell() {
           </nav>
         );
       })()}
+      {proceedConfirm && (() => {
+        const style = {
+          left: Math.max(8, Math.min(proceedConfirm.position.x, window.innerWidth - 160)),
+          top: Math.max(8, Math.min(proceedConfirm.position.y, window.innerHeight - 140)),
+        } as CSSProperties;
+        const forceName = state ? state.forces[state.playerForceId]?.name ?? '' : '';
+        return (
+          <>
+            {/* 原版式横幅：悬浮在界面最下方，纯提示不吃鼠标（是/否弹在鼠标处） */}
+            <div className="strategy-end-banner" data-testid="strategy-end-banner" role="status">
+              <p>
+                将结束<span className="strategy-end-force">{forceName}军</span>的战略，
+              </p>
+              <p>有尚未行动的部队存在，</p>
+              <p>请问是否确定？</p>
+            </div>
+            <nav
+              ref={proceedConfirmRef}
+              className="city-command-menu tool-panel"
+              data-testid="proceed-confirm-menu"
+              style={style}
+              aria-label="结束战略确认"
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                emitAudioEvent({ type: 'menu-right-click' });
+                setProceedConfirm(null);
+              }}
+            >
+              <div className="city-command-secondary">
+                <div className="city-command-menu-title">是否确定？</div>
+                <button type="button" data-testid="proceed-confirm-yes" onClick={confirmProceedTenDay}>是</button>
+                <button type="button" data-testid="proceed-confirm-no" onClick={dismissProceedConfirm}>否</button>
+              </div>
+            </nav>
+          </>
+        );
+      })()}
       {returnCityConfirm && (() => {
         const style = {
           left: Math.max(8, Math.min(returnCityConfirm.position.x, window.innerWidth - 160)),
@@ -2505,36 +2670,29 @@ export function GameShell() {
           aria-label="部队命令菜单"
           onContextMenu={closeUnitCommandMenuFromRightClick}
         >
-          {UNIT_COMMANDS.map((command, commandIndex) => {
+          {(isSiegeUnit(unitMenuQuery?.unit) ? SIEGE_UNIT_COMMANDS : UNIT_COMMANDS).map((command) => {
             // 「补给」是运输队专属命令：作战部队的菜单里不出现这一项
             if (command === '补给' && unitMenuQuery?.unit?.kind !== 'transport') return null;
-            const disabled = command === '待命'
-              ? !unitMenuQuery?.commandAvailability.wait
-              : commandIndex === 1
-                ? !unitMenuQuery?.commandAvailability.attack
-                : command === '齐攻'
-                  ? !unitMenuQuery?.commandAvailability.jointAttack
-                  : command === '战法'
-                    ? !unitMenuQuery?.commandAvailability.tactic
-                    : command === '单挑'
-                      ? !unitMenuQuery?.commandAvailability.duel
-                      : command === '计略'
-                        ? !unitMenuQuery?.commandAvailability.strategy
-                        : command === '设置'
-                          ? !unitMenuQuery?.commandAvailability.facility
-                          : command === '修补'
-                            ? !unitMenuQuery?.commandAvailability.repair
-                            : command === '补给'
-                              ? !unitMenuQuery?.commandAvailability.supply
-                              : true;
+            const availability = unitMenuQuery?.commandAvailability;
+            const disabled =
+              command === '待命' ? !availability?.wait :
+              command === '攻击' ? !availability?.attack :
+              command === '齐攻' ? !availability?.jointAttack :
+              command === '战法' ? !availability?.tactic :
+              command === '单挑' ? !availability?.duel :
+              command === '计略' ? !availability?.strategy :
+              command === '设置' ? !availability?.facility :
+              command === '修补' ? !availability?.repair :
+              command === '补给' ? !availability?.supply : true;
             const onClick =
               command === '待命' ? executeUnitWaitCommand :
-              commandIndex === 1 ? executeUnitAttackCommand :
+              command === '攻击' ? executeUnitAttackCommand :
               command === '齐攻' ? executeUnitJointAttackCommand :
               command === '战法' ? executeUnitTacticCommand :
               command === '单挑' ? executeUnitDuelCommand :
               command === '计略' ? executeUnitStrategyCommand :
-              commandIndex === 7 ? executeUnitRepairCommand :
+              command === '设置' ? executeUnitFacilityCommand :
+              command === '修补' ? executeUnitRepairCommand :
               command === '补给' ? executeUnitSupplyCommand :
               undefined;
             return (
@@ -2544,7 +2702,7 @@ export function GameShell() {
                 data-testid={command === '补给' ? 'unit-command-supply' : undefined}
                 className={disabled ? 'is-disabled' : undefined}
                 disabled={disabled}
-                onClick={commandIndex === 6 ? executeUnitFacilityCommand : onClick}
+                onClick={onClick}
               >
                 {command}
               </button>
@@ -2774,6 +2932,10 @@ export function GameShell() {
       {state?.debateSession
         && state.officers[state.debateSession.recruiterId]?.forceId === state.playerForceId
         && <DebateDialog onClose={() => undefined} />}
+      {state?.pendingRecruitDebate
+        && state.officers[state.pendingRecruitDebate.recruiterId]?.forceId === state.playerForceId
+        && !state.debateSession?.status
+        && <RecruitDebatePromptDialog />}
       {duelDialogUnit && state?.units[duelDialogUnit.unitId] && (
         <DuelDialog unitId={duelDialogUnit.unitId} origin={duelDialogUnit.origin} onClose={() => setDuelDialogUnit(null)} />
       )}
@@ -2782,6 +2944,23 @@ export function GameShell() {
       )}
       {cultivatePickerOpen && activeHostCityId && (
         <CultivatePickerDialog onSelect={(category) => launchCultivate(category, activeCommandPassId)} onClose={closeCultivatePicker} />
+      )}
+      {banishTargetCityId && state && (
+        <OfficerPickerDialog
+          title="选择流放武将"
+          officers={banishCandidatesOf(state, state.playerForceId)}
+          selectedIds={[]}
+          max={banishCandidatesOf(state, state.playerForceId).length}
+          hint="流放的武将将成为本城在野武将，官职、太守、军师与军团任命一并解除 · 不消耗行动力与资金"
+          selectAllable
+          onConfirm={(ids) => {
+            if (ids.length === 0) return;
+            if (!window.confirm('是否流放武将？')) return;
+            issueCommand({ type: 'banish', cityId: banishTargetCityId, officerIds: ids });
+            setBanishTargetCityId(null);
+          }}
+          onClose={() => setBanishTargetCityId(null)}
+        />
       )}
       {deployCityId && (state?.passes?.[deployCityId as PassId] ? (
         <DeployDialog

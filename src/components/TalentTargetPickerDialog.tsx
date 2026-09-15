@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import { officerLoyalty } from '../game/loyalty';
+import { officerLoyalty, recruitWillOf, recruitWillTier, type RecruitWillTierKey } from '../game/loyalty';
 import { positionDefinition } from '../game/ranks';
 import type { GameState, Officer } from '../game/types';
 
@@ -8,6 +8,14 @@ import type { GameState, Officer } from '../game/types';
 type TalentTargetTab = '登庸' | '所属' | '能力';
 
 const TALENT_TARGET_TABS: TalentTargetTab[] = ['登庸', '所属', '能力'];
+
+/** 登庸意愿四档图例（血色 sp10 口径：深绿/浅绿/黄/白） */
+const WILL_LEGEND: Array<{ key: RecruitWillTierKey; label: string }> = [
+  { key: 'high', label: '意愿强' },
+  { key: 'mid', label: '意愿中' },
+  { key: 'low', label: '意愿轻' },
+  { key: 'none', label: '不能登庸' },
+];
 
 function statSum(officer: Officer): number {
   const stats = officer.stats;
@@ -41,11 +49,14 @@ function whereaboutOf(state: GameState, officer: Officer): string {
   if (location.kind === 'transfer') return '移动中';
   if (location.kind === 'task') return '任务中';
   if (location.kind === 'envoy') return '出使中';
+  if (location.kind === 'rumorJourney') return '流言中';
   return stationName(state, officer);
 }
 
 interface TalentTargetPickerDialogProps {
   state: GameState;
+  /** 执行武将：用于逐人计算登用接受意愿（颜色档位） */
+  executorId: string;
   selectedId: string;
   onPick(officerId: string): void;
   onClose(): void;
@@ -54,10 +65,26 @@ interface TalentTargetPickerDialogProps {
 /**
  * 「选择对象武将」列表页（原版三国志11 式）：
  * 全地图在野武将与其他势力武将一览，在野武将固定排最上面；
+ * 武将名按登用接受意愿四档着色（深绿/浅绿/黄/白）；
  * 点击行即选定为登庸对象，君主不可选（履行列标 ×）。
  */
-export function TalentTargetPickerDialog({ state, selectedId, onPick, onClose }: TalentTargetPickerDialogProps) {
+export function TalentTargetPickerDialog({ state, executorId, selectedId, onPick, onClose }: TalentTargetPickerDialogProps) {
   const [tab, setTab] = useState<TalentTargetTab>('登庸');
+
+  const willTiers = useMemo(() => {
+    const tiers = new Map<string, RecruitWillTierKey>();
+    const executor = state.officers[executorId];
+    if (!executor) return tiers;
+    for (const officer of Object.values(state.officers)) {
+      if (officer.deathMonth || officer.location.kind === 'captive' || officer.forceId === state.playerForceId) continue;
+      const will = recruitWillOf(state, executor, officer);
+      tiers.set(
+        officer.id,
+        will.verdict === 'refuse' ? 'none' : will.verdict === 'accept' ? 'high' : recruitWillTier(will.will).key,
+      );
+    }
+    return tiers;
+  }, [state, executorId]);
 
   const rows = useMemo(() => {
     const candidates = Object.values(state.officers).filter((officer) =>
@@ -137,6 +164,7 @@ export function TalentTargetPickerDialog({ state, selectedId, onPick, onClose }:
               {rows.map((officer) => {
                 const isMonarch = officer.forceId !== null && state.forces[officer.forceId]?.leaderId === officer.id;
                 const forceName = officer.forceId ? state.forces[officer.forceId]?.name ?? '—' : '';
+                const willTier = willTiers.get(officer.id) ?? 'none';
                 return (
                   <tr
                     key={officer.id}
@@ -149,7 +177,7 @@ export function TalentTargetPickerDialog({ state, selectedId, onPick, onClose }:
                   onClick={isMonarch ? undefined : () => onPick(officer.id)}
                   data-testid={`talent-target-${officer.id}`}
                 >
-                  <td className="talent-name">{officer.name}</td>
+                  <td className={`talent-name${willTier !== 'none' ? ` is-will-${willTier}` : ''}`}>{officer.name}</td>
                   <td>{forceName}</td>
                   <td>{identityOf(state, officer)}</td>
                   <td>{officer.forceId === null ? '---' : officerLoyalty(officer)}</td>
@@ -170,6 +198,14 @@ export function TalentTargetPickerDialog({ state, selectedId, onPick, onClose }:
         </div>
 
         <footer className="talent-target-footer">
+          <span className="talent-target-legend" role="img" aria-label="登庸意愿颜色图例">
+            {WILL_LEGEND.map((item) => (
+              <span key={item.key} className="talent-legend-item">
+                <span className={`will-dot will-${item.key}`} aria-hidden="true" />
+                {item.label}
+              </span>
+            ))}
+          </span>
           <span className="talent-target-hint">在野武将排最上 · 点击行即选定 · 君主（×）不可登庸</span>
           <button type="button" className="secondary-button" onClick={onClose}>返回</button>
         </footer>

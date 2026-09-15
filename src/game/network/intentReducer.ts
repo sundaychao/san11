@@ -15,10 +15,12 @@ import {
   repairFacility,
   supplyUnit,
   useFirePlot,
+  useSiegeTacticOnStructure,
   useUnitStrategy,
   useUnitTactic,
   waitUnit,
 } from '../battle/actions';
+import { isSiegeTactic } from '../battle/catalog';
 import { setBuildDelegate, setMoveDelegate, setRepairDelegate } from '../battle/delegate';
 import type { GridCoord } from '../battle/grid';
 import type { DeployFollowupAction } from './intents';
@@ -91,7 +93,7 @@ function applyDeployFollowup(
     case 'attackPass':
       return attackPass(state, forceId, unitId, action.passId);
     case 'useUnitTactic':
-      return useUnitTactic(state, forceId, unitId, action.targetId, action.tacticId);
+      return resolveTactic(state, forceId, unitId, action.targetId, action.tacticId);
     case 'useUnitStrategy':
       return useUnitStrategy(state, forceId, unitId, action.strategyId, action.selection);
     case 'buildFacility':
@@ -104,6 +106,20 @@ function applyDeployFollowup(
     default:
       return assertNever(action);
   }
+}
+
+/** 战法结算：兵器战法打建筑（城池/关隘/设施）走建筑通道，其余仍是部队战法 */
+function resolveTactic(
+  state: GameState,
+  forceId: ForceId,
+  unitId: string,
+  targetId: string,
+  tacticId: Parameters<typeof useUnitTactic>[4],
+) {
+  if (isSiegeTactic(tacticId) && !state.units[targetId]) {
+    return useSiegeTacticOnStructure(state, forceId, unitId, targetId, tacticId);
+  }
+  return useUnitTactic(state, forceId, unitId, targetId, tacticId);
 }
 
 function reduceIntent(
@@ -176,7 +192,7 @@ function reduceIntent(
     }
     case 'useUnitTactic': {
       const moved = moveIfRequested(state, forceId, intent.attackerId, intent.destination);
-      return cancelUnitDelegate(useUnitTactic(moved, forceId, intent.attackerId, intent.targetId, intent.tacticId), intent.attackerId);
+      return cancelUnitDelegate(resolveTactic(moved, forceId, intent.attackerId, intent.targetId, intent.tacticId), intent.attackerId);
     }
     case 'useUnitStrategy': {
       const moved = moveIfRequested(state, forceId, intent.unitId, intent.destination);

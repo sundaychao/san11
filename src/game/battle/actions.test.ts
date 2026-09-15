@@ -1026,14 +1026,14 @@ describe('battle deployment and movement actions', () => {
     setUniformTerrain(state, 'plain');
     readyUnitAt(state, unit.id, { q: 10, r: 12 }, 'sword');
 
-    // 无科技：阵 / 土垒 / 箭楼 / 太鼓台等默认可建
-    for (const facility of ['formation', 'earthwork', 'arrowTower'] as const) {
+    // 无科技：阵 / 土垒 / 箭楼 / 太鼓台 / 火种 / 火球等默认可建
+    for (const facility of ['formation', 'earthwork', 'arrowTower', 'fireSeed', 'fireBall'] as const) {
       expect(facilityBuildTargets(state, unit.id, undefined, facility).length).toBeGreaterThan(0);
     }
-    // 需科技：砦/石墙（石工术）、连弩楼（建筑学）、投石台（弹道）、陷阱（火药/化学）
+    // 需科技：砦/石墙（石工术）、连弩楼（建筑学）、投石台（弹道）、火焰种/火焰球（火药）、业火种/业火球（化学）
     for (const facility of [
       'fort', 'stoneWall', 'crossbowTower', 'catapultTower',
-      'fireSeed', 'fireBall', 'hellfireSeed', 'hellfireBall',
+      'flameSeed', 'flameBall', 'hellfireSeed', 'hellfireBall',
     ] as const) {
       expect(facilityBuildTargets(state, unit.id, undefined, facility)).toEqual([]);
       expect(() => buildFacility(state, 'liu', unit.id, facility, { q: 10, r: 11 })).toThrow();
@@ -1044,12 +1044,14 @@ describe('battle deployment and movement actions', () => {
     for (const facility of ['fort', 'stoneWall', 'crossbowTower', 'catapultTower', 'hellfireSeed', 'hellfireBall'] as const) {
       expect(facilityBuildTargets(researched, unit.id, undefined, facility).length).toBeGreaterThan(0);
     }
-    // 化学不覆盖火药：火焰种/火焰球仍需「火药」
-    expect(facilityBuildTargets(researched, unit.id, undefined, 'fireSeed')).toEqual([]);
-    expect(facilityBuildTargets(researched, unit.id, undefined, 'fireBall')).toEqual([]);
-    researched.forces.liu.techNodes = [...researched.forces.liu.techNodes, 'huoyao'];
+    // 化学不覆盖火药：火焰种/火焰球仍需「火药」；火种/火球为基础档仍可建
     expect(facilityBuildTargets(researched, unit.id, undefined, 'fireSeed').length).toBeGreaterThan(0);
     expect(facilityBuildTargets(researched, unit.id, undefined, 'fireBall').length).toBeGreaterThan(0);
+    expect(facilityBuildTargets(researched, unit.id, undefined, 'flameSeed')).toEqual([]);
+    expect(facilityBuildTargets(researched, unit.id, undefined, 'flameBall')).toEqual([]);
+    researched.forces.liu.techNodes = [...researched.forces.liu.techNodes, 'huoyao'];
+    expect(facilityBuildTargets(researched, unit.id, undefined, 'flameSeed').length).toBeGreaterThan(0);
+    expect(facilityBuildTargets(researched, unit.id, undefined, 'flameBall').length).toBeGreaterThan(0);
   });
 
   it('settles 连弩楼 harder than 箭楼 and keeps 投石台 on the 2~3 ring only', () => {
@@ -1217,8 +1219,22 @@ describe('battle deployment and movement actions', () => {
     expect(menuNames()).toEqual(expect.arrayContaining(['城塞', '石墙', '连弩楼']));
     expect(menuNames()).not.toContain('砦');
     expect(menuNames()).not.toContain('箭楼');
-    // 投石台与陷阱型不是升级链，始终保留自己的条目
-    expect(menuNames()).toEqual(expect.arrayContaining(['投石台', '火焰种', '火焰球', '业火种', '业火球']));
+    // 投石台是独立选项（非升级链）；陷阱型与据点/阻挡/攻击型一样走升级链：
+    // 默认只列基础档「火种/火球」，火焰/业火高档不单独出现
+    expect(menuNames()).toEqual(expect.arrayContaining(['投石台', '火种', '火球']));
+    for (const hidden of ['火焰种', '火焰球', '业火种', '业火球']) expect(menuNames()).not.toContain(hidden);
+
+    // 火药：火种 → 火焰种、火球 → 火焰球（入口改名并升级）
+    state.forces.liu.techNodes = ['shigongshu', 'jianzhuxue', 'huoyao'];
+    expect(menuNames()).toEqual(expect.arrayContaining(['火焰种', '火焰球']));
+    expect(menuNames()).not.toContain('火种');
+    expect(menuNames()).not.toContain('火球');
+
+    // 化学：火焰种 → 业火种、火焰球 → 业火球
+    state.forces.liu.techNodes = ['shigongshu', 'jianzhuxue', 'huoyao', 'huaxue'];
+    expect(menuNames()).toEqual(expect.arrayContaining(['业火种', '业火球']));
+    expect(menuNames()).not.toContain('火焰种');
+    expect(menuNames()).not.toContain('火焰球');
     // 升级链入口升级后仍用高档的造价
     expect(FACILITY_BUILD_COSTS[resolveFacilityUpgrade(state, 'liu', 'formation')]).toBe(900);
   });

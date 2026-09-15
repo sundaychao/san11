@@ -171,20 +171,22 @@ describe('输送编制：多武将 + 押运兵装', () => {
       .toThrow(/枪/);
   });
 
-  it('只押运兵装（不带兵/钱/粮）也算有效输送', () => {
+  it('押运兵装不必带钱粮，但运输队出门至少带 100 兵', () => {
     const state = createGame('liu', 1);
     state.cities.jiangling.armaments = { ...initialArmaments(), ram: 3 };
 
     const { next, unit } = deployFromJiangling(state, {
       officerIds: ['guan-yu'],
-      troops: 0,
+      troops: 100,
       food: 0,
       armaments: { ram: 2 },
     });
 
     expect(unit.armaments).toEqual({ ram: 2 });
-    expect(unit.troops).toBe(0);
+    expect(unit.troops).toBe(100);
     expect(next.cities.jiangling.armaments!.ram).toBe(1);
+    expect(() => deployFromJiangling(state, { officerIds: ['guan-yu'], troops: 0, food: 0, armaments: { ram: 2 } }))
+      .toThrow(/输送士兵必须为 100/);
   });
 });
 

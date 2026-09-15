@@ -57,6 +57,21 @@ function locationName(officer: Officer, state: GameState): string {
     return map[officer.location.task] ?? '执行任务';
   }
   if (officer.location.kind === 'captive') return `战俘@${state.cities[officer.location.cityId].name}`;
+  if (officer.location.kind === 'envoy') return `出使${state.forces[officer.location.targetForceId]?.name ?? ''}`;
+  if (officer.location.kind === 'recruitJourney') {
+    return officer.location.phase === 'outbound'
+      ? `登庸·前往${state.cities[officer.location.targetCityId]?.name ?? '目标城'}`
+      : '登庸·返程';
+  }
+  if (officer.location.kind === 'rumorJourney') {
+    const targetPassId = officer.location.targetPassId;
+    const targetName = officer.location.targetCityId
+      ? state.cities[officer.location.targetCityId]?.name
+      : (targetPassId ? state.passes?.[targetPassId]?.name : undefined);
+    return officer.location.phase === 'outbound'
+      ? `流言·前往${targetName ?? '目标据点'}`
+      : '流言·返程';
+  }
   return state.cities[officer.cityId]?.name ?? '在野';
 }
 
@@ -104,7 +119,7 @@ export function OfficerDetailDialog({ officer, state, onClose }: OfficerDetailDi
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="officer-detail-dialog tool-panel" data-testid="officer-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="officer-detail-title">
-        <header>
+        <header className="officer-detail-header">
           <div>
             <p>{forceName} · {locationName(officer, state)}</p>
             <h2 id="officer-detail-title">{officer.name}<OfficerHealthBadge officer={officer} /></h2>

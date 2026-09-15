@@ -310,18 +310,46 @@ describe('老龄病逝（寿命系统）', () => {
 });
 
 describe('死亡善后（applyDeathConsequences）', () => {
-  it('势力主公死亡：统率最高的在世同势力武将继任并写日志', () => {
+  it('势力主公死亡：魅力最高的在世同势力武将继任并写日志', () => {
     const state = createGame('liu', 1);
     const liuBei = state.officers['liu-bei'];
     markDeath(state, liuBei, '寿终正寝');
 
     applyDeathConsequences(state, liuBei);
 
-    // 关羽统率 95 为刘备势力在世最高
+    // 关羽魅力 94 为刘备势力在世最高（刘备 99 已故）
     expect(state.forces.liu.leaderId).toBe('guan-yu');
     const log = state.logs.at(-1);
     expect(log?.message).toContain('关羽');
     expect(log?.message).toContain('继任');
+  });
+
+  it('继任看魅力而非统率：刘表死后由魅力最高的蒯越继任（文聘统率更高）', () => {
+    const state = createGame('liu', 1);
+    const liuBiao = state.officers['liu-biao'];
+    markDeath(state, liuBiao, '寿终正寝');
+
+    applyDeathConsequences(state, liuBiao);
+
+    // 蒯越魅力 82 > 刘琦 72 > 韩嵩 76…；文聘统率 87 最高但魅力仅 79
+    expect(state.forces.biao.leaderId).toBe('kuai-yue');
+    expect(state.officers['wen-pin'].stats.leadership).toBeGreaterThan(state.officers['kuai-yue'].stats.leadership);
+  });
+
+  it('魅力相同时按统率次序继任', () => {
+    const state = createGame('liu', 1);
+    // 让张飞（统率 85）与诸葛亮（统率 92）魅力同为 99，其余武将魅力压低
+    for (const officer of Object.values(state.officers)) {
+      if (officer.forceId === 'liu') officer.stats.charisma = 10;
+    }
+    state.officers['zhang-fei'].stats.charisma = 99;
+    state.officers['zhuge-liang'].stats.charisma = 99;
+    const liuBei = state.officers['liu-bei'];
+    markDeath(state, liuBei, '寿终正寝');
+
+    applyDeathConsequences(state, liuBei);
+
+    expect(state.forces.liu.leaderId).toBe('zhuge-liang');
   });
 
   it('主公死亡后太守空缺；无同势力武将时不强行继任', () => {

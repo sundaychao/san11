@@ -1,4 +1,4 @@
-import { isBattleShip, siegeWeaponKindOf, TRANSPORT_MOVEMENT, TROOP_MOVEMENT } from '../armaments';
+import { isBattleShip, siegeWeaponKindOf, TRANSPORT_MOVEMENT, TROOP_MOVEMENT, type SiegeWeaponKind } from '../armaments';
 import type { AptitudeGrade, ArmyUnit, FacilityType, GameState, GridCell, TerrainType, TroopType } from '../types';
 import type { GridCoord } from './grid';
 
@@ -57,6 +57,9 @@ export const FIRE_PLOT_DAMAGE = 500;
 export const FIRE_FACILITY_DAMAGE = 150;
 export const FIRE_SEED_DAMAGE = 700;
 export const FIRE_BALL_DAMAGE = 700;
+/** 火种/火球（基础档陷阱）：无科技门槛，伤害低于火焰档 */
+export const BASE_FIRE_SEED_DAMAGE = 500;
+export const BASE_FIRE_BALL_DAMAGE = 500;
 /** 业火种/业火球（化学）：伤害更高、留下的业火持续更久 */
 export const HELLFIRE_SEED_DAMAGE = 1200;
 export const HELLFIRE_BALL_DAMAGE = 1200;
@@ -191,6 +194,10 @@ export interface UnitTactic {
   cost: number;
   range: number;
   power: number;
+  /** 最小射程（默认 1）：井阑/投石打不到相邻目标 */
+  minRange?: number;
+  /** 可打击的目标类别，默认 ['unit']。兵器战法用 'structure' 表示据点/设施等建筑 */
+  targetKinds?: ('unit' | 'structure')[];
 }
 
 export type TacticId =
@@ -208,7 +215,11 @@ export type TacticId =
   | 'cavalry-rush'
   | 'ship-ram'
   | 'ship-fire'
-  | 'ship-whirl';
+  | 'ship-whirl'
+  | 'siege-break'
+  | 'siege-radiate'
+  | 'siege-fire'
+  | 'siege-stone';
 
 export const TACTICS: Record<TacticId, UnitTactic> = {
   'spear-thrust': { id: 'spear-thrust', name: '突刺', troopType: 'spear', cost: 15, range: 1, power: 1.18 },
@@ -226,7 +237,27 @@ export const TACTICS: Record<TacticId, UnitTactic> = {
   'ship-ram': { id: 'ship-ram', name: '冲角', troopType: 'naval', cost: 15, range: 1, power: 1.22 },
   'ship-fire': { id: 'ship-fire', name: '火箭', troopType: 'naval', cost: 20, range: 2, power: 1.18 },
   'ship-whirl': { id: 'ship-whirl', name: '回旋', troopType: 'naval', cost: 30, range: 1, power: 1.3 },
+  // 兵器战法（原版 PK：每种兵器只有一种战法、无适性要求、不会施展失败）。
+  // 目标口径：冲车只打建筑；木兽邻接可打建筑与部队；井阑恰第 2 格；投石 2~3 格。
+  'siege-break': { id: 'siege-break', name: '破碎', troopType: 'siege', cost: 20, range: 1, power: 1.5, targetKinds: ['structure'] },
+  'siege-radiate': { id: 'siege-radiate', name: '放射', troopType: 'siege', cost: 20, range: 1, power: 1.25, targetKinds: ['structure', 'unit'] },
+  'siege-fire': { id: 'siege-fire', name: '火矢', troopType: 'siege', cost: 10, range: 2, minRange: 2, power: 1.15, targetKinds: ['unit', 'structure'] },
+  'siege-stone': { id: 'siege-stone', name: '投石', troopType: 'siege', cost: 20, range: 3, minRange: 2, power: 1.3, targetKinds: ['unit', 'structure'] },
 };
+
+/** 兵器种类 → 唯一战法（冲车升级木兽、井阑升级投石后自动换战法） */
+export const SIEGE_TACTIC_OF_WEAPON: Record<SiegeWeaponKind, TacticId> = {
+  ram: 'siege-break',
+  woodenBeast: 'siege-radiate',
+  tower: 'siege-fire',
+  catapult: 'siege-stone',
+};
+
+export const SIEGE_TACTIC_IDS: TacticId[] = Object.values(SIEGE_TACTIC_OF_WEAPON);
+
+export function isSiegeTactic(tacticId: TacticId): boolean {
+  return SIEGE_TACTIC_IDS.includes(tacticId);
+}
 
 export const TACTICS_BY_TROOP: Partial<Record<TroopType, TacticId[]>> = {
   spear: ['spear-thrust', 'spear-spiral', 'spear-double'],
@@ -364,8 +395,10 @@ export const COMBAT_RATING_SCALE = 100;
  * （`ranks.unitTroopCapOf`，官职/爵位 + 科技加成），不在这里。资金与兵粮没有
  * 随武将成长的自然解释，直接规定死数（用户口径）。
  */
-export const COMBAT_UNIT_GOLD_CAP = 10000;
 export const COMBAT_UNIT_FOOD_CAP = 50000;
+export const COMBAT_UNIT_GOLD_CAP = 10000;
+/** 运输队最低编制：出门（输送）不低于、补给后自留不低于 100 人 */
+export const MIN_TRANSPORT_TROOPS = 100;
 
 /** 统率修正 = clamp(1 + (攻方攻击力 − 守方防御力) / DIVISOR, MIN, MAX) */
 export const LEADERSHIP_MODIFIER_DIVISOR = 250;
@@ -402,8 +435,8 @@ export interface UnitFacility {
 }
 
 /**
- * 野外设施造价（金），由低到高：阵 300 < 土垒/火焰种/火焰球 400 < 石墙 500 < 箭楼/业火种/业火球 600 <
- * 砦 700 < 连弩楼 800 < 太鼓台/军乐台 800 < 城塞/投石台 900。既有设施数值保持不变。
+ * 野外设施造价（金），由低到高：阵 300 < 土垒/火种/火球 400 < 石墙 500 < 火焰种/火焰球 500 <
+ * 箭楼/业火种/业火球 600 < 砦 700 < 连弩楼 800 < 太鼓台/军乐台 800 < 城塞/投石台 900。既有设施数值保持不变。
  */
 export const FACILITY_BUILD_COSTS: Record<FacilityType, number> = {
   formation: 300,
@@ -418,17 +451,19 @@ export const FACILITY_BUILD_COSTS: Record<FacilityType, number> = {
   musicTower: 800,
   fireSeed: 400,
   fireBall: 400,
+  flameSeed: 500,
+  flameBall: 500,
   hellfireSeed: 600,
   hellfireBall: 600,
 };
 
 /**
  * 野外设施定义（耐久为满耐久）。既有设施数值保持不变：
- * 箭楼 700/600 金、城塞 1200/900、土垒 400/400、火焰种·火焰球 200/400。
+ * 箭楼 700/600 金、城塞 1200/900、土垒 400/400、火种·火球 200/400。
  * 新增梯度：据点型 阵 500/300 → 砦 900/700 → 城塞 1200/900；
  * 阻挡型 土垒 400/400 → 石墙 600/500；
  * 攻击型 箭楼 700/600 → 连弩楼 900/800 → 投石台 800/900（耐久略低但伤害与射程更强）；
- * 陷阱型 火焰种·火焰球 200/400 → 业火种·业火球 250/600。
+ * 陷阱型 火种·火球 200/400 → 火焰种·火焰球 200/500 → 业火种·业火球 250/600。
  */
 export const FACILITIES: Partial<Record<FacilityType, UnitFacility>> = {
   drum: { type: 'drum', name: '太鼓台', durability: 800 },
@@ -440,8 +475,10 @@ export const FACILITIES: Partial<Record<FacilityType, UnitFacility>> = {
   fort: { type: 'fort', name: '砦', durability: 900 },
   earthwork: { type: 'earthwork', name: '土垒', durability: 400 },
   stoneWall: { type: 'stoneWall', name: '石墙', durability: 600 },
-  fireSeed: { type: 'fireSeed', name: '火焰种', durability: 200 },
-  fireBall: { type: 'fireBall', name: '火焰球', durability: 200 },
+  fireSeed: { type: 'fireSeed', name: '火种', durability: 200 },
+  fireBall: { type: 'fireBall', name: '火球', durability: 200 },
+  flameSeed: { type: 'flameSeed', name: '火焰种', durability: 200 },
+  flameBall: { type: 'flameBall', name: '火焰球', durability: 200 },
   hellfireSeed: { type: 'hellfireSeed', name: '业火种', durability: 250 },
   hellfireBall: { type: 'hellfireBall', name: '业火球', durability: 250 },
   fortress: { type: 'fortress', name: '城塞', durability: 1200 },
@@ -449,7 +486,8 @@ export const FACILITIES: Partial<Record<FacilityType, UnitFacility>> = {
 
 /**
  * 野外设施升级链（低档 → 高档）：研究对应科技后，**建造选项与场上已建成的设施一并升级为该档**。
- * 阵 → 砦（石工术）→ 城塞（建筑学）；土垒 → 石墙（石工术）；箭楼 → 连弩楼（建筑学）。
+ * 阵 → 砦（石工术）→ 城塞（建筑学）；土垒 → 石墙（石工术）；箭楼 → 连弩楼（建筑学）；
+ * 火种 → 火焰种（火药）→ 业火种（化学）；火球 → 火焰球（火药）→ 业火球（化学）。
  *
  * 这里只登记「谁升级成谁」，升级门槛不重复写死 —— 高档设施的门槛已经在 `techs.TECH_FACILITY_GATES`
  * 里（fort/stoneWall = 石工术，fortress/crossbowTower = 建筑学），判定统一走 `techs.canBuildFacility`。
@@ -459,6 +497,10 @@ export const FACILITY_UPGRADE_CHAIN: Partial<Record<FacilityType, FacilityType>>
   fort: 'fortress',
   earthwork: 'stoneWall',
   arrowTower: 'crossbowTower',
+  fireSeed: 'flameSeed',
+  flameSeed: 'hellfireSeed',
+  fireBall: 'flameBall',
+  flameBall: 'hellfireBall',
 };
 
 /** 升级链里的高档设施：不作为独立建造选项出现（玩家只看到「当前档位」那一个入口） */
@@ -476,7 +518,7 @@ export const ZOC_FACILITY_TYPES = new Set<FacilityType>([
 ]);
 /** 可被任意势力修补的设施（只阻挡移动的土垒/石墙，以及陷阱） */
 export const PUBLIC_REPAIRABLE_FACILITY_TYPES = new Set<FacilityType>([
-  'earthwork', 'stoneWall', 'fireSeed', 'fireBall', 'hellfireSeed', 'hellfireBall',
+  'earthwork', 'stoneWall', 'fireSeed', 'fireBall', 'flameSeed', 'flameBall', 'hellfireSeed', 'hellfireBall',
 ]);
 
 export function movementProfileForUnit(unit: Pick<ArmyUnit, 'kind' | 'troopType'>): MovementProfile {

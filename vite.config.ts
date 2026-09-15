@@ -1,5 +1,30 @@
 import react from '@vitejs/plugin-react';
+import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
+
+/**
+ * vmThreads 池下 setupFiles 与测试文件分处不同模块上下文（实测同一个
+ * '@testing-library/react' 会解析成两个实例）：setup.ts 注册的
+ * afterEach(cleanup) 清的是空注册表，每轮空转。于是首个渲染弹窗的用例
+ * 会把 DOM 泄漏给同文件后续所有用例（getByRole 报 "Found multiple
+ * elements" 连环失败）。这里在转换期给每个 .test.tsx 注入文件内注册的
+ * cleanup，保证与测试文件同一 RTL 实例。cleanup 幂等，与 setup.ts 的
+ * afterEach 并存无害；日后换回 threads/forks 池也只是双保险。
+ */
+function rtlCleanupInjector(): Plugin {
+  return {
+    name: 'inject-rtl-cleanup-per-test-file',
+    transform(code, id) {
+      if (!/\.test\.tsx(?:\?.*)?$/.test(id) || id.includes('node_modules')) return null;
+      if (code.includes('__rtlAfterEach')) return null;
+      const inject =
+        "import { afterEach as __rtlAfterEach } from 'vitest';\n" +
+        "import { cleanup as __rtlCleanup } from '@testing-library/react';\n" +
+        '__rtlAfterEach(() => __rtlCleanup());\n';
+      return { code: inject + code, map: null };
+    },
+  };
+}
 
 export default defineConfig({
   plugins: [react()],
@@ -32,7 +57,7 @@ export default defineConfig({
     // Vitest 4 已移除 environmentMatchGlobs，改用 projects 划分。
     projects: [
       {
-        plugins: [react()],
+        plugins: [rtlCleanupInjector(), react()],
         test: {
           name: 'client',
           include: ['src/**/*.test.{ts,tsx}'],

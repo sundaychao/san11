@@ -10,7 +10,11 @@ import {
   requiredAptitudeForTactic,
   strategyTargetCells,
   strategyTargetUnits,
+  tacticHasAnyTarget,
+  tacticTargetCities,
   tacticTargetFacilities,
+  tacticTargetPasses,
+  tacticTargetPlots,
   tacticTargetUnits,
   unitCanUseTactic,
   unitFacilityMenuOptions,
@@ -72,6 +76,9 @@ export interface UnitActionQuery {
   repairFacilities: Facility[];
   /** 运输队周围可补给的己方作战部队（非运输队恒为空） */
   supplyUnits: ArmyUnit[];
+  /** 兵器战法可打的敌方城池 / 关隘（其余部队恒为空） */
+  tacticCities: City[];
+  tacticPasses: Pass[];
   tacticOptions: UnitTacticOption[];
   availableTactics: UnitTactic[];
   availableStrategies: UnitStrategy[];
@@ -97,16 +104,15 @@ function unavailableTacticReason(state: GameState, unitId: string, tactic: UnitT
   const unit = state.units[unitId];
   if (!unit) return '部队无法行动';
   if (!unitCanUseTactic(state, unitId, tactic.id)) {
+    // 兵器战法不要求兵种适性，只按兵器种类给（`unitCanUseTactic` 已含该口径）
     const troopLabel = tactic.troopType === 'naval' ? '水军' : TROOP_LABELS[tactic.troopType];
     return `需要${troopLabel}适性 ${requiredAptitudeForTactic(tactic.id)}`;
   }
   if (unit.acted) return '部队已行动';
   if (unitIsIncapacitated(unit)) return '部队无法行动';
   if ((unit.stamina ?? 0) < tactic.cost) return '战力不足';
-  if (
-    tacticTargetUnits(state, unitId, tactic.id, origin).length === 0 &&
-    tacticTargetFacilities(state, unitId, tactic.id, origin).length === 0
-  ) return '无有效目标';
+  // 兵器战法可以打建筑（据点/关隘/设施），因此目标判定要连建筑一起看
+  if (!tacticHasAnyTarget(state, unitId, tactic.id, origin)) return '无有效目标';
   return undefined;
 }
 
@@ -142,6 +148,21 @@ export function getTacticFacilityTargets(state: GameState, unitId: string, tacti
   return tacticTargetFacilities(state, unitId, tacticId, origin);
 }
 
+/** 兵器战法可打的敌方城池 */
+export function getTacticCityTargets(state: GameState, unitId: string, tacticId: Parameters<typeof tacticTargetCities>[2], origin?: GridCoord) {
+  return tacticTargetCities(state, unitId, tacticId, origin);
+}
+
+/** 兵器战法可打的敌方关隘 */
+export function getTacticPassTargets(state: GameState, unitId: string, tacticId: Parameters<typeof tacticTargetPasses>[2], origin?: GridCoord) {
+  return tacticTargetPasses(state, unitId, tacticId, origin);
+}
+
+/** 兵器战法可打的敌方开发地格（市场/农场/兵舍…，标识为 `cityId:plotIndex`） */
+export function getTacticPlotTargets(state: GameState, unitId: string, tacticId: Parameters<typeof tacticTargetPlots>[2], origin?: GridCoord) {
+  return tacticTargetPlots(state, unitId, tacticId, origin);
+}
+
 export function getFacilityBuildTargets(state: GameState, unitId: string, origin?: GridCoord, facilityType?: FacilityType) {
   return facilityBuildTargets(state, unitId, origin, facilityType);
 }
@@ -170,6 +191,8 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
       jointAttackUnits: [],
       repairFacilities: [],
       supplyUnits: [],
+      tacticCities: [],
+      tacticPasses: [],
       tacticOptions: [],
       availableTactics: [],
       availableStrategies: [],
@@ -187,6 +210,10 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
   const repairFacilities = repairableFacilities(state, unitId, origin);
   const supplyUnits = suppliableUnits(state, unitId, origin);
   const tacticOptions = getUnitTacticOptions(state, unitId, origin);
+  // 兵器：每种兵器只有一条战法，菜单与目标高亮都按这条算（据点/关隘也算有效目标）
+  const siegeTactic = tacticOptions.map((option) => option.tactic).find((tactic) => tactic.troopType === 'siege');
+  const tacticCities = siegeTactic ? tacticTargetCities(state, unitId, siegeTactic.id, origin) : [];
+  const tacticPasses = siegeTactic ? tacticTargetPasses(state, unitId, siegeTactic.id, origin) : [];
   const availableTactics = tacticOptions
     .filter((option) => !option.unavailableReason)
     .map((option) => option.tactic);
@@ -227,6 +254,8 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
     jointAttackUnits,
     repairFacilities,
     supplyUnits,
+    tacticCities,
+    tacticPasses,
     tacticOptions,
     availableTactics,
     availableStrategies,

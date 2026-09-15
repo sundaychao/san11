@@ -512,8 +512,8 @@ export const TECH_FACILITY_GATES: readonly TechFacilityGate[] = [
   { facility: 'fortress', level: 1, node: 'jianzhuxue' },
   { facility: 'catapultTower', level: 1, node: 'dandao' },
   // 陷阱
-  { facility: 'fireSeed', level: 1, node: 'huoyao' },
-  { facility: 'fireBall', level: 1, node: 'huoyao' },
+  { facility: 'flameSeed', level: 1, node: 'huoyao' },
+  { facility: 'flameBall', level: 1, node: 'huoyao' },
   { facility: 'hellfireSeed', level: 1, node: 'huaxue' },
   { facility: 'hellfireBall', level: 1, node: 'huaxue' },
 ];

@@ -11,10 +11,29 @@ import { officerMerit, positionDefinition } from '../game/ranks';
 import { PLOT_LABELS } from '../game/innerAffairs';
 import { skillDefinition, officerSkillNames, officerSkillsText } from '../game/skills';
 import { strongholdTransferDuration } from '../game/commands';
+import { rumorSuccessChanceOf } from '../game/rumor';
+import { RUMOR_ADVICE_MIN_CHANCE } from '../game/strategist';
 import type { City, ForceId, GameState, Officer, OfficerAptitudes, Pass, Stats } from '../game/types';
 import { OfficerHealthBadge } from './OfficerHealthBadge';
 import { OfficerDetailDialog } from './OfficerDetailDialog';
 import { closePopupOnContextMenu } from './popupEvents';
+
+/**
+ * 计略评估（流言）：该武将散布流言的预估成功率与「军师推荐」判定。
+ * 推荐门槛与军师提示同源（RUMOR_ADVICE_MIN_CHANCE，须**超过**），未指定目标据点时返回 null。
+ */
+function tacticAdviceOf(state: GameState, officer: Officer, target?: City | Pass) {
+  if (!target) return null;
+  const chance = Math.round(rumorSuccessChanceOf(state, officer, target));
+  return { chance, recommended: chance > RUMOR_ADVICE_MIN_CHANCE };
+}
+
+/** 「军师推荐」标记：○ 推荐（成功率超过门槛）/ × 未推荐 */
+function AdviceMark({ recommended }: { recommended: boolean }) {
+  return recommended
+    ? <span className="advice-mark is-yes" title={`军师推荐（预估成功率超过 ${RUMOR_ADVICE_MIN_CHANCE}%）`}>○</span>
+    : <span className="advice-mark is-no" title="军师未推荐">×</span>;
+}
 
 interface OfficerListDialogProps {
   scope?: 'player' | 'all' | { forceId: ForceId };
@@ -37,6 +56,11 @@ export interface OfficerListTableProps {
   initialTab?: OfficerListTab;
   /** 召唤目标据点（启用"召唤"分类时用于计算各武将召唤日数） */
   summonTarget?: City | Pass;
+  /**
+   * 计略分类（流言）的评估目标据点：传入后「计略」分类可用，
+   * 列出各武将的预估成功率与军师推荐（○ = 超过门槛），并令推荐人选置顶。
+   */
+  tacticTarget?: City | Pass;
   /** 可选：checkbox 配置，启用后第一列为勾选框 */
   checkboxes?: {
     /** 已选中的 id 集合 */
@@ -59,10 +83,11 @@ export interface OfficerListTableProps {
   onRowPick?: (officer: Officer) => void;
 }
 
-export type OfficerListTab = '奖赏' | '召唤' | '所属' | '能力' | '特技' | '适性' | '状态';
+export type OfficerListTab = '奖赏' | '召唤' | '计略' | '所属' | '能力' | '特技' | '适性' | '状态';
 type SortDirection = 'desc' | 'asc';
 type SortKey =
   | 'name'
+  | 'advice'
   | 'age'
   | 'force'
   | 'homeCity'
@@ -114,6 +139,22 @@ function locationText(officer: Officer, state: GameState) {
   if (officer.location.kind === 'unit') return '部队';
   if (officer.location.kind === 'transfer') return '在途';
   if (officer.location.kind === 'envoy') return `出使${state.forces[officer.location.targetForceId]?.name ?? ''}`;
+  if (officer.location.kind === 'recruitJourney') {
+    const end = officer.location.phase === 'outbound'
+      ? `前往${state.cities[officer.location.targetCityId]?.name ?? '目标城'}`
+      : `返回${state.cities[officer.location.fromCityId]?.name ?? '出发城'}`;
+    return `登庸中（${end}）`;
+  }
+  if (officer.location.kind === 'rumorJourney') {
+    const targetPassId = officer.location.targetPassId;
+    const targetName = officer.location.targetCityId
+      ? state.cities[officer.location.targetCityId]?.name
+      : (targetPassId ? state.passes?.[targetPassId]?.name : undefined);
+    const end = officer.location.phase === 'outbound'
+      ? `前往${targetName ?? '目标据点'}`
+      : `返回${state.cities[officer.location.fromCityId]?.name ?? '出发城'}`;
+    return `流言中（${end}）`;
+  }
   return state.cities[officer.location.cityId].name;
 }
 
@@ -168,6 +209,30 @@ export function taskInfo(officer: Officer, state: GameState) {
     return {
       status: '执行中',
       task: `移动 ${from}→${target}`,
+      time: `${officer.location.remainingTenDays}旬`,
+    };
+  }
+  if (officer.location.kind === 'recruitJourney') {
+    const end = officer.location.phase === 'outbound'
+      ? `前往${state.cities[officer.location.targetCityId]?.name ?? '目标城'}登庸`
+      : `登庸归来${state.cities[officer.location.fromCityId] ? `（${state.cities[officer.location.fromCityId].name}）` : ''}`;
+    return {
+      status: '执行中',
+      task: `登庸 · ${end}`,
+      time: `${officer.location.remainingTenDays}旬`,
+    };
+  }
+  if (officer.location.kind === 'rumorJourney') {
+    const targetPassId = officer.location.targetPassId;
+    const targetName = officer.location.targetCityId
+      ? state.cities[officer.location.targetCityId]?.name
+      : (targetPassId ? state.passes?.[targetPassId]?.name : undefined);
+    const end = officer.location.phase === 'outbound'
+      ? `前往${targetName ?? '目标据点'}散布流言`
+      : '散布流言归来';
+    return {
+      status: '执行中',
+      task: `流言 · ${end}`,
       time: `${officer.location.remainingTenDays}旬`,
     };
   }
@@ -301,6 +366,11 @@ function columnsForTab(activeTab: OfficerListTab, scope: OfficerListDialogProps[
     { label: '兵器', sortKey: 'siege' },
     { label: '水军', sortKey: 'navy' },
   ];
+  if (activeTab === '计略') return [
+    { label: '武将', sortKey: 'name' },
+    { label: '军师推荐', sortKey: 'advice' },
+    { label: '智力', sortKey: 'intelligence' },
+  ];
   return [
     { label: '武将', sortKey: 'name' },
     { label: '状态', sortKey: 'status' },
@@ -309,7 +379,7 @@ function columnsForTab(activeTab: OfficerListTab, scope: OfficerListDialogProps[
   ];
 }
 
-function renderOfficerCells(officer: Officer, state: GameState, activeTab: OfficerListTab, scope: OfficerListDialogProps['scope'], summonTarget?: City | Pass) {
+function renderOfficerCells(officer: Officer, state: GameState, activeTab: OfficerListTab, scope: OfficerListDialogProps['scope'], summonTarget?: City | Pass, tacticTarget?: City | Pass) {
   if (activeTab === '召唤') {
     const position = positionDefinition(officer.positionId);
     return (
@@ -398,6 +468,16 @@ function renderOfficerCells(officer: Officer, state: GameState, activeTab: Offic
     );
   }
 
+  if (activeTab === '计略') {
+    const advice = tacticAdviceOf(state, officer, tacticTarget);
+    return (
+      <>
+        <td className="advice-cell">{advice ? <AdviceMark recommended={advice.recommended} /> : '—'}</td>
+        <td>{officer.stats.intelligence}</td>
+      </>
+    );
+  }
+
   const task = taskInfo(officer, state);
   return (
     <>
@@ -419,8 +499,9 @@ function defaultOfficerCompare(left: Officer, right: Officer) {
     left.id.localeCompare(right.id);
 }
 
-function sortValue(officer: Officer, state: GameState, sortKey: SortKey, summonTarget?: City | Pass) {
+function sortValue(officer: Officer, state: GameState, sortKey: SortKey, summonTarget?: City | Pass, tacticTarget?: City | Pass) {
   if (sortKey === 'name') return officer.name;
+  if (sortKey === 'advice') return tacticAdviceOf(state, officer, tacticTarget)?.recommended ? 1 : 0;
   if (sortKey === 'age') return officerAge(state, officer) ?? -1;
   if (sortKey === 'force') return ownershipText(officer, state);
   if (sortKey === 'homeCity') return homeCityText(officer, state);
@@ -462,6 +543,7 @@ export function OfficerListTable({
   onRowClick,
   onRowPick,
   summonTarget,
+  tacticTarget,
 }: OfficerListTableProps) {
   const { state } = useGame();
   const [activeTab, setActiveTab] = useState<OfficerListTab>(() => initialTab
@@ -479,7 +561,7 @@ export function OfficerListTable({
         if (typeof scope === 'object' && scope !== null) return officer.forceId === scope.forceId;
         return officer.forceId === state.playerForceId;
       });
-    if (officerIds !== undefined && !sort && activeTab !== '召唤') return base;
+    if (officerIds !== undefined && !sort && activeTab !== '召唤' && activeTab !== '计略') return base;
     return [...base].sort((left, right) => {
       if (!sort) {
         // 召唤分类默认按所需旬数（日数）从低到高排列
@@ -490,13 +572,22 @@ export function OfficerListTable({
             left.name.localeCompare(right.name) ||
             left.id.localeCompare(right.id);
         }
+        // 计略分类默认：军师推荐者置顶，其余按智力降序
+        if (activeTab === '计略') {
+          const leftRecommended = tacticAdviceOf(state, left, tacticTarget)?.recommended ? 1 : 0;
+          const rightRecommended = tacticAdviceOf(state, right, tacticTarget)?.recommended ? 1 : 0;
+          return rightRecommended - leftRecommended ||
+            right.stats.intelligence - left.stats.intelligence ||
+            left.name.localeCompare(right.name) ||
+            left.id.localeCompare(right.id);
+        }
         return defaultOfficerCompare(left, right);
       }
-      return compareSortValues(sortValue(left, state, sort.key, summonTarget), sortValue(right, state, sort.key, summonTarget), sort.direction) ||
+      return compareSortValues(sortValue(left, state, sort.key, summonTarget, tacticTarget), sortValue(right, state, sort.key, summonTarget, tacticTarget), sort.direction) ||
         left.name.localeCompare(right.name) ||
         left.id.localeCompare(right.id);
     });
-  }, [officerIds, scope, sort, state, activeTab, summonTarget]);
+  }, [officerIds, scope, sort, state, activeTab, summonTarget, tacticTarget]);
   const columns = columnsForTab(activeTab, scopeForColumns);
   const changeTab = (tab: OfficerListTab) => {
     setActiveTab(tab);
@@ -586,14 +677,14 @@ export function OfficerListTable({
                       />
                     </td>
                   )}
-                  <th scope="row">
+                  <th scope="row" className="officer-name-cell">
                     {onRowClick ? (
                       <button type="button" className="officer-name-button" onClick={() => onRowClick(officer)}>
                         {officer.name}<OfficerHealthBadge officer={officer} />
                       </button>
                     ) : (<>{officer.name}<OfficerHealthBadge officer={officer} /></>)}
                   </th>
-                  {renderOfficerCells(officer, state, activeTab, scopeForColumns, summonTarget)}
+                  {renderOfficerCells(officer, state, activeTab, scopeForColumns, summonTarget, tacticTarget)}
                 </tr>
               );
             })}

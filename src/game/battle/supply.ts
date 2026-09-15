@@ -1,4 +1,4 @@
-import { COMBAT_UNIT_FOOD_CAP, COMBAT_UNIT_GOLD_CAP } from './catalog';
+import { COMBAT_UNIT_FOOD_CAP, COMBAT_UNIT_GOLD_CAP, MIN_TRANSPORT_TROOPS } from './catalog';
 import { gridKey, neighborsOf, type GridCoord } from './grid';
 import { assertUnitTurn } from './shared';
 import { unitTroopCapOf } from '../ranks';
@@ -109,13 +109,15 @@ export function supplyArmamentHeadroomOf(giver: ArmyUnit, target: ArmyUnit): Par
 /**
  * 士兵补给上限（补给页士兵拖动条的唯一口径）：
  * 接收部队兵种有对应兵装时，每补一兵必须随带一件兵装 ——
- * 上限 = min(运输队士兵数, 运输队该兵装携带量, 接收部队带兵余量)；
+ * 上限 = min(运输队士兵数 − 自留 100, 运输队该兵装携带量, 接收部队带兵余量)；
  * 运输队没带该兵装则一名兵都补不了。剑兵/攻城器械无对应兵装，不受兵装卡口。
+ * 运输队补给后至少给自己保留 `MIN_TRANSPORT_TROOPS` 名士兵（不给到编制之外）。
  */
 export function supplyTroopMaxOf(giver: ArmyUnit, target: ArmyUnit, troopHeadroom: number): number {
   const type = suppliableArmamentOf(target.troopType);
-  if (!type) return Math.min(giver.troops, troopHeadroom);
-  return Math.min(giver.troops, giver.armaments?.[type] ?? 0, troopHeadroom);
+  const maxByGiver = Math.max(0, giver.troops - MIN_TRANSPORT_TROOPS);
+  if (!type) return Math.min(maxByGiver, troopHeadroom);
+  return Math.min(maxByGiver, giver.armaments?.[type] ?? 0, troopHeadroom);
 }
 
 /**
@@ -146,6 +148,10 @@ export function supplyUnit(
 
   const carriedGold = unit.gold ?? 0;
   if (troops > unit.troops) throw new Error('补给士兵超过运输队携带量');
+  // 补给士兵后运输队至少自留 MIN_TRANSPORT_TROOPS 人（纯钱粮/兵装补给不受此限）
+  if (troops > 0 && unit.troops - troops < MIN_TRANSPORT_TROOPS) {
+    throw new Error(`补给后运输队至少保留${MIN_TRANSPORT_TROOPS}名士兵`);
+  }
   if (gold > carriedGold) throw new Error('补给资金超过运输队携带量');
   if (food > unit.food) throw new Error('补给兵粮超过运输队携带量');
 

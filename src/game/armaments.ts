@@ -219,15 +219,16 @@ export function armamentsExceedCap(value: Partial<CityArmaments> | undefined, ca
   return ARMAMENT_TYPES.some((type) => (value[type] ?? 0) > (caps[type] ?? 0));
 }
 
+/** 城池默认兵装：枪/戟/弩/军马按基数配发，每城默认各备 1 冲车、1 井阑、1 楼船 */
 export function initialArmaments(): CityArmaments {
   return {
     spear: 4000,
     halberd: 2500,
     crossbow: 2000,
     cavalry: 3000,
-    ram: 0,
-    tower: 0,
-    ship: 0,
+    ram: 1,
+    tower: 1,
+    ship: 1,
   };
 }
 

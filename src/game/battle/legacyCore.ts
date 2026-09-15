@@ -1,6 +1,6 @@
-import type { AptitudeGrade, ArmyUnit, City, CityArmaments, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, PassId, StrategyResultReport, TerrainType, TroopType } from '../types';
+import type { AptitudeGrade, ArmyUnit, City, CityArmaments, CityId, Facility, FacilityRepairReport, FacilityType, ForceId, GameState, Pass, PassId, StrategyResultReport, TerrainType, TroopType } from '../types';
 import { BLOCKED_TERRAINS, clamp, FACILITY_UPGRADE_CHAIN, LEADERSHIP_MODIFIER_DIVISOR, LEADERSHIP_MODIFIER_MAX, LEADERSHIP_MODIFIER_MIN, UPGRADED_FACILITY_TYPES, isWaterTerrain, troopMatchupModifier, type TroopCombatForm } from './catalog';
-import { isBattleShip } from '../armaments';
+import { isBattleShip, siegeWeaponKindOf } from '../armaments';
 import { nextRandom } from '../random';
 import { TECHP_PER_BREAK_UNIT, addTechP, canBuildFacility, catapultSplash, cavalryRaidMove, cavalryStirrupBonus, energyCapOf, fireDamageMultiplier, fireRangeBonus, moraleCapOf, spearSeizesFood, tacticPowerMultiplier } from '../techs';
 import { complexHandlerById } from '../skills/handlers';
@@ -29,7 +29,7 @@ import { AURA_ATTACK_MULTIPLIER, AURA_DEFENSE_MULTIPLIER, unitUnderAura } from '
 import { committedTroops } from './frontline';
 import { applyImmediateFireDamageToCityAndPlot } from './fire';
 import { allCityKeys, cellAt, cityCenter, deploymentCells, isLegalUnitCell, occupiedFacilityKeys, occupiedUnitKeys, reachableCosts, spawnCellFor, unitIsIncapacitated } from './movementRules';
-import { areAdjacent, attackableCities, attackableFacilities, attackableUnits, gridDistanceWithin, isCityInAttackRange, jointAttackableUnits } from './targetRules';
+import { areAdjacent, attackableCities, attackableFacilities, attackablePlots, attackableUnits, gridDistanceWithin, isCityInAttackRange, jointAttackableUnits, type PlotAttackTarget } from './targetRules';
 import { effectiveNavyAptitude, effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance, unitCombatRating } from './officerAbilities';
 import {
   ARROW_TOWER_DAMAGE,
@@ -56,6 +56,8 @@ import {
   FACILITY_BUILD_COSTS,
   FACILITY_BUILD_DURABILITY_PER_TEN_THOUSAND,
   FIRE_BALL_DAMAGE,
+  BASE_FIRE_SEED_DAMAGE,
+  BASE_FIRE_BALL_DAMAGE,
   FIRE_FACILITY_DAMAGE,
   FIRE_PLOT_DAMAGE,
   FIRE_PLOT_MAX_TEN_DAYS,
@@ -70,6 +72,7 @@ import {
   HELLFIRE_SEED_DAMAGE,
   NAVAL_TACTIC_IDS,
   PUBLIC_REPAIRABLE_FACILITY_TYPES,
+  SIEGE_TACTIC_OF_WEAPON,
   SPACING_LIMITED_FACILITY_TYPES,
   SHIP_WATER_ATTACK_MULTIPLIER,
   SHIP_WATER_DEFENSE_MULTIPLIER,
@@ -81,6 +84,7 @@ import {
   TACTICS_BY_TROOP,
   TERRAIN_DEFENSE,
   TROOP_LABEL,
+  isSiegeTactic,
 } from './catalog';
 import type { MovementProfile, StrategyId, StrategySelection, TacticId, UnitFacility, UnitStrategy, UnitTactic } from './catalog';
 
@@ -504,7 +508,7 @@ export function removeUnit(next: GameState, unit: ArmyUnit, looter?: ArmyUnit) {
       next.logs.push({
         id: `death-destroy-${next.month}-${next.logs.length}`,
         month: next.month,
-        forceId: null,
+        forceId: unit.forceId,
         message: `${dead.join('、')}所部覆灭，力战阵亡`,
       });
     }
@@ -538,6 +542,10 @@ export function unitTactics(state: GameState, unitId: string): UnitTactic[] {
   if (unitIsOnWater(state, unit)) {
     return NAVAL_TACTIC_IDS.map((id) => TACTICS[id]);
   }
+  // 兵器：每种兵器只有一种战法，按当前兵器种类（含科技升级后的木兽/投石车）取
+  if ((unit.troopType ?? 'sword') === 'siege') {
+    return [TACTICS[SIEGE_TACTIC_OF_WEAPON[siegeWeaponKindOf(state, unit) ?? 'ram']]];
+  }
   return (TACTICS_BY_TROOP[unit.troopType ?? 'sword'] ?? []).map((id) => TACTICS[id]);
 }
 
@@ -548,6 +556,8 @@ export function tacticTier(tacticId: TacticId): 1 | 2 | 3 {
   }
   const navalIndex = NAVAL_TACTIC_IDS.indexOf(tacticId);
   if (navalIndex >= 0) return (navalIndex + 1) as 1 | 2 | 3;
+  // 兵器战法只有一条，且原版不要求兵种适性
+  if (isSiegeTactic(tacticId)) return 1;
   throw new Error('战法不存在');
 }
 
@@ -559,6 +569,12 @@ export function unitCanUseTactic(state: GameState, unitId: string, tacticId: Tac
   const unit = state.units[unitId];
   const tactic = TACTICS[tacticId];
   if (!unit || (unit.kind ?? 'combat') !== 'combat' || !tactic) return false;
+  // 兵器战法：只看兵种与当前兵器种类，不看兵种适性（原版「兵器的战法没有兵种适性的要求」）
+  if (tactic.troopType === 'siege') {
+    if ((unit.troopType ?? 'sword') !== 'siege') return false;
+    if (unitIsOnWater(state, unit)) return false;
+    return unitTactics(state, unitId).some((candidate) => candidate.id === tacticId);
+  }
   const grade = tactic.troopType === 'naval'
     ? effectiveNavyAptitude(state, unit).grade
     : effectiveUnitAbilities(state, unit).aptitude.grade;
@@ -571,18 +587,47 @@ export function unitCanUseTactic(state: GameState, unitId: string, tacticId: Tac
   return maxTacticTier(grade) >= tacticTier(tacticId);
 }
 
+/** 战法可打击的目标类别（默认只有部队；兵器战法另有「建筑」） */
+function tacticTargetKindsOf(tactic: UnitTactic): ('unit' | 'structure')[] {
+  return tactic.targetKinds ?? ['unit'];
+}
+
+/** 战法是否可打建筑（据点 / 设施） */
+export function tacticHitsStructures(tacticId: TacticId): boolean {
+  const tactic = TACTICS[tacticId];
+  return Boolean(tactic && tacticTargetKindsOf(tactic).includes('structure'));
+}
+
+/** 距离是否落在战法的 [最小射程, 最大射程] 带内（与普攻同口径：贴脸距离 0 只对最小射程 1 放行） */
+function inTacticRangeBand(distance: number, minRange: number, maxRange: number) {
+  if (distance > maxRange) return false;
+  if (distance === 0) return minRange <= 1;
+  return distance >= minRange;
+}
+
+/** 战法对建筑的最小射程（井阑/投石打不到相邻格） */
+export function tacticMinRangeOf(tactic: UnitTactic): number {
+  return tactic.minRange ?? 1;
+}
+
+/** 战法发起者是否符合该战法的兵种/地形前提（兵器战法只看兵种，不看适性） */
+function tacticUserMatches(state: GameState, attackerAtOrigin: ArmyUnit, tactic: UnitTactic): boolean {
+  if (tactic.troopType === 'siege') {
+    return (attackerAtOrigin.troopType ?? 'sword') === 'siege' && !unitIsOnWater(state, attackerAtOrigin);
+  }
+  if (tactic.troopType === 'naval') return unitIsOnWater(state, attackerAtOrigin);
+  return tactic.troopType === (attackerAtOrigin.troopType ?? 'sword') && !unitIsOnWater(state, attackerAtOrigin);
+}
+
 export function tacticTargetUnits(state: GameState, attackerId: string, tacticId: TacticId, origin?: GridCoord): ArmyUnit[] {
   const attacker = state.units[attackerId];
   const tactic = TACTICS[tacticId];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
   if (!attacker || attacker.kind === 'transport' || !tactic) return [];
-  if (tactic.troopType === 'naval') {
-    if (!unitIsOnWater(state, attackerAtOrigin)) return [];
-  } else {
-    if (tactic.troopType !== (attacker.troopType ?? 'sword')) return [];
-    if (unitIsOnWater(state, attackerAtOrigin)) return [];
-  }
-  const minRange = tacticId === 'crossbow-fire' || tacticId === 'crossbow-pierce' || tacticId === 'ship-fire' ? 2 : 1;
+  if (!tacticTargetKindsOf(tactic).includes('unit')) return [];
+  if (!tacticUserMatches(state, attackerAtOrigin, tactic)) return [];
+  const minRange = tactic.minRange
+    ?? (tacticId === 'crossbow-fire' || tacticId === 'crossbow-pierce' || tacticId === 'ship-fire' ? 2 : 1);
   return Object.values(state.units)
     .filter((unit) => {
       if (unit.id === attacker.id || unit.forceId === attacker.forceId) return false;
@@ -599,29 +644,103 @@ export function tacticTargetUnits(state: GameState, attackerId: string, tacticId
     ));
 }
 
+/** 球类陷阱：火矢可引燃（火球 → 火焰球 → 业火球） */
+const BALL_TRAP_TYPES: readonly FacilityType[] = ['fireBall', 'flameBall', 'hellfireBall'];
+
+/**
+ * 战法可打的战场设施（`state.facilities`）。两条互斥口径：
+ * - 火矢（弩兵 / 水军 `crossbow-fire`/`ship-fire`）：只引燃**球类陷阱**，且必须落在恰第 maxRange 格
+ *   —— 可引燃**己方**球（点火是主动引信，不分敌我），但贴脸距离打不到；
+ * - 兵器战法（破碎 / 放射 / 火矢 / 投石）：射程带内的任意**敌方**已建成设施。
+ */
 export function tacticTargetFacilities(state: GameState, attackerId: string, tacticId: TacticId, origin?: GridCoord): Facility[] {
   const attacker = state.units[attackerId];
   const tactic = TACTICS[tacticId];
   if (!attacker || attacker.kind === 'transport' || !tactic) return [];
-  if (tactic.troopType === 'naval') {
-    if (!unitIsOnWater(state, origin ? { ...attacker, q: origin.q, r: origin.r } : attacker)) return [];
-  } else {
-    if (tactic.troopType !== (attacker.troopType ?? 'sword')) return [];
-    if (unitIsOnWater(state, origin ? { ...attacker, q: origin.q, r: origin.r } : attacker)) return [];
-  }
-  if (tacticId !== 'crossbow-fire' && tacticId !== 'ship-fire') return [];
   const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
+  if (!tacticUserMatches(state, attackerAtOrigin, tactic)) return [];
+  const siege = tactic.troopType === 'siege';
+  const fireArrow = tacticId === 'crossbow-fire' || tacticId === 'ship-fire';
+  if (!siege && !fireArrow) return [];
   return Object.values(state.facilities ?? {})
-    .filter((facility) => (
-      // 火矢可引燃球类陷阱：火焰球与业火球同口径
-      (facility.type === 'fireBall' || facility.type === 'hellfireBall') &&
-      facilityIsCompleted(facility) &&
-      gridDistanceWithin(attackerAtOrigin, facility, tactic.range) === tactic.range
-    ))
+    .filter((facility) => {
+      if (!facilityIsCompleted(facility)) return false;
+      const distance = gridDistanceWithin(attackerAtOrigin, facility, tactic.range);
+      if (!siege) {
+        // 弩兵/水军火矢：球类陷阱 + 恰第 maxRange 格（己方球同样可引燃）
+        return BALL_TRAP_TYPES.includes(facility.type) && distance === tactic.range;
+      }
+      // 兵器战法：只打敌方设施，射程带内（井阑/投石打不到相邻格）
+      if (facility.forceId === attacker.forceId) return false;
+      return inTacticRangeBand(distance, tacticMinRangeOf(tactic), tactic.range);
+    })
     .sort((a, b) => (
       gridDistanceWithin(attackerAtOrigin, a, tactic.range) - gridDistanceWithin(attackerAtOrigin, b, tactic.range) ||
       a.id.localeCompare(b.id)
     ));
+}
+
+/** 兵器战法可打的敌方城池（距离按城池 7 格轮廓的最近格计） */
+export function tacticTargetCities(state: GameState, attackerId: string, tacticId: TacticId, origin?: GridCoord): City[] {
+  const attacker = state.units[attackerId];
+  const tactic = TACTICS[tacticId];
+  if (!attacker || attacker.kind === 'transport' || !tactic) return [];
+  if (!tacticTargetKindsOf(tactic).includes('structure')) return [];
+  const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
+  if (!tacticUserMatches(state, attackerAtOrigin, tactic)) return [];
+  const minRange = tacticMinRangeOf(tactic);
+  const distanceOf = (city: City) => Math.min(
+    ...sevenCellCityFootprint(cityCenter(city)).map((coord) => gridDistanceWithin(attackerAtOrigin, coord, tactic.range)),
+  );
+  return Object.values(state.cities)
+    .filter((city) => city.ownerId !== attacker.forceId)
+    .filter((city) => inTacticRangeBand(distanceOf(city), minRange, tactic.range))
+    .sort((a, b) => distanceOf(a) - distanceOf(b) || a.id.localeCompare(b.id));
+}
+
+/** 兵器战法可打的敌方关隘 */
+export function tacticTargetPasses(state: GameState, attackerId: string, tacticId: TacticId, origin?: GridCoord): Pass[] {
+  const attacker = state.units[attackerId];
+  const tactic = TACTICS[tacticId];
+  if (!attacker || attacker.kind === 'transport' || !tactic) return [];
+  if (!tacticTargetKindsOf(tactic).includes('structure')) return [];
+  const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
+  if (!tacticUserMatches(state, attackerAtOrigin, tactic)) return [];
+  const minRange = tacticMinRangeOf(tactic);
+  const distanceOf = (pass: Pass) => gridDistanceWithin(attackerAtOrigin, { q: pass.q, r: pass.r }, tactic.range);
+  return Object.values(state.passes ?? {})
+    .filter((pass) => pass.ownerId !== attacker.forceId)
+    .filter((pass) => inTacticRangeBand(distanceOf(pass), minRange, tactic.range))
+    .sort((a, b) => distanceOf(a) - distanceOf(b) || a.id.localeCompare(b.id));
+}
+
+/**
+ * 兵器战法可打的敌方开发地格（都市地格：市场 / 农场 / 兵舍 / 锻冶场 …）。
+ * 合法集合直接复用普攻的 `attackablePlots`（同一套「敌方 + 已建成或建设中」口径），
+ * 再按战法自己的射程带收紧：冲车/木兽只剩邻接 1 格、井阑恰第 2 格、投石 2~3 格。
+ * 开发地格没有独立 id，用 `cityId:plotIndex`（见 `targetRules.plotTargetKey`）标识。
+ */
+export function tacticTargetPlots(state: GameState, attackerId: string, tacticId: TacticId, origin?: GridCoord): PlotAttackTarget[] {
+  const attacker = state.units[attackerId];
+  const tactic = TACTICS[tacticId];
+  if (!attacker || attacker.kind === 'transport' || !tactic) return [];
+  if (!tacticTargetKindsOf(tactic).includes('structure')) return [];
+  const attackerAtOrigin = origin ? { ...attacker, q: origin.q, r: origin.r } : attacker;
+  if (!tacticUserMatches(state, attackerAtOrigin, tactic)) return [];
+  const minRange = tacticMinRangeOf(tactic);
+  const distanceOf = (plot: PlotAttackTarget) => gridDistanceWithin(attackerAtOrigin, { q: plot.q, r: plot.r }, tactic.range);
+  return attackablePlots(state, attackerId, origin)
+    .filter((plot) => inTacticRangeBand(distanceOf(plot), minRange, tactic.range))
+    .sort((a, b) => distanceOf(a) - distanceOf(b) || a.cityId.localeCompare(b.cityId) || a.plotIndex - b.plotIndex);
+}
+
+/** 兵器战法是否有任何可用目标（据点 / 关隘 / 设施 / 部队 / 开发地格） */
+export function tacticHasAnyTarget(state: GameState, attackerId: string, tacticId: TacticId, origin?: GridCoord): boolean {
+  return tacticTargetUnits(state, attackerId, tacticId, origin).length > 0 ||
+    tacticTargetCities(state, attackerId, tacticId, origin).length > 0 ||
+    tacticTargetPasses(state, attackerId, tacticId, origin).length > 0 ||
+    tacticTargetFacilities(state, attackerId, tacticId, origin).length > 0 ||
+    tacticTargetPlots(state, attackerId, tacticId, origin).length > 0;
 }
 
 export function firePlotCells(state: GameState, unitId: string, origin?: GridCoord): GridCoord[] {
@@ -681,7 +800,7 @@ export function unitFacilityMenuOptions(
 /** 该部队当前可建造的设施清单（升级档位 + 部队资金双过滤），供建造菜单使用 */
 export function buildableFacilitiesForUnit(state: GameState, unitId: string): UnitFacility[] {
   const unit = state.units[unitId];
-  if (!unit || unit.kind === 'transport') return [];
+  if (!unit) return [];
   return unitFacilityMenuOptions(state, unit.forceId).filter((facility) => (
     (unit.gold ?? 0) >= FACILITY_BUILD_COSTS[facility.type]
   ));
@@ -689,8 +808,7 @@ export function buildableFacilitiesForUnit(state: GameState, unitId: string): Un
 
 export function facilityBuildTargets(state: GameState, unitId: string, origin?: GridCoord, facilityType?: FacilityType): GridCoord[] {
   const unit = state.units[unitId];
-  // 运输队不能设置设施（`buildFacility` 会抛错），可建位置直接返回空，菜单项随之置灰
-  if (!unit || unit.kind === 'transport') return [];
+  if (!unit) return [];
   // 科技门槛：砦/石墙（石工术）、城塞/连弩楼（建筑学）、投石台（弹道）、火焰种/火焰球（火药）、业火种/业火球（化学）
   if (facilityType && !canBuildFacility(state, unit.forceId, facilityType)) return [];
   if (facilityType && (unit.gold ?? 0) < FACILITY_BUILD_COSTS[facilityType]) return [];
@@ -702,7 +820,7 @@ export function facilityBuildTargets(state: GameState, unitId: string, origin?: 
 
 export function repairableFacilities(state: GameState, unitId: string, origin?: GridCoord): Facility[] {
   const unit = state.units[unitId];
-  if (!unit || unit.kind === 'transport') return [];
+  if (!unit) return [];
   const source = origin ? { ...unit, q: origin.q, r: origin.r } : unit;
   return Object.values(state.facilities ?? {})
     .filter((facility) => {
@@ -1009,6 +1127,10 @@ export function useUnitTactic(state: GameState, forceId: ForceId, attackerId: st
     }
   }
   if (fireArrowCells.length > 0) igniteGroundFire(next, fireArrowCells, nextAttacker);
+  // 兵器命中部队后的附带效果：木兽「放射」与被攻击地点着火；井阑「火矢」引燃目标格
+  if ((tactic.id === 'siege-radiate' || tactic.id === 'siege-fire') && next.units[nextTarget.id]) {
+    igniteWoodenBeastAttack(next, { q: nextTarget.q, r: nextTarget.r });
+  }
   if (next.units[targetId]) applyTacticPositionEffect(next, attackerId, targetId, tactic);
   if (next.units[targetId]) applyTacticCounterDamage(next, attackerId, targetId);
   // 疾走：骑兵战法攻击武力较低目标后令其混乱
@@ -1045,6 +1167,8 @@ function applyTacticCounterDamage(next: GameState, attackerId: string, targetId:
   const attacker = next.units[attackerId];
   const target = next.units[targetId];
   if (!attacker || !target) return;
+  // 兵器：攻击全是战法攻击、不被反击（原版口径），且自身也不能反击别人
+  if ((attacker.troopType ?? 'sword') === 'siege') return;
   const attackerTerrain = unitTerrain(next, attacker);
   if (!areAdjacent(target, attacker) || rollNoCounterAttack(next, attacker, attackerTerrain)) return;
   const rolledCounterDamage = damageForRoll(next, target, unitTerrain(next, attacker), 0.5, true, attacker);
@@ -1317,12 +1441,14 @@ function igniteFacility(
   // 科技「猛火油」：释放者势力的基础火伤害＋100%
   const casterForceId = fireStrategyCaster?.forceId ?? looter?.forceId;
   const fireMultiplier = fireDamageMultiplier(next, casterForceId);
-  // 火焰种 / 业火种：本体 + 周围一圈共 7 格；业火伤害更高、留下的火持续 2~4 旬
+  // 火种/火焰种/业火种：本体 + 周围一圈共 7 格；越高级伤害越高，业火留下的火持续 2~4 旬
   const seedProfile = facility.type === 'fireSeed'
-    ? { damage: FIRE_SEED_DAMAGE, duration: ORDINARY_FIRE_DURATION, prefix: 'fire-seed' }
-    : facility.type === 'hellfireSeed'
-      ? { damage: HELLFIRE_SEED_DAMAGE, duration: HELLFIRE_DURATION, prefix: 'hellfire-seed' }
-      : undefined;
+    ? { damage: BASE_FIRE_SEED_DAMAGE, duration: ORDINARY_FIRE_DURATION, prefix: 'fire-seed' }
+    : facility.type === 'flameSeed'
+      ? { damage: FIRE_SEED_DAMAGE, duration: ORDINARY_FIRE_DURATION, prefix: 'flame-seed' }
+      : facility.type === 'hellfireSeed'
+        ? { damage: HELLFIRE_SEED_DAMAGE, duration: HELLFIRE_DURATION, prefix: 'hellfire-seed' }
+        : undefined;
   if (seedProfile) {
     const cells = [facility, ...neighborsOf(facility.q, facility.r)];
     const affectedCells = fireStrategyAffectedCells(next, cells, fireStrategyCaster);
@@ -1332,12 +1458,14 @@ function igniteFacility(
     delete next.facilities?.[facility.id];
     return true;
   }
-  // 火焰球 / 业火球：沿施放方向贯通 3 格（fireBallCells 对两者同样适用）
+  // 火球/火焰球/业火球：沿施放方向贯通 3 格（fireBallCells 对所有球类同样适用）
   const ballProfile = facility.type === 'fireBall'
-    ? { damage: FIRE_BALL_DAMAGE, duration: ORDINARY_FIRE_DURATION, prefix: 'fire-ball' }
-    : facility.type === 'hellfireBall'
-      ? { damage: HELLFIRE_BALL_DAMAGE, duration: HELLFIRE_DURATION, prefix: 'hellfire-ball' }
-      : undefined;
+    ? { damage: BASE_FIRE_BALL_DAMAGE, duration: ORDINARY_FIRE_DURATION, prefix: 'fire-ball' }
+    : facility.type === 'flameBall'
+      ? { damage: FIRE_BALL_DAMAGE, duration: ORDINARY_FIRE_DURATION, prefix: 'flame-ball' }
+      : facility.type === 'hellfireBall'
+        ? { damage: HELLFIRE_BALL_DAMAGE, duration: HELLFIRE_DURATION, prefix: 'hellfire-ball' }
+        : undefined;
   if (ballProfile) {
     const cells = fireBallCells(next, source, facility);
     const affectedCells = fireStrategyAffectedCells(next, cells, fireStrategyCaster);
@@ -1511,7 +1639,6 @@ export function buildFacility(state: GameState, forceId: ForceId, unitId: string
   const unit = assertUnitTurn(state, forceId, unitId);
   const facility = FACILITIES[facilityType];
   if (!facility) throw new Error('设施不存在');
-  if (unit.kind === 'transport') throw new Error('运输队不能设置设施');
   const buildCost = FACILITY_BUILD_COSTS[facilityType];
   if ((unit.gold ?? 0) < buildCost) throw new Error(`资金不足 ${buildCost}`);
   if (!facilityBuildTargets(state, unitId, undefined, facilityType).some((coord) => coord.q === target.q && coord.r === target.r)) {
@@ -1554,7 +1681,6 @@ export function repairFacility(state: GameState, forceId: ForceId, unitId: strin
   const facility = state.facilities?.[facilityId];
   if (!facility) throw new Error('设施不存在');
   if (facility.forceId !== forceId && !PUBLIC_REPAIRABLE_FACILITY_TYPES.has(facility.type)) throw new Error('只能修补己方设施');
-  if (unit.kind === 'transport') throw new Error('运输队不能修补设施');
   if (!repairableFacilities(state, unitId).some((target) => target.id === facilityId)) throw new Error('设施不在修补范围');
 
   const next = structuredClone(state);

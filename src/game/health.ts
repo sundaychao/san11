@@ -185,9 +185,10 @@ export function oldAgeDeathChance(age: number): number {
   return Math.min(0.3, Math.max(0, (age - 58) * 0.02));
 }
 
-/** 武将死亡善后：主公继位（统率高者继任）、清空太守、部队副将继任或溃散 */
+/** 武将死亡善后：主公继位（魅力最高者继任）、清空太守、部队副将继任或溃散 */
 export function applyDeathConsequences(state: GameState, officer: Officer): void {
-  // 势力主公：由统率最高的在世同势力武将继任
+  // 势力主公：由魅力最高的在世同势力武将继任（魅力 = 人望与统御号召力）；
+  // 同魅力时依次比统率、id，保证结果稳定可复现。
   if (officer.forceId) {
     const force = state.forces[officer.forceId];
     if (force && force.leaderId === officer.id) {
@@ -195,7 +196,9 @@ export function applyDeathConsequences(state: GameState, officer: Officer): void
         .filter((candidate) => candidate.forceId === officer.forceId
           && candidate.id !== officer.id
           && candidate.deathMonth === undefined)
-        .sort((a, b) => b.stats.leadership - a.stats.leadership)[0];
+        .sort((a, b) => b.stats.charisma - a.stats.charisma
+          || b.stats.leadership - a.stats.leadership
+          || a.id.localeCompare(b.id))[0];
       if (successor) {
         force.leaderId = successor.id;
         state.logs.push({

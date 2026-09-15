@@ -183,9 +183,16 @@ export function FormationOfficerPicker({
         </header>
 
         <section className="officer-picker-selected" aria-label="已选武将">
-          <div className="officer-slot is-leader"><span>主将</span><strong>{officers.find((officer) => officer.id === leaderId)?.name ?? '未选择'}</strong></div>
-          <div className="officer-slot"><span>副将 1</span><strong>{officers.find((officer) => officer.id === deputyIds[0])?.name ?? '未选择'}</strong></div>
-          <div className="officer-slot"><span>副将 2</span><strong>{officers.find((officer) => officer.id === deputyIds[1])?.name ?? '未选择'}</strong></div>
+          {([
+            { label: '主将', officer: officers.find((o) => o.id === leaderId), leader: true },
+            { label: '副将 1', officer: officers.find((o) => o.id === deputyIds[0]) },
+            { label: '副将 2', officer: officers.find((o) => o.id === deputyIds[1]) },
+          ] as Array<{ label: string; officer?: Officer; leader?: boolean }>).map(({ label, officer, leader }) => (
+            <div key={label} className={`officer-slot${leader ? ' is-leader' : ''}`}>
+              <span>{label}</span>
+              {officer ? <strong>{officer.name}</strong> : <strong>未选择</strong>}
+            </div>
+          ))}
         </section>
 
         <div className="officer-picker-tabs" role="tablist" aria-label="武将显示切换">

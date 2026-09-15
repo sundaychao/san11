@@ -24,7 +24,7 @@ const TROOP_TYPES = ['sword', 'spear', 'halberd', 'crossbow', 'cavalry', 'siege'
 const FACILITY_TYPES = [
   'drum', 'arrowTower', 'crossbowTower', 'catapultTower', 'musicTower',
   'formation', 'fort', 'fortress', 'earthwork', 'stoneWall',
-  'fireSeed', 'fireBall', 'hellfireSeed', 'hellfireBall',
+  'fireSeed', 'fireBall', 'flameSeed', 'flameBall', 'hellfireSeed', 'hellfireBall',
 ];
 const APTITUDE_GRADES = ['S++', 'S+', 'S', 'A', 'B', 'C'];
 const STRATEGY_IDS = ['fire', 'extinguish', 'false-report', 'disturb', 'calm', 'inspire', 'discord'];
@@ -170,6 +170,27 @@ function validOfficerLocation(location: unknown, custom?: boolean) {
       DIPLOMACY_ACTIONS.includes(value.action as DiplomacyAction) &&
       (value.phase === 'outbound' || value.phase === 'return') &&
       Number.isInteger(value.outboundTenDays) && Number(value.outboundTenDays) > 0 &&
+      Number.isInteger(value.returnTenDays) && Number(value.returnTenDays) > 0 &&
+      Number.isInteger(value.remainingTenDays) && Number(value.remainingTenDays) > 0;
+  }
+  if (value.kind === 'recruitJourney') {
+    // 去程remaining=0表示「已抵达目标城等待舌战抉择」，允许存读档；返程must仍为正值（>0）
+    return cityRef(value.fromCityId) &&
+      cityRef(value.targetCityId) &&
+      typeof value.targetOfficerId === 'string' &&
+      (value.phase === 'outbound' || value.phase === 'return') &&
+      Number.isInteger(value.returnTenDays) && Number(value.returnTenDays) > 0 &&
+      Number.isInteger(value.remainingTenDays) && Number(value.remainingTenDays) >= (value.phase === 'return' ? 1 : 0);
+  }
+  if (value.kind === 'rumorJourney') {
+    // 目标据点城/关二选一（城池优先），其余字段与使者同口径
+    const targetRef = value.targetCityId !== undefined
+      ? cityRef(value.targetCityId)
+      : value.targetPassId !== undefined && passRef(value.targetPassId);
+    return cityRef(value.fromCityId) &&
+      (value.fromPassId === undefined || passRef(value.fromPassId)) &&
+      targetRef &&
+      (value.phase === 'outbound' || value.phase === 'return') &&
       Number.isInteger(value.returnTenDays) && Number(value.returnTenDays) > 0 &&
       Number.isInteger(value.remainingTenDays) && Number(value.remainingTenDays) > 0;
   }
@@ -405,6 +426,19 @@ export function isGameState(value: unknown): value is GameState {
       // 出使在途：出发城允许已易主（出使途中被夺城也要能读档），只要求城仍存在且使者有归属
       return officer.forceId !== null && Boolean(cityById[officer.location.fromCityId]);
     }
+    if (officer.location.kind === 'recruitJourney') {
+      // 登庸差旅在途：出发/目标城允许途中易主，只要求两城仍存在且武将已有归属
+      return officer.forceId !== null &&
+        Boolean(cityById[officer.location.fromCityId]) &&
+        Boolean(cityById[officer.location.targetCityId]);
+    }
+    if (officer.location.kind === 'rumorJourney') {
+      // 流言差旅在途：出发/目标据点允许途中易主，只要求据点仍存在且武将已有归属
+      const targetExists = officer.location.targetCityId
+        ? Boolean(cityById[officer.location.targetCityId])
+        : Boolean(officer.location.targetPassId && state.passes?.[officer.location.targetPassId]);
+      return officer.forceId !== null && Boolean(cityById[officer.location.fromCityId]) && targetExists;
+    }
     return Boolean(cityById[officer.location.cityId]);
   };
   const participatingForceIds = new Set(cities.map((city) => city.ownerId));
@@ -419,7 +453,8 @@ export function isGameState(value: unknown): value is GameState {
       Boolean(cityById[officer.cityId]) &&
       // 俘虏关押在敌方城，cityId 不要求属本方；关隘驻将按关隘归属校验。
       // 出使在途的使者同理：出发城可能在途中被敌方攻占，此时仍要能存读档（返程时由 settleEnvoys 改回本方据点）。
-      (officer.location.kind === 'captive' || officer.location.kind === 'envoy' || officer.forceId === null ||
+      // 流言差旅与登庸差旅同为在途状态，出发据点允许途中易主。
+      (officer.location.kind === 'captive' || officer.location.kind === 'envoy' || officer.location.kind === 'recruitJourney' || officer.location.kind === 'rumorJourney' || officer.forceId === null ||
         (officer.location.kind === 'pass'
           ? Boolean(state.passes?.[officer.location.passId]) && state.passes![officer.location.passId].ownerId === officer.forceId
           : cityById[officer.cityId].ownerId === officer.forceId)) &&
@@ -455,6 +490,12 @@ export function isGameState(value: unknown): value is GameState {
     (state.firePlots === undefined || (
       Array.isArray(state.firePlots) &&
       state.firePlots.every(validFirePlot)
+    )) &&
+    (state.pendingRecruitDebate === undefined || state.pendingRecruitDebate === null || (
+      typeof state.pendingRecruitDebate.recruiterId === 'string' &&
+      Boolean(officerById[state.pendingRecruitDebate.recruiterId]) &&
+      typeof state.pendingRecruitDebate.targetId === 'string' &&
+      Boolean(officerById[state.pendingRecruitDebate.targetId])
     )) &&
     (state.facilities === undefined || (
       Object.values(state.facilities).every((facility) => validFacility(facility) && state.facilities![facility.id] === facility)

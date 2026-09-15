@@ -5,6 +5,7 @@ import { ARMAMENT_TYPES, armamentLabelFor, armamentsOf, emptyArmaments } from '.
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { movementAllowanceForProfile, TERRAIN_COST_BY_PROFILE, TRANSPORT_COMBAT_RATING } from '../game/battle/catalog';
 import { TRANSPORT_TROOP_CAP } from '../game/battle/deployment';
+import { MIN_TRANSPORT_TROOPS } from '../game/battle/catalog';
 import { effectiveStat } from '../game/health';
 import { officerSkillsText } from '../game/skills';
 import { useGame } from '../game/store/GameProvider';
@@ -44,8 +45,8 @@ function toAmount(value: string) {
   return Number.isFinite(amount) ? amount : -1;
 }
 
-function clampAmount(value: number, max: number) {
-  return Math.min(max, Math.max(0, Number.isFinite(value) ? Math.round(value) : 0));
+function clampAmount(value: number, max: number, min = 0) {
+  return Math.min(max, Math.max(min, Number.isFinite(value) ? Math.round(value) : min));
 }
 
 /** 押运清单：士兵 / 资金 / 兵粮 各一份，兵装按类型各一份 */
@@ -89,16 +90,18 @@ export function TransportDialog({ cityId, passId, onClose, onConfirm }: Transpor
   const goldMax = Math.max(0, source.gold);
   const foodMax = Math.max(0, source.food);
   const troopMax = Math.min(TRANSPORT_TROOP_CAP, Math.max(0, source.troops - 500));
+  // 运输队出门至少 MIN_TRANSPORT_TROOPS 人；可押运兵力达不到时（据点所余不足），按可押上限满编
+  const troopMin = Math.min(MIN_TRANSPORT_TROOPS, troopMax);
   const maxLoad: TransportLoad = { troops: troopMax, gold: goldMax, food: foodMax, armaments: stock };
   const defaultLoad: TransportLoad = {
-    troops: Math.min(1000, troopMax),
+    troops: Math.max(troopMin, Math.min(1000, troopMax)),
     gold: Math.min(1000, goldMax),
     food: Math.min(3000, foodMax),
     armaments: emptyArmaments(),
   };
   const rawLoad = draft ?? defaultLoad;
   const clampLoad = (value: TransportLoad): TransportLoad => ({
-    troops: clampAmount(value.troops, troopMax),
+    troops: clampAmount(value.troops, troopMax, troopMin),
     gold: clampAmount(value.gold, goldMax),
     food: clampAmount(value.food, foodMax),
     armaments: ARMAMENT_TYPES.reduce((acc, type) => {
@@ -194,7 +197,7 @@ export function TransportDialog({ cityId, passId, onClose, onConfirm }: Transpor
   const loadRow = (
     key: string,
     label: string,
-    opts: { value: number; max: number; step: number; disabled?: boolean; note?: string; onChange(value: number): void },
+    opts: { value: number; max: number; step: number; min?: number; disabled?: boolean; note?: string; onChange(value: number): void },
   ) => {
     const inputId = `transport-load-${key}`;
     return (
@@ -204,7 +207,7 @@ export function TransportDialog({ cityId, passId, onClose, onConfirm }: Transpor
           id={inputId}
           aria-label={`输送${label}`}
           type="range"
-          min={0}
+          min={opts.min ?? 0}
           max={Math.max(0, opts.max)}
           step={opts.step}
           value={opts.value}
@@ -269,7 +272,7 @@ export function TransportDialog({ cityId, passId, onClose, onConfirm }: Transpor
 
           <span className="deploy-section-label">资源</span>
           <div className="transport-range-group" aria-label="输送资源">
-            {loadRow('troops', '士兵', { value: troopAmount, max: troopMax, step: 100, onChange: (amount) => patchLoad({ troops: amount }) })}
+            {loadRow('troops', '士兵', { value: troopAmount, min: troopMin, max: troopMax, step: 100, onChange: (amount) => patchLoad({ troops: amount }) })}
             {loadRow('gold', '资金', { value: goldAmount, max: goldMax, step: 100, onChange: (amount) => patchLoad({ gold: amount }) })}
             {loadRow('food', '兵粮', {
               value: foodAmount,

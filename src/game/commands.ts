@@ -1,6 +1,6 @@
 import { nextRandom } from './random';
 import { cityCanBuildFacility, hasCityTrait, forceMaxTraining } from './cityTraits';
-import { REWARD_AP_COST, REWARD_GOLD_COST, REWARD_LOYALTY_GAIN, loyaltyCapOf, officerLoyalty, recruitWillOf, recruitmentInitialLoyalty, setOfficerLoyalty } from './loyalty';
+import { REWARD_AP_COST, REWARD_GOLD_COST, REWARD_LOYALTY_GAIN, loyaltyCapOf, officerLoyalty, recruitWillOf, recruitmentInitialLoyalty, setOfficerLoyalty, talentDebateTriggerChance, willSuccessChance } from './loyalty';
 import { addOfficerMerit, applyPositionStatDelta, MERIT_PER_COMMAND, officerIsOnCampaign, officerMerit, positionDefinition, forceRankOf, rankDefinition, rankIndex } from './ranks';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentCost, armamentsOf, armamentProductionTenDays, clampArmamentsTo, isDelayedArmament, produceArmamentYield } from './armaments';
 import { ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, CULTIVATE_TEN_DAYS, abilityCultivateRemaining, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
@@ -8,7 +8,7 @@ import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from './ski
 import { effectsOfKind, officerSkillNames, resolveCommandSkills, resolveOfficerSkills } from './skills';
 import { RESEARCH_AP_COST, TECHP_PER_CIVIL_ACTION, TECHP_PER_CONSTRUCTION, TECHP_PER_PATROL, TECHP_PER_PRODUCE_ARMAMENT, TECHP_PER_TRADE, TECHP_PER_TRAIN, actionPointCostMultiplier, addTechP, canBuildFacility, facilityLevelCap, hasTech, moraleCapOf, researchTenDays, techCostOf, techNodeOf, techPrereqMet } from './techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_CHANCE, EXPLORE_GOLD_MAX, EXPLORE_GOLD_MIN, EXPLORE_GOLD_PER_OFFICER, EXPLORE_TREASURE_BASE_CHANCE, EXPLORE_TREASURE_INT_BONUS_MAX, treasureDefinition } from './treasures';
-import { RUMOR_AP_COST, RUMOR_GOLD_COST, resolveRumor, POACH_AP_COST, POACH_GOLD_COST, resolvePoach, canPoach } from './rumor';
+import { RUMOR_AP_COST, RUMOR_GOLD_COST, POACH_AP_COST, POACH_GOLD_COST, resolvePoach, canPoach } from './rumor';
 import { ALLIANCE_GOODWILL_GAIN, ALLIANCE_GOODWILL_LOSS, BREAK_GOODWILL_LOSS, DIPLOMACY_AP_COST, GOODWILL_GOLD_COST, DIPLOMACY_GOLD_MAX, REINFORCEMENT_TEN_DAYS, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, adjustDiplomacy, areAllies, forceHasCity, goodwillGain, leaderCityOf, resolveAlliance, resolveRequestTroops, resolveTruce } from './diplomacy';
 import { captiveRecruitLoyaltyThreshold, capturableByLoyalty, executeCaptive, recruitCaptiveChance, releaseCaptive, resolveRecruitCaptive } from './captives';
 import { MARRY_TECHP_COST, RELATIONSHIP_LABELS, areRelated, enterRelationship, relationshipValidation } from './relationship';
@@ -48,6 +48,9 @@ export const COMMAND_AP = {
   buildFacilityPlot: PLOT_AP_COST,
   cancelCityPlot: 0,
   appointStrategist: STRATEGIST_AP_COST,
+  banish: 0,
+  acceptRecruitDebate: 0,
+  rejectRecruitDebate: 0,
 } as const;
 
 /** 新征士兵的初始士气（征兵会按此值稀释城池士气） */
@@ -79,6 +82,9 @@ export const COMMAND_LABELS: Record<GameCommand['type'], string> = {
   buildFacilityPlot: '开发',
   cancelCityPlot: '撤销设施',
   appointStrategist: '任命军师',
+  banish: '流放',
+  acceptRecruitDebate: '舌战劝说',
+  rejectRecruitDebate: '放弃登庸',
 };
 
 // 商人粮价：1金可兑换的兵粮数，每月每城在 3~7 之间独立波动（标准价5）
@@ -301,6 +307,14 @@ export function envoyTravelTenDays(state: GameState, from: City | Pass, targetFo
 }
 
 /**
+ * 流言差旅单程旬数：出发据点 → 目标据点（敌城/敌关隘）的移动旬数。
+ * 去程与返程同距同耗时，故「启程 → 散布 → 归城」共 2 倍本值。
+ */
+export function rumorTravelTenDays(state: GameState, from: City | Pass, target: City | Pass): number {
+  return Math.max(1, strongholdTransferDuration(state, from, target));
+}
+
+/**
  * 外交使者携带的任务内容。出发时写入 `OfficerLocation('envoy')`，抵达当旬由
  * `resolveDiplomacyMission` 结算 —— 出发与结算共用同一份描述，避免两处口径漂移。
  */
@@ -495,7 +509,8 @@ function validateTransfer(state: GameState, forceId: ForceId, command: Extract<G
  */
 export function officerIsBusy(officer: Officer): boolean {
   const kind = officer.location.kind;
-  return kind === 'transfer' || kind === 'task' || kind === 'captive' || kind === 'envoy';
+  return kind === 'transfer' || kind === 'task' || kind === 'captive' || kind === 'envoy'
+    || kind === 'recruitJourney' || kind === 'rumorJourney';
 }
 
 /** 召唤：将本方势力其他据点（城池/关隘）的待命武将召唤至本据点，耗时与移动相同 */
@@ -541,7 +556,7 @@ function validateSummon(state: GameState, forceId: ForceId, command: Extract<Gam
   return errors;
 }
 
-type SingleOfficerCommand = Exclude<GameCommand, { type: 'transfer' } | { type: 'summon' } | { type: 'sworn' } | { type: 'abilityResearch' } | { type: 'explore' } | { type: 'grantTreasure' } | { type: 'appointPosition' } | { type: 'captiveDispose' } | { type: 'marry' } | { type: 'legion' } | { type: 'cancelCityPlot' } | { type: 'appointStrategist' } | { type: 'recruit' } | { type: 'produceArmament' } | { type: 'train' } | { type: 'patrol' } | { type: 'research' } | { type: 'buildFacilityPlot' } | { type: 'reward' }>;
+type SingleOfficerCommand = Exclude<GameCommand, { type: 'transfer' } | { type: 'summon' } | { type: 'sworn' } | { type: 'abilityResearch' } | { type: 'explore' } | { type: 'grantTreasure' } | { type: 'appointPosition' } | { type: 'captiveDispose' } | { type: 'marry' } | { type: 'legion' } | { type: 'cancelCityPlot' } | { type: 'appointStrategist' } | { type: 'recruit' } | { type: 'produceArmament' } | { type: 'train' } | { type: 'patrol' } | { type: 'research' } | { type: 'buildFacilityPlot' } | { type: 'reward' } | { type: 'banish' }>;
 
 function localOfficer(state: GameState, forceId: ForceId, command: SingleOfficerCommand) {
   const officer = state.officers[command.officerId];
@@ -585,6 +600,17 @@ export function passAvailableOfficers(state: GameState, forceId: ForceId, passId
     (officer) => officer.forceId === forceId && officer.location.kind === 'pass'
       && officer.location.passId === passId && !officer.acted && !officer.deathMonth,
   );
+}
+
+/** 可流放的武将：本势力驻守城池/关隘的在世武将（排除君主与出征在外者），按忠诚从低到高 */
+export function banishCandidatesOf(state: GameState, forceId: ForceId): Officer[] {
+  const leaderId = state.forces[forceId]?.leaderId;
+  return Object.values(state.officers)
+    .filter((officer) => officer.forceId === forceId
+      && officer.id !== leaderId
+      && !officer.deathMonth
+      && (officer.location.kind === 'city' || officer.location.kind === 'pass'))
+    .sort((a, b) => officerLoyalty(a) - officerLoyalty(b));
 }
 
 /** 命令对应的据点可用武将（命令携带 passId 时按关隘驻扎武将过滤，否则按城池过滤） */
@@ -670,7 +696,37 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     }
   }
 
-  if (command.type !== 'transfer' && command.type !== 'summon' && command.type !== 'sworn' && command.type !== 'abilityResearch' && command.type !== 'explore' && command.type !== 'grantTreasure' && command.type !== 'appointPosition' && command.type !== 'captiveDispose' && command.type !== 'marry' && command.type !== 'legion' && command.type !== 'cancelCityPlot' && command.type !== 'appointStrategist' && command.type !== 'reward') {
+  // 流放：勾选多位本势力驻守城池/关隘的武将（排除君主），不消耗行动力与资金
+  if (command.type === 'banish') {
+    const ids = command.officerIds;
+    if (ids.length === 0) {
+      errors.push('至少选择一名流放武将');
+    } else if (new Set(ids).size !== ids.length) {
+      errors.push('流放武将不可重复');
+    } else {
+      for (const officerId of ids) {
+        const officer = state.officers[officerId];
+        if (!officer || officer.forceId !== forceId) {
+          errors.push('只能流放己方武将');
+          break;
+        }
+        if (officer.id === state.forces[forceId]?.leaderId) {
+          errors.push('不能流放君主');
+          break;
+        }
+        if (officer.deathMonth !== undefined) {
+          errors.push('该武将已死亡');
+          break;
+        }
+        if (officer.location.kind !== 'city' && officer.location.kind !== 'pass') {
+          errors.push('只能流放驻守城池或关隘的武将');
+          break;
+        }
+      }
+    }
+  }
+
+  if (command.type !== 'transfer' && command.type !== 'summon' && command.type !== 'sworn' && command.type !== 'abilityResearch' && command.type !== 'explore' && command.type !== 'grantTreasure' && command.type !== 'appointPosition' && command.type !== 'captiveDispose' && command.type !== 'marry' && command.type !== 'legion' && command.type !== 'cancelCityPlot' && command.type !== 'appointStrategist' && command.type !== 'reward' && command.type !== 'banish' && command.type !== 'acceptRecruitDebate' && command.type !== 'rejectRecruitDebate') {
     const officerIds = commandOfficerIds(command);
     if (officerIds) {
       // 多人执行指令：1~3名本城待命、未行动、不重复的己方武将
@@ -772,9 +828,26 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
     }
   }
 
+  if (command.type === 'acceptRecruitDebate' || command.type === 'rejectRecruitDebate') {
+    // 跨城登庸的舌战抉择：只允许回应当前挂起的待决事项，且执行武将须仍在差旅中
+    const pending = state.pendingRecruitDebate;
+    if (!pending || pending.recruiterId !== command.officerId || pending.targetId !== command.targetOfficerId) {
+      errors.push('当前没有待处理的登庸舌战抉择');
+    } else {
+      const officer = state.officers[command.officerId];
+      const target = state.officers[command.targetOfficerId];
+      if (!officer || !target) errors.push('登庸武将无效');
+      else if (officer.location.kind !== 'recruitJourney' || officer.location.phase !== 'outbound') {
+        errors.push('执行武将不在登庸行程中');
+      }
+    }
+  }
+
   if (command.type === 'rumor') {
-    const target = state.cities[command.targetCityId];
-    if (!target || !target.ownerId || target.ownerId === forceId) errors.push('只能对敌城散布流言');
+    const passTarget = command.targetPassId ? state.passes?.[command.targetPassId] : undefined;
+    const cityTarget = command.targetCityId ? state.cities[command.targetCityId] : undefined;
+    const target = passTarget ?? cityTarget;
+    if (!target || !target.ownerId || target.ownerId === forceId) errors.push('只能对敌方城池/关隘散布流言');
   }
 
   if (command.type === 'poach') {
@@ -1033,6 +1106,18 @@ function findLocalTalent(state: GameState, city: City) {
   );
 }
 
+/** 登用落地（共同收口）：跳槽到执行方据点、忠诚重置、仕龄清零、本旬视为已行动、技巧P +150 */
+function enlistTarget(next: GameState, forceId: ForceId, target: Officer, cityId: CityId): void {
+  target.forceId = forceId;
+  target.location = { kind: 'city', cityId };
+  target.cityId = cityId;
+  target.bannedUntilMonth = undefined;
+  target.loyalty = recruitmentInitialLoyalty(target);
+  target.serviceYears = 0;
+  target.acted = true;
+  addTechP(next, forceId, 150);
+}
+
 function resolveTalentSearch(state: GameState, forceId: ForceId, city: City, officer: Officer) {
   const talent = findLocalTalent(state, city);
   const roll = nextRandom(state.seed, state.rngCursor);
@@ -1042,14 +1127,7 @@ function resolveTalentSearch(state: GameState, forceId: ForceId, city: City, off
     // 血色衣冠 6.0：登用接受意愿 >0 才可能应允（亲爱君主必定同意）
     const will = recruitWillOf(state, officer, talent);
     if (will.verdict !== 'refuse' && (will.verdict === 'accept' || will.will > 0)) {
-      talent.forceId = forceId;
-      talent.location = { kind: 'city', cityId: city.id };
-      talent.cityId = city.id;
-      talent.loyalty = recruitmentInitialLoyalty(talent);
-      talent.serviceYears = 0;
-      // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
-      talent.acted = true;
-      addTechP(state, forceId, 150);
+      enlistTarget(state, forceId, talent, city.id);
       return `${officer.name}在${city.name}登用了${talent.name}`;
     }
     return `${officer.name}在${city.name}寻得${talent.name}，但对方无意出仕`;
@@ -1073,14 +1151,7 @@ function resolveExplore(state: GameState, forceId: ForceId, city: City, officer:
     // 血色衣冠 6.0：登用接受意愿 >0 才可能应允（亲爱君主必定同意）
     const will = recruitWillOf(state, officer, talent);
     if (will.verdict !== 'refuse' && (will.verdict === 'accept' || will.will > 0)) {
-      talent.forceId = forceId;
-      talent.location = { kind: 'city', cityId: city.id };
-      talent.cityId = city.id;
-      talent.loyalty = recruitmentInitialLoyalty(talent);
-      talent.serviceYears = 0;
-      // 本旬新加入的武将视为已行动（与舌战登用/进驻一致），下一旬才可执行指令
-      talent.acted = true;
-      addTechP(state, forceId, 150);
+      enlistTarget(state, forceId, talent, city.id);
       parts.push(`登用了${talent.name}`);
     } else {
       parts.push(`寻得${talent.name}，但对方无意出仕`);
@@ -1345,6 +1416,28 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         message = `${officer.name}在${city.name}登庸人才，但对象无效`;
         break;
       }
+      // 血色衣冠 6.0 跨城登庸：对象不在本市（在野/他势力驻城）时，执行武将先启程前往对象所在城，
+      // 单程按据点间移动旬数计；抵达当旬才结算成败或进入舌战抉择，成功/失败后再按同距返程。
+      const targetCityId = target.location.kind === 'city' || target.location.kind === 'unaffiliated'
+        ? target.location.cityId
+        : target.cityId;
+      if (targetCityId && targetCityId !== command.cityId) {
+        const origin = isPassGarrison(stronghold) ? (next.cities[stronghold.homeCityId] ?? city) : stronghold;
+        const destination = next.cities[targetCityId];
+        const travel = Math.max(1, strongholdTransferDuration(next, origin, destination));
+        officer.location = {
+          kind: 'recruitJourney',
+          fromCityId: command.cityId,
+          targetCityId,
+          targetOfficerId: target.id,
+          remainingTenDays: travel,
+          returnTenDays: travel,
+          phase: 'outbound',
+        };
+        officer.acted = true;
+        message = `${officer.name}自${city.name}启程前往${destination?.name ?? '他方城'}登庸${target.name}（单程约${travel}旬）`;
+        break;
+      }
       // 血色衣冠 6.0 新忠诚系统：先判定「登用接受意愿」
       const will = recruitWillOf(next, officer, target);
       if (will.verdict === 'refuse') {
@@ -1354,13 +1447,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       }
       if (will.verdict === 'accept') {
         // 素来亲善我方君主：不待舌战，必定同意出仕
-        target.forceId = forceId;
-        target.location = { kind: 'city', cityId: city.id };
-        target.cityId = city.id;
-        target.loyalty = recruitmentInitialLoyalty(target);
-        target.serviceYears = 0;
-        target.acted = true;
-        addTechP(next, forceId, 150);
+        enlistTarget(next, forceId, target, city.id);
         message = `${target.name}素来亲善我方君主，${officer.name}不待舌战便将其登庸！`;
         officer.acted = true;
         break;
@@ -1370,26 +1457,82 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         officer.acted = true;
         break;
       }
-      // 登庸触发舌战：胜利则登用，失败则目标短期禁仕
-      next.debateSession = createDebate(next, officer, target);
-      next.logs.push({
-        id: `debate-start-${next.month}-${next.rngCursor}`,
-        month: next.month,
-        forceId,
-        message: `${officer.name}向${target.name}发起说客舌战`,
-      });
-      message = `${officer.name}与${target.name}舌战开始`;
+      // 原版时机：登庸按「舌战触发率」掷点（魅力越高、相性越近越易舌战）；
+      // 触发则舌战胜负定登用（败则禁仕 3 个月），未触发按意愿成功率直接判定，失败不禁仕。
+      const triggerRoll = nextRandom(next.seed, next.rngCursor);
+      next.rngCursor = triggerRoll.cursor;
+      if (triggerRoll.value < talentDebateTriggerChance(next, officer, target)) {
+        next.debateSession = createDebate(next, officer, target);
+        next.logs.push({
+          id: `debate-start-${next.month}-${next.rngCursor}`,
+          month: next.month,
+          forceId,
+          message: `${officer.name}向${target.name}发起说客舌战`,
+        });
+        message = `${officer.name}与${target.name}舌战开始`;
+      } else {
+        const successRoll = nextRandom(next.seed, next.rngCursor);
+        next.rngCursor = successRoll.cursor;
+        if (successRoll.value < willSuccessChance(will.will) / 100) {
+          enlistTarget(next, forceId, target, city.id);
+          message = `${officer.name}说动${target.name}，成功将其登庸！`;
+        } else {
+          message = `${officer.name}尝试登庸${target.name}，但对方无意出仕`;
+        }
+      }
       officer.acted = true;
       break;
     }
+    case 'acceptRecruitDebate': {
+      // 跨城登庸抵达后的舌战抉择：玩家选择进行舌战 → 创建会话（执行武将仍在目标城停留）
+      const officer = next.officers[command.officerId];
+      const target = next.officers[command.targetOfficerId];
+      next.pendingRecruitDebate = null;
+      const location = officer.location;
+      const placeName = location.kind === 'recruitJourney' ? next.cities[location.targetCityId]?.name : undefined;
+      next.debateSession = createDebate(next, officer, target);
+      next.logs.push({
+        id: `recruit-debate-${next.month}-${next.rngCursor}`,
+        month: next.month,
+        forceId,
+        message: `${officer.name}在${placeName ?? '他方城'}见过${target.name}，决定以舌战说动其加入`,
+      });
+      message = `${officer.name}向${target.name}发起说客舌战`;
+      break;
+    }
+    case 'rejectRecruitDebate': {
+      // 跨城登庸抵达后的舌战抉择：玩家选择放弃 → 登庸失败，执行武将只身返回出发据点
+      const officer = next.officers[command.officerId];
+      const target = next.officers[command.targetOfficerId];
+      next.pendingRecruitDebate = null;
+      const location = officer.location;
+      if (location.kind === 'recruitJourney' && location.phase === 'outbound') {
+        location.phase = 'return';
+        location.remainingTenDays = location.returnTenDays;
+      }
+      next.logs.push({
+        id: `recruit-debate-decline-${next.month}-${next.rngCursor}`,
+        month: next.month,
+        forceId,
+        message: `${officer.name}放弃舌战劝说${target.name}，准备返回${next.cities[command.cityId]?.name ?? '我方据点'}`,
+      });
+      message = `${officer.name}放弃登庸，班师返回${next.cities[command.cityId]?.name ?? '我方据点'}`;
+      break;
+    }
     case 'explore': {
-      const reports = command.officerIds.map((officerId) => {
+      // 批量探索：每个武将的结果单独记一条日志（左下角信息栏逐条显示），不再拼成一段
+      command.officerIds.forEach((officerId) => {
         const officer = next.officers[officerId];
         stronghold.gold -= EXPLORE_GOLD_PER_OFFICER;
         officer.acted = true;
-        return resolveExplore(next, forceId, city, officer);
+        next.logs.push({
+          id: `command-${next.month}-${next.logs.length}`,
+          month: next.month,
+          forceId,
+          message: resolveExplore(next, forceId, city, officer),
+        });
       });
-      message = reports.join('；');
+      // 日志已在上面逐条写入，message 留空避免尾部再推一条重复记录
       break;
     }
     case 'grantTreasure': {
@@ -1541,28 +1684,28 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     }
     case 'rumor': {
       const officer = next.officers[command.officerId];
-      const target = next.cities[command.targetCityId];
-      stronghold.gold -= RUMOR_GOLD_COST;
-      const result = resolveRumor(next, officer, target);
-      officer.acted = true;
-      if (result.captured) {
-        officer.location = {
-          kind: 'captive',
-          cityId: target.id,
-          // 散布流言仅可对敌城执行（上方校验 target.ownerId 非空）
-          captorForceId: target.ownerId!,
-          capturedTenDays: 0,
-        };
-        officer.cityId = target.id;
-        message = `${officer.name}向${target.name}散布流言时被识破逮捕，沦为俘虏！`;
-      } else if (result.success) {
-        const loyaltyPart = result.loyaltyLosses.length > 0
-          ? `，${result.loyaltyLosses.map((l) => `${l.name}忠诚 ${l.before}→${l.after}`).join('、')}`
-          : '';
-        message = `${officer.name}在${target.name}散布流言成功，治安下降${result.orderLoss}${loyaltyPart}`;
-      } else {
-        message = `${officer.name}向${target.name}散布流言失败，未能动摇民心`;
+      const passTarget = command.targetPassId ? next.passes?.[command.targetPassId] : undefined;
+      const target: City | Pass | undefined = passTarget ?? (command.targetCityId ? next.cities[command.targetCityId] : undefined);
+      if (!officer || !target) {
+        message = '流言目标无效';
+        break;
       }
+      stronghold.gold -= RUMOR_GOLD_COST;
+      // 流言须亲赴敌方据点：去程/返程各按据点间移动旬数计（去程=返程），
+      // 抵达当旬才散布流言并见分晓；被识破逮捕则就地沦为俘虏，不再返程。
+      const origin = isPassGarrison(stronghold) ? (next.cities[stronghold.homeCityId] ?? city) : stronghold;
+      const travel = rumorTravelTenDays(next, origin, target);
+      officer.acted = true;
+      officer.location = {
+        kind: 'rumorJourney',
+        fromCityId: command.cityId,
+        fromPassId: command.passId,
+        ...(passTarget ? { targetPassId: passTarget.id } : { targetCityId: target.id as CityId }),
+        returnTenDays: travel,
+        phase: 'outbound',
+        remainingTenDays: travel,
+      };
+      message = `${officer.name}自${city.name}启程前往${target.name}散布流言（单程约${travel}旬，往返约${travel * 2}旬）`;
       break;
     }
     case 'poach': {
@@ -1686,10 +1829,44 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         : '解除军师任命';
       break;
     }
+    case 'banish': {
+      const names: string[] = [];
+      const force = next.forces[forceId];
+      for (const officerId of command.officerIds) {
+        const officer = next.officers[officerId];
+        // 职务清算：官阶加成回收、太守/军师/军团司令一并解任
+        if (officer.positionId) {
+          applyPositionStatDelta(officer, officer.positionId, -1);
+          officer.positionId = undefined;
+        }
+        for (const city of Object.values(next.cities)) {
+          if (city.governorId === officerId) city.governorId = null;
+        }
+        for (const pass of Object.values(next.passes ?? {})) {
+          if (pass.governorId === officerId) pass.governorId = null;
+        }
+        if (force.strategistId === officerId) force.strategistId = undefined;
+        // 军团以军团长为标识：军团长被流放即解散其军团（编制城市回归直辖）
+        if (force.legions) {
+          for (const legionId of Object.keys(force.legions)) {
+            if (force.legions[legionId].commanderId === officerId) delete force.legions[legionId];
+          }
+        }
+        // 转为本城在野：与城破无路可逃同款落位（captives.ts 同口径），忠诚保留
+        officer.forceId = null;
+        officer.location = { kind: 'unaffiliated', cityId: command.cityId };
+        officer.cityId = command.cityId;
+        officer.acted = false;
+        officer.serviceYears = 0;
+        names.push(officer.name);
+      }
+      message = `流放${names.join('、')}，已成为${next.cities[command.cityId].name}在野武将`;
+      break;
+    }
   }
 
-  // 依行动累积功绩（任命官职/授予宝物/能力研究本身不计功绩）
-  if (command.type !== 'appointPosition' && command.type !== 'grantTreasure' && command.type !== 'abilityResearch') {
+  // 依行动累积功绩（任命官职/授予宝物/能力研究/流放本身不计功绩）
+  if (command.type !== 'appointPosition' && command.type !== 'grantTreasure' && command.type !== 'abilityResearch' && command.type !== 'banish') {
     const involvedIds = 'officerIds' in command && Array.isArray(command.officerIds)
       ? command.officerIds
       : 'officerId' in command && command.officerId
@@ -1701,18 +1878,20 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
     }
   }
 
-  // 探索按人数结算行动力（每人20）；文官制度：指令行动力消耗－20%
+  // 探索按人数结算行动力（每人20）；文官制度：指令行动力消耗－20%；基础值为 0 的指令（官职/撤销/流放）不耗行动力
   const baseApCost = command.type === 'explore'
     ? EXPLORE_AP_PER_OFFICER * command.officerIds.length
     : COMMAND_AP[command.type];
-  const apCost = Math.max(1, Math.round(baseApCost * actionPointCostMultiplier(next, forceId)));
+  const apCost = baseApCost > 0 ? Math.max(1, Math.round(baseApCost * actionPointCostMultiplier(next, forceId))) : 0;
   next.actionPoints[forceId] -= apCost;
-  next.logs.push({
-    id: `command-${next.month}-${next.logs.length}`,
-    month: next.month,
-    forceId,
-    message,
-  });
+  if (message) {
+    next.logs.push({
+      id: `command-${next.month}-${next.logs.length}`,
+      month: next.month,
+      forceId,
+      message,
+    });
+  }
   // 据点资源容纳上限的收口之一：AI 直接调用 executeCommand（runAiTurn）不经 intentReducer，
   // 在这里统一截断，保证任何来源的指令都不会把钱财/兵粮/兵装/兵力顶爆。
   clampStrongholdsInPlace(next);

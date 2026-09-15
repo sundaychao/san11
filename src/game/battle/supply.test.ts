@@ -138,6 +138,10 @@ describe('补给执行', () => {
     expect(() => supplyUnit(next, 'liu', unit.id, 'friend', { troops: 99999, gold: 0, food: 0 })).toThrow(/携带量/);
     expect(() => supplyUnit(next, 'liu', unit.id, 'friend', { troops: 0, gold: 99999, food: 0 })).toThrow(/携带量/);
     expect(() => supplyUnit(next, 'liu', unit.id, 'friend', { troops: 0, gold: 0, food: 99999 })).toThrow(/携带量/);
+    // 运输队补给后至少自留 100 名士兵：把 2000 兵全给出去会拒绝，最多给 1900（自留 100）
+    expect(() => supplyUnit(next, 'liu', unit.id, 'friend', { troops: 2000, gold: 0, food: 0 })).toThrow(/至少保留100名士兵/);
+    const keepMin = supplyUnit(next, 'liu', unit.id, 'friend', { troops: 1900, gold: 0, food: 0 });
+    expect(keepMin.units[unit.id].troops).toBe(100);
 
     // 敌军相邻也不能给
     const enemySpot = neighborsOf(unit.q, unit.r).find((candidate) => cellAt(next, candidate) && candidate.q !== friend.q)!;
@@ -229,9 +233,9 @@ describe('兵装补给', () => {
     expect(supplyTroopMaxOf(next.units[unit.id], friend, headroom.troops)).toBe(0);
     expect(() => supplyUnit(next, 'liu', unit.id, 'friend', { troops: 100, gold: 0, food: 0 })).toThrow(/每兵一件/);
 
-    // 剑兵无对应兵装，士兵补给不受兵装限制：上限 = min(运输队士兵 2000, 带兵余量)
+    // 剑兵无对应兵装，士兵补给不受兵装限制：上限 = min(运输队士兵 2000 − 自留 100, 带兵余量) = 1900
     friend.troopType = 'sword';
-    expect(supplyTroopMaxOf(next.units[unit.id], friend, headroom.troops)).toBe(Math.min(next.units[unit.id].troops, headroom.troops));
+    expect(supplyTroopMaxOf(next.units[unit.id], friend, headroom.troops)).toBe(Math.min(next.units[unit.id].troops - 100, headroom.troops));
     const after = supplyUnit(next, 'liu', unit.id, 'friend', { troops: 100, gold: 0, food: 0 });
     expect(after.units.friend.troops).toBe(friend.troops + 100);
   });

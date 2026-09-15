@@ -15,7 +15,9 @@ import { territoryCityAt } from './territory';
 import { movementAllowanceBonus } from './skills/rules/movement';
 import { cityPopulationOf, ruralPopulationOf } from './innerAffairs';
 import { appointSuccessorGovernor, applyFacilityLevelTech, settleDurabilityRecovery } from './innerAffairs';
-import { settleLoyaltyDrift, settleServiceYears } from './loyalty';import { settleCaptives } from './captives';
+import { settleLoyaltyDrift, settleServiceYears, recruitWillOf, willSuccessChance, talentDebateTriggerChance, recruitmentInitialLoyalty } from './loyalty';
+import { resolveRumor } from './rumor';
+import { settleCaptives } from './captives';
 import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
 import { settleLegionAutomation, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, cityQuarterlyFoodIncome, DEFAULT_OFFICER_SALARY } from './innerAffairs';
 import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
@@ -27,7 +29,7 @@ import { cityIncomeMultiplier } from './skills/rules/city';
 import { tenDayIndex } from './diplomacy';
 import { passIncomeMultiplierByBlockade, passQuarterlyFoodIncome, passMonthlyGoldIncome } from './passes';
 import { cityResourceCaps, clampStrongholdsInPlace, passResourceCaps } from './strongholdCapacity';
-import type { ArmyUnit, City, CityId, FacilityRepairReport, ForceId, GameState, OfficerLocation, Pass } from './types';
+import type { ArmyUnit, City, CityId, FacilityRepairReport, ForceId, GameState, Officer, OfficerLocation, Pass } from './types';
 
 interface CityEvent {
   name: string;
@@ -217,18 +219,19 @@ function settleExpiringUnits(next: GameState) {
  * - 俸禄：有官职的武将每月从所在城资金扣俸禄。
  */
 function settleRanksMeritSalaries(next: GameState) {
-  const promotions: string[] = [];
+  const promotions: Array<{ forceId: ForceId; message: string }> = [];
   for (const force of Object.values(next.forces)) {
     const cityCount = Object.values(next.cities).filter((city) => city.ownerId === force.id).length;
     const desired = rankForCityCount(cityCount);
     if (rankIndex(force.rank) < rankIndex(desired.id)) {
       const previous = rankIndex(force.rank) >= 0 ? rankDefinition(force.rank as NonNullable<typeof force.rank>).name : '无';
       force.rank = desired.id;
-      promotions.push(
-        desired.id === 'huangdi'
+      promotions.push({
+        forceId: force.id,
+        message: desired.id === 'huangdi'
           ? `${force.name}大业已成，属下劝汉帝退位，拥立其为皇帝！`
           : `${force.name}势力主晋升为${desired.name}（此前${previous}）`,
-      );
+      });
     } else if (rankIndex(force.rank) === -1) {
       force.rank = desired.id;
     }
@@ -247,10 +250,10 @@ function settleRanksMeritSalaries(next: GameState) {
   }
   for (const promotion of promotions) {
     next.logs.push({
-      id: `rank-${next.month}-${promotion.length}-${next.logs.length}`,
+      id: `rank-${next.month}-${promotion.forceId}-${next.logs.length}`,
       month: next.month,
-      forceId: null,
-      message: promotion,
+      forceId: promotion.forceId,
+      message: promotion.message,
     });
   }
 }
@@ -607,6 +610,282 @@ function settleEnvoys(next: GameState) {
   }
 }
 
+type RecruitJourneyLocation = Extract<OfficerLocation, { kind: 'recruitJourney' }>;
+
+/** 跨城登庸成功后收口：目标换主、忠诚重置、仕龄清零、技巧P入账，并进入与执行武将同程的返程差旅 */
+function recruitJourneySuccess(next: GameState, officer: Officer, target: Officer, location: RecruitJourneyLocation) {
+  const forceId = officer.forceId as ForceId;
+  target.forceId = forceId;
+  target.bannedUntilMonth = undefined;
+  target.loyalty = recruitmentInitialLoyalty(target);
+  target.serviceYears = 0;
+  target.acted = true;
+  target.cityId = location.fromCityId;
+  target.location = {
+    kind: 'recruitJourney',
+    fromCityId: location.fromCityId,
+    targetCityId: location.targetCityId,
+    targetOfficerId: target.id,
+    remainingTenDays: location.returnTenDays,
+    returnTenDays: location.returnTenDays,
+    phase: 'return',
+  };
+  const force = next.forces[forceId];
+  if (force) force.techP = (force.techP ?? 0) + 150;
+}
+
+/** 未触发舌战时按「登用接受意愿」成功率判定，随后执行武将转返程 */
+function resolveRecruitRoll(next: GameState, officer: Officer, target: Officer, will: number, location: RecruitJourneyLocation, placeName: string) {
+  const forceId = officer.forceId;
+  const successRoll = nextRandom(next.seed, next.rngCursor);
+  next.rngCursor = successRoll.cursor;
+  if (successRoll.value < willSuccessChance(will) / 100) {
+    recruitJourneySuccess(next, officer, target, location);
+    next.logs.push({
+      id: `recruit-arrive-win-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+      month: next.month,
+      forceId,
+      message: `${officer.name}抵达${placeName}，说动${target.name}，成功将其登庸`,
+    });
+  } else {
+    next.logs.push({
+      id: `recruit-arrive-lose-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+      month: next.month,
+      forceId,
+      message: `${officer.name}抵达${placeName}，尝试登庸${target.name}，但对方无意出仕`,
+    });
+  }
+  location.phase = 'return';
+  location.remainingTenDays = location.returnTenDays;
+}
+
+/** 跨城登庸抵达结算：此时才见分晓（成败或等待舌战抉择） */
+function settleRecruitArrival(next: GameState, officer: Officer, location: RecruitJourneyLocation) {
+  const forceId = officer.forceId;
+  const target = next.officers[location.targetOfficerId];
+  const targetCity = next.cities[location.targetCityId];
+  const placeName = targetCity?.name ?? '目标地';
+  // 途中目标已不可招揽（死亡/已被登走/禁仕期内/敌方君主）→ 无功而返
+  const invalidTarget = !target || target.deathMonth
+    || target.forceId === forceId
+    || (target.forceId !== null && next.forces[target.forceId]?.leaderId === target.id)
+    || (target.bannedUntilMonth !== undefined && target.bannedUntilMonth > next.month);
+  if (invalidTarget) {
+    next.logs.push({
+      id: `recruit-arrive-void-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+      month: next.month,
+      forceId,
+      message: `${officer.name}抵达${placeName}，但登庸对象已不可招揽，无功而返`,
+    });
+    location.phase = 'return';
+    location.remainingTenDays = location.returnTenDays;
+    return;
+  }
+  const will = recruitWillOf(next, officer, target);
+  if (will.verdict === 'accept') {
+    recruitJourneySuccess(next, officer, target, location);
+    next.logs.push({
+      id: `recruit-arrive-accept-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+      month: next.month,
+      forceId,
+      message: `${officer.name}抵达${placeName}，${target.name}素来亲善我方君主，不待舌战便随其出仕`,
+    });
+    location.phase = 'return';
+    location.remainingTenDays = location.returnTenDays;
+    return;
+  }
+  if (will.verdict === 'refuse' || will.will <= 0) {
+    next.logs.push({
+      id: `recruit-arrive-refuse-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+      month: next.month,
+      forceId,
+      message: `${officer.name}抵达${placeName}，尝试登庸${target.name}，但对方无意出仕`,
+    });
+    location.phase = 'return';
+    location.remainingTenDays = location.returnTenDays;
+    return;
+  }
+  // 可舌战：按「舌战触发率」掷点（与同城登庸同一口径）；触发时玩家势力挂起抉择，其他势力直接兜底
+  const triggerRoll = nextRandom(next.seed, next.rngCursor);
+  next.rngCursor = triggerRoll.cursor;
+  if (triggerRoll.value < talentDebateTriggerChance(next, officer, target)) {
+    if (forceId === next.playerForceId) {
+      next.pendingRecruitDebate = { recruiterId: officer.id, targetId: target.id };
+      next.logs.push({
+        id: `recruit-debate-wait-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+        month: next.month,
+        forceId,
+        message: `${officer.name}抵达${placeName}，或可舌战劝说${target.name}加入`,
+      });
+      return;
+    }
+    // 非玩家势力（登庸差旅当前仅玩家可触发）：不弹抉择，直接按意愿成功率判定
+  }
+  resolveRecruitRoll(next, officer, target, will.will, location, placeName);
+}
+
+/** 跨城登庸返程到点：回到出发据点（易主则改回本方仍持有的城）并解除占用 */
+function settleRecruitReturnHome(next: GameState, officer: Officer, location: RecruitJourneyLocation) {
+  const homeCity = next.cities[location.fromCityId];
+  let destId: CityId = location.fromCityId;
+  if (!homeCity || homeCity.ownerId !== officer.forceId) {
+    const friendly = Object.values(next.cities).find((city) => city.ownerId === officer.forceId);
+    if (friendly) destId = friendly.id;
+  }
+  officer.location = { kind: 'city', cityId: destId };
+  officer.cityId = destId;
+  officer.acted = false;
+  next.logs.push({
+    id: `recruit-return-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+    month: next.month,
+    forceId: officer.forceId,
+    message: officer.id === location.targetOfficerId
+      ? `${officer.name}随登庸队伍抵达${next.cities[destId]?.name ?? '我方据点'}，正式加入我方`
+      : `${officer.name}完成登庸差旅，返回${next.cities[destId]?.name ?? '我方据点'}`,
+  });
+}
+
+/**
+ * 跨城登庸差旅推进：
+ * - 去程在途逐旬扣减；抵达目标城当旬结算登用结果（成败/进入舌战抉择），成功后目标武将同行返程；
+ * - 返程在途逐旬扣减；回到出发据点恢复待命；
+ * - 已抵达且等待舌战抉择/舌战进行中（remaining=0 的去程）不再推进计时。
+ */
+function settleRecruitJourneys(next: GameState) {
+  for (const officer of Object.values(next.officers)) {
+    const location = officer.location;
+    if (location.kind !== 'recruitJourney') continue;
+    if (location.remainingTenDays <= 0) {
+      if (location.phase === 'outbound') {
+        const waiting = next.pendingRecruitDebate?.recruiterId === officer.id;
+        const debating = next.debateSession?.status === 'ongoing' && next.debateSession.recruiterId === officer.id;
+        if (waiting || debating) continue;
+        settleRecruitArrival(next, officer, location);
+      } else {
+        settleRecruitReturnHome(next, officer, location);
+      }
+      continue;
+    }
+    location.remainingTenDays -= 1;
+    if (location.remainingTenDays > 0) continue;
+    if (location.phase === 'outbound') {
+      settleRecruitArrival(next, officer, location);
+    } else {
+      settleRecruitReturnHome(next, officer, location);
+    }
+  }
+}
+
+type RumorJourneyLocation = Extract<OfficerLocation, { kind: 'rumorJourney' }>;
+
+/** 流言差旅的目标据点：城池与关隘二选一（城池优先） */
+function rumorJourneyTarget(next: GameState, location: RumorJourneyLocation): City | Pass | undefined {
+  if (location.targetCityId) return next.cities[location.targetCityId];
+  return location.targetPassId ? next.passes?.[location.targetPassId] : undefined;
+}
+
+/** 流言差旅返程落点：优先回出发据点（关隘/城池），出发据点已易主则改回本方仍持有的城池 */
+function rumorJourneyHome(next: GameState, officer: Officer, location: RumorJourneyLocation): { destination: OfficerLocation; cityId: CityId; name: string } {
+  const originPass = location.fromPassId ? next.passes?.[location.fromPassId] : undefined;
+  const originCity = next.cities[location.fromCityId];
+  if (originPass && originPass.ownerId === officer.forceId) {
+    return { destination: { kind: 'pass', passId: originPass.id }, cityId: originPass.homeCityId, name: originPass.name };
+  }
+  if (originCity && originCity.ownerId === officer.forceId) {
+    return { destination: { kind: 'city', cityId: originCity.id }, cityId: originCity.id, name: originCity.name };
+  }
+  const friendly = Object.values(next.cities).find((city) => city.ownerId === officer.forceId);
+  return friendly
+    ? { destination: { kind: 'city', cityId: friendly.id }, cityId: friendly.id, name: friendly.name }
+    : { destination: { kind: 'unaffiliated', cityId: location.fromCityId }, cityId: location.fromCityId, name: '我方据点' };
+}
+
+/**
+ * 流言差旅抵达结算：此时才散布流言并见分晓。
+ * - 目标据点途中已归本方/变为无主 → 已无流言必要，无功而返；
+ * - 被识破逮捕 → 就地转为目标据点势力的俘虏，行程终止（不返程）；
+ * - 其余情况一律转返程，回到出发据点才恢复待命。
+ */
+function settleRumorArrival(next: GameState, officer: Officer, location: RumorJourneyLocation) {
+  const forceId = officer.forceId;
+  const target = rumorJourneyTarget(next, location);
+  const placeName = target?.name ?? '目标据点';
+
+  if (!target || !target.ownerId || target.ownerId === forceId) {
+    next.logs.push({
+      id: `rumor-arrive-void-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+      month: next.month,
+      forceId,
+      message: `${officer.name}抵达${placeName}，但该据点已无需散布流言，无功而返`,
+    });
+    location.phase = 'return';
+    location.remainingTenDays = location.returnTenDays;
+    return;
+  }
+
+  const result = resolveRumor(next, officer, target);
+  if (result.captured) {
+    // 关隘俘虏关入所属城池
+    const cityId = ('homeCityId' in target ? target.homeCityId : target.id) as CityId;
+    officer.location = { kind: 'captive', cityId, captorForceId: target.ownerId, capturedTenDays: 0 };
+    officer.cityId = cityId;
+    next.logs.push({
+      id: `rumor-arrive-captured-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+      month: next.month,
+      forceId,
+      message: `${officer.name}在${placeName}散布流言时被识破逮捕，沦为俘虏！`,
+    });
+    return;
+  }
+
+  const loyaltyPart = result.loyaltyLosses.length > 0
+    ? `，${result.loyaltyLosses.map((loss) => `${loss.name}忠诚 ${loss.before}→${loss.after}`).join('、')}`
+    : '';
+  next.logs.push({
+    id: `rumor-arrive-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+    month: next.month,
+    forceId,
+    message: result.success
+      ? `${officer.name}在${placeName}散布流言成功，治安下降${result.orderLoss}${loyaltyPart}`
+      : `${officer.name}向${placeName}散布流言失败，未能动摇民心`,
+  });
+  location.phase = 'return';
+  location.remainingTenDays = location.returnTenDays;
+}
+
+/** 流言差旅返程到点：回到出发据点并解除占用（行动力旬初重置） */
+function settleRumorReturnHome(next: GameState, officer: Officer, location: RumorJourneyLocation) {
+  const home = rumorJourneyHome(next, officer, location);
+  officer.location = home.destination;
+  officer.cityId = home.cityId;
+  officer.acted = false;
+  next.logs.push({
+    id: `rumor-return-${next.month}-${next.tenDay}-${officer.id}-${next.logs.length}`,
+    month: next.month,
+    forceId: officer.forceId,
+    message: `${officer.name}散布流言归来，回到${home.name}`,
+  });
+}
+
+/**
+ * 流言差旅推进：
+ * - 去程在途逐旬扣减，抵达当旬散布流言并见分晓（被捕则就地成为俘虏，旅程结束）；
+ * - 返程在途逐旬扣减，回到出发据点恢复待命。
+ */
+function settleRumorJourneys(next: GameState) {
+  for (const officer of Object.values(next.officers)) {
+    const location = officer.location;
+    if (location.kind !== 'rumorJourney') continue;
+    location.remainingTenDays -= 1;
+    if (location.remainingTenDays > 0) continue;
+    if (location.phase === 'outbound') {
+      settleRumorArrival(next, officer, location);
+    } else {
+      settleRumorReturnHome(next, officer, location);
+    }
+  }
+}
+
 function settleAbilityResearch(next: GameState) {
   for (const force of Object.values(next.forces)) {
     const research = force.abilityResearch;
@@ -766,10 +1045,10 @@ export function settleTenDay(state: GameState): GameState {
   rollMerchants(next);
   // 城池箭矢射击（敌方部队进入攻击范围时先造成伤害）
   const cityArrowEvents = settleCityRangedAttack(next);
-  for (const msg of cityArrowEvents) next.logs.push({ id: `city-arrow-${next.month}-${next.tenDay}-${next.logs.length}`, month: next.month, forceId: null, message: msg });
+  for (const event of cityArrowEvents) next.logs.push({ id: `city-arrow-${next.month}-${next.tenDay}-${next.logs.length}`, month: next.month, forceId: event.forceId, message: event.message });
   // 关隘箭矢射击（敌方部队进入关隘攻击范围时先造成伤害）
   const passArrowEvents = settlePassRangedAttack(next);
-  for (const msg of passArrowEvents) next.logs.push({ id: `pass-arrow-${next.month}-${next.tenDay}-${next.logs.length}`, month: next.month, forceId: null, message: msg });
+  for (const event of passArrowEvents) next.logs.push({ id: `pass-arrow-${next.month}-${next.tenDay}-${next.logs.length}`, month: next.month, forceId: event.forceId, message: event.message });
 
   for (const city of Object.values(next.cities)) {
     settleCitySupply(next, city);
@@ -790,6 +1069,10 @@ export function settleTenDay(state: GameState): GameState {
   settleTruces(next);
   // 外交使者：抵达当旬结算并转返程（放在停战递减之后，新签的停战期不在同一旬被扣掉一旬）
   settleEnvoys(next);
+  // 跨城登庸差旅：抵达当旬结算成败/舌战抉择，返程到点归城（置于使节之后，互不干扰）
+  settleRecruitJourneys(next);
+  // 流言差旅：抵达当旬散布流言并见分晓，返程到点归城（同样置于使节之后，互不干扰）
+  settleRumorJourneys(next);
   settleLegionAutomation(next);
   settleExpiringUnits(next);
   // 建设用地建设进度推进（完成则立即转为已建成设施）

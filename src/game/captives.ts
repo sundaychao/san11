@@ -310,7 +310,7 @@ function passTravelDistance(pass: Pass, city: City): number {
 export function settleCaptives(state: GameState): void {
   const month = state.month;
   const quarterBonus = (month - 1) % 3 === 0 ? CAPTIVE_LOYALTY_DROP_QUARTER_BONUS : 0;
-  const events: string[] = [];
+  const events = new Map<ForceId | null, string[]>();
 
   for (const officer of Object.values(state.officers)) {
     if (officer.location.kind !== 'captive') continue;
@@ -324,7 +324,7 @@ export function settleCaptives(state: GameState): void {
         ? { kind: 'city', cityId: originalOwner.id }
         : { kind: 'unaffiliated', cityId: officer.location.cityId };
       officer.cityId = officer.location.cityId;
-      events.push(`${officer.name}趁乱逃回${originalOwner ? state.cities[originalOwner.id].name : '故地'}`);
+      pushEvent(events, officer.forceId, `${officer.name}趁乱逃回${originalOwner ? state.cities[originalOwner.id].name : '故地'}`);
       continue;
     }
 
@@ -345,18 +345,26 @@ export function settleCaptives(state: GameState): void {
         ? { kind: 'city', cityId: ownCity.id }
         : { kind: 'unaffiliated', cityId: officer.location.cityId };
       officer.cityId = officer.location.cityId;
-      events.push(`${officer.name}越狱逃走`);
+      pushEvent(events, officer.forceId, `${officer.name}越狱逃走`);
     }
   }
 
-  if (events.length > 0) {
+  // 按俘虏所属势力分组发布：只有该势力（或玩家）的军情栏才显示对应俘虏动态
+  for (const [forceId, list] of events) {
     state.logs.push({
       id: `captive-${month}-${state.logs.length}`,
       month,
-      forceId: null,
-      message: events.slice(0, 4).join('，'),
+      forceId,
+      message: list.slice(0, 4).join('，'),
     });
   }
+}
+
+/** 按势力收集俘虏事件（forceId 为俘虏所属势力，越狱/逃回对其最具信息价值） */
+function pushEvent(events: Map<ForceId | null, string[]>, forceId: ForceId | null, message: string): void {
+  const list = events.get(forceId) ?? [];
+  list.push(message);
+  events.set(forceId, list);
 }
 
 /** 登用俘虏的成功率 —— 血色衣冠 6.0 新忠诚系统口径：
@@ -441,7 +449,7 @@ export function executeCaptive(state: GameState, target: Officer): void {
       target.treasureId = undefined;
     }
   }
-  // 死亡善后须在清空归属前执行：主公被处决时按统率继任，太守空缺清位
+  // 死亡善后须在清空归属前执行：主公被处决时按魅力继任，太守空缺清位
   applyDeathConsequences(state, target);
   target.forceId = null;
   target.location = { kind: 'unaffiliated', cityId: target.cityId };

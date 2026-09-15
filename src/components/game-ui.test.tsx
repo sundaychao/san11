@@ -737,7 +737,7 @@ describe('game interface shell', () => {
     const dialog = screen.getByRole('dialog', { name: '征兵' });
     expect(within(dialog).getByRole('button', { name: '执行武将' })).toBeVisible();
     // 头像占位区默认显示魅力最高的待命武将（刘备）
-    expect(within(dialog).getByRole('button', { name: /刘备/ })).toBeVisible();
+    expect(within(dialog).getByTitle('刘备 · 魅力99')).toBeVisible();
     expect(within(dialog).getByRole('button', { name: '决定·征兵' })).toBeEnabled();
   });
 
@@ -934,6 +934,84 @@ describe('game interface shell', () => {
       const swatch = item.querySelector('i') as HTMLElement | null;
       return swatch ? aiForceColors.includes(swatch.style.backgroundColor) || aiForceColors.includes(swatch.style.backgroundColor.toLowerCase()) : false;
     })).toBe(true);
+  });
+
+  it('点「进行」时若尚有未行动的委任部队：界面最下方弹原版式横幅、鼠标处弹是/否，点「是」才推进', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['liu-bei'],
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    // 一支「已委任移动、本旬尚未行动」的部队 —— 正是原版提示的触发条件
+    const unit = Object.values(state.units)[0];
+    unit.delegate = { kind: 'move', target: { q: unit.q + 2, r: unit.r } };
+    unit.moved = false;
+    unit.acted = false;
+    unit.movementRemaining = 20;
+
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const openProceed = () => {
+      fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+      expect(screen.getByTestId('map-context-proceed-button')).toBeVisible();
+    };
+
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+    openProceed();
+    await user.click(screen.getByTestId('map-context-proceed-button'));
+
+    // 尚未推进：界面最下方出现原版式横幅（势力名高亮），鼠标处出现是/否
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+    const banner = screen.getByTestId('strategy-end-banner');
+    expect(banner).toHaveTextContent('将结束刘备军的战略，');
+    expect(banner).toHaveTextContent('有尚未行动的部队存在，');
+    expect(banner).toHaveTextContent('请问是否确定？');
+    expect(within(screen.getByTestId('proceed-confirm-menu')).getByTestId('proceed-confirm-no')).toBeVisible();
+
+    // 点「否」→ 只收提示，不推进
+    await user.click(screen.getByTestId('proceed-confirm-no'));
+    expect(screen.queryByTestId('strategy-end-banner')).toBeNull();
+    expect(screen.queryByTestId('proceed-confirm-menu')).toBeNull();
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+
+    // 再来一次，这次点「是」→ 直接推进一旬
+    openProceed();
+    await user.click(screen.getByTestId('map-context-proceed-button'));
+    await user.click(screen.getByTestId('proceed-confirm-yes'));
+    expect(screen.queryByTestId('strategy-end-banner')).toBeNull();
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+  });
+
+  it('尚未行动但未委任的部队不触发「进行」确认（判据是委任部队）', async () => {
+    const user = userEvent.setup();
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerIds: ['liu-bei'],
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units)[0];
+    unit.moved = false;
+    unit.acted = false;
+
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+    await user.click(screen.getByTestId('map-context-proceed-button'));
+    expect(screen.queryByTestId('strategy-end-banner')).toBeNull();
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
   });
 
   it('splits the 军情与政务 info bar into 我方 / 他方 tabs and defaults to 我方', async () => {

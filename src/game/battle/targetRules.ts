@@ -203,6 +203,20 @@ export interface PlotAttackTarget {
   forceId: ArmyUnit['forceId'] | null;
 }
 
+/** 开发地格的稳定标识：`cityId:plotIndex`（地图高亮、战法意图都按它传递） */
+export function plotTargetKey(cityId: string, plotIndex: number) {
+  return `${cityId}:${plotIndex}`;
+}
+
+/** 解析 `cityId:plotIndex` 标识；格式不符返回 null（兵器战法打开发地格时用） */
+export function parsePlotTargetKey(key: string): { cityId: string; plotIndex: number } | null {
+  const separator = key.lastIndexOf(':');
+  if (separator <= 0 || separator === key.length - 1) return null;
+  const plotIndex = Number(key.slice(separator + 1));
+  if (!Number.isInteger(plotIndex) || plotIndex < 0) return null;
+  return { cityId: key.slice(0, separator), plotIndex };
+}
+
 export function attackablePlots(state: GameState, attackerId: string, origin?: GridCoord): PlotAttackTarget[] {
   const attacker = state.units[attackerId];
   if (!attacker || attacker.kind === 'transport') return [];

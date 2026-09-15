@@ -252,7 +252,7 @@ describe('passes (关隘据点)', () => {
     addUnit(state, makeUnit({ id: 'arrow-target', forceId: 'liu', q: cell.q, r: cell.r, troops: 3000 }));
     const events = settlePassRangedAttack(state);
     expect(state.units['arrow-target'].troops).toBeLessThan(3000);
-    expect(events.some((message) => message.includes('箭矢'))).toBe(true);
+    expect(events.some((event) => event.message.includes('箭矢'))).toBe(true);
   });
 
   it('transfers a broken pass to the attacker', () => {

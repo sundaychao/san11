@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -7,7 +7,7 @@ import { deployTransportUnit, deployUnit, deployUnitPreviewWithId, facilityBuild
 import { movementAllowanceForProfile } from '../game/battle/definitions';
 import { deploymentCells, chooseDelegateSpawnCell } from '../game/battle/deployment';
 import { getDeploymentTargets } from '../game/battle/queries';
-import { gridKey, neighborsOf, sevenCellCityFootprint } from '../game/battle/grid';
+import { gridKey, neighborsOf, sevenCellCityFootprint, coordsWithinRange } from '../game/battle/grid';
 import { computeDelegatePath, setMoveDelegate } from '../game/battle/delegate';
 import { deployUnitWithId } from '../game/battle/deployment';
 import { executeCommand, envoyTravelTenDays } from '../game/commands';
@@ -16,6 +16,8 @@ import { cityPlots, PLOT_BASE_VALUE } from '../game/innerAffairs';
 import { completeTechResearch } from '../game/techs';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider, useGame } from '../game/store/GameProvider';
+import { gridDistanceWithin } from '../game/battle/targetRules';
+import type { ArmyUnit } from '../game/types';
 import { settleTenDay } from '../game/turn';
 import { GameShell } from './GameShell';
 import { OfficerListDialog } from './OfficerListDialog';
@@ -533,6 +535,9 @@ describe('command interface', { timeout: 30000 }, () => {
     // 在野武将排最上面（第一数据行）
     const rows = within(picker).getAllByRole('row');
     expect(rows[1]).toHaveTextContent('赵云');
+    // 意愿四档图例（深绿/浅绿/黄/白）与武将名按意愿档位着色
+    expect(within(picker).getByRole('img', { name: '登庸意愿颜色图例' })).toBeVisible();
+    expect(picker.querySelector('.talent-name[class*="is-will-"]')).toBeTruthy();
     // 君主行不可选（履行 ×）
     const monarchRow = within(picker).getAllByTestId(/^talent-target-/).find((row) => row.getAttribute('data-testid') !== 'talent-target-picker' && row.className.includes('is-monarch'));
     expect(monarchRow).toBeTruthy();
@@ -546,6 +551,149 @@ describe('command interface', { timeout: 30000 }, () => {
     await user.click(targetRow);
     expect(screen.queryByTestId('talent-target-picker')).not.toBeInTheDocument();
     expect(within(dialog).getByLabelText('选择对象武将')).toHaveTextContent(name);
+  });
+
+  it('流言目标据点列表页：含敌城排除空关，选定后军师在游戏界面底部弹出提示', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    // 江陵待命武将智力压到 20 → 对曹操高智军师（郭嘉 98）坐镇的宛判定值触底，军师只出忠告
+    for (const officer of Object.values(state.officers)) {
+      if (officer.forceId === 'liu' && officer.location.kind === 'city' && officer.location.cityId === 'jiangling') {
+        officer.stats = { ...officer.stats, intelligence: 20 };
+      }
+    }
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-diplomacy'));
+    await user.click(within(menu).getByTestId('city-command-command-rumor'));
+    const dialog = screen.getByRole('dialog', { name: '流言' });
+
+    // 默认不预选据点：只显示「目标城市」占位，执行武将与军师提示都不出现
+    expect(within(dialog).getByTestId('rumor-target-trigger')).toHaveTextContent('选择目标据点');
+    expect(within(dialog).queryByLabelText('选择执行武将')).toBeNull();
+    expect(screen.queryByTestId('strategist-hint')).toBeNull();
+    // 未选据点不出「只能对敌方城池/关隘散布流言」提示（校验仍在，仅不出提示）
+    expect(dialog).not.toHaveTextContent('只能对敌方');
+
+    // 点击目标城市 → 打开据点列表页
+    await user.click(within(dialog).getByTestId('rumor-target-trigger'));
+    const picker = screen.getByTestId('rumor-target-picker');
+    expect(within(picker).getByTestId('rumor-target-wan')).toBeVisible();
+    // 空关隘（函谷关属曹操但无守将）不在列表
+    expect(within(picker).queryByTestId('rumor-target-hanguguan')).toBeNull();
+
+    // 选定宛 → 列表关闭；执行武将行与军师提示此时才出现（曹操高智军师坐镇 → 提示「微乎其微」）
+    await user.click(within(picker).getByTestId('rumor-target-wan'));
+    expect(screen.queryByTestId('rumor-target-picker')).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId('rumor-target-trigger')).toHaveTextContent('宛');
+    expect(within(dialog).getByLabelText('选择执行武将')).toBeInTheDocument();
+    const hint = screen.getByTestId('strategist-hint');
+    expect(hint).toHaveTextContent('微乎其微');
+    expect(hint).toHaveTextContent('诸葛亮');
+  });
+
+  it('军师建议可采纳：左键点击任意区域即收起提示并换上建议人选，流言界面保留', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    // 压低刘表势力智力 → 零陵防御薄弱，流言有成功可能
+    for (const officer of Object.values(state.officers)) {
+      if (officer.forceId === 'biao') officer.stats = { ...officer.stats, intelligence: 20 };
+    }
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-diplomacy'));
+    await user.click(within(menu).getByTestId('city-command-command-rumor'));
+    const dialog = screen.getByRole('dialog', { name: '流言' });
+
+    await user.click(within(dialog).getByTestId('rumor-target-trigger'));
+    await user.click(within(screen.getByTestId('rumor-target-picker')).getByTestId('rumor-target-lingling'));
+
+    // 选定据点后执行武将行才出现
+    expect(within(dialog).getByLabelText('选择执行武将')).toBeInTheDocument();
+
+    // 建议人选（江陵待命武将中智力最高的刘备）说话
+    const hint = screen.getByTestId('strategist-hint');
+    expect(hint).toHaveTextContent('此任务，还请务必交由我来担任。');
+    expect(hint).toHaveTextContent('刘备');
+    expect(hint).toHaveTextContent('预估成功率');
+
+    // 点提示框以外的任意区域（此处为对话框标题）→ 提示框消失、流言界面保留、建议人选填进「执行武将」
+    await user.click(within(dialog).getByRole('heading', { name: '流言' }));
+    expect(screen.queryByTestId('strategist-hint')).toBeNull();
+    expect(screen.getByRole('dialog', { name: '流言' })).toBeInTheDocument();
+    expect(within(dialog).getByTestId('rumor-executor-trigger')).toHaveTextContent('刘备');
+  });
+
+  it('军师提示显示时：点弹窗外的暗色区域只收起提示，不关闭流言界面', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    for (const officer of Object.values(state.officers)) {
+      if (officer.forceId === 'biao') officer.stats = { ...officer.stats, intelligence: 20 };
+    }
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-diplomacy'));
+    await user.click(within(menu).getByTestId('city-command-command-rumor'));
+    const dialog = screen.getByRole('dialog', { name: '流言' });
+    await user.click(within(dialog).getByTestId('rumor-target-trigger'));
+    await user.click(within(screen.getByTestId('rumor-target-picker')).getByTestId('rumor-target-lingling'));
+    expect(screen.getByTestId('strategist-hint')).toBeInTheDocument();
+
+    const backdrop = dialog.parentElement as HTMLElement;
+    await user.click(backdrop);
+    expect(screen.queryByTestId('strategist-hint')).toBeNull();
+    expect(screen.getByRole('dialog', { name: '流言' })).toBeInTheDocument();
+
+    // 提示已收起后，再点暗色区域按既有规则关闭对话框
+    await user.click(backdrop);
+    expect(screen.queryByRole('dialog', { name: '流言' })).toBeNull();
+  });
+
+  it('流言执行武将改为武将选择页：默认「计略」分类，军师推荐标 ○、其余标 ×，按智力降序', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 1);
+    // 压低刘表势力智力 → 零陵防御薄弱：江陵待命武将里智 ≥34 者成功率都超过门槛
+    for (const officer of Object.values(state.officers)) {
+      if (officer.forceId === 'biao') officer.stats = { ...officer.stats, intelligence: 20 };
+    }
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-diplomacy'));
+    await user.click(within(menu).getByTestId('city-command-command-rumor'));
+    const dialog = screen.getByRole('dialog', { name: '流言' });
+
+    await user.click(within(dialog).getByTestId('rumor-target-trigger'));
+    await user.click(within(screen.getByTestId('rumor-target-picker')).getByTestId('rumor-target-lingling'));
+
+    // 点击执行武将项 → 进入武将选择页，默认停在「计略」分类，属性只有 武将 / 军师推荐 / 智力
+    await user.click(within(dialog).getByTestId('rumor-executor-trigger'));
+    const picker = screen.getByRole('dialog', { name: '选择执行武将' });
+    expect(within(picker).getByRole('button', { name: '计略' })).toHaveClass('is-active');
+    expect(within(picker).getByLabelText('按武将排序')).toBeInTheDocument();
+    expect(within(picker).getByLabelText('按军师推荐排序')).toBeInTheDocument();
+    expect(within(picker).getByLabelText('按智力排序')).toBeInTheDocument();
+
+    // 推荐人选置顶并标 ○，其余按智力降序
+    const dataRows = within(picker).getAllByRole('row').slice(1);
+    expect(dataRows[0].textContent).toContain('刘备');
+    expect(dataRows[0].textContent).toContain('○');
+    const intelligences = dataRows.map((row) => Number(row.querySelector('td:last-child')?.textContent ?? '0'));
+    expect(intelligences.slice(1)).toEqual([...intelligences.slice(1)].sort((a, b) => b - a));
+
+    // 甘氏（智 18 → 成功率 58%，未超过门槛）标 ×；点击行即选定并返回
+    const ganRow = dataRows.find((row) => row.textContent?.startsWith('甘氏'))!;
+    expect(ganRow.textContent).toContain('×');
+    await user.click(ganRow);
+    expect(screen.queryByRole('dialog', { name: '选择执行武将' })).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId('rumor-executor-trigger')).toHaveTextContent('甘氏');
   });
 
   it('defaults the summon picker to the 召唤 tab with days sorted ascending', async () => {
@@ -656,7 +804,7 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(within(dialog).queryByLabelText('目标城池')).not.toBeInTheDocument();
     const shipButton = within(dialog).getByRole('button', { name: '楼船' });
     expect(shipButton).toBeVisible();
-    expect(shipButton).toBeDisabled();
+    expect(shipButton).toBeEnabled(); // 每城默认 1 楼船，可直接编成
     expect(within(dialog).getByRole('button', { name: '小舟' })).toBeEnabled();
     await user.click(within(dialog).getByRole('button', { name: '枪兵' }));
     const confirmedDialog = await chooseDeployLeader(user, '刘备');
@@ -1338,8 +1486,8 @@ describe('运输队补给', () => {
     const dialog = screen.getByRole('dialog', { name: '补给' });
     expect(within(dialog).queryByRole('img', { name: '部队能力雷达图' })).not.toBeInTheDocument();
     expect(within(dialog).getByTestId('supply-giver-troops')).toHaveTextContent('5,000 → 5,000');
-    // 拖动上限 = min(运输队携带量, 接收容量)：兵 5000、金 6000、粮 20000
-    expect(within(dialog).getByLabelText('补给士兵')).toHaveAttribute('max', '5000');
+    // 拖动上限 = min(运输队携带量, 接收容量)：兵 4900（运输队自留 100）、金 6000、粮 20000
+    expect(within(dialog).getByLabelText('补给士兵')).toHaveAttribute('max', '4900');
     expect(within(dialog).getByLabelText('补给资金')).toHaveAttribute('max', '6000');
     expect(within(dialog).getByLabelText('补给兵粮')).toHaveAttribute('max', '20000');
 
@@ -1802,16 +1950,15 @@ describe('运输队补给', () => {
     expect(screen.getByTestId('delegate-menu')).toBeVisible();
   });
 
+  // 普通部队的「攻击」命令负责攻城；兵器部队没有普攻、改由「战法」打建筑（见「兵器部队命令菜单」）
   it('attacks an enemy city from the unit command menu when no enemy unit is in range', async () => {
     const user = userEvent.setup();
     const game = createGame('liu', 1);
-    game.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5 };
     const deployed = deployUnit(game, 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
       targetCityId: 'xiangyang',
-      troopType: 'siege',
-      siegeWeapon: 'ram',
+      troopType: 'sword',
       troops: 4000,
       food: 6000,
     });
@@ -2901,6 +3048,23 @@ describe('外交命令菜单', () => {
     return menu;
   }
 
+  /**
+   * 在已打开的外交对话框里选定对象势力。
+   * 外交页与流言页同规矩：默认不预选势力，须点开「选择对象势力」列表再点一行（默认曹操）。
+   */
+  async function pickDiplomacyForce(
+    user: ReturnType<typeof userEvent.setup>,
+    dialog: HTMLElement,
+    forceId = 'cao',
+  ) {
+    await user.click(within(dialog).getByTestId('diplomacy-force-trigger'));
+    const picker = await screen.findByRole('dialog', { name: '选择对象势力' });
+    const row = picker.querySelector(`[data-force-id="${forceId}"]`);
+    expect(row).not.toBeNull();
+    await user.click(row as HTMLElement);
+    expect(screen.queryByRole('dialog', { name: '选择对象势力' })).not.toBeInTheDocument();
+  }
+
   it('「外交」段直接列出五种外交行动，行动名与源码标签一致', async () => {
     const user = userEvent.setup();
     const menu = await openDiplomacySection(user);
@@ -2951,10 +3115,15 @@ describe('外交命令菜单', () => {
     const dialog = screen.getByRole('dialog', { name: '外交 · 同盟' });
     // 行动已由命令菜单决定，页内不再提供切换
     expect(within(dialog).queryByLabelText('外交行动')).not.toBeInTheDocument();
+    // 默认不预选对象势力：礼金拖动条要等选定势力后才出现
+    expect(within(dialog).getByTestId('diplomacy-force-trigger')).toHaveTextContent('选择势力');
+    expect(within(dialog).queryByLabelText('礼金')).not.toBeInTheDocument();
+    await pickDiplomacyForce(user, dialog);
 
     const slider = within(dialog).getByLabelText('礼金') as HTMLInputElement;
     expect(slider).toHaveAttribute('type', 'range');
     expect(slider).toHaveValue('0');
+    expect(slider).toHaveAttribute('step', '500');
     const max = Number(slider.max);
     expect(max).toBeGreaterThan(0);
 
@@ -2981,6 +3150,7 @@ describe('外交命令菜单', () => {
     await user.click(within(menuAgain).getByTestId('city-command-diplomacy-truce'));
 
     const truceDialog = screen.getByRole('dialog', { name: '外交 · 停战协议' });
+    await pickDiplomacyForce(user, truceDialog);
     expect(within(truceDialog).getByLabelText('礼金')).toHaveAttribute('type', 'range');
     expect(within(truceDialog).getByLabelText('停战月数')).toBeVisible();
   });
@@ -2992,7 +3162,8 @@ describe('外交命令菜单', () => {
     await user.click(within(menu).getByTestId('city-command-diplomacy-goodwill'));
 
     const dialog = screen.getByRole('dialog', { name: '外交 · 亲善' });
-    // 默认对象势力是首个非己方势力（曹操，君主曹操驻宛）：江陵 → 宛 = 5 旬 = 50 天
+    // 选定曹操（君主曹操驻宛）：江陵 → 宛 = 5 旬 = 50 天
+    await pickDiplomacyForce(user, dialog);
     const days = envoyTravelTenDays(state, state.cities.jiangling, 'cao')! * 10;
     expect(days).toBe(50);
     expect(within(dialog).getByText('抵达日期').nextElementSibling).toHaveTextContent(`${days}天`);
@@ -3011,9 +3182,15 @@ describe('外交命令菜单', () => {
     await user.click(within(menu).getByTestId('city-command-diplomacy-goodwill'));
 
     const dialog = screen.getByRole('dialog', { name: '外交 · 亲善' });
-    // 不再是下拉框，而是点开武将列表的按钮
+    // 未选势力时连「执行武将」一项都不出现（次序：先对象势力，后使者）
+    expect(within(dialog).queryByRole('button', { name: '选择执行武将' })).not.toBeInTheDocument();
+    await pickDiplomacyForce(user, dialog);
+
+    // 不再是下拉框，而是点开武将列表的按钮；且默认不预选（显示占位）
     expect(within(dialog).queryByLabelText('执行武将')).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole('button', { name: '选择执行武将' }));
+    const envoyTrigger = within(dialog).getByRole('button', { name: '选择执行武将' });
+    expect(envoyTrigger).toHaveTextContent('选择武将');
+    await user.click(envoyTrigger);
 
     const picker = await screen.findByRole('dialog', { name: '选择执行武将' });
     // 单选列表：没有勾选框，也没有确定按钮
@@ -3029,5 +3206,296 @@ describe('外交命令菜单', () => {
     const trigger = within(screen.getByRole('dialog', { name: '外交 · 亲善' })).getByRole('button', { name: '选择执行武将' });
     expect(trigger).toHaveTextContent('简雍');
     expect(trigger).toHaveTextContent('政治72');
+  });
+
+  it('外交军师提示：选定势力并动过礼金后才出现，可行时推举使者且点击任意处即采纳', async () => {
+    const user = userEvent.setup();
+    const menu = await openDiplomacySection(user);
+    await user.click(within(menu).getByTestId('city-command-diplomacy-alliance'));
+    const dialog = screen.getByRole('dialog', { name: '外交 · 同盟' });
+
+    await pickDiplomacyForce(user, dialog);
+    // 只选了势力、还没动礼金 → 军师不开口
+    expect(screen.queryByTestId('strategist-hint')).toBeNull();
+
+    // 拖动礼金（0 → 500）：拖动途中连续派发 change，军师此时不开口（提示不得一闪而过）
+    // （数额取自提示本身，不写死；注意别用「再设成 0」来触发，React 对同值受控输入不派发 onChange）
+    const slider = within(dialog).getByLabelText('礼金') as HTMLInputElement;
+    fireEvent.change(slider, { target: { value: '500' } });
+    expect(screen.queryByTestId('strategist-hint')).toBeNull();
+
+    // 停下拖动 → 军师才给评估；500 金仍不足以同盟，报出所需的最低礼金
+    await waitFor(() => expect(screen.getByTestId('strategist-hint')).toBeInTheDocument());
+    const stingy = screen.getByTestId('strategist-hint').textContent!;
+    const needed = Number(stingy.match(/礼金至少需 ([\d,]+) 金/)![1].replace(/,/g, ''));
+    expect(needed).toBeGreaterThan(500);
+    expect(needed).toBeLessThanOrEqual(Number(slider.max));
+
+    // 拖到所需礼金：又一次拖动开始 → 提示先收起，拖停后军师改口，并推举政治最高的刘备
+    fireEvent.change(slider, { target: { value: String(needed) } });
+    expect(screen.queryByTestId('strategist-hint')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('strategist-hint')).toHaveTextContent('此条件足以成事'));
+    const hint = screen.getByTestId('strategist-hint');
+    expect(hint).toHaveTextContent('刘备');
+
+    // 左键点任意区域（这里点「对象势力」这一行的标签）→ 采纳人选，提示收起
+    await user.click(within(dialog).getByText('对象势力'));
+    expect(screen.queryByTestId('strategist-hint')).toBeNull();
+    expect(within(dialog).getByTestId('diplomacy-envoy-trigger')).toHaveTextContent('刘备');
+  });
+
+  it('外交军师提示：停战协议按停战月数重新评估（月数越长越难）', async () => {
+    const user = userEvent.setup();
+    const menu = await openDiplomacySection(user);
+    await user.click(within(menu).getByTestId('city-command-diplomacy-truce'));
+    const dialog = screen.getByRole('dialog', { name: '外交 · 停战协议' });
+
+    // 刘表相性最远 → 24 个月（最长期限）需追加礼金，缩回 1 个月同样条件即可谈成
+    // （数值对拍：改动同盟/停战判定式必然在此报出）
+    await pickDiplomacyForce(user, dialog, 'biao');
+    const months = within(dialog).getByLabelText('停战月数') as HTMLSelectElement;
+    fireEvent.change(months, { target: { value: '24' } });
+    expect(screen.getByTestId('strategist-hint')).toHaveTextContent('礼金至少需');
+
+    fireEvent.change(months, { target: { value: '1' } });
+    expect(screen.getByTestId('strategist-hint')).toHaveTextContent('此条件足以成事');
+  });
+
+  it('流放：君主菜单直达武将多选页，确定后经确认提示执行，武将变成本城在野', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const state = createGame('liu', 3);
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-monarch'));
+    await user.click(within(menu).getByTestId('city-command-command-banish'));
+
+    // 菜单点击后直接进入全势力武将多选页（不经过命令对话框）
+    const picker = screen.getByRole('dialog', { name: '选择流放武将' });
+    expect(screen.queryByRole('dialog', { name: '流放' })).not.toBeInTheDocument();
+    // 君主刘备不在候选之列
+    expect(within(picker).queryByLabelText('刘备')).not.toBeInTheDocument();
+
+    await user.click(within(picker).getByLabelText('张飞'));
+    await user.click(within(picker).getByRole('button', { name: '确定（1人）' }));
+
+    // 确定 → 二次确认 → 执行；取消确认则停留选择页
+    expect(confirmSpy).toHaveBeenCalledWith('是否流放武将？');
+    expect(screen.queryByRole('dialog', { name: '选择流放武将' })).not.toBeInTheDocument();
+    expect(screen.getByText(/流放张飞，已成为江陵在野武将/)).toBeVisible();
+    confirmSpy.mockRestore();
+  });
+});
+
+describe('兵器部队命令菜单', () => {
+  /** 在江陵旁摆一支兵器部队（默认冲车） */
+  function siegeState(overrides: Partial<ArmyUnit> = {}) {
+    const state = createGame('liu', 3);
+    const anchor = { q: state.cities.jiangling.gridQ, r: state.cities.jiangling.gridR };
+    const spot = neighborsOf(anchor.q, anchor.r).find((coord) => {
+      const cell = state.grid.find((candidate) => candidate.q === coord.q && candidate.r === coord.r);
+      return Boolean(cell && !['mountain', 'deepWater'].includes(cell.terrain));
+    })!;
+    state.officers['guan-yu'].location = { kind: 'unit', unitId: 'siege' };
+    state.units.siege = {
+      id: 'siege',
+      kind: 'combat',
+      forceId: 'liu',
+      leaderId: 'guan-yu',
+      officerIds: ['guan-yu'],
+      homeCityId: 'jiangling',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      q: spot.q,
+      r: spot.r,
+      troops: 6000,
+      food: 6000,
+      stamina: 100,
+      energy: 100,
+      movementRemaining: 16,
+      moved: false,
+      acted: false,
+      ...overrides,
+    };
+    return { state, spot };
+  }
+
+  it('只有待命/战法/单挑/计略四项（没有攻击/齐攻/设置/修补）', () => {
+    const { state, spot } = siegeState();
+    renderState(state);
+    panMapTo(spot.q, spot.r);
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === `${spot.q},${spot.r}`)!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
+
+    const menu = screen.getByTestId('unit-command-menu');
+    expect(within(menu).getAllByRole('button').map((button) => button.textContent))
+      .toEqual(['待命', '战法', '单挑', '计略']);
+  });
+
+  it('井阑点战法直接进选目标：不弹二级菜单，第 2 格的敌部队被高亮', async () => {
+    const user = userEvent.setup();
+    const { state, spot } = siegeState({ siegeWeapon: 'tower' });
+    const origin = { q: spot.q, r: spot.r };
+    const target = coordsWithinRange(origin, 2)
+      .find((coord) => gridDistanceWithin(origin, coord, 2) === 2)!;
+    state.officers['xiahou-dun'].location = { kind: 'unit', unitId: 'foe' };
+    state.units.foe = {
+      id: 'foe',
+      kind: 'combat',
+      forceId: 'cao',
+      leaderId: 'xiahou-dun',
+      officerIds: ['xiahou-dun'],
+      homeCityId: 'xiangyang',
+      troopType: 'sword',
+      q: target.q,
+      r: target.r,
+      troops: 5000,
+      food: 3000,
+      energy: 100,
+      stamina: 100,
+      movementRemaining: 10,
+      moved: false,
+      acted: false,
+    };
+
+    renderState(state);
+    panMapTo(origin.q, origin.r);
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === `${origin.q},${origin.r}`)!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
+
+    const menu = screen.getByTestId('unit-command-menu');
+    const tacticButton = within(menu).getByRole('button', { name: '战法' });
+    expect(tacticButton).toBeEnabled();
+    await user.click(tacticButton);
+
+    expect(screen.queryByTestId('unit-tactic-menu')).not.toBeInTheDocument();
+    // 部队攻击目标的可视标记是头顶的 ▼ 箭头（与普攻/战法同一口径），不属于 is-attack-target 类
+    const foeMarker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === `${target.q},${target.r}`)!;
+    const arrow = within(foeMarker).getByTestId('attack-target-arrow');
+    expect(arrow).toHaveTextContent('▼');
+    // 只有第 2 格的敌部队是目标：其余格子（含隔壁环 1）不该出现箭头
+    expect(screen.getAllByTestId('attack-target-arrow')).toHaveLength(1);
+  });
+
+  it('冲车点战法打相邻敌城：城池高亮，点击后守军减少', async () => {
+    const user = userEvent.setup();
+    const game = createGame('liu', 3);
+    game.cities['jiangling'].armaments = { ...initialArmaments(), ram: 5 };
+    const state = deployUnit(game, 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troopType: 'siege',
+      siegeWeapon: 'ram',
+      troops: 4000,
+      food: 6000,
+    });
+    const attacker = Object.values(state.units)[0];
+    const target = state.cities.xiangyang;
+    // 贴到襄阳 7 格轮廓的外一环：冲车射程 1，恰好能打
+    const attackCell = sevenCellCityFootprint({ q: target.gridQ, r: target.gridR })
+      .flatMap((coord) => neighborsOf(coord.q, coord.r))
+      .find((coord) => !cityKeys(state).has(gridKey(coord)))!;
+    Object.assign(state.units[attacker.id], {
+      q: attackCell.q,
+      r: attackCell.r,
+      moved: false,
+      acted: false,
+      movementRemaining: 16,
+    });
+
+    renderState(state);
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === `${attackCell.q},${attackCell.r}`)!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' }));
+
+    // 冲车只有「破碎」一条战法：不弹二级菜单，敌城直接高亮
+    expect(screen.queryByTestId('unit-tactic-menu')).not.toBeInTheDocument();
+    expect(screen.getByTestId('attack-city-target-arrow')).toBeVisible();
+    const xiangyang = screen.getAllByTestId('city-marker')
+      .find((candidate) => candidate.textContent?.includes('襄阳'))!;
+    const troopsBefore = Number(within(xiangyang).getByTestId('city-marker-troops').textContent);
+    // 城池标记是 <button>，走 onClick（不是 SVG 的 onPointerDown）
+    await user.click(xiangyang);
+
+    const xiangyangAfter = screen.getAllByTestId('city-marker')
+      .find((candidate) => candidate.textContent?.includes('襄阳'))!;
+    expect(Number(within(xiangyangAfter).getByTestId('city-marker-troops').textContent)).toBeLessThan(troopsBefore);
+    expect(screen.queryByTestId('attack-city-target-arrow')).not.toBeInTheDocument();
+  });
+
+  it('冲车点战法后相邻的敌方开发设施高亮；点击即打入建筑通道（地格被打空）', async () => {
+    const user = userEvent.setup();
+    const { state, spot } = siegeState();
+    // 在冲车相邻格铺一格敌方（襄阳）开发设施；耐久 1 保证一击清空，便于断言
+    const plotCoord = neighborsOf(spot.q, spot.r)[0];
+    state.cities.xiangyang.plots = [
+      ...(state.cities.xiangyang.plots ?? []),
+      { id: 'p-ui-market', type: 'market', level: 1, value: 0, q: plotCoord.q, r: plotCoord.r, durability: 1 },
+    ];
+
+    renderState(state);
+    panMapTo(spot.q, spot.r);
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === `${spot.q},${spot.r}`)!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
+    await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' }));
+
+    // 开发设施靠 is-attack-target 类高亮（城池是箭头、部队是 ▼）
+    const overlayOf = () => screen.queryAllByTestId('city-plot-overlay')
+      .find((candidate) => candidate.getAttribute('data-plot-id') === 'p-ui-market');
+    expect(overlayOf()?.classList.contains('is-attack-target')).toBe(true);
+
+    fireEvent.pointerDown(overlayOf()!, { button: 0, buttons: 1, clientX: 320, clientY: 220 });
+
+    // 耐久归零 → 地格清空，覆盖层随之消失；瞄准态也一并收起
+    expect(overlayOf()).toBeUndefined();
+    expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
+  });
+
+  it('城中没有空闲建设用地时，「开发」在菜单层直接置灰', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    // 把所有建设用地占满（全部改成已建成设施），城中不再有空地
+    state.cities.jiangling.plots = (state.cities.jiangling.plots ?? []).map((plot) => ({
+      ...plot,
+      type: 'market' as const,
+      level: 1,
+      constructing: undefined,
+    }));
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+
+    const develop = within(menu).getByTestId('city-command-command-buildFacilityPlot');
+    expect(develop).toBeDisabled();
+    expect(develop).toHaveAttribute('title', '城中已无空闲的建设用地');
+    // 同段其它条目不受影响（仍可点击）
+    expect(within(menu).getByTestId('city-command-command-patrol')).toBeEnabled();
+  });
+
+  it('城中还有空地时，「开发」可点击', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+
+    const develop = within(menu).getByTestId('city-command-command-buildFacilityPlot');
+    expect(develop).toBeEnabled();
+    expect(develop).not.toHaveAttribute('title', '城中已无空闲的建设用地');
   });
 });

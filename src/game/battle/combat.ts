@@ -23,8 +23,9 @@ import {
   rollRepeatNormalAttack,
   siegeDamageMultiplier,
 } from '../skills/rules/combat';
-import { applyCatapultSplash, igniteWoodenBeastAttack } from './legacyCore';
-import { attackableFacilities, attackablePlots, attackableUnits, gridDistanceWithin, jointAttackableUnits } from './targetRules';
+import { applyCatapultSplash, igniteWoodenBeastAttack, tacticTargetCities, tacticTargetFacilities, tacticTargetPasses, tacticTargetPlots } from './legacyCore';
+import { attackableFacilities, attackablePlots, attackableUnits, gridDistanceWithin, jointAttackableUnits, parsePlotTargetKey } from './targetRules';
+import { isSiegeTactic, TACTICS, type TacticId } from './catalog';
 import { PLOT_MAX_DURABILITY } from '../innerAffairs';
 import {
   areAdjacent,
@@ -39,6 +40,66 @@ import {
 import { cityCenter, unitIsIncapacitated } from './movementRules';
 
 const NORMAL_ATTACK_CRITICAL_MULTIPLIER = 1.35;
+
+/**
+ * 兵器战法打建筑（据点 / 关隘 / 战场设施 / 开发地格）：复用普攻的建筑伤害通道，
+ * 额外乘战法威力、改扣战力。目标合法性按战法自己的射程带判定
+ * （`tacticTargetCities/Passes/Facilities/Plots`）。
+ * 装甲部队之外的单位调用会抛错 —— 调用方（意图层）先用 `isSiegeTactic` 过滤。
+ */
+export function useSiegeTacticOnStructure(
+  state: GameState,
+  forceId: ForceId,
+  attackerId: string,
+  targetId: string,
+  tacticId: TacticId,
+): GameState {
+  const tactic = TACTICS[tacticId];
+  if (!tactic || !isSiegeTactic(tacticId)) throw new Error('部队不能使用该战法');
+  const options: StructureAttackOptions = { tacticPower: tactic.power, staminaCost: tactic.cost };
+  if (tacticTargetCities(state, attackerId, tacticId).some((city) => city.id === targetId)) {
+    return attackCity(state, forceId, attackerId, targetId as CityId, options);
+  }
+  if (tacticTargetPasses(state, attackerId, tacticId).some((pass) => pass.id === targetId)) {
+    return attackPass(state, forceId, attackerId, targetId as PassId, options);
+  }
+  if (tacticTargetFacilities(state, attackerId, tacticId).some((facility) => facility.id === targetId)) {
+    return attackFacility(state, forceId, attackerId, targetId, options);
+  }
+  // 开发地格（市场/农场/兵舍…）：没有独立 id，目标用地图上的 `cityId:plotIndex` 标识
+  const plotTarget = parsePlotTargetKey(targetId);
+  if (plotTarget && tacticTargetPlots(state, attackerId, tacticId).some((plot) => (
+    plot.cityId === plotTarget.cityId && plot.plotIndex === plotTarget.plotIndex
+  ))) {
+    return attackPlot(state, forceId, attackerId, plotTarget.cityId as CityId, plotTarget.plotIndex, options);
+  }
+  throw new Error('目标不在战法范围');
+}
+
+/**
+ * 建筑攻击的战法口径（普攻不传）：
+ * - `tacticPower`：战法威力倍率，乘在耐久/驻军伤害上；
+ * - `staminaCost`：改扣战力（stamina）而不是士气，且不要求士气 ≥10（兵器战法没有普攻）。
+ */
+export interface StructureAttackOptions {
+  tacticPower?: number;
+  staminaCost?: number;
+}
+
+/** 建筑攻击的消耗与前置校验：战法走战力，普攻走士气 */
+function consumeStructureAttackCost(
+  attacker: ArmyUnit,
+  nextAttacker: ArmyUnit,
+  options?: StructureAttackOptions,
+) {
+  if (options?.staminaCost === undefined) {
+    if (attacker.energy < 10) throw new Error('士气不足');
+    nextAttacker.energy -= 10;
+    return;
+  }
+  if ((attacker.stamina ?? 0) < options.staminaCost) throw new Error('战力不足');
+  nextAttacker.stamina = Math.max(0, (nextAttacker.stamina ?? 0) - options.staminaCost);
+}
 
 /** 木兽（机械解锁的冲车升级版）：攻击命中后使被攻击地点着火 */
 function ignitesTargetOnHit(state: GameState, attacker: ArmyUnit): boolean {
@@ -267,21 +328,21 @@ export function jointAttackUnit(state: GameState, forceId: ForceId, attackerId: 
   return next;
 }
 
-export function attackFacility(state: GameState, forceId: ForceId, attackerId: string, facilityId: string): GameState {
+export function attackFacility(state: GameState, forceId: ForceId, attackerId: string, facilityId: string, options?: StructureAttackOptions): GameState {
   const attacker = assertUnitTurn(state, forceId, attackerId);
   const facility = state.facilities?.[facilityId];
   if (!facility) throw new Error('设施不存在');
   if (facility.forceId === forceId) throw new Error('不能攻击己方设施');
-  if (attacker.energy < 10) throw new Error('士气不足');
+  if (options?.staminaCost === undefined && attacker.energy < 10) throw new Error('士气不足');
   if (!attackableFacilities(state, attackerId).some((target) => target.id === facilityId)) throw new Error('设施不在攻击范围');
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];
   const nextFacility = next.facilities![facilityId];
-  const multiplier = (attacksAsSiege(next, nextAttacker) ? 1.3 : 0.55) * siegeDamageMultiplier(next, nextAttacker);
+  const multiplier = (attacksAsSiege(next, nextAttacker) ? 1.3 : 0.55) * siegeDamageMultiplier(next, nextAttacker) * (options?.tacticPower ?? 1);
   const damage = Math.max(80, Math.round(damageRoll(next, nextAttacker, 'plain') * multiplier));
   const targetCoord = { q: nextFacility.q, r: nextFacility.r };
   nextFacility.durability = Math.max(0, nextFacility.durability - damage);
-  nextAttacker.energy -= 10;
+  consumeStructureAttackCost(attacker, nextAttacker, options);
   nextAttacker.acted = true;
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
@@ -291,24 +352,24 @@ export function attackFacility(state: GameState, forceId: ForceId, attackerId: s
   return next;
 }
 
-export function attackPlot(state: GameState, forceId: ForceId, attackerId: string, cityId: CityId, plotIndex: number): GameState {
+export function attackPlot(state: GameState, forceId: ForceId, attackerId: string, cityId: CityId, plotIndex: number, options?: StructureAttackOptions): GameState {
   const attacker = assertUnitTurn(state, forceId, attackerId);
   const city = state.cities[cityId];
   const plot = city?.plots?.[plotIndex];
   if (!city || !plot) throw new Error('目标设施不存在');
   if (plot.q == null || plot.r == null) throw new Error('目标设施不在地图上');
   if (city.ownerId === forceId) throw new Error('不能攻击己方势力设施');
-  if (attacker.energy < 10) throw new Error('士气不足');
+  if (options?.staminaCost === undefined && attacker.energy < 10) throw new Error('士气不足');
   if (!attackablePlots(state, attackerId).some((target) => target.cityId === cityId && target.plotIndex === plotIndex)) throw new Error('目标不在攻击范围');
 
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];
   const nextPlot = next.cities[cityId].plots![plotIndex];
-  const multiplier = (attacksAsSiege(next, nextAttacker) ? 1.3 : 0.55) * siegeDamageMultiplier(next, nextAttacker);
+  const multiplier = (attacksAsSiege(next, nextAttacker) ? 1.3 : 0.55) * siegeDamageMultiplier(next, nextAttacker) * (options?.tacticPower ?? 1);
   const damage = Math.max(80, Math.round(damageRoll(next, nextAttacker, 'plain') * multiplier));
   const targetCoord = { q: nextPlot.q!, r: nextPlot.r! };
   nextPlot.durability = Math.max(0, (nextPlot.durability ?? PLOT_MAX_DURABILITY) - damage);
-  nextAttacker.energy -= 10;
+  consumeStructureAttackCost(attacker, nextAttacker, options);
   nextAttacker.acted = true;
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
@@ -324,25 +385,25 @@ export function attackPlot(state: GameState, forceId: ForceId, attackerId: strin
   return next;
 }
 
-export function attackCity(state: GameState, forceId: ForceId, attackerId: string, cityId: CityId): GameState {
+export function attackCity(state: GameState, forceId: ForceId, attackerId: string, cityId: CityId, options?: StructureAttackOptions): GameState {
   const attacker = assertUnitTurn(state, forceId, attackerId);
   const city = state.cities[cityId];
   if (!city) throw new Error('城市不存在');
   if (city.ownerId === forceId) throw new Error('不能攻击己方城市');
   // 无主无守军城同样可打：守军已是 0，只会掉耐久；耐久归零即攻破占领（资源减半、耐久重置 20%）。
   // 想兵不血刃并保住资源，应改用 moveUnit 进驻。
-  if (attacker.energy < 10) throw new Error('士气不足');
+  if (options?.staminaCost === undefined && attacker.energy < 10) throw new Error('士气不足');
   if (!isCityInAttackRange(state, attacker, city)) throw new Error('城市不在攻击范围');
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];
   const nextCity = next.cities[cityId];
   const damage = damageRoll(next, nextAttacker, 'plain');
-  const multiplier = (attacksAsSiege(next, nextAttacker) ? 1.4 : 0.2) * siegeDamageMultiplier(next, nextAttacker);
+  const multiplier = (attacksAsSiege(next, nextAttacker) ? 1.4 : 0.2) * siegeDamageMultiplier(next, nextAttacker) * (options?.tacticPower ?? 1);
   // 科技「云梯」：对据点驻军的伤害加成（一般部队＋40%，攻城武器＋20%）
   const garrisonMultiplier = garrisonDamageMultiplier(next, forceId, siegeProfileOf(next, nextAttacker));
   nextCity.troops = Math.max(0, nextCity.troops - Math.round(damage * 0.65 * garrisonMultiplier));
   nextCity.durability = Math.max(0, nextCity.durability - Math.round(damage * multiplier));
-  nextAttacker.energy -= 10;
+  consumeStructureAttackCost(attacker, nextAttacker, options);
   nextAttacker.acted = true;
   next.facilityRepairReports = [];
   next.strategyResultReports = [];
@@ -355,25 +416,25 @@ export function attackCity(state: GameState, forceId: ForceId, attackerId: strin
   return next;
 }
 
-export function attackPass(state: GameState, forceId: ForceId, attackerId: string, passId: PassId): GameState {
+export function attackPass(state: GameState, forceId: ForceId, attackerId: string, passId: PassId, options?: StructureAttackOptions): GameState {
   const attacker = assertUnitTurn(state, forceId, attackerId);
   const pass = state.passes?.[passId];
   if (!pass) throw new Error('关隘不存在');
   if (pass.ownerId === forceId) throw new Error('不能攻击己方关隘');
   // 无主无守军关隘同样可打（与城池同口径）：耐久归零即攻破占领
-  if (attacker.energy < 10) throw new Error('士气不足');
+  if (options?.staminaCost === undefined && attacker.energy < 10) throw new Error('士气不足');
   if (!isPassInAttackRange(state, attacker, pass)) throw new Error('关隘不在攻击范围');
   const next = structuredClone(state);
   const nextAttacker = next.units[attackerId];
   const nextPass = next.passes?.[passId];
   if (!nextPass) throw new Error('关隘不存在');
   const damage = damageRoll(next, nextAttacker, 'plain');
-  const multiplier = (attacksAsSiege(next, nextAttacker) ? 1.4 : 0.2) * siegeDamageMultiplier(next, nextAttacker);
+  const multiplier = (attacksAsSiege(next, nextAttacker) ? 1.4 : 0.2) * siegeDamageMultiplier(next, nextAttacker) * (options?.tacticPower ?? 1);
   // 科技「云梯」：对据点驻军的伤害加成（一般部队＋40%，攻城武器＋20%）
   const garrisonMultiplier = garrisonDamageMultiplier(next, forceId, siegeProfileOf(next, nextAttacker));
   nextPass.troops = Math.max(0, nextPass.troops - Math.round(damage * 0.65 * garrisonMultiplier));
   nextPass.durability = Math.max(0, nextPass.durability - Math.round(damage * multiplier));
-  nextAttacker.energy -= 10;
+  consumeStructureAttackCost(attacker, nextAttacker, options);
   nextAttacker.acted = true;
   next.facilityRepairReports = [];
   next.strategyResultReports = [];

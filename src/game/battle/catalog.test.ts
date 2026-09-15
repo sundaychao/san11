@@ -42,13 +42,17 @@ describe('battle catalog', () => {
     expect(FACILITIES.crossbowTower!.durability).toBeGreaterThan(FACILITIES.arrowTower!.durability);
     expect(FACILITY_BUILD_COSTS.crossbowTower).toBeGreaterThan(FACILITY_BUILD_COSTS.arrowTower);
 
-    // 陷阱型：火焰种/火焰球 200 → 业火种/业火球 250（耐久），造价 400 → 600
-    expect(FACILITIES.fireSeed).toMatchObject({ name: '火焰种', durability: 200 });
-    expect(FACILITIES.fireBall).toMatchObject({ name: '火焰球', durability: 200 });
+    // 陷阱型：火种/火球 200 → 火焰种/火焰球 200（火药）→ 业火种/业火球 250（化学），造价 400 → 500 → 600
+    expect(FACILITIES.fireSeed).toMatchObject({ name: '火种', durability: 200 });
+    expect(FACILITIES.fireBall).toMatchObject({ name: '火球', durability: 200 });
+    expect(FACILITIES.flameSeed).toMatchObject({ name: '火焰种', durability: 200 });
+    expect(FACILITIES.flameBall).toMatchObject({ name: '火焰球', durability: 200 });
     expect(FACILITIES.hellfireSeed).toMatchObject({ name: '业火种', durability: 250 });
     expect(FACILITIES.hellfireBall).toMatchObject({ name: '业火球', durability: 250 });
-    expect(FACILITY_BUILD_COSTS.hellfireSeed).toBeGreaterThan(FACILITY_BUILD_COSTS.fireSeed);
-    expect(FACILITY_BUILD_COSTS.hellfireBall).toBeGreaterThan(FACILITY_BUILD_COSTS.fireBall);
+    expect(FACILITY_BUILD_COSTS.flameSeed).toBeGreaterThan(FACILITY_BUILD_COSTS.fireSeed);
+    expect(FACILITY_BUILD_COSTS.flameBall).toBeGreaterThan(FACILITY_BUILD_COSTS.fireBall);
+    expect(FACILITY_BUILD_COSTS.hellfireSeed).toBeGreaterThan(FACILITY_BUILD_COSTS.flameSeed);
+    expect(FACILITY_BUILD_COSTS.hellfireBall).toBeGreaterThan(FACILITY_BUILD_COSTS.flameBall);
 
     // 每种设施类型都必须同时有定义与造价
     for (const type of Object.keys(FACILITY_BUILD_COSTS)) {
@@ -63,7 +67,7 @@ describe('battle catalog', () => {
       expect(PUBLIC_REPAIRABLE_FACILITY_TYPES.has(type)).toBe(false);
     }
     // 石墙与土垒同为公共可修补的纯阻挡设施；陷阱同样可被任意势力修补
-    for (const type of ['earthwork', 'stoneWall', 'fireSeed', 'fireBall', 'hellfireSeed', 'hellfireBall'] as const) {
+    for (const type of ['earthwork', 'stoneWall', 'fireSeed', 'fireBall', 'flameSeed', 'flameBall', 'hellfireSeed', 'hellfireBall'] as const) {
       expect(PUBLIC_REPAIRABLE_FACILITY_TYPES.has(type)).toBe(true);
       expect(ZOC_FACILITY_TYPES.has(type)).toBe(false);
     }

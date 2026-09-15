@@ -9,6 +9,7 @@ import {
   settleLoyaltyDrift,
   settleServiceYears,
   serviceYearsOf,
+  talentDebateTriggerChance,
 } from './loyalty';
 import { createGame } from './scenario/jingxiang208';
 import { compatTierOf, affinityOf, officerCompatWithRuler } from './diplomacy';
@@ -28,6 +29,22 @@ describe('忠诚度系统（血色衣冠6.0）', () => {
     const bonus = Object.values(state.officers).find((o) => o.forceId === null);
     expect(bonus?.loyalty ?? 0).toBe(0);
     expect(bonus?.serviceYears ?? 0).toBe(0);
+  });
+
+  it('登庸舌战触发率：25% + 魅力项 + 相性项；低魅力触底 10%', () => {
+    const state = createGame('cao');
+    const target = Object.values(state.officers).find((o) => o.forceId === null && !o.deathMonth)!;
+    delete (target as { xing?: number }).xing; // 在野无相性 → 75 兜底
+    const cao = state.officers['cao-cao'];
+    // 曹操（魅力 96、相性 25）对兜底 75 的在野武将：相性差 50 → 计入封顶 25，该项归零
+    // 25% + (96 − 50) × 0.5% + 0 = 48%
+    expect(talentDebateTriggerChance(state, cao, target)).toBeCloseTo(0.48, 5);
+    // 魅力压到 10：25% − 20% → 触底 10%
+    cao.stats.charisma = 10;
+    expect(talentDebateTriggerChance(state, cao, target)).toBe(0.1);
+    // 魅力拉满到 100：25% + 25% + 0 = 50%
+    cao.stats.charisma = 100;
+    expect(talentDebateTriggerChance(state, cao, target)).toBeCloseTo(0.5, 5);
   });
 
   it('褒奖：每人忠诚+5并扣除每人100金与5行动力，不改变武将待命状态', () => {

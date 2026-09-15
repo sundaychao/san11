@@ -2,25 +2,28 @@ import { AlertCircle, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { ARMAMENT_GOLD_COST, ARMAMENT_TYPES, armamentCost, armamentLabelFor, armamentProductionIntelligence, armamentProductionTenDays, armamentsOf, isDelayedArmament, produceArmamentYield } from '../game/armaments';
-import { COMMAND_AP, COMMAND_LABELS, SELL_FEE_RATIO, TRADE_MAX_GRAIN, envoyTravelTenDays, grainPriceOf, patrolGoldCost, passAvailableOfficers, quoteTrade, researchTechPCost, strongholdTransferDuration, tradeEffectMultiplier, tradeEffectPercent, validateCommand } from '../game/commands';
+import { COMMAND_AP, COMMAND_LABELS, SELL_FEE_RATIO, TRADE_MAX_GRAIN, envoyTravelTenDays, grainPriceOf, patrolGoldCost, passAvailableOfficers, quoteTrade, researchTechPCost, rumorTravelTenDays, strongholdTransferDuration, tradeEffectMultiplier, tradeEffectPercent, validateCommand } from '../game/commands';
 import { TECH_NODES, TECH_SYSTEMS, canBuildFacility, facilityGateNode, hasTech, moraleCapOf, researchTenDays, researchableTechs, techCostOf, techNodeOf } from '../game/techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition, treasureEffectText } from '../game/treasures';
 import { REWARD_GOLD_COST, loyaltyCapOf, officerLoyalty, recruitWillOf, recruitWillTier, rewardLoyaltyGain } from '../game/loyalty';
 import { ABILITY_CENTER, ABILITY_NODE_MAP, ABILITY_NODES, ABILITY_RESEARCH_GOLD, ABILITY_START_ID, ABILITY_TREE_COLS, ABILITY_TREE_ROWS, abilityCultivateRemaining, abilityEffectText, abilityKindLabel, abilityNodeStatus, canCultivateOfficer } from '../game/abilityResearch';
 import { POSITIONS, forceRankOf, officerIsOnCampaign, officerMerit, positionDefinition, rankDefinition, rankIndex } from '../game/ranks';
 import { capturableByLoyalty, captivesOf, recruitCaptiveChance, captiveRecruitLoyaltyThreshold } from '../game/captives';
-import { DIPLOMACY_ACTION_LABELS, DIPLOMACY_GOLD_MAX, GOODWILL_GOLD_COST, NEUTRAL_DIPLOMACY, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, areAllies, forceDiplomacy, forceRelationView } from '../game/diplomacy';
-import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasPlotFacility, patrolOrderGain, plotBuiltCount, plotConstructingCount, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
+import { DIPLOMACY_ACTION_LABELS, DIPLOMACY_GOLD_MAX, DIPLOMACY_GOLD_STEP, GOODWILL_GOLD_COST, NEUTRAL_DIPLOMACY, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, areAllies, forceDiplomacy, forceRelationView } from '../game/diplomacy';
+import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasEmptyPlot, hasPlotFacility, patrolOrderGain, plotBuiltCount, plotConstructingCount, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
 import { cityResourceCaps } from '../game/strongholdCapacity';
 import { hasCityTrait } from '../game/cityTraits';
 import { MARRY_TECHP_COST, relationCandidates } from '../game/relationship';
-import { POACH_GOLD_COST, RUMOR_GOLD_COST, canPoach, poachChance, rumorTargets } from '../game/rumor';
+import { POACH_GOLD_COST, RUMOR_GOLD_COST, canPoach, poachChance, rumorTargetOptions } from '../game/rumor';
+import { RUMOR_ADVICE_MIN_CHANCE, diplomacyAdviceOf, rumorAdviceOf, strategistOf } from '../game/strategist';
 import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from '../game/skills/rules/city';
 import { useGame } from '../game/store/GameProvider';
 import type { ArmamentType, CityId, DiplomacyAction, ForceId, GameCommand, Officer, PassId, TechNodeId } from '../game/types';
 import { ForceRelationDialog } from './ForceRelationDialog';
 import { OfficerPickerDialog } from './OfficerPickerDialog';
+import { OfficerPortrait } from './OfficerPortrait';
 import { TalentTargetPickerDialog } from './TalentTargetPickerDialog';
+import { RumorTargetPickerDialog } from './RumorTargetPickerDialog';
 import { TechTreePanel, type TechNodeStatus } from './TechTreePanel';
 import { closePopupOnContextMenu } from './popupEvents';
 
@@ -38,6 +41,26 @@ interface CommandDialogProps {
 
 /** 多人执行指令（勾选1~3名武将共同执行） */
 const MULTI_OFFICER_TYPES: GameCommand['type'][] = ['recruit', 'produceArmament', 'train', 'patrol', 'research', 'buildFacilityPlot'];
+
+/**
+ * 礼金拖动条的「静置」判定（毫秒）：拖动途中 range 连续派发 change，
+ * 军师若逐个变化都开口就会一闪而过——因此拖动期间先收起提示，
+ * 待连续变动停下这么久之后再让军师给出评估。
+ */
+const DIPLOMACY_HINT_SETTLE_MS = 250;
+
+/** 军师提示框的视图模型（流言与外交共用同一套渲染） */
+interface StrategistHintView {
+  /** 说话人（流言可行时是建议人选，其余是军师本人） */
+  speaker: Officer;
+  /** 军师是否认可当前条件（决定提示框配色） */
+  viable: boolean;
+  text: string;
+  /** 右下角小字（如「预估成功率 34% · 点击任意处采纳」） */
+  meta?: string;
+  /** 有值时：点击任意区域即把该武将填进「执行武将」 */
+  adoptId?: string;
+}
 
 type ExecutorStatKey = keyof Officer['stats'];
 const EXECUTOR_STAT_LABELS: Record<ExecutorStatKey, string> = {
@@ -79,22 +102,33 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
   // 任命官职：选中的武将 + 官职（null=免官）
   const [positionOfficerId, setPositionOfficerId] = useState('');
   const [positionChoice, setPositionChoice] = useState<string>('');
-  // 流言：目标城市
+  // 流言：目标据点（'' = 未手选，需玩家先选定）+ 目标列表页开关 + 执行武将列表页开关
   const [rumorTargetCityId, setRumorTargetCityId] = useState<CityId | ''>('');
+  const [rumorTargetPassId, setRumorTargetPassId] = useState<PassId | ''>('');
+  const [rumorPickerOpen, setRumorPickerOpen] = useState(false);
+  const [rumorExecutorPickerOpen, setRumorExecutorPickerOpen] = useState(false);
+  /** 军师提示已被采纳/已被点掉 → 收起提示框（流言与外交共用；改选目标/礼金时重置） */
+  const [hintSettled, setHintSettled] = useState(false);
   // 登庸：对象武将（'' = 未手选，回退到默认候选）+ 全武将列表页开关
   const [talentTargetId, setTalentTargetId] = useState('');
   const [talentPickerOpen, setTalentPickerOpen] = useState(false);
   // 挖角：目标城市 + 目标武将
   const [poachTargetCityId, setPoachTargetCityId] = useState<CityId | ''>('');
   const [poachTargetOfficerId, setPoachTargetOfficerId] = useState('');
-  // 外交：目标势力 + 行动
+  // 外交：目标势力 + 行动（两者默认都不预选，须玩家先选定势力）
   const [diplomacyForceId, setDiplomacyForceId] = useState<ForceId | ''>('');
+  // 外交：出使武将（使者，'' = 未选，须玩家点开武将列表选择）
+  const [diplomacyOfficerId, setDiplomacyOfficerId] = useState('');
   // 外交：出使武将选择弹窗（单击即选定并返回）
   const [diplomacyOfficerPickerOpen, setDiplomacyOfficerPickerOpen] = useState(false);
   // 外交：行动由命令菜单「外交」段选定（页内不再提供切换），直接跟随 prop；缺省按亲善
   const diplomacyAction: DiplomacyAction = initialDiplomacyAction ?? 'goodwill';
   const [diplomacyGold, setDiplomacyGold] = useState(0);
   const [diplomacyMonths, setDiplomacyMonths] = useState(TRUCE_MONTHS_MIN);
+  /** 外交：礼金或停战月数被玩家动过 → 军师这时才开口（见 diplomacyAdvice） */
+  const [diplomacyHintArmed, setDiplomacyHintArmed] = useState(false);
+  /** 礼金拖动条的「静置」计时器：拖停 DIPLOMACY_HINT_SETTLE_MS 之后才置 diplomacyHintArmed */
+  const diplomacyHintTimerRef = useRef<number | null>(null);
   // 外交：打开「选择对象势力」一览页（选定后回到本页继续选行动）
   const [forceSelectOpen, setForceSelectOpen] = useState(false);
   // 处置俘虏：目标 + 行动
@@ -129,6 +163,14 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
       dialog?.querySelector<HTMLElement>('button:not([disabled])');
     firstControl?.focus();
     return () => previousFocus.current?.focus();
+  }, []);
+
+  // 卸载时清掉礼金拖动条的静置计时器，避免对话框已关闭还去 setState
+  useEffect(() => () => {
+    if (diplomacyHintTimerRef.current !== null) {
+      window.clearTimeout(diplomacyHintTimerRef.current);
+      diplomacyHintTimerRef.current = null;
+    }
   }, []);
 
   if (!state) return null;
@@ -283,11 +325,36 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
       )
     : [];
   const activeOfficer = activeOfficerId ? state.officers[activeOfficerId] : undefined;
-  // 流言：目标敌城
-  const enemyCities = rumorTargets(state, state.playerForceId);
-  const activeRumorTargetId = rumorTargetCityId || enemyCities[0]?.id || '';
+  // 流言：目标据点选项（全部敌城 + 有守将的敌关隘）；默认不预选，须玩家先选定据点
+  const rumorOptions = type === 'rumor' ? rumorTargetOptions(state, state.playerForceId) : [];
+  const activeRumorTargetId = rumorTargetPassId || rumorTargetCityId;
+  const activeRumorOption = rumorOptions.find((option) => option.id === activeRumorTargetId);
+  const activeRumorStronghold = activeRumorOption
+    ? (activeRumorOption.kind === 'pass'
+      ? state.passes?.[activeRumorOption.id as PassId]
+      : state.cities[activeRumorOption.id as CityId])
+    : undefined;
+  // 军师对流言的评估：从本据点可用武将中预估成功率——有可能→建议人选；无可能→军师出面说明
+  const rumorAdvice = type === 'rumor' && activeRumorStronghold
+    ? rumorAdviceOf(state, availableOfficers, activeRumorStronghold)
+    : null;
+  const rumorSpeaker = rumorAdvice?.viable
+    ? state.officers[rumorAdvice.executorId!]
+    : strategistOf(state, state.playerForceId);
+  /**
+   * 流言差旅：执行武将须亲赴目标据点，去程与返程同距，
+   * 单程 = 出发据点 → 目标据点的移动旬数（1旬=10天），全程 = 单程 × 2。
+   */
+  const rumorTravel = type === 'rumor' && activeRumorStronghold
+    ? (() => {
+        const origin = pass ? (state.cities[pass.homeCityId] ?? city) : city;
+        if (!origin) return null;
+        const travel = rumorTravelTenDays(state, origin, activeRumorStronghold);
+        return { name: activeRumorStronghold.name, travel };
+      })()
+    : null;
   // 挖角：目标敌城 + 目标武将
-  const poachCities = enemyCities;
+  const poachCities = type === 'poach' ? rumorTargetOptions(state, state.playerForceId).filter((option) => option.kind === 'city') : [];
   const activePoachTargetCityId = poachTargetCityId || poachCities[0]?.id || '';
   const poachCandidates = activePoachTargetCityId
     ? Object.values(state.officers).filter(
@@ -300,9 +367,9 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
   const poachExecutor = type === 'poach' ? activeOfficer : undefined;
   const poachWill = activePoachTarget && poachExecutor ? recruitWillOf(state, poachExecutor, activePoachTarget) : null;
   const poachWillTier = poachWill ? recruitWillTier(poachWill.verdict === 'accept' ? 999 : poachWill.will) : null;
-  // 外交：目标势力（非己方、非已破盟）
+  // 外交：目标势力（非己方、非已破盟）；默认不预选，须玩家先选定
   const diplomacyForces = Object.values(state.forces).filter((force) => force.id !== state.playerForceId);
-  const activeDiplomacyForceId = diplomacyForceId || diplomacyForces[0]?.id || '';
+  const activeDiplomacyForceId = diplomacyForceId;
   const activeDiplomacyForce = activeDiplomacyForceId ? state.forces[activeDiplomacyForceId] : undefined;
   const diplomacyForced = activeDiplomacyForceId ? forceDiplomacy(state, state.playerForceId, activeDiplomacyForceId) : NEUTRAL_DIPLOMACY;
   const activeDiplomacyRelation = activeDiplomacyForceId
@@ -311,9 +378,10 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
   /** 外交礼金上限：受本据点资金与规则上限双重限制（拖动条的 max） */
   const diplomacyGoldMax = Math.min(garrisonGold, DIPLOMACY_GOLD_MAX);
   const diplomacyGoldClamped = Math.min(Math.max(0, diplomacyGold), diplomacyGoldMax);
-  // 外交执行武将：默认按政治降序取首位（沿用 availableOfficers 的推荐口径），可点开武将列表改选
+  // 外交执行武将（使者）：默认不预选（须点开武将列表选择），故单独一份 state 而不复用通用 officerId；
+  // 候选按政治降序 —— 判定式中执行者政治直接入算，越高越好
   const diplomacyOfficerCandidates = [...availableOfficers].sort((a, b) => b.stats.politics - a.stats.politics);
-  const activeDiplomacyOfficer = state.officers[activeOfficerId];
+  const activeDiplomacyOfficer = diplomacyOfficerId ? state.officers[diplomacyOfficerId] : undefined;
   /**
    * 出使行程：单程 = 出发据点 → 对方势力君主所在城池的移动旬数（1旬=10天）。
    * 未选对象势力时为 null；`envoyDaysText` 即对话框里的「抵达日期」。
@@ -322,9 +390,87 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
     ? envoyTravelTenDays(state, garrison, activeDiplomacyForceId)
     : null;
   const envoyDaysText = envoyTenDays === null ? '—' : `${envoyTenDays * 10}天`;
+  /**
+   * 军师对同盟/停战交涉的评估：判定式是确定式（无随机），故直接给「能否谈成」；
+   * 谈不成时报出所需最低礼金。评估人取「已选使者」，未选时取政治最高的可用武将
+   * （此时提示里会推举他，点击任意处即采纳）。
+   * 仅在玩家动过礼金或停战月数之后出现（`diplomacyHintArmed`）——刚打开就报结论太吵。
+   */
+  const diplomacyAdvisor = activeDiplomacyOfficer ?? diplomacyOfficerCandidates[0];
+  const diplomacyAdvice = type === 'diplomacy'
+    && (diplomacyAction === 'alliance' || diplomacyAction === 'truce')
+    && activeDiplomacyForceId
+    && diplomacyHintArmed
+    ? diplomacyAdviceOf(
+        state, state.playerForceId, activeDiplomacyForceId as ForceId, diplomacyAction,
+        diplomacyAdvisor, diplomacyGoldClamped, diplomacyMonths,
+      )
+    : null;
+  /** 军师提示框内容（流言与外交共用一套：说话人、台词、可采纳的人选） */
+  const strategistHint: StrategistHintView | null = (() => {
+    if (type === 'rumor' && rumorAdvice && rumorSpeaker) {
+      return {
+        speaker: rumorSpeaker,
+        viable: rumorAdvice.viable,
+        text: rumorAdvice.viable
+          ? '此任务，还请务必交由我来担任。'
+          : '处于这种情况之下，能够达成任务的可能性，可说是微乎其微啊。',
+        meta: rumorAdvice.viable ? `预估成功率 ${rumorAdvice.chance}% · 点击任意处采纳` : undefined,
+        adoptId: rumorAdvice.viable ? rumorAdvice.executorId : undefined,
+      };
+    }
+    if (diplomacyAdvice) {
+      const speaker = strategistOf(state, state.playerForceId);
+      if (!speaker) return null;
+      const chosen = Boolean(activeDiplomacyOfficer);
+      // 所需礼金超过「本据点资金 / 规则上限」时，再怎么加钱也谈不成
+      const affordable = Math.min(garrisonGold, DIPLOMACY_GOLD_MAX);
+      const canAdopt = diplomacyAdvice.viable && !chosen;
+      return {
+        speaker,
+        viable: diplomacyAdvice.viable,
+        text: diplomacyAdvice.viable
+          ? (chosen ? '此条件足以成事，请照此办理。' : `此条件足以成事，可遣${diplomacyAdvice.executorName}为使。`)
+          : (diplomacyAdvice.requiredGold > affordable
+            ? '纵是倾尽礼金，恐怕亦难如愿啊。'
+            : `以此条件恐难如愿——礼金至少需 ${diplomacyAdvice.requiredGold.toLocaleString('en-US')} 金。`),
+        meta: canAdopt ? `点击任意处采纳 · 遣${diplomacyAdvice.executorName}前往` : undefined,
+        adoptId: canAdopt ? diplomacyAdvice.executorId : undefined,
+      };
+    }
+    return null;
+  })();
+  /** 军师提示框的可见性（左键点击任意区域即收起，见下方 effect） */
+  const hintVisible = Boolean(strategistHint && !hintSettled);
+  /** 采纳军师建议：把人选填进对应的执行武将项，并收起提示框 */
+  const adoptHint = (id: string) => {
+    if (type === 'diplomacy') setDiplomacyOfficerId(id);
+    else setOfficerId(id);
+    setHintSettled(true);
+  };
+  /**
+   * 收起军师提示：左键点击**任意区域**都生效（提示框本身没有关闭按钮），
+   * 若有建议人选则同时填入执行武将；对话框本身保持打开。
+   * 用 document 捕获阶段监听 mouseup——既在目标元素的 click 之前触发（点被提示框遮住的
+   * 按钮时不会误触），又不会误伤「刚选定目标、提示框才出现」的那一次点击。
+   */
+  useEffect(() => {
+    if (!hintVisible) return undefined;
+    const dismissOnMouseUp = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      // 松开礼金拖动条的那一下不算「点任意区域」：拖动结束时提示本就该出现（或刚出现），
+      // 若把它一并收掉，拖动结束仍会是一闪而过
+      const target = event.target as HTMLElement | null;
+      if (target instanceof HTMLInputElement && target.type === 'range') return;
+      if (strategistHint?.adoptId) adoptHint(strategistHint.adoptId);
+      else setHintSettled(true);
+    };
+    document.addEventListener('mouseup', dismissOnMouseUp, true);
+    return () => document.removeEventListener('mouseup', dismissOnMouseUp, true);
+  }, [hintVisible, strategistHint]);
   /** 外交页的行动效果说明（亲善无额外说明，返回空串时整行不渲染） */
   const diplomacyNote = diplomacyAction === 'alliance'
-    ? (areAllies(state, state.playerForceId, activeDiplomacyForceId)
+    ? (activeDiplomacyForceId && areAllies(state, state.playerForceId, activeDiplomacyForceId)
       ? '双方已是同盟'
       : `礼金越高成功率越高（上限${DIPLOMACY_GOLD_MAX.toLocaleString('en-US')}金），同盟后不可互相攻击`)
     : diplomacyAction === 'truce'
@@ -351,6 +497,20 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
   const talentTarget = type === 'talent' && activeTalentTargetId ? state.officers[activeTalentTargetId] : undefined;
   const talentWill = talentTarget && activeOfficer ? recruitWillOf(state, activeOfficer, talentTarget) : null;
   const talentWillTier = talentWill ? recruitWillTier(talentWill.verdict === 'accept' ? 999 : talentWill.will) : null;
+  // 跨城登庸：对象不在本市时，执行武将需先启程前往其所在城（行程按据点间距计旬）
+  const talentTravelNote = type === 'talent' && talentTarget
+    ? (() => {
+        const targetCityId = talentTarget.location.kind === 'city' || talentTarget.location.kind === 'unaffiliated'
+          ? talentTarget.location.cityId
+          : talentTarget.cityId;
+        if (!targetCityId || targetCityId === cityId) return null;
+        const origin = pass ? state.cities[pass.homeCityId] ?? city : city;
+        const dest = state.cities[targetCityId];
+        if (!origin || !dest) return null;
+        const travel = Math.max(1, strongholdTransferDuration(state, origin, dest));
+        return { name: dest.name, travel };
+      })()
+    : null;
   // 处置俘虏：关押在本据点的俘虏
   const captiveOfficers = captivesOf(state, state.playerForceId);
   const activeCaptiveId = captiveOfficerId || captiveOfficers[0]?.id || '';
@@ -458,7 +618,9 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
       return { type, cityId, passId, officerId: activePositionOfficer?.id ?? '', positionId: activePositionId || null };
     }
     if (type === 'rumor') {
-      return { type, cityId, passId, officerId: activeOfficerId, targetCityId: activeRumorTargetId as CityId };
+      return activeRumorOption?.kind === 'pass'
+        ? { type, cityId, passId, officerId: activeOfficerId, targetPassId: activeRumorOption.id as PassId }
+        : { type, cityId, passId, officerId: activeOfficerId, targetCityId: activeRumorTargetId as CityId };
     }
     if (type === 'talent') {
       return { type, cityId, passId, officerId: activeOfficerId, targetOfficerId: activeTalentTargetId };
@@ -471,7 +633,7 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
         type,
         cityId,
         passId,
-        officerId: activeOfficerId,
+        officerId: diplomacyOfficerId,
         targetForceId: activeDiplomacyForceId as ForceId,
         action: diplomacyAction,
         months: diplomacyAction === 'truce' ? diplomacyMonths : undefined,
@@ -517,16 +679,23 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
   // 外交：标题随子行动变化（行动已由命令菜单选定），形如「外交 · 同盟」
   const label = type === 'diplomacy' ? `外交 · ${DIPLOMACY_ACTION_LABELS[diplomacyAction]}` : COMMAND_LABELS[type];
   // 开发：地格在地图上选择，弹窗阶段跳过地格类校验（资金/封锁等仍校验）；
-  // 若本据点已无空闲建设用地，直接提示无法开发
-  const noEmptyPlot = type === 'buildFacilityPlot'
-    && (Boolean(pass) || !(city.plots ?? []).some((plot) => plot && plot.type === 'empty' && !plot.constructing));
+  // 若本据点已无空闲建设用地，直接提示无法开发（与命令菜单的置灰判据同一函数）
+  const noEmptyPlot = type === 'buildFacilityPlot' && !pass && !hasEmptyPlot(city);
   const actionableErrors = type === 'buildFacilityPlot'
     ? [...errors.filter((error) => !error.includes('地格')), ...(noEmptyPlot ? ['本城没有空闲的建设用地，无法开发'] : [])]
     : errors;
-  // 滑块居中（0）时只显示商人到访/交易次数类错误，隐藏数量类校验
+  // 滑块居中（0）时只显示商人到访/封锁/交易次数类错误，隐藏数量类校验
   const visibleErrors = type === 'trade' && tradeIdle
-    ? errors.filter((error) => error.includes('商人') || error.includes('交易'))
-    : actionableErrors;
+    ? errors.filter((error) => error.includes('商人') || (error.includes('交易') && !error.includes('数量')))
+    // 流言：面板默认不预选据点，未选定弹出的「只能对敌方城池/关隘散布流言」不进提示区
+    // （校验本身保留，仍由 actionableErrors 禁用「决定」按钮，执行层另有目标无效兜底）
+    : type === 'rumor'
+      ? actionableErrors.filter((error) => !error.includes('散布流言'))
+      // 外交：同样默认不预选「对象势力」与「使者」，未选定时的「武将不在目标城市 / 目标势力无效」
+      // 属未填完的噪音，不进提示区（校验仍由 actionableErrors 禁用「决定」按钮）
+      : type === 'diplomacy'
+        ? actionableErrors.filter((error) => !error.includes('武将不在') && !error.includes('目标势力无效'))
+        : actionableErrors;
 
   // 多人执行指令效果预估（与 commands.ts 结算公式保持一致）
   const hasExecutors = activeExecutors.length > 0;
@@ -610,7 +779,7 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
           : '免除官职'
       : type === 'talent'
         ? talentWill && talentWillTier && talentTarget
-          ? `资金 500 · ${talentTarget.name}：${talentWill.verdict === 'refuse' ? '必拒' : talentWill.verdict === 'accept' ? '必定同意' : `意愿${talentWillTier.label}`}`
+          ? `资金 500 · ${talentTarget.name}：${talentWill.verdict === 'refuse' ? '必拒' : talentWill.verdict === 'accept' ? '必定同意' : `意愿${talentWillTier.label}`}${talentTravelNote ? ` · 启程前往${talentTravelNote.name}（单程${talentTravelNote.travel}旬）` : ''}`
           : '资金 500'
     : type === 'recruit'
       ? `资金 800 · 兵粮 500 · 士兵 +${recruitEstimate.toLocaleString('en-US')}`
@@ -635,7 +804,7 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
                     ? `培育武将 · 30日（3旬）· 剩余培育次数 ${abilityRemaining}`
                     : `资金 ${ABILITY_RESEARCH_GOLD} · 研究 ${abilityNode?.months ?? 0} 个月`
                   : type === 'rumor'
-                    ? `资金 ${RUMOR_GOLD_COST} · 降低敌城民心与武将忠诚`
+                    ? `资金 ${RUMOR_GOLD_COST} · 降低敌城民心与武将忠诚${rumorTravel ? ` · 单程${rumorTravel.travel}旬（往返约${rumorTravel.travel * 2}旬）` : ''}`
                     : type === 'poach'
                       ? `资金 ${POACH_GOLD_COST} · 登用敌城武将`
                       : type === 'diplomacy'
@@ -671,7 +840,8 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
                 : '移动武将';
 
   return (
-    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
+    // 军师提示显示时，点击弹窗外的暗色区域只收起提示、不关闭流言界面（其余情况照旧点外面即关闭）
+    <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !hintVisible && onClose()} onContextMenu={(event) => closePopupOnContextMenu(event, onClose, audio)}>
       <form ref={dialogRef} className="command-dialog tool-panel" role="dialog" aria-modal="true" aria-labelledby="command-title" onSubmit={submit} onKeyDown={handleDialogKeyDown}>
         <header>
           <div><p>{garrisonName}政务 · 行动力 {type === 'explore' ? `${EXPLORE_AP_PER_OFFICER}/人` : COMMAND_AP[type]}</p><h2 id="command-title">{label}</h2></div>
@@ -698,7 +868,7 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
                   >
                     {officer ? (
                       <>
-                        <span className="command-executor-portrait">{officer.name}</span>
+                        <OfficerPortrait officer={officer} size={92} className="command-executor-portrait" />
                         <span className="command-executor-caption">{EXECUTOR_STAT_LABELS[executorStatKey]}{officer.stats[executorStatKey]}</span>
                       </>
                     ) : (
@@ -731,7 +901,7 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
           </div>
         )}
 
-        {!isMultiOfficer && type !== 'transfer' && type !== 'summon' && type !== 'sworn' && type !== 'abilityResearch' && type !== 'explore' && type !== 'grantTreasure' && type !== 'appointPosition' && type !== 'captiveDispose' && type !== 'marry' && type !== 'legion' && type !== 'appointStrategist' && type !== 'reward' && type !== 'diplomacy' && (
+        {!isMultiOfficer && type !== 'transfer' && type !== 'summon' && type !== 'sworn' && type !== 'abilityResearch' && type !== 'explore' && type !== 'grantTreasure' && type !== 'appointPosition' && type !== 'captiveDispose' && type !== 'marry' && type !== 'legion' && type !== 'appointStrategist' && type !== 'reward' && type !== 'diplomacy' && type !== 'rumor' && (
           <label className="field-row">
             <span>执行武将</span>
             <select aria-label="执行武将" value={activeOfficerId} onChange={(event) => setOfficerId(event.target.value)}>
@@ -742,26 +912,6 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
               ))}
             </select>
           </label>
-        )}
-
-        {type === 'diplomacy' && (
-          <div className="field-row">
-            <span>执行武将</span>
-            <button
-              type="button"
-              className="officer-picker-trigger"
-              aria-label="选择执行武将"
-              aria-haspopup="dialog"
-              onClick={() => setDiplomacyOfficerPickerOpen(true)}
-            >
-              <strong>{activeDiplomacyOfficer ? activeDiplomacyOfficer.name : '选择武将'}</strong>
-              <small>
-                {activeDiplomacyOfficer
-                  ? `政治${activeDiplomacyOfficer.stats.politics} · 点击从武将列表改选`
-                  : '点击从武将列表中选择'}
-              </small>
-            </button>
-          </div>
         )}
 
         {type === 'reward' && (
@@ -944,7 +1094,6 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
               <div><dt>资金</dt><dd>{garrisonGold.toLocaleString('en-US')} → {Math.min(cityCaps.gold, Math.max(0, garrisonGold + tradeQuote.goldDelta)).toLocaleString('en-US')}</dd></div>
               <div><dt>兵粮</dt><dd>{garrisonFood.toLocaleString('en-US')} → {Math.min(cityCaps.food, Math.max(0, garrisonFood + tradeQuote.foodDelta)).toLocaleString('en-US')}</dd></div>
             </dl>
-            <div className="command-note">向左拖动卖出兵粮（八成折价），向右拖动买入兵粮；单次最多交易{TRADE_MAX_GRAIN.toLocaleString('en-US')}兵粮（不得超过据点资金/兵粮容纳上限）</div>
           </section>
         )}
 
@@ -1128,19 +1277,45 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
 
         {type === 'rumor' && (
           <section className="grant-treasure-panel" aria-label="流言">
-            {enemyCities.length === 0 ? (
-              <div className="command-note">当前没有可散布流言的敌城</div>
+            {rumorOptions.length === 0 ? (
+              <div className="command-note">当前没有可散布流言的敌方据点</div>
             ) : (
               <>
-                <label className="field-row">
+                <div className="field-row">
                   <span>目标城市</span>
-                  <select aria-label="流言目标城市" value={activeRumorTargetId} onChange={(event) => setRumorTargetCityId(event.target.value as CityId)}>
-                    {enemyCities.map((target) => (
-                      <option key={target.id} value={target.id}>{target.name}（{state.forces[target.ownerId!]?.name ?? ''}）</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="command-note">散布流言可降低目标城市治安与武将忠诚，成功率受执行武将智力与对方军师智力影响</div>
+                  <button
+                    type="button"
+                    className="officer-picker-trigger"
+                    aria-label="选择流言目标据点"
+                    aria-haspopup="dialog"
+                    data-testid="rumor-target-trigger"
+                    onClick={() => setRumorPickerOpen(true)}
+                  >
+                    <strong>{activeRumorOption ? `${activeRumorOption.name}（${state.forces[activeRumorOption.ownerId]?.name ?? ''}·${activeRumorOption.kind === 'pass' ? '关隘' : '都市'}）` : '选择目标据点'}</strong>
+                    <small>{activeRumorOption ? '点击打开据点列表改选' : '点击打开据点列表选择'}</small>
+                  </button>
+                </div>
+                {/* 流言页次序：先选目标城市，选定后才出现执行武将（军师亦在此时才给建议） */}
+                {activeRumorOption && (
+                  <div className="field-row">
+                    <span>执行武将</span>
+                    <button
+                      type="button"
+                      className="officer-picker-trigger"
+                      aria-label="选择执行武将"
+                      aria-haspopup="dialog"
+                      data-testid="rumor-executor-trigger"
+                      onClick={() => setRumorExecutorPickerOpen(true)}
+                    >
+                      <strong>{activeOfficer ? activeOfficer.name : '选择武将'}</strong>
+                      <small>
+                        {activeOfficer
+                          ? `智力${activeOfficer.stats.intelligence} · 点击打开武将选择页改选`
+                          : '点击打开武将选择页'}
+                      </small>
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </section>
@@ -1201,6 +1376,7 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
                 className="force-select-trigger"
                 aria-label="选择对象势力"
                 aria-haspopup="dialog"
+                data-testid="diplomacy-force-trigger"
                 onClick={() => setForceSelectOpen(true)}
               >
                 <strong>
@@ -1214,43 +1390,86 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
                 </small>
               </button>
             </div>
-            <dl className="produce-stock">
-              <div>
-                <dt>交情</dt>
-                <dd>{activeDiplomacyForce ? `${activeDiplomacyRelation?.tierLabel ?? '—'} · 友好度 ${diplomacyForced}` : '—'}</dd>
-              </div>
-              <div><dt>抵达日期</dt><dd>{envoyDaysText}</dd></div>
-            </dl>
-            {diplomacyNote && (
-              <div className="command-note">{diplomacyNote}</div>
-            )}
-            {(diplomacyAction === 'alliance' || diplomacyAction === 'truce') && (
-              <div className="field-row">
-                <span>礼金</span>
-                <div className="diplomacy-slider">
-                  <input
-                    type="range"
-                    min={0}
-                    max={diplomacyGoldMax}
-                    step={500}
-                    value={diplomacyGoldClamped}
-                    onChange={(event) => setDiplomacyGold(Math.max(0, Number(event.target.value)))}
-                    aria-label="礼金"
-                    aria-valuetext={`礼金 ${diplomacyGoldClamped} 金`}
-                  />
-                  <strong>{diplomacyGoldClamped.toLocaleString('en-US')}</strong>
+            {/* 外交页次序：先选对象势力，选定后才出现使者与礼金（军师也要等礼金被拖动才开口） */}
+            {activeDiplomacyForceId && (
+              <>
+                <div className="field-row">
+                  <span>执行武将</span>
+                  <button
+                    type="button"
+                    className="officer-picker-trigger"
+                    aria-label="选择执行武将"
+                    aria-haspopup="dialog"
+                    data-testid="diplomacy-envoy-trigger"
+                    onClick={() => setDiplomacyOfficerPickerOpen(true)}
+                  >
+                    <strong>{activeDiplomacyOfficer ? activeDiplomacyOfficer.name : '选择武将'}</strong>
+                    <small>
+                      {activeDiplomacyOfficer
+                        ? `政治${activeDiplomacyOfficer.stats.politics} · 点击从武将列表改选`
+                        : '点击从武将列表中选择'}
+                    </small>
+                  </button>
                 </div>
-              </div>
-            )}
-            {diplomacyAction === 'truce' && (
-              <label className="field-row">
-                <span>停战月数</span>
-                <select aria-label="停战月数" value={diplomacyMonths} onChange={(event) => setDiplomacyMonths(Number(event.target.value))}>
-                  {Array.from({ length: TRUCE_MONTHS_MAX - TRUCE_MONTHS_MIN + 1 }, (_, index) => TRUCE_MONTHS_MIN + index).map((months) => (
-                    <option key={months} value={months}>{months}个月</option>
-                  ))}
-                </select>
-              </label>
+                <dl className="produce-stock">
+                  <div>
+                    <dt>交情</dt>
+                    <dd>{`${activeDiplomacyRelation?.tierLabel ?? '—'} · 友好度 ${diplomacyForced}`}</dd>
+                  </div>
+                  <div><dt>抵达日期</dt><dd>{envoyDaysText}</dd></div>
+                </dl>
+                {diplomacyNote && (
+                  <div className="command-note">{diplomacyNote}</div>
+                )}
+                {(diplomacyAction === 'alliance' || diplomacyAction === 'truce') && (
+                  <div className="field-row">
+                    <span>礼金</span>
+                    <div className="diplomacy-slider">
+                      <input
+                        type="range"
+                        min={0}
+                        max={diplomacyGoldMax}
+                        step={DIPLOMACY_GOLD_STEP}
+                        value={diplomacyGoldClamped}
+                        onChange={(event) => {
+                          setDiplomacyGold(Math.max(0, Number(event.target.value)));
+                          // 拖动途中 range 连续派发 change：此刻先收起提示（军师别一闪而过），
+                          // 连续变动停下 DIPLOMACY_HINT_SETTLE_MS 之后军师才重新评估并开口
+                          setDiplomacyHintArmed(false);
+                          setHintSettled(false);
+                          if (diplomacyHintTimerRef.current !== null) window.clearTimeout(diplomacyHintTimerRef.current);
+                          diplomacyHintTimerRef.current = window.setTimeout(() => {
+                            diplomacyHintTimerRef.current = null;
+                            setDiplomacyHintArmed(true);
+                          }, DIPLOMACY_HINT_SETTLE_MS);
+                        }}
+                        aria-label="礼金"
+                        aria-valuetext={`礼金 ${diplomacyGoldClamped} 金`}
+                      />
+                      <strong>{diplomacyGoldClamped.toLocaleString('en-US')}</strong>
+                    </div>
+                  </div>
+                )}
+                {diplomacyAction === 'truce' && (
+                  <label className="field-row">
+                    <span>停战月数</span>
+                    <select
+                      aria-label="停战月数"
+                      value={diplomacyMonths}
+                      onChange={(event) => {
+                        setDiplomacyMonths(Number(event.target.value));
+                        // 期限同样影响判定，改动后军师重新评估
+                        setDiplomacyHintArmed(true);
+                        setHintSettled(false);
+                      }}
+                    >
+                      {Array.from({ length: TRUCE_MONTHS_MAX - TRUCE_MONTHS_MIN + 1 }, (_, index) => TRUCE_MONTHS_MIN + index).map((months) => (
+                        <option key={months} value={months}>{months}个月</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </>
             )}
           </section>
         )}
@@ -1510,12 +1729,36 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
         </footer>
       </form>
 
+      {/* 军师提示框：显示在游戏界面底部（仿原版忠告框），覆盖在弹窗层之上 —— 流言与外交共用 */}
+      {hintVisible && strategistHint && (
+        <div
+          className={`strategist-hint${strategistHint.viable ? ' is-viable' : ''}`}
+          data-testid="strategist-hint"
+          aria-live="polite"
+        >
+          <OfficerPortrait officer={strategistHint.speaker} size={72} className="strategist-hint-portrait" />
+          <div className="strategist-hint-main">
+            <p className="strategist-hint-text">{strategistHint.text}</p>
+            <div className="strategist-hint-meta">
+              <span className="strategist-hint-name">
+                {strategistHint.speaker.name}{strategistHint.viable ? '' : ' · 军师'}
+              </span>
+              {strategistHint.meta && (
+                <span className="strategist-hint-adopt">{strategistHint.meta}</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {forceSelectOpen && (
         <ForceRelationDialog
           state={state}
           selectedForceId={activeDiplomacyForceId}
           onPick={(id) => {
             setDiplomacyForceId(id);
+            // 换了对象势力 → 军师依新关系重新评估（提示框若已收起则重新可见）
+            setHintSettled(false);
             setForceSelectOpen(false);
           }}
           onClose={() => setForceSelectOpen(false)}
@@ -1525,12 +1768,56 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
       {talentPickerOpen && (
         <TalentTargetPickerDialog
           state={state}
+          executorId={activeOfficerId}
           selectedId={activeTalentTargetId}
           onPick={(id) => {
             setTalentTargetId(id);
             setTalentPickerOpen(false);
           }}
           onClose={() => setTalentPickerOpen(false)}
+        />
+      )}
+
+      {rumorPickerOpen && (
+        <RumorTargetPickerDialog
+          state={state}
+          origin={pass ? (state.cities[pass.homeCityId] ?? city) : city}
+          selectedId={activeRumorTargetId}
+          onPick={(id) => {
+            const option = rumorOptions.find((item) => item.id === id);
+            if (option?.kind === 'pass') {
+              setRumorTargetPassId(id as PassId);
+              setRumorTargetCityId('');
+            } else {
+              setRumorTargetCityId(id as CityId);
+              setRumorTargetPassId('');
+            }
+            // 换了目标据点 → 军师重新评估，提示框重新可见
+            setHintSettled(false);
+            setRumorPickerOpen(false);
+          }}
+          onClose={() => setRumorPickerOpen(false)}
+        />
+      )}
+
+      {/* 流言执行武将：点开「武将选择页」，默认停在「计略」分类（军师推荐 ○ + 智力） */}
+      {rumorExecutorPickerOpen && (
+        <OfficerPickerDialog
+          officers={availableOfficers}
+          selectedIds={activeOfficerId ? [activeOfficerId] : []}
+          pickMode="single"
+          tabs={['计略', '所属', '能力', '特技', '适性', '状态']}
+          initialTab="计略"
+          tacticTarget={activeRumorStronghold}
+          hint={`按流言成功率评估：○ 为军师推荐（预估成功率超过 ${RUMOR_ADVICE_MIN_CHANCE}%），点击即选定并返回`}
+          onConfirm={(ids) => {
+            if (ids[0]) {
+              setOfficerId(ids[0]);
+              setHintSettled(true);
+            }
+            setRumorExecutorPickerOpen(false);
+          }}
+          onClose={() => setRumorExecutorPickerOpen(false)}
         />
       )}
 
@@ -1548,14 +1835,19 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
         />
       )}
 
+      {/* 外交使者：政治越高判定值越高，故按政治降序排列 */}
       {diplomacyOfficerPickerOpen && (
         <OfficerPickerDialog
           officers={diplomacyOfficerCandidates}
-          selectedIds={activeOfficerId ? [activeOfficerId] : []}
+          selectedIds={activeDiplomacyOfficer ? [activeDiplomacyOfficer.id] : []}
           pickMode="single"
           hint="按政治降序排列；点击即选定并返回。出使者需往返对方君主所在城池，往返期间不可再被指派"
           onConfirm={(ids) => {
-            if (ids[0]) setOfficerId(ids[0]);
+            if (ids[0]) {
+              setDiplomacyOfficerId(ids[0]);
+              // 换了使者 → 判定式里的政治变了，军师重新评估
+              setHintSettled(false);
+            }
             setDiplomacyOfficerPickerOpen(false);
           }}
           onClose={() => setDiplomacyOfficerPickerOpen(false)}

@@ -279,6 +279,37 @@ export function willSuccessChance(will: number): number {
   return Math.min(90, Math.max(5, Math.round(will * WILL_SUCCESS_FACTOR)));
 }
 
+// —— 登庸舌战触发率（原版时机：执行武将魅力越高、与目标相性越近越易舌战） ——
+/** 触发基准概率 */
+export const TALENT_DEBATE_BASE = 0.25;
+/** 每 1 点魅力对触发率的增减（0.5%） */
+export const TALENT_DEBATE_CHARISMA_STEP = 0.005;
+/** 相性差每近 1 点的触发率加成（1%） */
+export const TALENT_DEBATE_COMPAT_STEP = 0.01;
+/** 相性差计入上限（超过按 25 计） */
+export const TALENT_DEBATE_COMPAT_CAP = 25;
+/** 触发率下限 */
+export const TALENT_DEBATE_MIN = 0.1;
+/** 触发率上限 */
+export const TALENT_DEBATE_MAX = 0.85;
+
+/**
+ * 登庸是否触发舌战（原版时机口径）：
+ * 25% +（魅力 − 50）× 0.5% +（25 − min(相性差, 25)）× 1%，下限 10%、上限 85%。
+ * 相性差与登用接受意愿同口径（与登用君主、登用武将各取一半）。
+ */
+export function talentDebateTriggerChance(state: GameState, executor: Officer, target: Officer): number {
+  const targetXing = affinityOf(state, target);
+  const executorForceId = executor.forceId;
+  const ruler = executorForceId ? state.officers[state.forces[executorForceId]?.leaderId ?? ''] : undefined;
+  const rulerXing = ruler ? affinityOf(state, ruler) : targetXing;
+  const compatDiff = (circleCompatDiff(targetXing, rulerXing) + circleCompatDiff(targetXing, affinityOf(state, executor))) / 2;
+  const chance = TALENT_DEBATE_BASE
+    + (executor.stats.charisma - 50) * TALENT_DEBATE_CHARISMA_STEP
+    + (TALENT_DEBATE_COMPAT_CAP - Math.min(compatDiff, TALENT_DEBATE_COMPAT_CAP)) * TALENT_DEBATE_COMPAT_STEP;
+  return Math.min(TALENT_DEBATE_MAX, Math.max(TALENT_DEBATE_MIN, chance));
+}
+
 export type RecruitWillTierKey = 'high' | 'mid' | 'low' | 'none';
 
 /** 登用意愿四档（血色 sp10 登庸界面颜色：深绿/浅绿/浅黄/白） */
@@ -320,7 +351,7 @@ export function settleLoyaltyDrift(state: GameState): void {
     officersByForce.set(officer.forceId, list);
   }
 
-  const affected: string[] = [];
+  const affectedByForce = new Map<ForceId, string[]>();
 
   for (const [forceId, officers] of officersByForce) {
     const force = state.forces[forceId];
@@ -394,16 +425,19 @@ export function settleLoyaltyDrift(state: GameState): void {
       const drop = Math.max(forcedDrop ? 1 : 0, Math.round(scaled));
       if (drop <= 0) continue;
       setOfficerLoyalty(officer, current - drop);
-      affected.push(`${officer.name} ${current}→${officerLoyalty(officer)}`);
+      const list = affectedByForce.get(forceId) ?? [];
+      list.push(`${officer.name} ${current}→${officerLoyalty(officer)}`);
+      affectedByForce.set(forceId, list);
     }
   }
 
-  if (affected.length > 0) {
+  // 按势力分开发布：只有该势力（或玩家）的军情栏才显示对应武将的忠诚浮动
+  for (const [forceId, names] of affectedByForce) {
     state.logs.push({
-      id: `loyalty-${state.month}-${state.logs.length}`,
+      id: `loyalty-${state.month}-${forceId}-${state.logs.length}`,
       month: state.month,
-      forceId: null,
-      message: `四季交替，部分武将忠诚浮动：${affected.slice(0, 3).join('；')}${affected.length > 3 ? ` 等${affected.length}人` : ''}`,
+      forceId,
+      message: `四季交替，${state.forces[forceId]?.name ?? '本方'}部分武将忠诚浮动：${names.slice(0, 3).join('；')}${names.length > 3 ? ` 等${names.length}人` : ''}`,
     });
   }
 }

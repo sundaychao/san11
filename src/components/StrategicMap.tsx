@@ -5,6 +5,7 @@ import { SIEGE_WEAPON_KIND_LABELS, siegeWeaponKindOf, vehicleLabelFor, type Sieg
 import { unitAuraRange } from '../game/battle/aura';
 import { CATAPULT_TOWER_MAX_RANGE, CATAPULT_TOWER_MIN_RANGE, FORMATION_RANGE, FORT_RANGE, isWaterTerrain } from '../game/battle/catalog';
 import { coordsWithinRange, gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
+import { plotTargetKey } from '../game/battle/targetRules';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
 import { china42Passes } from '../game/scenario/jingxiang208';
 import { passAt, passAttackRangeCoords, passBlockedKeys } from '../game/passes';
@@ -94,6 +95,8 @@ const FACILITY_GLYPHS: Partial<Record<FacilityType, string>> = {
   earthwork: '垒',
   fireSeed: '火',
   fireBall: '球',
+  flameSeed: '焰',
+  flameBall: '炎',
   // 科技解锁的新设施：阵/砦（据点型）、石墙（阻挡型）、连弩楼/投石台（攻击型）、业火种/业火球（陷阱型）
   formation: '阵',
   fort: '砦',
@@ -1341,7 +1344,7 @@ export function StrategicMap({
               const facilityLabel = plot.constructing
                 ? PLOT_LABELS[plot.constructing.facility] ?? plot.type ?? '?'
                 : (plot.type ? PLOT_LABELS[plot.type] : '?');
-              const isAttackPlotTarget = attackTargetPlotKeys?.has(`${city.id}:${idx}`) ?? false;
+              const isAttackPlotTarget = attackTargetPlotKeys?.has(plotTargetKey(city.id, idx)) ?? false;
               return (
                 <g
                   key={`plot-${city.id}-${idx}`}

@@ -1,12 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import { ARMAMENT_GOLD_COST, armamentCost, produceArmamentYield } from './armaments';
-import { COMMAND_AP, TRADE_MAX_GRAIN, executeCommand, grainPriceOf, patrolGoldCost, quoteTrade, rollGrainPrices, rollMerchants, tradeEffectPercent, transferDuration, validateCommand } from './commands';
+import { COMMAND_AP, TRADE_MAX_GRAIN, executeCommand, grainPriceOf, patrolGoldCost, quoteTrade, rollGrainPrices, rollMerchants, strongholdTransferDuration, tradeEffectPercent, transferDuration, validateCommand } from './commands';
+import { recruitWillOf, talentDebateTriggerChance, willSuccessChance } from './loyalty';
+import { nextRandom } from './random';
 import type { PlotType } from './innerAffairs';
 import { armamentYieldMultiplier, barracksYieldMultiplier, cityAttackRangeCoords, patrolOrderGain, recruitBaseYield } from './innerAffairs';
 import { hasCityTrait } from './cityTraits';
 import { POSITIONS, forceRankOf } from './ranks';
 import { createGame } from './scenario/jingxiang208';
-import type { GameState } from './types';
+import type { CityId, GameState, Officer } from './types';
+
+/** 在指定城池注入一名在野武将（可选喜/恶列表，供跨城登庸测试设定抵达判定） */
+function injectFieldOfficer(state: GameState, cityId: string, opts?: { likes?: string[]; hates?: string[] }): Officer {
+  const officer: Officer = {
+    id: `field-${cityId}`,
+    name: '田野在野',
+    forceId: null,
+    cityId: cityId as never,
+    location: { kind: 'unaffiliated', cityId: cityId as never },
+    stats: { leadership: 60, war: 60, intelligence: 70, politics: 65, charisma: 60 },
+    personality: 'calm',
+    acted: false,
+    ...(opts?.likes ? { likes: opts.likes } : {}),
+    ...(opts?.hates ? { hates: opts.hates } : {}),
+  };
+  state.officers[officer.id] = officer;
+  return officer;
+}
+
+/** 构造：曹操（宛）跨城登庸「江陵在野武将」，返回执行后的状态与目标武将 */
+function setupCrossCityJourney(seed = 42) {
+  const state = createGame('cao', seed);
+  const target = injectFieldOfficer(state, 'jiangling');
+  const travel = Math.max(1, strongholdTransferDuration(state, state.cities.wan, state.cities.jiangling));
+  const command = { type: 'talent' as const, cityId: 'wan' as CityId, officerId: 'cao-cao', targetOfficerId: target.id };
+  return { state, target, travel, command };
+}
 
 /** 为江陵预置军事设施（征兵需兵舍，枪/戟/弩需锻冶，冲车/井阑需工房，军马需厩舍，楼船需造船） */
 function withFacilities(state: GameState, facilities: PlotType[] = ['barracks', 'forge', 'smithy', 'stable', 'shipyard']) {
@@ -276,8 +305,37 @@ describe('command engine', () => {
     expect(patrolGoldCost(state.cities.jiangling)).toBe(5);
   });
 
+  /**
+   * 探测登庸首掷（原版时机：登庸按舌战触发率掷点，触发则舌战、未触发按成功率直接判定）。
+   * 登庸路径在意愿判定后恰好消费两次掷点（触发掷、成功掷），可用同种子预演选出目标分支的种子。
+   */
+  function findTalentSeed(want: 'debate' | 'direct-success' | 'direct-fail'): number {
+    // xorshift32 对小种子的首个输出值接近 0，须在大数值域选种才能覆盖「未触发」分支
+    const base = 0x40000000;
+    for (let i = 0; i < 4000; i += 1) {
+      const seed = base + i * 7919;
+      const state = createGame('liu', seed);
+      const executor = state.officers['liu-bei'];
+      const target = state.officers['zhao-yun'];
+      const will = recruitWillOf(state, executor, target);
+      if (will.verdict !== 'maybe' || will.will <= 0) continue;
+      const chance = talentDebateTriggerChance(state, executor, target);
+      const trigger = nextRandom(state.seed, state.rngCursor);
+      if (want === 'debate') {
+        if (trigger.value < chance) return seed;
+        continue;
+      }
+      if (trigger.value < chance) continue;
+      const success = nextRandom(state.seed, trigger.cursor);
+      const successHit = success.value < willSuccessChance(will.will) / 100;
+      if (want === 'direct-success' && successHit) return seed;
+      if (want === 'direct-fail' && !successHit) return seed;
+    }
+    throw new Error(`no seed for ${want}`);
+  }
+
   it('starts a debate when finding a local talent to recruit', () => {
-    const state = createGame('liu', 1);
+    const state = createGame('liu', findTalentSeed('debate'));
     const next = executeCommand(state, 'liu', {
       type: 'talent', cityId: 'jiangling', officerId: 'liu-bei', targetOfficerId: 'zhao-yun',
     });
@@ -290,7 +348,7 @@ describe('command engine', () => {
   });
 
   it('does not recruit the talent before the debate finishes regardless of seed', () => {
-    const state = createGame('liu', 14336);
+    const state = createGame('liu', findTalentSeed('debate'));
     const next = executeCommand(state, 'liu', {
       type: 'talent', cityId: 'jiangling', officerId: 'liu-bei', targetOfficerId: 'zhao-yun',
     });
@@ -298,6 +356,31 @@ describe('command engine', () => {
     expect(next.debateSession?.status).toBe('ongoing');
     expect(next.officers['zhao-yun'].forceId).toBeNull();
     expect(next.logs.some((log) => log.message.includes('舌战'))).toBe(true);
+  });
+
+  it('未触发舌战时按意愿成功率直接判定：成功则登用（原版时机）', () => {
+    const state = createGame('liu', findTalentSeed('direct-success'));
+    const next = executeCommand(state, 'liu', {
+      type: 'talent', cityId: 'jiangling', officerId: 'liu-bei', targetOfficerId: 'zhao-yun',
+    });
+
+    expect(next.debateSession).toBeFalsy();
+    expect(next.officers['zhao-yun'].forceId).toBe('liu');
+    expect(next.officers['zhao-yun'].serviceYears).toBe(0);
+    expect(next.officers['zhao-yun'].acted).toBe(true);
+    expect(next.officers['liu-bei'].acted).toBe(true);
+  });
+
+  it('未触发舌战且判定失败：目标不禁仕、下月可再试', () => {
+    const state = createGame('liu', findTalentSeed('direct-fail'));
+    const next = executeCommand(state, 'liu', {
+      type: 'talent', cityId: 'jiangling', officerId: 'liu-bei', targetOfficerId: 'zhao-yun',
+    });
+
+    expect(next.debateSession).toBeFalsy();
+    expect(next.officers['zhao-yun'].forceId).toBeNull();
+    expect(next.officers['zhao-yun'].bannedUntilMonth).toBeUndefined();
+    expect(next.officers['liu-bei'].acted).toBe(true);
   });
 
   it('starts a personnel-only transfer with travel time based on city distance', () => {
@@ -806,5 +889,105 @@ describe('appoint position', () => {
     expect(validateCommand(granted, 'liu', {
       type: 'appointPosition', cityId: 'jiangling', officerId: 'guan-yu', positionId: '',
     })).toEqual([]);
+  });
+});
+
+describe('跨城登庸差旅命令', () => {
+  it('跨城登庸不即时结算：执行武将转入差旅行程，扣除资金并视为本旬已行动', () => {
+    const { state, target, travel, command } = setupCrossCityJourney();
+    expect(validateCommand(state, 'cao', command)).toEqual([]);
+    const next = executeCommand(state, 'cao', command);
+
+    const location = next.officers['cao-cao'].location;
+    expect(location).toMatchObject({
+      kind: 'recruitJourney',
+      fromCityId: 'wan',
+      targetCityId: 'jiangling',
+      targetOfficerId: target.id,
+      phase: 'outbound',
+      remainingTenDays: travel,
+      returnTenDays: travel,
+    });
+    // 成功与否留待抵达当旬见分晓：目标此刻未被登走、无舌战会话
+    expect(next.officers[target.id].forceId).toBeNull();
+    expect(next.debateSession).toBeFalsy();
+    expect(next.cities.wan.gold).toBe(state.cities.wan.gold - 500);
+    expect(next.officers['cao-cao'].acted).toBe(true);
+  });
+
+  it('行程在途武将不可再执行指令（非常驻据点的待命武将）', () => {
+    const { state, command } = setupCrossCityJourney();
+    const next = executeCommand(state, 'cao', command);
+    // 调动（transfer）同城命令：行程中武将不在本城待命
+    expect(validateCommand(next, 'cao', {
+      type: 'transfer', cityId: 'wan', officerIds: ['cao-cao'], targetCityId: 'xiangyang',
+    })).toEqual([expect.stringContaining('只能移动出发据点内')]);
+  });
+
+  it('chooseRecruitDebate → accept：创建说客舌战会话并清空待决事项', () => {
+    const { state, target, command } = setupCrossCityJourney();
+    const journey = executeCommand(state, 'cao', command);
+    // 抵达目标城并挂起舌战抉择（模拟结算层落下的待决状态）
+    const loc = journey.officers['cao-cao'].location as Extract<Officer['location'], { kind: 'recruitJourney' }>;
+    loc.remainingTenDays = 0;
+    journey.pendingRecruitDebate = { recruiterId: 'cao-cao', targetId: target.id };
+
+    const accept = { type: 'acceptRecruitDebate' as const, cityId: 'wan' as CityId, officerId: 'cao-cao', targetOfficerId: target.id };
+    expect(validateCommand(journey, 'cao', accept)).toEqual([]);
+    const next = executeCommand(journey, 'cao', accept);
+    expect(next.pendingRecruitDebate).toBeNull();
+    expect(next.debateSession).toMatchObject({ status: 'ongoing', recruiterId: 'cao-cao', targetId: target.id });
+  });
+
+  it('reject：放弃舌战，执行武将转入返程、目标不被登走', () => {
+    const { state, target, travel, command } = setupCrossCityJourney();
+    const journey = executeCommand(state, 'cao', command);
+    const loc = journey.officers['cao-cao'].location as Extract<Officer['location'], { kind: 'recruitJourney' }>;
+    loc.remainingTenDays = 0;
+    journey.pendingRecruitDebate = { recruiterId: 'cao-cao', targetId: target.id };
+
+    const reject = { type: 'rejectRecruitDebate' as const, cityId: 'wan' as CityId, officerId: 'cao-cao', targetOfficerId: target.id };
+    expect(validateCommand(journey, 'cao', reject)).toEqual([]);
+    const next = executeCommand(journey, 'cao', reject);
+    expect(next.pendingRecruitDebate).toBeNull();
+    expect(next.officers['cao-cao'].location).toMatchObject({ kind: 'recruitJourney', phase: 'return', remainingTenDays: travel });
+    expect(next.officers[target.id].forceId).toBeNull();
+  });
+
+  it('无待决事项时不可响应舌战抉择命令', () => {
+    const { state, command } = setupCrossCityJourney();
+    const journey = executeCommand(state, 'cao', command);
+    expect(validateCommand(journey, 'cao', {
+      type: 'acceptRecruitDebate', cityId: 'wan', officerId: 'cao-cao', targetOfficerId: 'field-jiangling',
+    })).toEqual([expect.stringContaining('没有待处理')]);
+  });
+});
+
+describe('批量探索日志', () => {
+  it('批量探索：每名武将的探索结果单独记一条日志，不合并成一段', () => {
+    const state = createGame('liu', 7);
+    const next = executeCommand(state, 'liu', {
+      type: 'explore', cityId: 'jiangling', officerIds: ['liu-bei', 'guan-yu'],
+    });
+    const exploreLogs = next.logs.filter((log) => log.message.includes('探索'));
+    expect(exploreLogs).toHaveLength(2);
+    // 每条日志只含本人结果，且带各自武将名
+    expect(exploreLogs[0].message).toContain('刘备');
+    expect(exploreLogs[1].message).toContain('关羽');
+    expect(exploreLogs[0].message).not.toContain('关羽');
+    expect(exploreLogs[1].message).not.toContain('刘备');
+    // 两名武将均已行动、行动力按人次扣除
+    expect(next.officers['liu-bei'].acted).toBe(true);
+    expect(next.officers['guan-yu'].acted).toBe(true);
+  });
+
+  it('单将探索仍只有一条日志', () => {
+    const state = createGame('liu', 7);
+    const next = executeCommand(state, 'liu', {
+      type: 'explore', cityId: 'jiangling', officerIds: ['liu-bei'],
+    });
+    const exploreLogs = next.logs.filter((log) => log.message.includes('探索'));
+    expect(exploreLogs).toHaveLength(1);
+    expect(exploreLogs[0].message).toContain('刘备');
   });
 });
