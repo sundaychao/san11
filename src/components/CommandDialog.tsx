@@ -10,7 +10,7 @@ import { ABILITY_CENTER, ABILITY_NODE_MAP, ABILITY_NODES, ABILITY_RESEARCH_GOLD,
 import { POSITIONS, forceRankOf, officerIsOnCampaign, officerMerit, positionDefinition, rankDefinition, rankIndex } from '../game/ranks';
 import { capturableByLoyalty, captivesOf, recruitCaptiveChance, captiveRecruitLoyaltyThreshold } from '../game/captives';
 import { DIPLOMACY_ACTION_LABELS, DIPLOMACY_GOLD_MAX, DIPLOMACY_GOLD_STEP, GOODWILL_GOLD_COST, NEUTRAL_DIPLOMACY, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, areAllies, forceDiplomacy, forceRelationView } from '../game/diplomacy';
-import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasEmptyPlot, hasPlotFacility, patrolOrderGain, plotBuiltCount, plotConstructingCount, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, recruitTimesLeft, recruitTimesPerTenDay, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
+import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentInProgressCount, armamentProductionBlockReason, armamentTimesLeft, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasEmptyPlot, hasPlotFacility, isImmediateArmamentFacility, patrolOrderGain, plotBuiltCount, plotConstructingCount, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, recruitTimesLeft, recruitTimesPerTenDay, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
 import { cityResourceCaps } from '../game/strongholdCapacity';
 import { hasCityTrait } from '../game/cityTraits';
 import { MARRY_TECHP_COST, relationCandidates } from '../game/relationship';
@@ -523,16 +523,16 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
     return () => document.removeEventListener('mouseup', dismissOnMouseUp, true);
   }, [hintVisible, strategistHint]);
   /**
-   * 生产兵装：默认选中第一种「本据点已具备设施」的兵装。
-   * 否则缺设施的兵装会被置灰却仍是选中态（金框 + 灰），读数看着能造其实不能；
-   * 一种设施都没有时保留原值，由 validateCommand 报「需先建设X才能生产」拦下。
+   * 生产兵装：默认选中第一种「本据点当前可生产」的兵装。
+   * 否则被卡住的兵装（缺设施 / 本旬次数用尽 / 设施全在产）会置灰却仍是选中态（金框 + 灰），
+   * 读数看着能造其实不能；全部不可生产时保留原值，由 validateCommand 报原因拦下。
    */
   useEffect(() => {
     if (type !== 'produceArmament') return;
-    if (hasPlotFacility(garrison, ARMAMENT_FACILITY[armamentType])) return;
-    const firstAvailable = ARMAMENT_TYPES.find((item) => hasPlotFacility(garrison, ARMAMENT_FACILITY[item]));
+    if (!armamentProductionBlockReason(state, garrison, armamentType)) return;
+    const firstAvailable = ARMAMENT_TYPES.find((item) => !armamentProductionBlockReason(state, garrison, item));
     if (firstAvailable) setArmamentType(firstAvailable);
-  }, [type, garrison, armamentType]);
+  }, [type, garrison, armamentType, state]);
   /** 外交页的行动效果说明（亲善无额外说明，返回空串时整行不渲染） */
   const diplomacyNote = diplomacyAction === 'alliance'
     ? (activeDiplomacyForceId && areAllies(state, state.playerForceId, activeDiplomacyForceId)
@@ -834,7 +834,9 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
       : type === 'train'
         ? `兵粮 300 · 士气 +${trainEstimate}`
         : type === 'produceArmament'
-          ? `资金 ${armamentCost(garrison, armamentType)} · ${armamentLabelFor(state, state.playerForceId, armamentType)} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType) ? `${productionTenDays}旬` : '即时'}`
+          ? `资金 ${armamentCost(garrison, armamentType)} · ${armamentLabelFor(state, state.playerForceId, armamentType)} +${productionGain.toLocaleString('en-US')} · ${isDelayedArmament(armamentType)
+            ? `${productionTenDays}旬 · 同时生产 ${armamentInProgressCount(state, garrison, ARMAMENT_FACILITY[armamentType])}/${plotBuiltCount(garrison, ARMAMENT_FACILITY[armamentType])} 件`
+            : `即时 · 本旬剩余 ${armamentTimesLeft(garrison, ARMAMENT_FACILITY[armamentType])}/${plotBuiltCount(garrison, ARMAMENT_FACILITY[armamentType])} 次`}`
           : type === 'patrol'
             ? `资金 ${patrolGoldCost(garrison)} · 治安 +${patrolEstimate}`
             : type === 'trade'
@@ -1095,16 +1097,18 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
               {ARMAMENT_TYPES.map((item) => {
                 const selected = armamentType === item;
                 const stock = cityArmaments[item];
-                const nextStock = selected ? stock + productionGain : stock;
+                // 唯一判据：缺设施 / 本旬次数用尽（锻冶厂·厩舍）/ 设施已全部投入生产（工房·造船厂）
+                const blockReason = armamentProductionBlockReason(state, garrison, item);
                 const facilityMissing = !hasPlotFacility(garrison, ARMAMENT_FACILITY[item]);
+                const nextStock = selected && !blockReason ? stock + productionGain : stock;
                 return (
                   <button
                     key={item}
                     type="button"
                     aria-label={armamentLabelFor(state, state.playerForceId, item)}
                     className={selected ? 'is-active' : ''}
-                    disabled={facilityMissing}
-                    title={facilityMissing ? `需先建设${armamentFacilityLabel(item)}才能生产` : undefined}
+                    disabled={Boolean(blockReason)}
+                    title={blockReason ?? undefined}
                     onClick={() => setArmamentType(item)}
                   >
                     <strong>{armamentLabelFor(state, state.playerForceId, item)}</strong>
@@ -1116,6 +1120,12 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
             <dl className="produce-stock">
               <div><dt>资金</dt><dd>{garrisonGold.toLocaleString('en-US')} → {Math.max(0, garrisonGold - armamentCost(garrison, armamentType)).toLocaleString('en-US')}{armamentCost(garrison, armamentType) < ARMAMENT_GOLD_COST ? '（特色优惠）' : ''}</dd></div>
               <div><dt>期间</dt><dd>{isDelayedArmament(armamentType) ? `${productionTenDays}旬（综合智${armamentProductionIntelligence(activeExecutors)}）` : '即时'}</dd></div>
+              <div>
+                <dt>产能</dt>
+                <dd>{isImmediateArmamentFacility(ARMAMENT_FACILITY[armamentType])
+                  ? `本旬剩余 ${armamentTimesLeft(garrison, ARMAMENT_FACILITY[armamentType])}/${plotBuiltCount(garrison, ARMAMENT_FACILITY[armamentType])} 次`
+                  : `同时生产 ${armamentInProgressCount(state, garrison, ARMAMENT_FACILITY[armamentType])}/${plotBuiltCount(garrison, ARMAMENT_FACILITY[armamentType])} 件`}</dd>
+              </div>
               <div><dt>效果</dt><dd>有利于对应兵种出征</dd></div>
             </dl>
           </section>

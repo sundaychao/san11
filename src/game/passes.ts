@@ -98,6 +98,7 @@ export function createScenarioPasses(state: Pick<GameState, 'cities' | 'grid'>):
       armaments: occupied ? { ...PASS_INITIAL_ARMAMENTS } : emptyArmaments(),
       trainedThisTenDay: false,
       patrolledThisTenDay: false,
+      recruitedThisTenDay: 0,
       q: anchor.q,
       r: anchor.r,
       flankKeys,

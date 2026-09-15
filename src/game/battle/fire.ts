@@ -2,7 +2,7 @@ import type { ArmyUnit, GameState } from '../types';
 import { gridKey, sevenCellCityFootprint, type GridCoord } from './grid';
 import { fireDamageMultiplierOf } from '../skills/rules/combat';
 import { reduceUnitDamageByFortress, removeUnit } from './shared';
-import { PLOT_MAX_DURABILITY } from '../innerAffairs';
+import { PLOT_LABELS, PLOT_MAX_DURABILITY, interruptArmamentProductionAtPlot } from '../innerAffairs';
 
 export const GROUND_FIRE_DAMAGE = 500;
 export const GROUND_FIRE_FACILITY_DAMAGE = 150;
@@ -59,17 +59,29 @@ export function applyGroundFireDamageToFacilities(next: GameState) {
 export function applyGroundFireDamageToPlots(next: GameState) {
   const burningKeys = new Set((next.firePlots ?? []).map(gridKey));
   for (const city of Object.values(next.cities)) {
-    for (const plot of city.plots ?? []) {
+    const plots = city.plots ?? [];
+    for (let plotIndex = 0; plotIndex < plots.length; plotIndex += 1) {
+      const plot = plots[plotIndex];
       if (plot.q == null || plot.r == null) continue;
       if (plot.type === 'empty') continue;
       if (!burningKeys.has(gridKey({ q: plot.q, r: plot.r }))) continue;
       plot.durability = Math.max(0, (plot.durability ?? PLOT_MAX_DURABILITY) - GROUND_FIRE_FACILITY_DAMAGE);
       if (plot.durability > 0) continue;
-      // 耐久归零：设施拆除，地格清空
+      // 耐久归零：设施拆除，地格清空（该地格上在产的兵器/舰船生产一并中断）
+      const label = PLOT_LABELS[plot.type];
       plot.type = 'empty';
       plot.level = 0;
       plot.value = 0;
       plot.constructing = undefined;
+      const interrupted = interruptArmamentProductionAtPlot(next, city, plotIndex);
+      if (interrupted) {
+        next.logs.push({
+          id: `plot-burnt-${city.id}-${next.month}-${next.logs.length}`,
+          month: next.month,
+          forceId: city.ownerId,
+          message: `${city.name}的${label}被烧毁，${interrupted}`,
+        });
+      }
     }
   }
 }
@@ -77,15 +89,28 @@ export function applyGroundFireDamageToPlots(next: GameState) {
 /** 点火瞬间对目标格上的城内开发设施、所属城池本体、关隘本体造成一次即时耐久伤害（与点火对部队/野外设施的即时伤害一致，量值参考每旬烧灼）：开发设施掉 150，城池若目标格在其 7 格内则掉 150，关隘若目标格即其锚点则掉 150。无主空城/无主关隘同样会烧 */
 export function applyImmediateFireDamageToCityAndPlot(next: GameState, target: GridCoord) {
   for (const city of Object.values(next.cities)) {
-    for (const plot of city.plots ?? []) {
+    const plots = city.plots ?? [];
+    for (let plotIndex = 0; plotIndex < plots.length; plotIndex += 1) {
+      const plot = plots[plotIndex];
       if (plot.q !== target.q || plot.r !== target.r) continue;
       if (plot.type === 'empty') continue;
       plot.durability = Math.max(0, (plot.durability ?? PLOT_MAX_DURABILITY) - GROUND_FIRE_FACILITY_DAMAGE);
       if (plot.durability > 0) continue;
+      const label = PLOT_LABELS[plot.type];
       plot.type = 'empty';
       plot.level = 0;
       plot.value = 0;
       plot.constructing = undefined;
+      // 设施被烧毁：该地格上在产的兵器/舰船生产一并中断（已投入资金不退还）
+      const interrupted = interruptArmamentProductionAtPlot(next, city, plotIndex);
+      if (interrupted) {
+        next.logs.push({
+          id: `plot-burnt-${city.id}-${next.month}-${next.logs.length}`,
+          month: next.month,
+          forceId: city.ownerId,
+          message: `${city.name}的${label}被烧毁，${interrupted}`,
+        });
+      }
     }
     const inFootprint = sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })
       .some((coord) => coord.q === target.q && coord.r === target.r);

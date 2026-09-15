@@ -186,6 +186,8 @@ describe('command engine', () => {
       amount: 2,
       remainingTenDays: 12,
       lead: true,
+      // 生产与设施绑定：占用江陵第 3 格（withFacilities 铺的顺序：兵舍/锻冶/工房/厩舍/造船）
+      plotIndex: 2,
     });
     expect(next.cities.jiangling.gold).toBe(state.cities.jiangling.gold - ARMAMENT_GOLD_COST);
   });
@@ -207,6 +209,8 @@ describe('command engine', () => {
       amount: 2,
       remainingTenDays: 12,
       lead: true,
+      // 生产与设施绑定：占用江陵第 3 格（withFacilities 铺的顺序：兵舍/锻冶/工房/厩舍/造船）
+      plotIndex: 2,
     });
     expect(next.officers['liu-bei'].acted).toBe(true);
   });
@@ -1012,5 +1016,192 @@ describe('批量探索日志', () => {
     const exploreLogs = next.logs.filter((log) => log.message.includes('探索'));
     expect(exploreLogs).toHaveLength(1);
     expect(exploreLogs[0].message).toContain('刘备');
+  });
+});
+
+/** 在江陵铺 N 座**已建成**兵舍（每旬可征兵次数＝已建成兵舍座数），并补足资金/兵粮/人口 */
+function withBarracks(state: GameState, count: number) {
+  const city = state.cities.jiangling;
+  const plots = city.plots ?? (city.plots = []);
+  for (let index = 0; index < count; index += 1) {
+    plots[index] = { ...plots[index], id: `test-barracks-${index}`, type: 'barracks', level: 1, constructing: undefined };
+  }
+  state.actionPoints.liu = 200;
+  city.gold = 10_000;
+  city.food = 10_000;
+  city.population = 100_000;
+  return state;
+}
+
+describe('征兵次数（每旬每城上限＝已建成兵舍座数）', () => {
+  it('一座兵舍：本旬只能征一次，换一名待命武将再征被拒', () => {
+    const state = withBarracks(createGame('liu', 1), 1);
+    const next = executeCommand(state, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'] });
+    expect(next.cities.jiangling.recruitedThisTenDay).toBe(1);
+
+    expect(validateCommand(next, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['guan-yu'] }))
+      .toContain('本旬征兵次数已用尽（兵舍 1 座）');
+    expect(() => executeCommand(next, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['guan-yu'] }))
+      .toThrow(/本旬征兵次数已用尽/);
+  });
+
+  it('三座兵舍：本旬可依次征三次，第四次被拒', () => {
+    let state = withBarracks(createGame('liu', 1), 3);
+    for (const officerId of ['liu-bei', 'guan-yu', 'jian-yong']) {
+      state = executeCommand(state, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: [officerId] });
+    }
+    expect(state.cities.jiangling.recruitedThisTenDay).toBe(3);
+
+    expect(validateCommand(state, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['sun-qian'] }))
+      .toContain('本旬征兵次数已用尽（兵舍 3 座）');
+  });
+
+  it('次旬重置：rollMerchants 把已征次数归零后同城可再征', () => {
+    const state = withBarracks(createGame('liu', 1), 1);
+    const next = executeCommand(state, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'] });
+    rollMerchants(next);
+
+    expect(next.cities.jiangling.recruitedThisTenDay).toBe(0);
+    expect(validateCommand(next, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['guan-yu'] })).toEqual([]);
+  });
+
+  it('无兵舍时只报兵舍前置，不叠加「次数已用尽」', () => {
+    const state = createGame('liu', 1);
+    state.cities.jiangling.plots = [];
+    const errors = validateCommand(state, 'liu', { type: 'recruit', cityId: 'jiangling', officerIds: ['liu-bei'] });
+
+    expect(errors).toContain('需先建设兵舍才能征兵');
+    expect(errors.join('；')).not.toContain('次数已用尽');
+  });
+});
+
+/** 按「地格序号 → 设施」列表铺江陵的建设用地（序号即生产绑定的 plotIndex），并补足资金/行动力 */
+function withPlotLayout(state: GameState, layout: PlotType[]) {
+  const city = state.cities.jiangling;
+  const plots = city.plots ?? (city.plots = []);
+  layout.forEach((facility, index) => {
+    plots[index] = {
+      ...plots[index],
+      id: `test-${facility}-${index}`,
+      type: facility,
+      level: 1,
+      value: 0,
+      constructing: undefined,
+    };
+  });
+  state.actionPoints.liu = 200;
+  city.gold = 20_000;
+  return state;
+}
+
+describe('生产兵装：产能由设施决定，设施被拆即中断', () => {
+  it('锻冶厂座数＝每旬可生产次数：2 座可产 2 次基础兵装，第 3 次被拒', () => {
+    const state = withPlotLayout(createGame('liu', 1), ['forge', 'forge']);
+    const first = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'spear',
+    });
+    expect(first.cities.jiangling.armamentProducedThisTenDay).toEqual({ forge: 1 });
+
+    // 枪/戟/弩共用锻冶厂产能：第二次换弩照样算锻冶厂的账
+    const second = executeCommand(first, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['guan-yu'], armamentType: 'crossbow',
+    });
+    expect(second.cities.jiangling.armamentProducedThisTenDay).toEqual({ forge: 2 });
+
+    expect(validateCommand(second, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['jian-yong'], armamentType: 'halberd',
+    })).toContain('本旬锻冶厂生产次数已用尽（2 座）');
+    expect(() => executeCommand(second, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['jian-yong'], armamentType: 'halberd',
+    })).toThrow(/本旬锻冶厂生产次数已用尽/);
+  });
+
+  it('工房座数＝同时可执行件数：1 座工房在产时拒绝第二件，造船厂各算各的', () => {
+    const state = withPlotLayout(createGame('liu', 1), ['smithy', 'shipyard']);
+    const producing = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'ram',
+    });
+    // 生产与设施绑定：占用第 1 格工房
+    expect(producing.officers['liu-bei'].location).toMatchObject({ task: 'armament', plotIndex: 0 });
+
+    expect(validateCommand(producing, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['guan-yu'], armamentType: 'tower',
+    })).toContain('工房已全部投入生产（在产上限 1 件）');
+    // 造船厂是另一类设施，楼船照常可开工
+    expect(validateCommand(producing, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['guan-yu'], armamentType: 'ship',
+    })).toEqual([]);
+  });
+
+  it('两座工房可同时开工两件，各占一座地格', () => {
+    const state = withPlotLayout(createGame('liu', 1), ['smithy', 'smithy']);
+    const first = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'ram',
+    });
+    const second = executeCommand(first, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['guan-yu'], armamentType: 'tower',
+    });
+
+    expect(second.officers['liu-bei'].location).toMatchObject({ plotIndex: 0 });
+    expect(second.officers['guan-yu'].location).toMatchObject({ plotIndex: 1 });
+    expect(validateCommand(second, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['jian-yong'], armamentType: 'ram',
+    })).toContain('工房已全部投入生产（在产上限 2 件）');
+  });
+
+  it('拆除绑定的设施地格 → 该次生产中断、武将释放回城、资金不退还', () => {
+    const state = withPlotLayout(createGame('liu', 1), ['smithy', 'shipyard']);
+    const producing = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'ram',
+    });
+    const goldAfterStart = producing.cities.jiangling.gold;
+    const ramsBefore = producing.cities.jiangling.armaments?.ram ?? 0;
+
+    const cancelled = executeCommand(producing, 'liu', {
+      type: 'cancelCityPlot', cityId: 'jiangling', plotIndex: 0,
+    });
+
+    // 生产中断：兵装未入库，武将立即释放为待命
+    expect(cancelled.officers['liu-bei'].location).toEqual({ kind: 'city', cityId: 'jiangling' });
+    expect(cancelled.officers['liu-bei'].acted).toBe(false);
+    expect(cancelled.cities.jiangling.armaments?.ram).toBe(ramsBefore);
+    // 已投入的资金不退还
+    expect(cancelled.cities.jiangling.gold).toBe(goldAfterStart);
+    expect(cancelled.logs.at(-1)?.message).toContain('刘备的冲车生产中断');
+  });
+
+  it('拆除未绑定的地格不影响在产：工房产能仍被占用', () => {
+    const state = withPlotLayout(createGame('liu', 1), ['smithy', 'smithy']);
+    const producing = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'ram',
+    });
+
+    // 拆掉第 2 格（没被占用的那座工房）
+    const cancelled = executeCommand(producing, 'liu', {
+      type: 'cancelCityPlot', cityId: 'jiangling', plotIndex: 1,
+    });
+
+    expect(cancelled.officers['liu-bei'].location).toMatchObject({ task: 'armament', plotIndex: 0 });
+    // 剩 1 座工房、1 件在产 → 再开一件被拒
+    expect(validateCommand(cancelled, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['guan-yu'], armamentType: 'tower',
+    })).toContain('工房已全部投入生产（在产上限 1 件）');
+  });
+
+  it('次旬重置：锻冶厂生产次数归零后可再产', () => {
+    const state = withPlotLayout(createGame('liu', 1), ['forge']);
+    const next = executeCommand(state, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['liu-bei'], armamentType: 'spear',
+    });
+    expect(validateCommand(next, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['guan-yu'], armamentType: 'spear',
+    })).toContain('本旬锻冶厂生产次数已用尽（1 座）');
+
+    rollMerchants(next);
+
+    expect(next.cities.jiangling.armamentProducedThisTenDay).toEqual({});
+    expect(validateCommand(next, 'liu', {
+      type: 'produceArmament', cityId: 'jiangling', officerIds: ['guan-yu'], armamentType: 'spear',
+    })).toEqual([]);
   });
 });

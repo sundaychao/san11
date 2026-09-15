@@ -16,7 +16,7 @@ import { isPassBlocked } from './passes';
 import { createDebate } from './debate';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './battle/grid';
 import { cellAt } from './battle/movementRules';
-import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, COMMAND_OFFICER_MAX,
+import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentProductionBlockReason, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentProducedTimes, freeArmamentPlotIndex, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, COMMAND_OFFICER_MAX,
                              appointSuccessorGovernor, hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, recruitTimesLeft, recruitTimesPerTenDay, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
 import { appointStrongholdSuccessor, isPassGarrison } from './strongholds';
 import { cityResourceCaps, clampStrongholdsInPlace } from './strongholdCapacity';
@@ -129,6 +129,8 @@ export function rollMerchants(state: GameState): void {
     city.patrolledThisTenDay = false;
     // 征兵次数同样每旬归零（本旬可征次数上限＝已建成兵舍座数）
     city.recruitedThisTenDay = 0;
+    // 锻冶厂/厩舍的即时生产次数同样每旬归零（上限＝该设施已建成座数）
+    city.armamentProducedThisTenDay = {};
   }
   // 关隘也随每旬重置训练/巡查/征兵标记（关隘无治安值、无商人到访）
   for (const pass of Object.values(state.passes ?? {})) {
@@ -1024,8 +1026,10 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
   if (command.type === 'produceArmament') {
     if (!ARMAMENT_TYPES.includes(command.armamentType)) {
       errors.push('兵装类型无效');
-    } else if (!hasPlotFacility(city, ARMAMENT_FACILITY[command.armamentType])) {
-      errors.push(`需先建设${armamentFacilityLabel(command.armamentType)}才能生产`);
+    } else {
+      // 唯一判据：缺设施 / 本旬次数用尽（锻冶厂·厩舍） / 设施已全部投入生产（工房·造船厂）
+      const blocked = armamentProductionBlockReason(state, city, command.armamentType);
+      if (blocked) errors.push(blocked);
     }
   }
   if (command.type === 'trade') {
@@ -1321,6 +1325,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       const officers = command.officerIds.map((officerId) => next.officers[officerId]);
       const names = officers.map((officer) => officer.name).join('、');
       const current = armamentsOf(city.armaments);
+      const facility = ARMAMENT_FACILITY[command.armamentType];
       // 生产数量 = 1000 + 最高智力×10 + 其余2人智力各×5，再乘特技/设施修正
       const baseGain = produceArmamentYield(officers, command.armamentType);
       const gain = Math.round(baseGain * commandYieldMultiplier(next, command)
@@ -1328,7 +1333,9 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       city.gold -= armamentCost(city, command.armamentType);
       if (isDelayedArmament(command.armamentType)) {
         // 兵器/舰船：按综合智力计算工期，逐旬推进（发明/造船特技日数减半）
+        // 生产与设施绑定：占用一座空闲的同类型设施地格（序号写入任务，该地格被拆除即中断）
         const tenDays = armamentProductionTenDays(officers, armamentProductionSpeedMultiplier(next, command));
+        const plotIndex = freeArmamentPlotIndex(next, city, facility);
         for (const [index, officer] of officers.entries()) {
           officer.location = {
             kind: 'task',
@@ -1338,6 +1345,7 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
             amount: gain,
             remainingTenDays: tenDays,
             lead: index === 0,
+            ...(plotIndex === null ? {} : { plotIndex }),
           };
         }
         addTechP(next, forceId, TECHP_PER_PRODUCE_ARMAMENT);
@@ -1350,6 +1358,11 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
         // 按容纳上限截断后再算实际入库量（含科技「修筑要塞」倍率）：满了就只报实际增加的部分，不谎报产量
         clampArmamentsTo(city.armaments, cityResourceCaps(next, city).armaments);
         const applied = city.armaments[command.armamentType] - current[command.armamentType];
+        // 即时兵装消耗一次对应设施的产能：每旬可生产次数＝该设施已建成座数
+        city.armamentProducedThisTenDay = {
+          ...(city.armamentProducedThisTenDay ?? {}),
+          [facility]: armamentProducedTimes(city, facility) + 1,
+        };
         addTechP(next, forceId, TECHP_PER_PRODUCE_ARMAMENT);
         message = `${names}生产${city.name}${ARMAMENT_LABELS[command.armamentType]}，增加了${applied.toLocaleString('en-US')}`;
         next.cityEffectReports = [{

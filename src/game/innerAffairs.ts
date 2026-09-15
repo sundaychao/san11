@@ -1,9 +1,9 @@
 import { coordsWithinRange, gridKey, neighborsOf, ringCoordsWithinRange, sevenCellCityFootprint, type GridCoord } from './battle/grid';
 import { BLOCKED_TERRAINS, isWaterTerrain } from './battle/catalog';
 import { positionDefinition } from './ranks';
-import { armamentProductionTenDays, isDelayedArmament, produceArmamentYield } from './armaments';
+import { ARMAMENT_LABELS, armamentProductionTenDays, isDelayedArmament, produceArmamentYield } from './armaments';
 import { cityCanBuildFacility, hasCityTrait } from './cityTraits';
-import type { ArmamentType, City, CityId, ForceId, GameState, GridCell, Legion, Officer, Pass, TechNodeId, TerrainType } from './types';
+import type { ArmamentType, City, CityId, ForceId, GameState, GridCell, Legion, Officer, Pass, PassId, TechNodeId, TerrainType } from './types';
 import { TECH_LEVEL_COSTS, counterAttackMultiplier, durabilityRecoveryMultiplier, facilityLevelCap, moraleCapOf, rangedRangeBonus, researchTenDays, techNodeOf } from './techs';
 
 /** 本地 clamp，避免与 commands.ts 的循环依赖 */
@@ -301,7 +301,9 @@ export function cancelCityPlot(state: GameState, city: City, plotIndex: number):
   plot.type = 'empty';
   plot.level = 0;
   plot.value = 0;
-  return `${city.name}的${label}已撤销，建设用地恢复为空地`;
+  // 该地格上若有工期制兵装（工房/造船厂）在产，一并中断：在产武将释放回城，已投入资金不退还
+  const interrupted = interruptArmamentProductionAtPlot(state, city, plotIndex);
+  return `${city.name}的${label}已撤销，建设用地恢复为空地${interrupted ? `；${interrupted}` : ''}`;
 }
 
 /** 指定坐标周围 range 圈（BFS 距离）内是否有敌方部队（用于设施撤销禁用判定） */
@@ -780,6 +782,140 @@ export function recruitTimesPerTenDay(stronghold: City | Pass): number {
 /** 本旬**剩余**征兵次数 = 上限 − 已用（`recruitedThisTenDay`），下限 0 */
 export function recruitTimesLeft(stronghold: City | Pass): number {
   return Math.max(0, recruitTimesPerTenDay(stronghold) - (stronghold.recruitedThisTenDay ?? 0));
+}
+
+/** 兵装生产设施（`ARMAMENT_FACILITY` 的值域）：锻冶厂/厩舍为即时生产，工房/造船厂为工期制生产 */
+export const ARMAMENT_FACILITIES: readonly PlotType[] = ['forge', 'stable', 'smithy', 'shipyard'];
+
+/**
+ * 即时生产的兵装设施：锻冶厂（枪/戟/弩）与厩舍（军马）。无工期，
+ * 每旬可生产次数＝该设施**已建成座数**（与征兵同构，见 `recruitTimesPerTenDay`）。
+ * 另两类（工房/造船厂）是工期制生产，约束为「同时可执行件数＝座数」，不按旬计次。
+ */
+export const IMMEDIATE_ARMAMENT_FACILITIES: readonly PlotType[] = ['forge', 'stable'];
+
+export function isImmediateArmamentFacility(facility: PlotType): boolean {
+  return IMMEDIATE_ARMAMENT_FACILITIES.includes(facility);
+}
+
+/** 本旬该设施已用于即时生产的次数（`armamentProducedThisTenDay`，每旬归零） */
+export function armamentProducedTimes(stronghold: City | Pass, facility: PlotType): number {
+  return stronghold.armamentProducedThisTenDay?.[facility] ?? 0;
+}
+
+/** 本旬该设施还剩几次即时生产机会 = 已建成座数 − 已用（下限 0） */
+export function armamentTimesLeft(stronghold: City | Pass, facility: PlotType): number {
+  return Math.max(0, plotBuiltCount(stronghold, facility) - armamentProducedTimes(stronghold, facility));
+}
+
+/** 某个 task 地点是否落在指定据点（城池看 cityId、关隘看 passId） */
+function taskBelongsToStronghold(
+  location: { cityId: CityId; passId?: PassId },
+  stronghold: City | Pass,
+): boolean {
+  return 'homeCityId' in stronghold
+    ? location.passId === stronghold.id
+    : location.cityId === stronghold.id && !location.passId;
+}
+
+/** 工期制生产正在占用的地格序号：生产与设施绑定，同一座设施同时只能产一件 */
+export function armamentBusyPlotIndices(state: GameState, stronghold: City | Pass): Set<number> {
+  const busy = new Set<number>();
+  for (const officer of Object.values(state.officers)) {
+    const location = officer.location;
+    if (location.kind !== 'task' || location.task !== 'armament') continue;
+    // 多人生产只由主将（lead）占位，随从跟随同一件生产
+    if (location.plotIndex == null || location.lead === false) continue;
+    if (!taskBelongsToStronghold(location, stronghold)) continue;
+    busy.add(location.plotIndex);
+  }
+  return busy;
+}
+
+/** 该设施当前**在产**的工期制生产件数（＝被占用的同类型地格数） */
+export function armamentInProgressCount(state: GameState, stronghold: City | Pass, facility: PlotType): number {
+  const plots = stronghold.plots ?? [];
+  let count = 0;
+  for (const index of armamentBusyPlotIndices(state, stronghold)) {
+    if (plots[index]?.type === facility) count += 1;
+  }
+  return count;
+}
+
+/** 找一座空闲（未被在产占用）的同类型设施地格序号；无可用设施返回 null */
+export function freeArmamentPlotIndex(state: GameState, stronghold: City | Pass, facility: PlotType): number | null {
+  const busy = armamentBusyPlotIndices(state, stronghold);
+  const plots = stronghold.plots ?? [];
+  for (let index = 0; index < plots.length; index += 1) {
+    if (plots[index].type === facility && !busy.has(index)) return index;
+  }
+  return null;
+}
+
+/**
+ * 生产兵装的拦截原因（唯一判据：命令菜单置灰、弹窗按钮禁用、`validateCommand` 三处共用）。
+ * 可生产时返回 null。
+ * - 无该设施 → 需先建设 X 才能生产
+ * - 即时兵装（锻冶/厩舍）→ 本旬生产次数已用尽（上限＝已建成座数）
+ * - 工期制兵装（工房/造船）→ 设施已全部投入生产（同时可执行件数＝已建成座数）
+ */
+export function armamentProductionBlockReason(
+  state: GameState,
+  stronghold: City | Pass,
+  armamentType: ArmamentType,
+): string | null {
+  const facility = ARMAMENT_FACILITY[armamentType];
+  const count = plotBuiltCount(stronghold, facility);
+  if (count <= 0) return `需先建设${PLOT_LABELS[facility]}才能生产`;
+  if (isImmediateArmamentFacility(facility)) {
+    return armamentTimesLeft(stronghold, facility) <= 0
+      ? `本旬${PLOT_LABELS[facility]}生产次数已用尽（${count} 座）`
+      : null;
+  }
+  return armamentInProgressCount(state, stronghold, facility) >= count
+    ? `${PLOT_LABELS[facility]}已全部投入生产（在产上限 ${count} 件）`
+    : null;
+}
+
+/** 该据点是否还有任意兵装可以生产（命令菜单「生产兵装」置灰用） */
+export function anyArmamentProducible(state: GameState, stronghold: City | Pass): boolean {
+  return (Object.keys(ARMAMENT_FACILITY) as ArmamentType[])
+    .some((armamentType) => armamentProductionBlockReason(state, stronghold, armamentType) === null);
+}
+
+/**
+ * 「生产兵装」整体不可用的原因（命令菜单置灰 + 悬停提示用）：可生产时返回 null。
+ * 先判「一类设施都没有」，再逐类取第一条拦截原因（如「本旬锻冶厂生产次数已用尽」/「工房已全部投入生产」）。
+ */
+export function armamentUnavailableReason(state: GameState, stronghold: City | Pass): string | null {
+  if (!Object.values(ARMAMENT_FACILITY).some((facility) => hasPlotFacility(stronghold, facility))) {
+    return `需先建设${PLOT_LABELS.forge} / ${PLOT_LABELS.stable} / ${PLOT_LABELS.smithy} / ${PLOT_LABELS.shipyard}才能生产`;
+  }
+  const reasons = (Object.keys(ARMAMENT_FACILITY) as ArmamentType[])
+    .map((armamentType) => armamentProductionBlockReason(state, stronghold, armamentType));
+  if (reasons.some((reason) => reason === null)) return null;
+  return reasons.find((reason): reason is string => Boolean(reason)) ?? '本旬已无可生产的兵装';
+}
+
+/**
+ * 地格被拆除（手动撤销 / 火攻烧毁）时，中断绑定在该地格上的工期制生产：
+ * 在产武将立即释放回据点待命，**已投入的资金不退还**（用户口径）。
+ * 返回中断说明，无人受影响时返回 null。
+ */
+export function interruptArmamentProductionAtPlot(state: GameState, city: City, plotIndex: number): string | null {
+  const affected: string[] = [];
+  let label = '';
+  for (const officer of Object.values(state.officers)) {
+    const location = officer.location;
+    if (location.kind !== 'task' || location.task !== 'armament') continue;
+    if (location.plotIndex !== plotIndex || location.cityId !== city.id) continue;
+    if (!label) label = ARMAMENT_LABELS[location.armamentType];
+    officer.location = { kind: 'city', cityId: city.id };
+    officer.cityId = city.id;
+    officer.acted = false;
+    affected.push(officer.name);
+  }
+  return affected.length > 0 ? `${affected.join('、')}的${label}生产中断` : null;
 }
 
 /**
@@ -1276,10 +1412,13 @@ function runLegionAction(state: GameState, city: City, officers: Officer[], acti
       return `${names}训练守军`;
     }
     case 'recruit': {
+      // 与手动征兵同一口径：需已建成兵舍，且本旬次数未超上限（＝已建成兵舍座数）
+      if (!hasPlotFacility(city, 'barracks') || recruitTimesLeft(city) <= 0) return null;
       if (city.gold < 800 || city.food < 500 || city.population < 500) return null;
       city.gold -= 800;
       city.food -= 500;
       city.population -= 500;
+      city.recruitedThisTenDay = (city.recruitedThisTenDay ?? 0) + 1;
       const gained = gain(recruitBaseYield(officers, city) * barracksYieldMultiplier(city));
       // 新征士兵士气50，稀释城池士气（与 executeCommand 征兵一致）
       const prevTroops = city.troops;
@@ -1299,11 +1438,17 @@ function runLegionAction(state: GameState, city: City, officers: Officer[], acti
       return `${names}巡察安抚百姓`;
     }
     case 'produceSpear': {
+      // 与手动生产同一口径：需已建成锻冶厂，且本旬生产次数未超上限（＝已建成座数）
+      if (armamentProductionBlockReason(state, city, 'spear')) return null;
       if (city.gold < 300) return null;
       city.gold -= 300;
       const current = city.armaments?.spear ?? 0;
       const armaments = city.armaments ?? { spear: 0, halberd: 0, crossbow: 0, cavalry: 0, ram: 0, tower: 0, ship: 0 };
       city.armaments = { ...armaments, spear: current + gain(1000 + officers.length * 500) };
+      city.armamentProducedThisTenDay = {
+        ...(city.armamentProducedThisTenDay ?? {}),
+        forge: armamentProducedTimes(city, 'forge') + 1,
+      };
       for (const officer of officers) officer.acted = true;
       return `${names}生产枪兵`;
     }

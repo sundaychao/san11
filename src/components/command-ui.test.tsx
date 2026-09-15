@@ -3605,4 +3605,145 @@ describe('兵器部队命令菜单', () => {
     expect(develop).toBeEnabled();
     expect(develop).not.toHaveAttribute('title', '城中已无空闲的建设用地');
   });
+
+  it('「征兵」本旬次数用尽后在菜单层置灰：上限＝已建成兵舍座数', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    // 江陵只铺 1 座兵舍，且本旬已征过 1 次 → 本旬 0 次可征
+    state.cities.jiangling.plots = (state.cities.jiangling.plots ?? []).map((plot, index) => ({
+      ...plot,
+      type: index === 0 ? ('barracks' as const) : ('market' as const),
+      level: 1,
+      constructing: undefined,
+    }));
+    state.cities.jiangling.recruitedThisTenDay = 1;
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+
+    const recruit = within(menu).getByTestId('city-command-command-recruit');
+    expect(recruit).toBeDisabled();
+    expect(recruit).toHaveAttribute('title', '本旬征兵次数已用尽（兵舍 1 座）');
+    // 同段其它条目不受影响
+    expect(within(menu).getByTestId('city-command-command-patrol')).toBeEnabled();
+  });
+
+  it('兵舍两座时「征兵」本旬还能再征一次（不置灰）', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    state.cities.jiangling.plots = (state.cities.jiangling.plots ?? []).map((plot, index) => ({
+      ...plot,
+      type: index < 2 ? ('barracks' as const) : ('market' as const),
+      level: 1,
+      constructing: undefined,
+    }));
+    state.cities.jiangling.recruitedThisTenDay = 1;
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+
+    const recruit = within(menu).getByTestId('city-command-command-recruit');
+    expect(recruit).toBeEnabled();
+    expect(recruit).not.toHaveAttribute('title', '本旬征兵次数已用尽（兵舍 2 座）');
+  });
+
+  it('征兵弹窗的「预计消耗」里带本旬剩余次数（x/兵舍座数）', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    state.cities.jiangling.plots = (state.cities.jiangling.plots ?? []).map((plot, index) => ({
+      ...plot,
+      type: index < 2 ? ('barracks' as const) : ('market' as const),
+      level: 1,
+      constructing: undefined,
+    }));
+    state.cities.jiangling.recruitedThisTenDay = 1;
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    await user.click(within(menu).getByTestId('city-command-command-recruit'));
+
+    expect(await screen.findByText(/本旬剩余 1\/2 次/)).toBeInTheDocument();
+  });
+
+  /** 按「地格序号 → 设施」列表铺江陵的建设用地（序号即绑定用的 plotIndex） */
+  function layoutJianglingPlots(state: ReturnType<typeof createGame>, layout: Array<'forge' | 'smithy' | 'stable' | 'barracks' | 'empty'>) {
+    state.cities.jiangling.plots = (state.cities.jiangling.plots ?? []).map((plot, index) => ({
+      ...plot,
+      type: (layout[index] ?? 'empty') as (typeof plot)['type'],
+      level: (layout[index] ?? 'empty') === 'empty' ? 0 : 1,
+      constructing: undefined,
+    }));
+    return state;
+  }
+
+  it('生产兵装面板：锻冶厂本旬次数用尽、工房全部在产时分别置灰并给出原因', async () => {
+    const user = userEvent.setup();
+    const state = layoutJianglingPlots(createGame('liu', 3), ['forge', 'smithy', 'stable']);
+    // 锻冶厂 1 座、本旬已产 1 次 → 用尽；工房 1 座且已有一件在产 → 全在产
+    state.cities.jiangling.armamentProducedThisTenDay = { forge: 1 };
+    state.officers['liu-bei'].location = {
+      kind: 'task', cityId: 'jiangling', task: 'armament', armamentType: 'ram',
+      amount: 2, remainingTenDays: 5, lead: true, plotIndex: 1,
+    };
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    await user.click(within(menu).getByTestId('city-command-command-produceArmament'));
+
+    const panel = screen.getByRole('region', { name: '生产兵装选择' });
+    for (const label of ['枪', '戟', '弩']) {
+      const card = within(panel).getByRole('button', { name: label });
+      expect(card).toBeDisabled();
+      expect(card).toHaveAttribute('title', '本旬锻冶厂生产次数已用尽（1 座）');
+    }
+    for (const label of ['冲车', '井阑']) {
+      const card = within(panel).getByRole('button', { name: label });
+      expect(card).toBeDisabled();
+      expect(card).toHaveAttribute('title', '工房已全部投入生产（在产上限 1 件）');
+    }
+    // 厩舍尚可生产：面板不停留在不可生产的兵装上，产能行显示其本旬剩余次数
+    const horse = within(panel).getByRole('button', { name: '军马' });
+    expect(horse).toBeEnabled();
+    expect(horse).toHaveClass('is-active');
+    expect(within(panel).getByText('本旬剩余 1/1 次')).toBeInTheDocument();
+  });
+
+  it('「生产兵装」本旬已无可生产的兵装时在菜单层置灰', async () => {
+    const user = userEvent.setup();
+    const state = layoutJianglingPlots(createGame('liu', 3), ['forge']);
+    // 仅 1 座锻冶厂且本旬已用尽 → 枪/戟/弩 次数用尽，其余兵装缺设施
+    state.cities.jiangling.armamentProducedThisTenDay = { forge: 1 };
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+
+    const produce = within(menu).getByTestId('city-command-command-produceArmament');
+    expect(produce).toBeDisabled();
+    expect(produce).toHaveAttribute('title', '本旬锻冶厂生产次数已用尽（1 座）');
+  });
+
+  it('生产兵装面板：工期制兵装的产能行显示「同时生产 x/y 件」（座数＝同时可执行件数）', async () => {
+    const user = userEvent.setup();
+    const state = layoutJianglingPlots(createGame('liu', 3), ['smithy', 'smithy']);
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    await user.click(within(menu).getByTestId('city-command-command-produceArmament'));
+
+    const panel = screen.getByRole('region', { name: '生产兵装选择' });
+    await user.click(within(panel).getByRole('button', { name: '冲车' }));
+    expect(within(panel).getByText('同时生产 0/2 件')).toBeInTheDocument();
+  });
 });

@@ -165,7 +165,12 @@ export type OfficerLocation =
   | { kind: 'unit'; unitId: string }
   | { kind: 'unaffiliated'; cityId: CityId }
   | { kind: 'transfer'; fromCityId: CityId; fromPassId?: PassId; targetCityId: CityId; targetPassId?: PassId; remainingTenDays: number }
-  | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'armament'; armamentType: ArmamentType; amount: number; remainingTenDays: number; lead?: boolean }
+  | {
+    kind: 'task'; cityId: CityId; passId?: PassId; task: 'armament'; armamentType: ArmamentType;
+    amount: number; remainingTenDays: number; lead?: boolean;
+    /** 生产所绑定的设施地格序号：该地格被拆除则该次生产中断（已投入资金不退还） */
+    plotIndex?: number;
+  }
   | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'research'; nodeId: TechNodeId; remainingTenDays: number; lead?: boolean }
   | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'cultivate'; nodeId: string; remainingTenDays: number }
   | { kind: 'task'; cityId: CityId; passId?: PassId; task: 'construction'; facility: string; plotIndex: number; remainingTenDays: number }
@@ -274,6 +279,9 @@ export interface City {
   patrolledThisTenDay?: boolean;
   /** 本旬已征兵的次数（上限＝该据点已建成兵舍座数，见 `innerAffairs.recruitTimesPerTenDay`） */
   recruitedThisTenDay?: number;
+  /** 本旬各类设施（锻冶厂/厩舍）已用于即时生产的次数：上限＝该设施已建成座数，
+   *  见 `innerAffairs.armamentTimesLeft`。工期制兵装（工房/造船）不按旬计次，故不写入此表。 */
+  armamentProducedThisTenDay?: Record<string, number>;
   /** 都市地格设施（市场/农场/兵舍/工房等），编号0~5 */
   plots?: CityPlot[];
 }
@@ -321,6 +329,9 @@ export interface Pass {
   patrolledThisTenDay?: boolean;
   /** 本旬已征兵的次数（上限＝该据点已建成兵舍座数，见 `innerAffairs.recruitTimesPerTenDay`） */
   recruitedThisTenDay?: number;
+  /** 本旬各类设施（锻冶厂/厩舍）已用于即时生产的次数：上限＝该设施已建成座数，
+   *  见 `innerAffairs.armamentTimesLeft`。工期制兵装（工房/造船）不按旬计次，故不写入此表。 */
+  armamentProducedThisTenDay?: Record<string, number>;
   /** 地格设施（与城池同构；关隘当前不开放建设，供兵舍/锻冶等加成逻辑复用） */
   plots?: CityPlot[];
   /** 唯一可通行的中心锚点格 */

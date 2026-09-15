@@ -4,7 +4,7 @@ import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { COMMAND_AP, OFFICER_COMMANDS, banishCandidatesOf, cityAvailableOfficers, passAvailableOfficers } from '../game/commands';
 import { ALLIED_ONLY_ACTIONS, DIPLOMACY_ACTIONS, DIPLOMACY_ACTION_LABELS } from '../game/diplomacy';
-import { ARMAMENT_FACILITY, hasEmptyPlot, hasPlotFacility, isCityBlocked, recruitTimesLeft, recruitTimesPerTenDay } from '../game/innerAffairs';
+import { armamentUnavailableReason, hasEmptyPlot, hasPlotFacility, isCityBlocked, recruitTimesLeft, recruitTimesPerTenDay } from '../game/innerAffairs';
 import { useGame } from '../game/store/GameProvider';
 import type { CityId, DiplomacyAction, GameCommand, GameState, PassId } from '../game/types';
 import type { CultivateCategory } from './CultivateDialog';
@@ -202,10 +202,10 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
           || recruitTimesLeft(menuGarrison) <= 0
           || actionPoints < COMMAND_AP.recruit;
       }
+      // 生产兵装：无任何生产设施，或本旬各类兵装都被卡住（次数用尽 / 设施全在产）时置灰
       if (item.command === 'produceArmament') {
         const menuGarrison = menuPass ?? menuCity;
-        const anyProducible = menuGarrison ? Object.values(ARMAMENT_FACILITY).some((facility) => hasPlotFacility(menuGarrison, facility)) : false;
-        if (!anyProducible) return true;
+        if (!menuGarrison || armamentUnavailableReason(state, menuGarrison) !== null) return true;
       }
     }
     if (item.command === 'research' && state && techResearching(state)) return true;
@@ -243,6 +243,10 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
       if (!menuGarrison || !hasPlotFacility(menuGarrison, 'barracks')) return '需先建设兵舍才能征兵';
       const barracksCount = recruitTimesPerTenDay(menuGarrison);
       if (recruitTimesLeft(menuGarrison) <= 0) return `本旬征兵次数已用尽（兵舍 ${barracksCount} 座）`;
+    }
+    if (item.command === 'produceArmament') {
+      const menuGarrison = menuPass ?? menuCity;
+      if (state && menuGarrison) return armamentUnavailableReason(state, menuGarrison) ?? undefined;
     }
     return undefined;
   };
