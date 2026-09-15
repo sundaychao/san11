@@ -20,7 +20,7 @@ import {
   REWARD_LOYALTY_GAIN,
 } from '../game/loyalty';
 import { RUMOR_BASE_CHANCE, RUMOR_GOLD_COST, RUMOR_MAX_CHANCE, RUMOR_MIN_CHANCE } from '../game/rumor';
-import { RUMOR_ADVICE_MIN_CHANCE } from '../game/strategist';
+import { RUMOR_ADVICE_MIN_CHANCE, RECRUIT_ADVICE_MIN_CHANCE } from '../game/strategist';
 
 /** 把某章节的全部展示文案拍平成一个字符串，便于做「数值是否抄对」的包含断言 */
 function flatten(id: string): string {
@@ -154,6 +154,9 @@ describe('游戏规则面板内容', () => {
     expectStandaloneNumber(text, RECRUIT_REFUSE_LOYALTY);
     expectStandaloneNumber(text, LOYALTY_CAP_SERVICE_MAX);
     expectStandaloneNumber(text, LOYALTY_CAP_POSITION_MAX);
+    // 登庸军师提示的门槛与流言同源抄录，改常量须同步规则页
+    expect(text).toContain(`${RECRUIT_ADVICE_MIN_CHANCE}%`);
+    expect(text).toContain('登庸的军师提示');
     for (const name of ['忠诚度基准值', '季初忠诚下降', '登用接受意愿', '仕龄', '克己复礼', '仁政', '论客']) {
       expect(text).toContain(name);
     }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { TROOP_LABELS } from '../game/armaments';
-import { officerIsBusy } from '../game/commands';
+import { cityAvailableOfficers, officerIsBusy } from '../game/commands';
 import type { GridCoord } from '../game/battle/grid';
 import { china42Passes } from '../game/scenario/jingxiang208';
 import { useGame } from '../game/store/GameProvider';
@@ -178,20 +178,25 @@ export function ForceOverviewPanel({ onFocus }: ForceOverviewPanelProps = {}) {
 
       {activeTab === 'city' && (
         <ol className="force-overview-list">
-          {cities.map((city) => (
-            <li key={city.id}>
-              <button
-                type="button"
-                className="force-overview-row"
-                data-testid={`force-overview-city-${city.id}`}
-                title={`${city.name}：居中显示该城池`}
-                onClick={() => focusOn(cityCell(state, city.id))}
-              >
-                <strong>{city.name}</strong>
-                <small>{city.troops.toLocaleString('en-US')}兵 / {city.population.toLocaleString('en-US')}人</small>
-              </button>
-            </li>
-          ))}
+          {cities.map((city) => {
+            // 本城本旬是否还有可下令的武将：直接用引擎口径 `cityAvailableOfficers`
+            // （驻守本城、在世、本旬未行动）。全军已行动 / 武将都在途出征 / 只剩执行任务者 → 置灰。
+            const hasReadyOfficer = cityAvailableOfficers(state, state.playerForceId, city.id).length > 0;
+            return (
+              <li key={city.id}>
+                <button
+                  type="button"
+                  className={`force-overview-row ${hasReadyOfficer ? 'is-ready' : 'has-acted'}`}
+                  data-testid={`force-overview-city-${city.id}`}
+                  title={hasReadyOfficer ? `${city.name}：居中显示该城池` : `${city.name}：本旬已无可行动的武将`}
+                  onClick={() => focusOn(cityCell(state, city.id))}
+                >
+                  <strong>{city.name}</strong>
+                  <small>{city.troops.toLocaleString('en-US')}兵 / {city.population.toLocaleString('en-US')}人</small>
+                </button>
+              </li>
+            );
+          })}
         </ol>
       )}
 

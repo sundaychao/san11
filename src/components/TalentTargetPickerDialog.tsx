@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import { officerLoyalty, recruitWillOf, recruitWillTier, type RecruitWillTierKey } from '../game/loyalty';
+import { officerLoyalty, recruitWillOf, recruitWillTier, talentTargetStationAllows, type RecruitWillTierKey } from '../game/loyalty';
 import { positionDefinition } from '../game/ranks';
 import type { GameState, Officer } from '../game/types';
 
@@ -163,27 +163,32 @@ export function TalentTargetPickerDialog({ state, executorId, selectedId, onPick
             <tbody>
               {rows.map((officer) => {
                 const isMonarch = officer.forceId !== null && state.forces[officer.forceId]?.leaderId === officer.id;
+                // 默认口径：在野武将寄居其他势力城池时不可登庸（与君主同样显示 × 且不可点）
+                const isStationLocked = !talentTargetStationAllows(state, state.playerForceId, officer);
+                const isLocked = isMonarch || isStationLocked;
                 const forceName = officer.forceId ? state.forces[officer.forceId]?.name ?? '—' : '';
-                const willTier = willTiers.get(officer.id) ?? 'none';
+                const willTier = isLocked ? 'none' : willTiers.get(officer.id) ?? 'none';
                 return (
                   <tr
                     key={officer.id}
                     className={[
                       'talent-target-row',
                       isMonarch ? 'is-monarch' : '',
+                      isStationLocked ? 'is-station-locked' : '',
                       officer.id === selectedId ? 'is-selected' : '',
                       officer.forceId === null ? 'is-unaffiliated' : '',
                     ].join(' ').trim()}
-                  onClick={isMonarch ? undefined : () => onPick(officer.id)}
-                  data-testid={`talent-target-${officer.id}`}
-                >
-                  <td className={`talent-name${willTier !== 'none' ? ` is-will-${willTier}` : ''}`}>{officer.name}</td>
-                  <td>{forceName}</td>
-                  <td>{identityOf(state, officer)}</td>
-                  <td>{officer.forceId === null ? '---' : officerLoyalty(officer)}</td>
-                  <td>{stationName(state, officer)}</td>
-                  <td>{whereaboutOf(state, officer)}</td>
-                  <td className="talent-ok">{isMonarch ? '×' : '○'}</td>
+                    title={isStationLocked ? `${officer.name}寄居他方城池，无法前往登庸` : isMonarch ? '君主不可登庸' : undefined}
+                    onClick={isLocked ? undefined : () => onPick(officer.id)}
+                    data-testid={`talent-target-${officer.id}`}
+                  >
+                    <td className={`talent-name${willTier !== 'none' ? ` is-will-${willTier}` : ''}`}>{officer.name}</td>
+                    <td>{forceName}</td>
+                    <td>{identityOf(state, officer)}</td>
+                    <td>{officer.forceId === null ? '---' : officerLoyalty(officer)}</td>
+                    <td>{stationName(state, officer)}</td>
+                    <td>{whereaboutOf(state, officer)}</td>
+                    <td className="talent-ok">{isLocked ? '×' : '○'}</td>
                   <td>{officer.stats.leadership}</td>
                   <td>{officer.stats.war}</td>
                   <td>{officer.stats.intelligence}</td>
@@ -206,7 +211,7 @@ export function TalentTargetPickerDialog({ state, executorId, selectedId, onPick
               </span>
             ))}
           </span>
-          <span className="talent-target-hint">在野武将排最上 · 点击行即选定 · 君主（×）不可登庸</span>
+          <span className="talent-target-hint">在野武将排最上 · 点击行即选定 · 君主与寄居他方城池者（×）不可登庸</span>
           <button type="button" className="secondary-button" onClick={onClose}>返回</button>
         </footer>
       </section>

@@ -28,11 +28,11 @@ function injectFieldOfficer(state: GameState, cityId: string, opts?: { likes?: s
   return officer;
 }
 
-/** 构造：曹操（宛）跨城登庸「江陵在野武将」，返回执行后的状态与目标武将 */
+/** 构造：曹操（宛）跨城登庸「汉中在野武将」（无主城，符合默认登庸口径），返回执行后的状态与目标武将 */
 function setupCrossCityJourney(seed = 42) {
   const state = createGame('cao', seed);
-  const target = injectFieldOfficer(state, 'jiangling');
-  const travel = Math.max(1, strongholdTransferDuration(state, state.cities.wan, state.cities.jiangling));
+  const target = injectFieldOfficer(state, 'hanzhong');
+  const travel = Math.max(1, strongholdTransferDuration(state, state.cities.wan, state.cities.hanzhong));
   const command = { type: 'talent' as const, cityId: 'wan' as CityId, officerId: 'cao-cao', targetOfficerId: target.id };
   return { state, target, travel, command };
 }
@@ -381,6 +381,29 @@ describe('command engine', () => {
     expect(next.officers['zhao-yun'].forceId).toBeNull();
     expect(next.officers['zhao-yun'].bannedUntilMonth).toBeUndefined();
     expect(next.officers['liu-bei'].acted).toBe(true);
+  });
+
+  it('默认不可登庸寄居其他势力城池的在野武将（本城与无主城照常）', () => {
+    const state = createGame('liu', 1);
+    const command = (targetOfficerId: string) => ({
+      type: 'talent' as const, cityId: 'jiangling' as CityId, officerId: 'liu-bei', targetOfficerId,
+    });
+
+    // 庞统寄居襄阳（曹操势力）→ 拒绝，理由可读
+    expect(state.cities.xiangyang.ownerId).toBe('cao');
+    expect(validateCommand(state, 'liu', command('pang-tong'))).toContain('庞统寄居他方城池，无法前往登庸');
+
+    // 本城（江陵）在野赵云 → 放行
+    expect(validateCommand(state, 'liu', command('zhao-yun'))).toEqual([]);
+
+    // 无主城池里的在野武将不属于任何势力 → 放行
+    const field = injectFieldOfficer(state, 'wuwei');
+    expect(state.cities.wuwei.ownerId).toBeNull();
+    expect(validateCommand(state, 'liu', command(field.id))).toEqual([]);
+
+    // 该城一旦有主（曹操），随即封禁
+    state.cities.wuwei.ownerId = 'cao';
+    expect(validateCommand(state, 'liu', command(field.id))).toContain('田野在野寄居他方城池，无法前往登庸');
   });
 
   it('starts a personnel-only transfer with travel time based on city distance', () => {
@@ -902,7 +925,7 @@ describe('跨城登庸差旅命令', () => {
     expect(location).toMatchObject({
       kind: 'recruitJourney',
       fromCityId: 'wan',
-      targetCityId: 'jiangling',
+      targetCityId: 'hanzhong',
       targetOfficerId: target.id,
       phase: 'outbound',
       remainingTenDays: travel,
@@ -958,7 +981,7 @@ describe('跨城登庸差旅命令', () => {
     const { state, command } = setupCrossCityJourney();
     const journey = executeCommand(state, 'cao', command);
     expect(validateCommand(journey, 'cao', {
-      type: 'acceptRecruitDebate', cityId: 'wan', officerId: 'cao-cao', targetOfficerId: 'field-jiangling',
+      type: 'acceptRecruitDebate', cityId: 'wan', officerId: 'cao-cao', targetOfficerId: 'field-hanzhong',
     })).toEqual([expect.stringContaining('没有待处理')]);
   });
 });

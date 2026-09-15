@@ -10,7 +10,7 @@ import {
   rumorTargetOptions,
 } from './rumor';
 import { executeCommand, officerIsBusy } from './commands';
-import { RUMOR_ADVICE_MIN_CHANCE, rumorAdviceOf, strategistOf } from './strategist';
+import { RUMOR_ADVICE_MIN_CHANCE, RECRUIT_ADVICE_MIN_CHANCE, recruitAdviceOf, recruitSuccessChance, rumorAdviceOf, strategistOf } from './strategist';
 import { createGame } from './scenario/jingxiang208';
 import { settleTenDay } from './turn';
 import type { GameState, Officer } from './types';
@@ -113,6 +113,75 @@ function findRumorJourneySeed(want: 'success' | 'fail' | 'captured') {
   }
   throw new Error('no seed satisfies the expected rumor journey branch');
 }
+
+describe('登庸军师评估', () => {
+  /** 江陵据点里待命、未行动的武将（军师评估的候选执行者） */
+  function jianglingGarrison(state: GameState): Officer[] {
+    return Object.values(state.officers).filter((officer) =>
+      officer.forceId === 'liu' && !officer.acted
+      && officer.location.kind === 'city' && officer.location.cityId === 'jiangling');
+  }
+
+  it('recruitAdviceOf：逐一测算我方武将，推举成功率最高者（过了半即推举）', () => {
+    const state = createGame('liu', 3);
+    const garrison = jianglingGarrison(state);
+    const target = state.officers['zhao-yun']; // 江陵在野赵云（登庸页的默认对象）
+    const advice = recruitAdviceOf(state, garrison, target);
+
+    expect(advice.viable).toBe(true);
+    expect(advice.chance).toBeGreaterThanOrEqual(RECRUIT_ADVICE_MIN_CHANCE);
+    // 推举者即逐人测算里的最高者：刘备（魅力 99 压过甘氏 42）
+    expect(advice.executorId).toBe('liu-bei');
+    expect(advice.chance).toBe(recruitSuccessChance(state, state.officers['liu-bei'], target));
+    // 魅力直接入算：甘氏的成算必然低于刘备
+    expect(advice.chance).toBeGreaterThan(recruitSuccessChance(state, state.officers['gan-shi'], target));
+  });
+
+  it('recruitAdviceOf：必定同意折算 100%，必拒 / 无意出仕折算 0%', () => {
+    const state = createGame('liu', 3);
+    const garrison = jianglingGarrison(state);
+    const target = state.officers['zhao-yun'];
+    // 素来亲善我方君主 → 不待舌战直接出仕
+    target.likes = ['liu-bei'];
+    expect(recruitSuccessChance(state, state.officers['liu-bei'], target)).toBe(100);
+    expect(recruitAdviceOf(state, garrison, target).chance).toBe(100);
+
+    // 拒绝：目标是君主 → 必拒，且原因是与执行者无关的共有原因
+    const monarch = recruitAdviceOf(state, garrison, state.officers['cao-cao']);
+    expect(monarch.viable).toBe(false);
+    expect(monarch.chance).toBe(0);
+    expect(monarch.rejected).toBe(true);
+    expect(monarch.reasons).toContain('对方是一方君主');
+
+    // 拒绝：在仕忠诚高于必拒线
+    state.officers['cao-ren'].loyalty = 99;
+    const loyal = recruitAdviceOf(state, garrison, state.officers['cao-ren']);
+    expect(loyal.rejected).toBe(true);
+    expect(loyal.reasons.some((reason) => reason.includes('拒不背主'))).toBe(true);
+  });
+
+  it('recruitAdviceOf：成算不过半只出忠告、不推举人选，并报出我方最高把握', () => {
+    const state = createGame('liu', 3);
+    const garrison = jianglingGarrison(state);
+    const target = state.officers['zhao-yun'];
+    // 全员魅力压到 40 以下：意愿被压在中档之下，成算最多三成
+    for (const officer of garrison) officer.stats = { ...officer.stats, charisma: 30 };
+    const advice = recruitAdviceOf(state, garrison, target);
+
+    expect(advice.viable).toBe(false);
+    expect(advice.executorId).toBeUndefined();
+    expect(advice.chance).toBeLessThan(RECRUIT_ADVICE_MIN_CHANCE);
+    expect(advice.chance).toBeGreaterThan(0);
+    // 未到门槛但并非必拒 → 不带必拒原因
+    expect(advice.rejected).toBe(false);
+    expect(advice.reasons).toEqual([]);
+
+    // 成算归零（在仕忠诚高、意愿为负）：既不推举人选，也不算「必拒」
+    const hopeless = recruitAdviceOf(state, garrison, state.officers['xun-yu']);
+    expect(hopeless.viable).toBe(false);
+    expect(hopeless.chance).toBe(0);
+  });
+});
 
 describe('军师模块', () => {
   it('strategistOf：已任命的军师优先，未任命回退智力最高者', () => {

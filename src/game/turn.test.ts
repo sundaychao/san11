@@ -969,11 +969,11 @@ describe('跨城登庸旬结算', () => {
     return location;
   }
 
-  /** 曹操（宛）→ 江陵跨城登庸的起点状态 */
+  /** 曹操（宛）→ 汉中（无主城）跨城登庸的起点状态：目标城不属任何势力，符合默认登庸口径 */
   function startJourney(opts?: { likes?: string[]; hates?: string[] }) {
     const state = createGame('cao', 42);
-    const target = injectFieldOfficer(state, 'jiangling', opts);
-    const travel = Math.max(1, strongholdTransferDuration(state, state.cities.wan, state.cities.jiangling));
+    const target = injectFieldOfficer(state, 'hanzhong', opts);
+    const travel = Math.max(1, strongholdTransferDuration(state, state.cities.wan, state.cities.hanzhong));
     const next = executeCommand(state, 'cao', {
       type: 'talent', cityId: 'wan', officerId: 'cao-cao', targetOfficerId: target.id,
     } as never);
@@ -983,7 +983,7 @@ describe('跨城登庸旬结算', () => {
   it('去程推进→抵达即允（亲善君主）：目标随行返程，两人按时同城归队', () => {
     const { next: journey } = startJourney({ likes: ['cao-cao'] });
     let state = journey;
-    const targetId = 'field-jiangling';
+    const targetId = 'field-hanzhong';
     const techPBefore = state.forces.cao.techP ?? 0;
 
     // 把去程压在最后一旬，一旬后抵达结算
@@ -1008,7 +1008,7 @@ describe('跨城登庸旬结算', () => {
 
     // 返程到点：双双回到出发城（宛），恢复待命
     journeyLocOf(state, 'cao-cao').remainingTenDays = 1;
-    state.officers[targetId].location = { kind: 'recruitJourney', fromCityId: 'wan', targetCityId: 'jiangling', targetOfficerId: targetId, remainingTenDays: 1, returnTenDays: 1, phase: 'return' };
+    state.officers[targetId].location = { kind: 'recruitJourney', fromCityId: 'wan', targetCityId: 'hanzhong', targetOfficerId: targetId, remainingTenDays: 1, returnTenDays: 1, phase: 'return' };
     state = settleTenDay(state);
     expect(state.officers['cao-cao'].location).toEqual({ kind: 'city', cityId: 'wan' });
     expect(state.officers['cao-cao'].cityId).toBe('wan');
@@ -1018,7 +1018,7 @@ describe('跨城登庸旬结算', () => {
 
   it('抵达被拒：执行武将只身返程，目标依然在野', () => {
     let state = startJourney({ hates: ['cao-cao'] }).next;
-    const targetId = 'field-jiangling';
+    const targetId = 'field-hanzhong';
     journeyLocOf(state, 'cao-cao').remainingTenDays = 1;
     state = settleTenDay(state);
 
@@ -1053,7 +1053,7 @@ describe('跨城登庸旬结算', () => {
 
   it('舌战占优：目标应允后随执行武将同行归来', () => {
     let state = startJourney().next;
-    const targetId = 'field-jiangling';
+    const targetId = 'field-hanzhong';
     journeyLocOf(state, 'cao-cao').remainingTenDays = 0;
     state.pendingRecruitDebate = { recruiterId: 'cao-cao', targetId };
     const techPBefore = state.forces.cao.techP ?? 0;
@@ -1081,7 +1081,7 @@ describe('跨城登庸旬结算', () => {
 
   it('舌战失利：目标禁仕 3 个月，执行武将只身返回', () => {
     let state = startJourney().next;
-    const targetId = 'field-jiangling';
+    const targetId = 'field-hanzhong';
     journeyLocOf(state, 'cao-cao').remainingTenDays = 0;
     state.pendingRecruitDebate = { recruiterId: 'cao-cao', targetId };
 

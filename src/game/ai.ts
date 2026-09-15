@@ -9,7 +9,7 @@ import { RUMOR_AP_COST, RUMOR_GOLD_COST } from './rumor';
 import { DIPLOMACY_AP_COST, FRIENDLY_TIER_MIN, GOODWILL_GOLD_COST, areAllies, areNonAggressed, forceDiplomacy } from './diplomacy';
 import { CAPTIVE_DISPOSE_AP_COST, canBuildPlot, cityPlots, COMMAND_OFFICER_MAX, hasPlotFacility, plotCost } from './innerAffairs';
 import { capturableByLoyalty } from './captives';
-import { recruitWillOf } from './loyalty';
+import { recruitWillOf, talentTargetStationAllows } from './loyalty';
 import { legionsOf } from './innerAffairs';
 import { nextRandom } from './random';
 import type { City, CityId, ForceId, GameCommand, GameState, Officer } from './types';
@@ -45,9 +45,11 @@ function cityCommand(
     const officer = bestOfficer(officers, stat);
     if (!officer) return null;
     // 登庸目标：同城在野优先，其次他城在野（AI 不主动策反他势力武将），须登用意愿可行且未被禁仕
+    // 默认口径：寄居其他势力城池的在野武将不可登庸（与我方玩家同一判据）
     const unaffiliated = Object.values(state.officers).filter((candidate) =>
       candidate.forceId === null && !candidate.deathMonth
-      && !(candidate.bannedUntilMonth && candidate.bannedUntilMonth > state.month));
+      && !(candidate.bannedUntilMonth && candidate.bannedUntilMonth > state.month)
+      && talentTargetStationAllows(state, forceId, candidate));
     const sameCity = unaffiliated.filter((candidate) => candidate.location.kind === 'unaffiliated' && candidate.location.cityId === city.id);
     const willOk = (candidate: Officer) => {
       const will = recruitWillOf(state, officer, candidate);

@@ -1,6 +1,6 @@
 import { nextRandom } from './random';
 import { cityCanBuildFacility, hasCityTrait, forceMaxTraining } from './cityTraits';
-import { REWARD_AP_COST, REWARD_GOLD_COST, REWARD_LOYALTY_GAIN, loyaltyCapOf, officerLoyalty, recruitWillOf, recruitmentInitialLoyalty, setOfficerLoyalty, talentDebateTriggerChance, willSuccessChance } from './loyalty';
+import { REWARD_AP_COST, REWARD_GOLD_COST, REWARD_LOYALTY_GAIN, loyaltyCapOf, officerLoyalty, recruitWillOf, recruitmentInitialLoyalty, setOfficerLoyalty, talentDebateTriggerChance, talentTargetStationAllows, willSuccessChance } from './loyalty';
 import { addOfficerMerit, applyPositionStatDelta, MERIT_PER_COMMAND, officerIsOnCampaign, officerMerit, positionDefinition, forceRankOf, rankDefinition, rankIndex } from './ranks';
 import { ARMAMENT_GOLD_COST, ARMAMENT_LABELS, ARMAMENT_TYPES, armamentCost, armamentsOf, armamentProductionTenDays, clampArmamentsTo, isDelayedArmament, produceArmamentYield } from './armaments';
 import { ABILITY_NODE_MAP, ABILITY_RESEARCH_GOLD, CULTIVATE_TEN_DAYS, abilityCultivateRemaining, abilityNodeStatus, canCultivateOfficer } from './abilityResearch';
@@ -17,7 +17,7 @@ import { createDebate } from './debate';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './battle/grid';
 import { cellAt } from './battle/movementRules';
 import { PLOT_AP_COST, PLOT_BASE_VALUE, PLOT_LABELS, PLOT_LEVEL_MULTIPLIER, LEGION_AP_COST, STRATEGIST_AP_COST, CAPTIVE_DISPOSE_AP_COST, applyLegionCommand, armamentYieldMultiplier, ARMAMENT_FACILITY, armamentFacilityLabel, barracksYieldMultiplier, canBuildPlot, canBuildPlotAtCoord, canDevelopWhenBlocked, cancelCityPlot, cityPlots, COMMAND_OFFICER_MAX,
-                             appointSuccessorGovernor, hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
+                             appointSuccessorGovernor, hasEnemyUnitsNear, hasPlotFacility, isCityBlocked, isPlotOccupiedByOtherCity, patrolOrderGain, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, recruitTimesLeft, recruitTimesPerTenDay, startBuildCityPlot, trainMoraleGain, UNIQUE_FACILITIES } from './innerAffairs';
 import { appointStrongholdSuccessor, isPassGarrison } from './strongholds';
 import { cityResourceCaps, clampStrongholdsInPlace } from './strongholdCapacity';
 import type { City, CityId, DiplomacyAction, ForceId, GameCommand, GameState, Legion, Officer, Pass, PassId, TechNodeId, TerrainType } from './types';
@@ -127,11 +127,14 @@ export function rollMerchants(state: GameState): void {
     // 训练/巡查次数每旬重置
     city.trainedThisTenDay = false;
     city.patrolledThisTenDay = false;
+    // 征兵次数同样每旬归零（本旬可征次数上限＝已建成兵舍座数）
+    city.recruitedThisTenDay = 0;
   }
-  // 关隘也随每旬重置训练/巡查标记（关隘无治安值、无商人到访）
+  // 关隘也随每旬重置训练/巡查/征兵标记（关隘无治安值、无商人到访）
   for (const pass of Object.values(state.passes ?? {})) {
     pass.trainedThisTenDay = false;
     pass.patrolledThisTenDay = false;
+    pass.recruitedThisTenDay = 0;
   }
 }
 
@@ -823,6 +826,7 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
       } else {
         if (target.forceId && state.forces[target.forceId]?.leaderId === target.id) errors.push('无法登庸一方君主');
         if (target.bannedUntilMonth && target.bannedUntilMonth > state.month) errors.push(`${target.name}短期内不愿仕官，暂时无法登用`);
+        if (!talentTargetStationAllows(state, forceId, target)) errors.push(`${target.name}寄居他方城池，无法前往登庸`);
       }
       if (commandGarrison(state, command).gold < 500) errors.push('资金不足 500');
     }
@@ -1004,7 +1008,11 @@ export function validateCommand(state: GameState, forceId: ForceId, command: Gam
   const goldCost = commandGoldCost(command, stronghold);
   if (stronghold.gold < goldCost) errors.push(`资金不足 ${goldCost}`);
   if (command.type === 'recruit') {
-    if (!hasPlotFacility(city, 'barracks')) errors.push('需先建设兵舍才能征兵');
+    if (!hasPlotFacility(stronghold, 'barracks')) errors.push('需先建设兵舍才能征兵');
+    // 每旬可征兵次数＝已建成兵舍座数，用尽后本旬不能再征（下条为「有兵舍但次数用完」）
+    else if (recruitTimesLeft(stronghold) <= 0) {
+      errors.push(`本旬征兵次数已用尽（兵舍 ${recruitTimesPerTenDay(stronghold)} 座）`);
+    }
     if (city.food < 500) errors.push('兵粮不足 500');
     if (city.population < 500) errors.push('人口不足 500');
   }
@@ -1284,6 +1292,8 @@ export function executeCommand(state: GameState, forceId: ForceId, command: Game
       city.gold -= 800;
       city.food -= 500;
       city.population -= 500;
+      // 记入本旬征兵次数（上限＝已建成兵舍座数，`recruitTimesPerTenDay`）
+      stronghold.recruitedThisTenDay = (stronghold.recruitedThisTenDay ?? 0) + 1;
       // 新征士兵士气50，稀释城池士气：(原有士兵×原有士气 + 新增士兵×50) ÷ 征兵后总士兵
       // 劲勇城：新征士兵士气以势力最大士气值计算
       const prevTroops = city.troops;

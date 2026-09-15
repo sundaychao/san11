@@ -543,14 +543,99 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(monarchRow).toBeTruthy();
     expect(within(monarchRow!).getByText('×')).toBeVisible();
 
-    // 点击一名非君主武将行 → 选定并返回登庸页
+    // 点击一名非君主武将行 → 选定并返回登庸页（跳过不可登庸行：君主 / 寄居他方城池）
     const targetRow = within(picker)
       .getAllByTestId(/^talent-target-/)
-      .find((row) => row.getAttribute('data-testid') !== 'talent-target-picker' && !row.className.includes('is-monarch') && row.getAttribute('data-testid') !== 'talent-target-zhao-yun')!;
+      .find((row) => row.getAttribute('data-testid') !== 'talent-target-picker'
+        && !row.className.includes('is-monarch')
+        && !row.className.includes('is-station-locked')
+        && row.getAttribute('data-testid') !== 'talent-target-zhao-yun')!;
     const name = targetRow.querySelector('.talent-name')!.textContent!;
     await user.click(targetRow);
     expect(screen.queryByTestId('talent-target-picker')).not.toBeInTheDocument();
     expect(within(dialog).getByLabelText('选择对象武将')).toHaveTextContent(name);
+  });
+
+  it('默认不可登庸寄居他势力城池的在野武将：列表标 × 且点击无效', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-talent'));
+    await user.click(within(menu).getByTestId('city-command-command-talent'));
+    const dialog = screen.getByRole('dialog', { name: '登庸' });
+    await user.click(within(dialog).getByLabelText('选择对象武将'));
+    const picker = screen.getByTestId('talent-target-picker');
+
+    // 庞统寄居襄阳（曹操势力），履行列 ×、不可点，点击后列表不关闭
+    const lockedRow = within(picker).getByTestId('talent-target-pang-tong');
+    expect(lockedRow.className).toContain('is-station-locked');
+    expect(within(lockedRow).getByText('×')).toBeVisible();
+    await user.click(lockedRow);
+    expect(screen.getByTestId('talent-target-picker')).toBeInTheDocument();
+
+    // 本城（江陵）在野赵云照常可选
+    const zhaoYunRow = within(picker).getByTestId('talent-target-zhao-yun');
+    expect(zhaoYunRow.className).not.toContain('is-station-locked');
+    expect(within(zhaoYunRow).getByText('○')).toBeVisible();
+    await user.click(zhaoYunRow);
+    expect(screen.queryByTestId('talent-target-picker')).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText('选择对象武将')).toHaveTextContent('赵云');
+  });
+
+  it('登庸页军师提示：有把握时推举我方行动武将，点击任意处即采纳', async () => {
+    const user = userEvent.setup();
+    const state = createGame('liu', 3);
+    // 甘氏魅力拉到 140：登用成算必然压过默认执行者（刘备），推举人选才是「换人」而非「点头」
+    state.officers['gan-shi'].stats = { ...state.officers['gan-shi'].stats, charisma: 140 };
+    renderState(state);
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-talent'));
+    await user.click(within(menu).getByTestId('city-command-command-talent'));
+    const dialog = screen.getByRole('dialog', { name: '登庸' });
+
+    // 默认对象（同城在野赵云）已有把握 → 军师指名甘氏，并标出预估成功率
+    const hint = screen.getByTestId('strategist-hint');
+    expect(hint).toHaveTextContent('这趟差事，还请务必交予我去说服赵云。');
+    expect(hint).toHaveTextContent('甘氏');
+    expect(hint).toHaveTextContent('预估成功率');
+    expect(hint).toHaveTextContent('点击任意处采纳');
+
+    // 点提示框以外的任意区域 → 提示收起、登庸界面保留、甘氏填进「执行武将」
+    await user.click(within(dialog).getByRole('heading', { name: '登庸' }));
+    expect(screen.queryByTestId('strategist-hint')).toBeNull();
+    expect(screen.getByRole('dialog', { name: '登庸' })).toBeInTheDocument();
+    expect((within(dialog).getByLabelText('执行武将') as HTMLSelectElement).value).toBe('gan-shi');
+  });
+
+  it('登庸页军师提示：成算不足时只出忠告、不指名任何人', async () => {
+    const user = userEvent.setup();
+    renderState();
+
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-talent'));
+    await user.click(within(menu).getByTestId('city-command-command-talent'));
+    const dialog = screen.getByRole('dialog', { name: '登庸' });
+
+    // 改选高忠诚的曹操武将：我方谁去都没成算
+    await user.click(within(dialog).getByLabelText('选择对象武将'));
+    const picker = screen.getByTestId('talent-target-picker');
+    await user.click(within(picker).getByTestId('talent-target-cao-ren'));
+
+    // 换了对象 → 军师重新评估（提示框重新可见）：只出忠告，不给可采纳的人选
+    const hint = screen.getByTestId('strategist-hint');
+    expect(hint).toHaveTextContent('依我看来，说动此人恐是难如登天啊。');
+    expect(hint).toHaveTextContent('· 军师');
+    expect(hint).not.toHaveTextContent('点击任意处采纳');
+
+    const executorBefore = (within(dialog).getByLabelText('执行武将') as HTMLSelectElement).value;
+    await user.click(within(dialog).getByRole('heading', { name: '登庸' }));
+    expect(screen.queryByTestId('strategist-hint')).toBeNull();
+    expect((within(dialog).getByLabelText('执行武将') as HTMLSelectElement).value).toBe(executorBefore);
   });
 
   it('流言目标据点列表页：含敌城排除空关，选定后军师在游戏界面底部弹出提示', async () => {
@@ -920,6 +1005,28 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(within(dialog).getByRole('button', { name: '木兽' })).toBeVisible();
     expect(within(dialog).getByRole('button', { name: '投石车' })).toBeVisible();
     expect(within(dialog).queryByRole('button', { name: '冲车' })).not.toBeInTheDocument();
+  });
+
+  it('生产兵装面板：缺设施的兵装置灰不可选，默认选中第一种可生产的兵装', async () => {
+    const user = userEvent.setup();
+
+    const state = createGame('liu', 3);
+    seedCityFacility(state, 'jiangling', 'smithy'); // 只有工房 → 枪/戟/弩/军马/楼船 全部缺设施
+    renderState(state);
+    await user.click(screen.getByRole('button', { name: /^江陵 刘备/ }));
+    const menu = screen.getByTestId('city-command-menu');
+    await user.click(within(menu).getByTestId('city-command-section-urban'));
+    await user.click(within(menu).getByTestId('city-command-command-produceArmament'));
+
+    const panel = screen.getByRole('region', { name: '生产兵装选择' });
+    // 缺锻冶 → 枪/戟/弩；缺厩舍 → 军马；缺造船 → 楼船
+    for (const label of ['枪', '戟', '弩', '军马', '楼船']) {
+      expect(within(panel).getByRole('button', { name: label })).toBeDisabled();
+    }
+    expect(within(panel).getByRole('button', { name: '冲车' })).toBeEnabled();
+    expect(within(panel).getByRole('button', { name: '井阑' })).toBeEnabled();
+    // 默认不会停在不可生产的「枪」上，而是落到本城第一种可生产兵装
+    expect(within(panel).getByRole('button', { name: '冲车' })).toHaveClass('is-active');
   });
 
   it('生产兵装面板显示名吃科技：研究「机械」后冲车卡片显示为「木兽」，库存数值不变', async () => {

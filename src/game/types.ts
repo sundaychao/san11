@@ -272,6 +272,8 @@ export interface City {
   trainedThisTenDay?: boolean;
   /** 本旬是否已巡查过（每旬每城仅一次） */
   patrolledThisTenDay?: boolean;
+  /** 本旬已征兵的次数（上限＝该据点已建成兵舍座数，见 `innerAffairs.recruitTimesPerTenDay`） */
+  recruitedThisTenDay?: number;
   /** 都市地格设施（市场/农场/兵舍/工房等），编号0~5 */
   plots?: CityPlot[];
 }
@@ -317,6 +319,8 @@ export interface Pass {
   trainedThisTenDay?: boolean;
   /** 本旬是否已巡查过（每旬每据点仅一次） */
   patrolledThisTenDay?: boolean;
+  /** 本旬已征兵的次数（上限＝该据点已建成兵舍座数，见 `innerAffairs.recruitTimesPerTenDay`） */
+  recruitedThisTenDay?: number;
   /** 地格设施（与城池同构；关隘当前不开放建设，供兵舍/锻冶等加成逻辑复用） */
   plots?: CityPlot[];
   /** 唯一可通行的中心锚点格 */

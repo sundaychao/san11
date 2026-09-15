@@ -5,17 +5,17 @@ import { ARMAMENT_GOLD_COST, ARMAMENT_TYPES, armamentCost, armamentLabelFor, arm
 import { COMMAND_AP, COMMAND_LABELS, SELL_FEE_RATIO, TRADE_MAX_GRAIN, envoyTravelTenDays, grainPriceOf, patrolGoldCost, passAvailableOfficers, quoteTrade, researchTechPCost, rumorTravelTenDays, strongholdTransferDuration, tradeEffectMultiplier, tradeEffectPercent, validateCommand } from '../game/commands';
 import { TECH_NODES, TECH_SYSTEMS, canBuildFacility, facilityGateNode, hasTech, moraleCapOf, researchTenDays, researchableTechs, techCostOf, techNodeOf } from '../game/techs';
 import { EXPLORE_AP_PER_OFFICER, EXPLORE_GOLD_PER_OFFICER, treasureDefinition, treasureEffectText } from '../game/treasures';
-import { REWARD_GOLD_COST, loyaltyCapOf, officerLoyalty, recruitWillOf, recruitWillTier, rewardLoyaltyGain } from '../game/loyalty';
+import { REWARD_GOLD_COST, loyaltyCapOf, officerLoyalty, recruitWillOf, recruitWillTier, rewardLoyaltyGain, talentTargetStationAllows } from '../game/loyalty';
 import { ABILITY_CENTER, ABILITY_NODE_MAP, ABILITY_NODES, ABILITY_RESEARCH_GOLD, ABILITY_START_ID, ABILITY_TREE_COLS, ABILITY_TREE_ROWS, abilityCultivateRemaining, abilityEffectText, abilityKindLabel, abilityNodeStatus, canCultivateOfficer } from '../game/abilityResearch';
 import { POSITIONS, forceRankOf, officerIsOnCampaign, officerMerit, positionDefinition, rankDefinition, rankIndex } from '../game/ranks';
 import { capturableByLoyalty, captivesOf, recruitCaptiveChance, captiveRecruitLoyaltyThreshold } from '../game/captives';
 import { DIPLOMACY_ACTION_LABELS, DIPLOMACY_GOLD_MAX, DIPLOMACY_GOLD_STEP, GOODWILL_GOLD_COST, NEUTRAL_DIPLOMACY, TRUCE_MONTHS_MAX, TRUCE_MONTHS_MIN, areAllies, forceDiplomacy, forceRelationView } from '../game/diplomacy';
-import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasEmptyPlot, hasPlotFacility, patrolOrderGain, plotBuiltCount, plotConstructingCount, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
+import { LEGION_LABELS, PLOT_LABELS, ARMAMENT_FACILITY, COMMAND_OFFICER_MAX, armamentFacilityLabel, armamentYieldMultiplier, barracksYieldMultiplier, constructionPolitics, constructTenDaysForOfficers, defaultOfficersFor, hasEmptyPlot, hasPlotFacility, patrolOrderGain, plotBuiltCount, plotConstructingCount, plotCost, plotCountIncludingConstructing, plotTotalLevel, recruitBaseYield, recruitTimesLeft, recruitTimesPerTenDay, trainMoraleGain, legionContaining, legionsOf, UNIQUE_FACILITIES as UNIQUE_PLOT_FACILITIES, type PlotType } from '../game/innerAffairs';
 import { cityResourceCaps } from '../game/strongholdCapacity';
 import { hasCityTrait } from '../game/cityTraits';
 import { MARRY_TECHP_COST, relationCandidates } from '../game/relationship';
 import { POACH_GOLD_COST, RUMOR_GOLD_COST, canPoach, poachChance, rumorTargetOptions } from '../game/rumor';
-import { RUMOR_ADVICE_MIN_CHANCE, diplomacyAdviceOf, rumorAdviceOf, strategistOf } from '../game/strategist';
+import { RUMOR_ADVICE_MIN_CHANCE, diplomacyAdviceOf, recruitAdviceOf, rumorAdviceOf, strategistOf } from '../game/strategist';
 import { armamentProductionSpeedMultiplier, commandYieldMultiplier } from '../game/skills/rules/city';
 import { useGame } from '../game/store/GameProvider';
 import type { ArmamentType, CityId, DiplomacyAction, ForceId, GameCommand, Officer, PassId, TechNodeId } from '../game/types';
@@ -406,6 +406,30 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
         diplomacyAdvisor, diplomacyGoldClamped, diplomacyMonths,
       )
     : null;
+  // 血色衣冠 6.0：登庸对象 = 全地图在野武将与其他势力武将（君主除外）；默认取同城在野，可点开列表改选
+  // 默认口径：寄居在其他势力城池的在野武将不可登庸（`talentTargetStationAllows`）
+  const talentCandidates = type === 'talent'
+    ? Object.values(state.officers).filter((officer) =>
+        !officer.deathMonth
+        && officer.location.kind !== 'captive'
+        && (officer.forceId === null || officer.forceId !== state.playerForceId)
+        && !(officer.forceId && state.forces[officer.forceId]?.leaderId === officer.id)
+        && talentTargetStationAllows(state, state.playerForceId, officer))
+    : [];
+  const talentDefaultTargetId = type === 'talent'
+    ? (talentCandidates.find((officer) => officer.forceId === null && officer.location.kind === 'unaffiliated' && officer.location.cityId === cityId)?.id
+      ?? talentCandidates[0]?.id
+      ?? '')
+    : '';
+  const activeTalentTargetId = talentTargetId || talentDefaultTargetId;
+  const talentTarget = type === 'talent' && activeTalentTargetId ? state.officers[activeTalentTargetId] : undefined;
+  const talentWill = talentTarget && activeOfficer ? recruitWillOf(state, activeOfficer, talentTarget) : null;
+  const talentWillTier = talentWill ? recruitWillTier(talentWill.verdict === 'accept' ? 999 : talentWill.will) : null;
+  /**
+   * 军师对登庸任务的评估：从本据点待命武将中预估各人登用成功率，给出建议人选。
+   * 达到门槛 → 指名我方行动武将（点击任意处采纳）；达不到 → 只出忠告（必拒时带原因）。
+   */
+  const recruitAdvice = type === 'talent' && talentTarget ? recruitAdviceOf(state, availableOfficers, talentTarget) : null;
   /** 军师提示框内容（流言与外交共用一套：说话人、台词、可采纳的人选） */
   const strategistHint: StrategistHintView | null = (() => {
     if (type === 'rumor' && rumorAdvice && rumorSpeaker) {
@@ -438,6 +462,36 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
         adoptId: canAdopt ? diplomacyAdvice.executorId : undefined,
       };
     }
+    if (recruitAdvice && talentTarget) {
+      const chosenId = recruitAdvice.viable ? recruitAdvice.executorId : undefined;
+      const speaker = chosenId ? state.officers[chosenId] : strategistOf(state, state.playerForceId);
+      if (!speaker) return null;
+      if (recruitAdvice.viable) {
+        // 建议人选自己开口请缨（与流言同款）；已被默认选中的话只需点头
+        const adopted = activeOfficerId === chosenId;
+        return {
+          speaker,
+          viable: true,
+          text: adopted
+            ? `凭我这三寸之舌，${talentTarget.name}定当应允。`
+            : `这趟差事，还请务必交予我去说服${talentTarget.name}。`,
+          meta: adopted
+            ? `预估成功率 ${recruitAdvice.chance}%`
+            : `预估成功率 ${recruitAdvice.chance}% · 点击任意处采纳`,
+          adoptId: adopted ? undefined : chosenId,
+        };
+      }
+      return {
+        speaker,
+        viable: false,
+        text: recruitAdvice.rejected && recruitAdvice.reasons.length > 0
+          ? `依我看来，${recruitAdvice.reasons[0]}，此事恐难如愿啊。`
+          : recruitAdvice.chance > 0
+            ? '依我看来，此番成算恐怕不足一半啊。'
+            : '依我看来，说动此人恐是难如登天啊。',
+        meta: recruitAdvice.chance > 0 ? `我方最高预估成功率 ${recruitAdvice.chance}%` : undefined,
+      };
+    }
     return null;
   })();
   /** 军师提示框的可见性（左键点击任意区域即收起，见下方 effect） */
@@ -468,6 +522,17 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
     document.addEventListener('mouseup', dismissOnMouseUp, true);
     return () => document.removeEventListener('mouseup', dismissOnMouseUp, true);
   }, [hintVisible, strategistHint]);
+  /**
+   * 生产兵装：默认选中第一种「本据点已具备设施」的兵装。
+   * 否则缺设施的兵装会被置灰却仍是选中态（金框 + 灰），读数看着能造其实不能；
+   * 一种设施都没有时保留原值，由 validateCommand 报「需先建设X才能生产」拦下。
+   */
+  useEffect(() => {
+    if (type !== 'produceArmament') return;
+    if (hasPlotFacility(garrison, ARMAMENT_FACILITY[armamentType])) return;
+    const firstAvailable = ARMAMENT_TYPES.find((item) => hasPlotFacility(garrison, ARMAMENT_FACILITY[item]));
+    if (firstAvailable) setArmamentType(firstAvailable);
+  }, [type, garrison, armamentType]);
   /** 外交页的行动效果说明（亲善无额外说明，返回空串时整行不渲染） */
   const diplomacyNote = diplomacyAction === 'alliance'
     ? (activeDiplomacyForceId && areAllies(state, state.playerForceId, activeDiplomacyForceId)
@@ -480,23 +545,6 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
         : diplomacyAction === 'break'
           ? '立即解除同盟，友好度大幅下降'
           : '';
-  // 血色衣冠 6.0：登庸对象 = 全地图在野武将与其他势力武将（君主除外）；默认取同城在野，可点开列表改选
-  const talentCandidates = type === 'talent'
-    ? Object.values(state.officers).filter((officer) =>
-        !officer.deathMonth
-        && officer.location.kind !== 'captive'
-        && (officer.forceId === null || officer.forceId !== state.playerForceId)
-        && !(officer.forceId && state.forces[officer.forceId]?.leaderId === officer.id))
-    : [];
-  const talentDefaultTargetId = type === 'talent'
-    ? (talentCandidates.find((officer) => officer.forceId === null && officer.location.kind === 'unaffiliated' && officer.location.cityId === cityId)?.id
-      ?? talentCandidates[0]?.id
-      ?? '')
-    : '';
-  const activeTalentTargetId = talentTargetId || talentDefaultTargetId;
-  const talentTarget = type === 'talent' && activeTalentTargetId ? state.officers[activeTalentTargetId] : undefined;
-  const talentWill = talentTarget && activeOfficer ? recruitWillOf(state, activeOfficer, talentTarget) : null;
-  const talentWillTier = talentWill ? recruitWillTier(talentWill.verdict === 'accept' ? 999 : talentWill.will) : null;
   // 跨城登庸：对象不在本市时，执行武将需先启程前往其所在城（行程按据点间距计旬）
   const talentTravelNote = type === 'talent' && talentTarget
     ? (() => {
@@ -782,7 +830,7 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
           ? `资金 500 · ${talentTarget.name}：${talentWill.verdict === 'refuse' ? '必拒' : talentWill.verdict === 'accept' ? '必定同意' : `意愿${talentWillTier.label}`}${talentTravelNote ? ` · 启程前往${talentTravelNote.name}（单程${talentTravelNote.travel}旬）` : ''}`
           : '资金 500'
     : type === 'recruit'
-      ? `资金 800 · 兵粮 500 · 士兵 +${recruitEstimate.toLocaleString('en-US')}`
+      ? `资金 800 · 兵粮 500 · 士兵 +${recruitEstimate.toLocaleString('en-US')} · 本旬剩余 ${recruitTimesLeft(garrison)}/${recruitTimesPerTenDay(garrison)} 次`
       : type === 'train'
         ? `兵粮 300 · 士气 +${trainEstimate}`
         : type === 'produceArmament'
@@ -1772,6 +1820,8 @@ export function CommandDialog({ type, cityId, passId, diplomacyAction: initialDi
           selectedId={activeTalentTargetId}
           onPick={(id) => {
             setTalentTargetId(id);
+            // 换了登庸对象 → 军师依新对象重新评估，提示框重新可见
+            setHintSettled(false);
             setTalentPickerOpen(false);
           }}
           onClose={() => setTalentPickerOpen(false)}

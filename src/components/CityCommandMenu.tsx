@@ -4,7 +4,7 @@ import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import { COMMAND_AP, OFFICER_COMMANDS, banishCandidatesOf, cityAvailableOfficers, passAvailableOfficers } from '../game/commands';
 import { ALLIED_ONLY_ACTIONS, DIPLOMACY_ACTIONS, DIPLOMACY_ACTION_LABELS } from '../game/diplomacy';
-import { ARMAMENT_FACILITY, hasEmptyPlot, hasPlotFacility, isCityBlocked } from '../game/innerAffairs';
+import { ARMAMENT_FACILITY, hasEmptyPlot, hasPlotFacility, isCityBlocked, recruitTimesLeft, recruitTimesPerTenDay } from '../game/innerAffairs';
 import { useGame } from '../game/store/GameProvider';
 import type { CityId, DiplomacyAction, GameCommand, GameState, PassId } from '../game/types';
 import type { CultivateCategory } from './CultivateDialog';
@@ -198,7 +198,9 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
       if (item.command === 'patrol') return Boolean(menuPass?.patrolledThisTenDay ?? menuCity?.patrolledThisTenDay) || actionPoints < COMMAND_AP.patrol;
       if (item.command === 'recruit') {
         const menuGarrison = menuPass ?? menuCity;
-        return !menuGarrison || !hasPlotFacility(menuGarrison, 'barracks') || actionPoints < COMMAND_AP.recruit;
+        return !menuGarrison || !hasPlotFacility(menuGarrison, 'barracks')
+          || recruitTimesLeft(menuGarrison) <= 0
+          || actionPoints < COMMAND_AP.recruit;
       }
       if (item.command === 'produceArmament') {
         const menuGarrison = menuPass ?? menuCity;
@@ -239,6 +241,8 @@ export function CityCommandMenu({ cityId, passId, hideUrban = false, actionPoint
     if (item.command === 'recruit') {
       const menuGarrison = menuPass ?? menuCity;
       if (!menuGarrison || !hasPlotFacility(menuGarrison, 'barracks')) return '需先建设兵舍才能征兵';
+      const barracksCount = recruitTimesPerTenDay(menuGarrison);
+      if (recruitTimesLeft(menuGarrison) <= 0) return `本旬征兵次数已用尽（兵舍 ${barracksCount} 座）`;
     }
     return undefined;
   };

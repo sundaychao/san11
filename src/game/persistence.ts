@@ -666,6 +666,7 @@ function injectMissingPasses(value: unknown): GameState {
       maxDurability: existing.maxDurability ?? def.maxDurability,
       trainedThisTenDay: existing.trainedThisTenDay ?? false,
       patrolledThisTenDay: existing.patrolledThisTenDay ?? false,
+      recruitedThisTenDay: existing.recruitedThisTenDay ?? 0,
       armaments: existing.armaments ?? def.armaments,
       flankKeys: existing.flankKeys ?? def.flankKeys,
       q: existing.q ?? def.q,

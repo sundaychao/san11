@@ -769,6 +769,20 @@ export function barracksYieldMultiplier(city: City | Pass): number {
 }
 
 /**
+ * 每旬征兵次数上限 = 该据点**已建成**兵舍的座数（无兵舍即 0 次）。
+ * 「座数」而非「总等级」：升级（合并）中的地格仍按原 `type` 计入，故升级不损次数。
+ * 这是「本旬还能征几次兵」的唯一口径——命令菜单置灰与 `validateCommand` 共用。
+ */
+export function recruitTimesPerTenDay(stronghold: City | Pass): number {
+  return plotBuiltCount(stronghold, 'barracks');
+}
+
+/** 本旬**剩余**征兵次数 = 上限 − 已用（`recruitedThisTenDay`），下限 0 */
+export function recruitTimesLeft(stronghold: City | Pass): number {
+  return Math.max(0, recruitTimesPerTenDay(stronghold) - (stronghold.recruitedThisTenDay ?? 0));
+}
+
+/**
  * 兵装加成系数：按该兵装**所需设施**的等级计算，每级 +15%。
  * 枪/戟/弩取锻冶等级，冲车/井阑取工房等级，军马取厩舍等级，楼船取造船等级。
  * 早先的 smithyYieldMultiplier 固定取工房等级，对枪/戟/弩（实际需要锻冶）无效，故改为按兵装取对应设施。

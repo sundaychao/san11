@@ -188,6 +188,20 @@ function willFloatOf(state: GameState, executorId: string, targetId: string): nu
   return hash % RECRUIT_WILL_FLOAT;
 }
 
+/**
+ * 招揽目标「所在据点」是否放行：**默认不允许登庸寄居在其他势力城池的在野武将**。
+ * - 在仕武将（他势力）不受此限 —— 那是正常招揽/挖角口径；
+ * - 在野武将看寄居城归属：我方城池可登庸；无主城池（`ownerId === null`）不属于任何势力，亦可登庸；
+ *   有主且非我方 → 不开放，玩家需先拿下该城（或走俘虏/流放等其它途径）。
+ * 出处在 `CommandDialog` 对象武将列表、`TalentTargetPickerDialog` 一览、`validateCommand` 与 AI 选目标四处共用。
+ */
+export function talentTargetStationAllows(state: GameState, forceId: ForceId, target: Officer): boolean {
+  if (target.forceId !== null) return true;
+  if (target.location.kind !== 'unaffiliated') return true;
+  const city = state.cities[target.location.cityId];
+  return !city || city.ownerId === null || city.ownerId === forceId;
+}
+
 export type RecruitVerdict = 'accept' | 'refuse' | 'maybe';
 
 export interface RecruitWillResult {

@@ -400,16 +400,16 @@ button { color: inherit; }
 .battle-grid-overlay.is-strategy-targeting { pointer-events: auto; }
 .battle-cell { fill: rgba(232, 214, 134, 0.36); stroke: rgba(255, 250, 218, 0.46); stroke-width: 0.4; vector-effect: non-scaling-stroke; }
 .battle-grid-overlay.is-editing .battle-cell { cursor: crosshair; fill: rgba(232, 214, 134, 0.22); stroke: rgba(255, 250, 218, 0.9); stroke-width: 0.9; }
-.battle-grid-overlay.is-editing .terrain-plain { fill: rgba(196, 170, 108, 0.72); stroke: rgba(240, 220, 160, 0.9); stroke-width: 0.9; }
-.battle-grid-overlay.is-editing .terrain-grass { fill: rgba(112, 178, 86, 0.72); stroke: rgba(180, 232, 140, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-plain { fill: rgba(174, 174, 174, 0.72); stroke: rgba(202, 202, 202, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-grass { fill: rgba(146, 204, 116, 0.72); stroke: rgba(198, 240, 168, 0.9); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-road { fill: rgba(222, 222, 222, 0.75); stroke: rgba(246, 246, 246, 0.9); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-path { fill: rgba(200, 172, 120, 0.72); stroke: rgba(238, 216, 168, 0.9); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-plank { fill: rgba(160, 110, 60, 0.78); stroke: rgba(224, 172, 108, 0.9); stroke-width: 0.9; }
-.battle-grid-overlay.is-editing .terrain-sand { fill: rgba(224, 202, 138, 0.72); stroke: rgba(248, 234, 178, 0.9); stroke-width: 0.9; }
-.battle-grid-overlay.is-editing .terrain-wasteland { fill: rgba(178, 168, 122, 0.72); stroke: rgba(222, 212, 168, 0.9); stroke-width: 0.9; }
-.battle-grid-overlay.is-editing .terrain-wetland { fill: rgba(108, 158, 142, 0.76); stroke: rgba(168, 222, 202, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-sand { fill: rgba(242, 228, 176, 0.72); stroke: rgba(252, 244, 206, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-wasteland { fill: rgba(140, 128, 88, 0.78); stroke: rgba(210, 198, 150, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-wetland { fill: rgba(170, 212, 228, 0.78); stroke: rgba(214, 240, 250, 0.9); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-poison { fill: rgba(148, 72, 172, 0.8); stroke: rgba(214, 150, 236, 0.92); stroke-width: 0.9; }
-.battle-grid-overlay.is-editing .terrain-forest { fill: rgba(28, 95, 42, 0.8); stroke: rgba(72, 170, 90, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-forest { fill: rgba(14, 66, 30, 0.84); stroke: rgba(72, 170, 90, 0.9); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-hill { fill: rgba(160, 103, 54, 0.74); stroke: rgba(226, 170, 91, 0.9); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-mountain { fill: #1e2122; stroke: #6a6f72; stroke-width: 1; }
 .battle-grid-overlay.is-editing .terrain-shore { fill: #77785e; stroke: #a8aa82; stroke-width: 1; }
@@ -426,16 +426,16 @@ button { color: inherit; }
 .battle-grid-overlay.is-strategy-targeting .battle-cell.is-strategy-target { fill: rgba(232, 88, 48, 0.34); stroke: rgba(255, 211, 88, 0.95); stroke-width: 1.8; cursor: pointer; }
 .battle-grid-overlay.is-construction-targeting .battle-cell.is-construction-target { fill: rgba(255, 200, 80, 0.38); stroke: rgba(255, 240, 140, 0.95); stroke-width: 2; stroke-dasharray: none; cursor: pointer; }
 .battle-grid-overlay.is-construction-targeting { pointer-events: auto; }
-.terrain-plain { fill: rgba(196, 170, 108, 0.42); stroke: rgba(240, 220, 160, 0.5); }
-.terrain-grass { fill: rgba(112, 178, 86, 0.42); stroke: rgba(180, 232, 140, 0.5); }
+.terrain-plain { fill: rgba(174, 174, 174, 0.4); stroke: rgba(202, 202, 202, 0.5); }
+.terrain-grass { fill: rgba(146, 204, 116, 0.4); stroke: rgba(198, 240, 168, 0.5); }
 .terrain-road { fill: rgba(222, 222, 222, 0.5); stroke: rgba(246, 246, 246, 0.6); }
 .terrain-path { fill: rgba(200, 172, 120, 0.42); stroke: rgba(238, 216, 168, 0.52); }
 .terrain-plank { fill: rgba(160, 110, 60, 0.46); stroke: rgba(224, 172, 108, 0.56); }
-.terrain-sand { fill: rgba(224, 202, 138, 0.42); stroke: rgba(248, 234, 178, 0.52); }
-.terrain-wasteland { fill: rgba(178, 168, 122, 0.42); stroke: rgba(222, 212, 168, 0.5); }
-.terrain-wetland { fill: rgba(108, 158, 142, 0.44); stroke: rgba(168, 222, 202, 0.52); }
+.terrain-sand { fill: rgba(242, 228, 176, 0.42); stroke: rgba(252, 244, 206, 0.52); }
+.terrain-wasteland { fill: rgba(140, 128, 88, 0.5); stroke: rgba(210, 198, 150, 0.5); }
+.terrain-wetland { fill: rgba(170, 212, 228, 0.5); stroke: rgba(214, 240, 250, 0.55); }
 .terrain-poison { fill: rgba(148, 72, 172, 0.46); stroke: rgba(214, 150, 236, 0.56); }
-.terrain-forest { fill: rgba(28, 95, 42, 0.5); stroke: rgba(72, 170, 90, 0.6); }
+.terrain-forest { fill: rgba(14, 66, 30, 0.62); stroke: rgba(72, 170, 90, 0.6); }
 .terrain-hill { fill: rgba(160, 103, 54, 0.42); stroke: rgba(226, 170, 91, 0.5); }
 .terrain-mountain { fill: #1e2122; stroke: #1e2122; stroke-width: 1; }
 .terrain-shore { fill: #77785e; stroke: #77785e; stroke-width: 1; }
@@ -685,7 +685,7 @@ button { color: inherit; }
 .map-editor-step p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .map-editor-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .map-editor-tools button { min-height: 36px; display: grid; grid-template-columns: 17px 1fr; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.07); color: var(--paper); text-align: left; cursor: pointer; }
-.map-editor-tools .terrain-tool-plain { background: rgba(229, 214, 150, 0.34); border-color: rgba(255, 250, 218, 0.7); }
+.map-editor-tools .terrain-tool-plain { background: rgba(189, 189, 189, 0.34); border-color: rgba(232, 232, 232, 0.7); }
 .map-editor-tools .terrain-tool-grass { background: rgba(92, 178, 74, 0.42); border-color: rgba(168, 240, 140, 0.78); }
 .map-editor-tools .terrain-tool-road { background: rgba(255, 199, 48, 0.42); border-color: rgba(255, 245, 152, 0.84); }
 .map-editor-tools .terrain-tool-path { background: rgba(214, 186, 126, 0.42); border-color: rgba(240, 222, 168, 0.8); }
@@ -708,7 +708,7 @@ button { color: inherit; }
 .map-editor-tools .terrain-tool-deepWater { background: rgba(16, 57, 99, 0.68); border-color: rgba(86, 148, 196, 0.78); }
 .map-editor-tools button:hover, .map-editor-tools button:focus-visible, .map-editor-tools button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.2); outline: none; }
 .map-editor-tools .terrain-tool.is-active { color: #fff6d6; box-shadow: inset 0 0 0 1px rgba(255, 246, 214, 0.38); }
-.map-editor-tools .terrain-tool-plain.is-active { background: rgba(229, 214, 150, 0.62); }
+.map-editor-tools .terrain-tool-plain.is-active { background: rgba(189, 189, 189, 0.62); }
 .map-editor-tools .terrain-tool-grass.is-active { background: rgba(92, 178, 74, 0.66); }
 .map-editor-tools .terrain-tool-road.is-active { background: rgba(255, 199, 48, 0.7); }
 .map-editor-tools .terrain-tool-forest.is-active { background: rgba(15, 148, 54, 0.7); }
@@ -1290,7 +1290,7 @@ button { color: inherit; }
 .talent-target-table .talent-name { font-family: STKaiti, KaiTi, serif; font-size: 14px; color: #fff6d6; text-align: left; padding-left: 12px; }
 .talent-target-table .talent-ok { color: var(--gold); font-weight: 700; }
 .talent-target-row { cursor: pointer; }
-.talent-target-row:hover:not(.is-monarch), .talent-target-row:focus-visible { background: rgba(197, 173, 111, 0.16); outline: none; }
+.talent-target-row:hover:not(.is-monarch):not(.is-station-locked), .talent-target-row:focus-visible { background: rgba(197, 173, 111, 0.16); outline: none; }
 .talent-target-row.is-unaffiliated .talent-name { color: #ffd98a; }
 
 /* 登庸意愿四档名字着色（血色 sp10：深绿/浅绿/黄；「不能登庸」用默认白不另设） */
@@ -1302,6 +1302,8 @@ button { color: inherit; }
 .talent-target-legend { display: inline-flex; align-items: center; gap: 10px; font-size: 11px; color: var(--muted); }
 .talent-legend-item { display: inline-flex; align-items: center; gap: 4px; }
 .talent-target-row.is-monarch { cursor: not-allowed; opacity: 0.45; }
+/* 默认口径：寄居其他势力城池的在野武将不可登庸（与君主同样 × 且不可点） */
+.talent-target-row.is-station-locked { cursor: not-allowed; opacity: 0.55; }
 .talent-target-row.is-selected { background: rgba(197, 173, 111, 0.24); box-shadow: inset 0 0 0 1px var(--gold-line); }
 .talent-target-empty { margin: 0; padding: 28px 0; color: var(--muted); text-align: center; font-size: 13px; }
 .talent-target-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
@@ -1372,7 +1374,11 @@ button { color: inherit; }
 .produce-armament-panel { display: grid; gap: 12px; margin-top: 15px; }
 .produce-armament-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .produce-armament-grid button { min-width: 0; min-height: 72px; display: grid; place-items: center; gap: 5px; padding: 8px 6px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.06); color: var(--paper); cursor: pointer; }
-.produce-armament-grid button:hover, .produce-armament-grid button:focus-visible, .produce-armament-grid button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.22); outline: none; }
+.produce-armament-grid button:hover:not(:disabled), .produce-armament-grid button:focus-visible, .produce-armament-grid button.is-active { border-color: var(--gold-line); background: rgba(197, 173, 111, 0.22); outline: none; }
+/* 缺设施（该兵装所需锻冶/工房/厩舍/造船未建成）→ 整格置灰且悬停不亮 */
+.produce-armament-grid button:disabled { opacity: 0.42; cursor: not-allowed; border-color: rgba(146, 136, 115, 0.4); background: rgba(244, 237, 217, 0.03); }
+.produce-armament-grid button:disabled strong { color: var(--muted); }
+.produce-armament-grid button:disabled span { color: rgba(146, 136, 115, 0.85); }
 .produce-armament-grid strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 18px; }
 .produce-armament-grid span { color: var(--muted); font-family: Consolas, "Courier New", monospace; font-size: 11px; text-align: center; }
 .produce-stock, .trade-quote { display: grid; gap: 6px; margin: 0; }
