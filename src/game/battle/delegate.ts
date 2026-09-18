@@ -3,6 +3,7 @@ import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './
 import {
   allCityKeys,
   cellAt,
+  forceStopKeysForUnit,
   occupiedFacilityKeys,
   occupiedUnitKeys,
   ownCityTransitKeysFor,
@@ -11,7 +12,7 @@ import {
 } from './movementRules';
 import { movementAllowanceForUnit, movementCostForCell, movementProfileForUnit } from './catalog';
 import { passBlockedKeys } from '../passes';
-import { FACILITY_BUILD_COSTS, facilityBuildTargets, facilityIsCompleted, repairableFacilities } from './legacyCore';
+import { FACILITY_BUILD_COSTS, facilityBuildTargets, facilityNeedsRepair, repairableFacilities } from './legacyCore';
 import { buildFacility, repairFacility } from './facilities';
 import { moveUnit } from './movement';
 import { assertUnitTurn } from './shared';
@@ -165,12 +166,17 @@ function targetCityFootprintKeys(state: GameState, target: GridCoord): Set<strin
  *
  * stopWhenCostExceeds：已找到 total 上限后可提前终止——未出堆的格 dist ≥ 当前出堆 cost，
  * 一旦出堆 cost 超过上限，其 dStart + dist 已不可能更优。
+ *
+ * stopKeys（敌方控制区 ZOC 格）：进入即当旬被迫停留，不能当「中间跳板」继续前进，
+ * 故不从这些格继续扩展（与正向 reachableCostsFrom 的 `zocKeys.has(currentKey) → continue` 同规则）。
+ * 这些格自身的 dist 仍然保留（它们仍可作为落点候选，见 pickBestDelegateStop 的两段口径）。
  */
 function minCostToTarget(
   state: GameState,
   target: GridCoord,
   options: PathOptions,
   stopWhenCostExceeds: () => number,
+  stopKeys: ReadonlySet<string> = new Set<string>(),
 ): Map<string, number> {
   const targetKey = gridKey(target);
   const cityKeys = allCityKeys(state);
@@ -188,6 +194,7 @@ function minCostToTarget(
     if (settled.has(current.key)) continue;
     settled.add(current.key);
     if (current.cost > stopWhenCostExceeds()) break;
+    if (stopKeys.has(current.key)) continue;
     const [q, r] = current.key.split(',').map(Number);
     const currentCell = cellAt(state, { q, r });
     // 反向边的权：正向从 neighbor 走进 current 时付的消耗
@@ -210,6 +217,32 @@ function minCostToTarget(
   return costs;
 }
 
+type DelegateCandidate = { key: string; q: number; r: number; dStart: number };
+type DelegateStop = { q: number; r: number; dStart: number; total: number };
+
+/**
+ * 从候选落点里挑「本旬已付消耗 + 到 target 剩余消耗」最小者，并列时取已消耗最大者。
+ * seed 提供起始上限（通常是目标格本身：落到目标即 dist=0，已是最优）。
+ */
+function rankDelegateStops(
+  candidates: readonly DelegateCandidate[],
+  distanceToTarget: Map<string, number>,
+  seed: DelegateStop | undefined,
+): DelegateStop | undefined {
+  let best = seed;
+  for (const candidate of candidates) {
+    const dist = distanceToTarget.get(candidate.key);
+    if (dist === undefined) continue; // 该格走不到 target（死路/被围/被 ZOC 隔断）
+    const total = candidate.dStart + dist;
+    if (!best
+      || total < best.total
+      || (total === best.total && candidate.dStart > best.dStart)) {
+      best = { q: candidate.q, r: candidate.r, dStart: candidate.dStart, total };
+    }
+  }
+  return best;
+}
+
 /**
  * 委任移动一步的落点选取：在本旬可达集中挑"本旬已付消耗 + 到 target 剩余消耗"最小的格，
  * 并列时取已消耗最大者（= 沿路走得最远）。目标城 footprint 格允许作为落点
@@ -220,13 +253,20 @@ function minCostToTarget(
  * 且落在最优路径上的格恰好取到 C，所以本函数等价于"在所有最优路径中挑本旬能走到的最远格"，
  * 天然覆盖多条等价最短路径（旧版只认 Dijkstra 选中的那一条）。
  * 反过来说：若玩家觉得落点"不够近"，那是该目标下本旬移动力所允许的最优解，不是选点缺陷。
+ *
+ * **被迫停留格（敌方 ZOC）不能当跳板**：进入 ZOC 当旬即止，若把这类格当成落点、
+ * 又按"从这里还能继续走"估算剩余消耗，就会把走不动的死角误判成捷径 ——
+ * 表现为"部队明明还有富余移动力，委任却只挪一格停在敌军旁边"。
+ * 故首选口径里落点排除非目标的 ZOC 格、反向距离图也不从 ZOC 格继续扩展（与正向同规则）。
+ * 只有当目标被 ZOC 完全隔断、本旬找不到任何"落点后仍能继续推进"的格时，
+ * 才退回宽松口径（不判 ZOC）至少挪一步，避免委任把部队钉死在原地。
  */
 function pickBestDelegateStop(state: GameState, unit: ArmyUnit, target: GridCoord): GridCoord | undefined {
   const startKey = gridKey(unit);
   const reachable = reachableCosts(state, unit);
   const targetCityKeys = targetCityFootprintKeys(state, target);
   const cityKeys = allCityKeys(state);
-  const candidates: { key: string; q: number; r: number; dStart: number }[] = [];
+  const candidates: DelegateCandidate[] = [];
   for (const [key, dStart] of reachable) {
     if (key === startKey) continue; // 不留在原地
     if (cityKeys.has(key) && !targetCityKeys.has(key)) continue;
@@ -235,24 +275,29 @@ function pickBestDelegateStop(state: GameState, unit: ArmyUnit, target: GridCoor
   }
   if (candidates.length === 0) return undefined;
 
+  const targetKey = gridKey(target);
   // 目标本身就是落点候选（本旬可达）时无需反向搜索：dist=0 已是最优，用它先立一个上限
-  let best: { q: number; r: number; dStart: number; total: number } | undefined;
-  const onTarget = candidates.find((c) => c.key === gridKey(target));
-  if (onTarget) best = { q: onTarget.q, r: onTarget.r, dStart: onTarget.dStart, total: onTarget.dStart };
+  const onTarget = candidates.find((c) => c.key === targetKey);
+  const seed: DelegateStop | undefined = onTarget
+    ? { q: onTarget.q, r: onTarget.r, dStart: onTarget.dStart, total: onTarget.dStart }
+    : undefined;
+  const stopWhenCostExceeds = () => (seed ? seed.total : Number.POSITIVE_INFINITY);
+  const options = pathOptionsFor(state, unit);
+  const stopKeys = forceStopKeysForUnit(state, unit);
 
-  const stopWhenCostExceeds = () => (best ? best.total : Number.POSITIVE_INFINITY);
-  const distToTarget = minCostToTarget(state, target, pathOptionsFor(state, unit), stopWhenCostExceeds);
-  for (const candidate of candidates) {
-    const dist = distToTarget.get(candidate.key);
-    if (dist === undefined) continue; // 该格走不到 target（死路/被围）
-    const total = candidate.dStart + dist;
-    if (!best
-      || total < best.total
-      || (total === best.total && candidate.dStart > best.dStart)) {
-      best = { q: candidate.q, r: candidate.r, dStart: candidate.dStart, total };
-    }
-  }
-  return best ? { q: best.q, r: best.r } : undefined;
+  const strict = rankDelegateStops(
+    candidates.filter((candidate) => candidate.key === targetKey || !stopKeys.has(candidate.key)),
+    minCostToTarget(state, target, options, stopWhenCostExceeds, stopKeys),
+    seed,
+  );
+  if (strict) return { q: strict.q, r: strict.r };
+
+  const loose = rankDelegateStops(
+    candidates,
+    minCostToTarget(state, target, options, stopWhenCostExceeds),
+    seed,
+  );
+  return loose ? { q: loose.q, r: loose.r } : undefined;
 }
 
 function pathOptionsFor(state: GameState, unit: ArmyUnit): PathOptions {
@@ -349,7 +394,8 @@ function delegateRepairStep(state: GameState, forceId: ForceId, unitId: string, 
   const unit = state.units[unitId];
   if (!unit || unit.acted || unit.moved || unitIsIncapacitated(unit)) return state;
   const facility = state.facilities?.[facilityId];
-  if (!facility || facilityIsCompleted(facility)) {
+  if (!facility || !facilityNeedsRepair(facility)) {
+    // 设施已不存在，或耐久已修满：结束修补委任
     const next = structuredClone(state);
     delete next.units[unitId].delegate;
     return next;
@@ -364,6 +410,24 @@ function delegateRepairStep(state: GameState, forceId: ForceId, unitId: string, 
   const approachTarget = passableNeighborOfFacility(state, facility, unitId);
   if (!approachTarget) return state;
   return delegateMoveStep(state, forceId, unitId, approachTarget, unit.delegate);
+}
+
+/** 旬结算执行委任前的预备：把本势力挂委任部队的本旬行动标记清掉、移动力恢复（与旬初重置同口径）。
+ * 手动行动类指令（移动/攻击/战法/计略等）都会清委任，故结算时仍挂着委任的部队一定是
+ * 「下委任后未再手动操作」的 —— 它们的委任应当在本次结算准时执行，而不是被上旬的
+ * moved 标记吞掉一拍（否则出征/移动当旬下的委任要等两次结算才生效）。 */
+export function prepareDelegationsForExecution(state: GameState, forceId: ForceId): GameState {
+  let changed = false;
+  const next = structuredClone(state);
+  for (const unit of Object.values(next.units)) {
+    if (unit.forceId !== forceId || !unit.delegate) continue;
+    if (!unit.moved && !unit.acted && unit.movementRemaining > 0) continue;
+    unit.moved = false;
+    unit.acted = false;
+    unit.movementRemaining = movementAllowanceForUnit(unit);
+    changed = true;
+  }
+  return changed ? next : state;
 }
 
 /** 执行单个部队的委任（仅未手动操作、未混乱的部队） */
@@ -393,6 +457,18 @@ export function executeDelegations(state: GameState, forceId: ForceId = state.tu
     if (after !== before && after.length > 0) repairReports.push(...after);
   }
   return { ...next, turnForceId: previousTurnForceId, facilityRepairReports: repairReports };
+}
+
+/**
+ * 该势力是否存在「尚未行动、且未委任」的部队 —— 点「进行」前原版式提示的唯一依据。
+ * 「已行动」与部队列表的显示口径一致（`acted || moved`，见 ForceOverviewPanel.unitHasActed）：
+ * 移动过的部队本旬同样不能攻击，若只看 `acted` 会出现「列表显示已行动、点进行还被追问」的错位。
+ * 已委任的部队推进时会自动行动一步，不算「忘了下令」，故不计入。
+ */
+export function hasUnactedNonDelegatedUnits(state: GameState, forceId: ForceId = state.turnForceId): boolean {
+  return Object.values(state.units).some((unit) => (
+    unit.forceId === forceId && !unit.delegate && !unit.acted && !unit.moved
+  ));
 }
 
 /** 该势力是否存在"可以立刻行动一步"的委任部队（右键菜单「委任部队行动」的可用性依据） */
@@ -450,15 +526,40 @@ export function setBuildDelegate(state: GameState, forceId: ForceId, unitId: str
   return delegateBuildStep(state, forceId, unitId, target, facility);
 }
 
-/** 玩家发起修补委任：先沿最优路径向未完成设施移动，到达相邻处自动持续修补直至建成。
- * 首触时部队尚无委任，需预置 kind:'repair' 让 delegateRepairStep 靠近时保留该委任。 */
+/** 玩家发起修补委任：先沿最优路径向受损设施移动，到达相邻处自动持续修补直至耐久修满。
+ * 首触时部队尚无委任，需预置 kind:'repair' 让 delegateRepairStep 靠近时保留该委任。
+ *
+ * 普通移动后的部队 movementRemaining 会被清零，因此本旬只登记委任，下一旬再执行。
+ * 出征落位则不同：deployUnit 会保留出征移动力，虽然 moved=true，但这部分移动力尚未使用；
+ * 这类部队确认委任修补后应立即向设施靠近，并把本旬剩余移动力消耗掉。 */
 export function setRepairDelegate(state: GameState, forceId: ForceId, unitId: string, facilityId: string): GameState {
   const unit = state.units[unitId];
-  if (!unit || unit.acted || unit.moved || unitIsIncapacitated(unit)) return state;
+  if (!unit || unitIsIncapacitated(unit)) return state;
   const facility = state.facilities?.[facilityId];
-  if (!facility || facility.forceId !== forceId || facilityIsCompleted(facility)) return state;
+  if (!facility || facility.forceId !== forceId || !facilityNeedsRepair(facility)) return state;
   const next = structuredClone(state);
+  // 与 moveUnit/waitUnit 同口径清理瞬时战报：确认委任时旧的建设/修补弹字必须立即消失，
+  // 否则部队本旬不动时，残留的「+N」会被误读成「已修补但耐久没加」。
+  next.battleDamageReports = [];
+  next.cityEffectReports = [];
+  next.facilityRepairReports = [];
+  next.strategyResultReports = [];
   next.units[unitId].delegate = { kind: 'repair', facilityId };
+  const isDeploymentPlacement = unit.moved && !unit.acted && unit.movementRemaining > 0;
+  if (isDeploymentPlacement) {
+    // 出征落位的 moved 只是“已完成出征”，不是普通移动已消耗移动力。
+    // 临时放开 moved，让委任逻辑复用正常移动/修补结算；若没有可达路径则恢复原状态。
+    next.units[unitId].moved = false;
+    const progressed = delegateRepairStep(next, forceId, unitId, facilityId);
+    const progressedUnit = progressed.units[unitId];
+    if (progressedUnit && !progressedUnit.acted
+      && progressedUnit.q === unit.q && progressedUnit.r === unit.r) {
+      progressedUnit.moved = true;
+      progressedUnit.movementRemaining = unit.movementRemaining;
+    }
+    return progressed;
+  }
+  if (unit.acted || unit.moved) return next;
   return delegateRepairStep(next, forceId, unitId, facilityId);
 }
 
@@ -467,6 +568,19 @@ export function computeDelegatePath(state: GameState, unitId: string, target: Gr
   const unit = state.units[unitId];
   if (!unit) return undefined;
   return optimalPathCells(state, { q: unit.q, r: unit.r }, target, pathOptionsFor(state, unit));
+}
+
+/** 供 UI 挑选修补部队：判断 unitId 部队能否执行对 facilityId 的修补委任。
+ * 口径与 delegateRepairStep 的推进完全一致（已相邻可修 / 沿 passableNeighborOfFacility 的邻格可达），
+ * 且不看本旬剩余移动力 —— 委任自下个旬起自动执行，与本旬是否已移动过无关。 */
+export function canUnitReachRepairFacility(state: GameState, unitId: string, facilityId: string): boolean {
+  const unit = state.units[unitId];
+  const facility = state.facilities?.[facilityId];
+  if (!unit || !facility || unitIsIncapacitated(unit)) return false;
+  if (repairableFacilities(state, unitId).some((candidate) => candidate.id === facilityId)) return true;
+  const approach = passableNeighborOfFacility(state, facility, unitId);
+  if (!approach) return false;
+  return Boolean(optimalPathCells(state, { q: unit.q, r: unit.r }, approach, pathOptionsFor(state, unit)));
 }
 
 /** 供 UI 使用的导出别名（legacyCore 的 assertUnitTurn） */

@@ -149,7 +149,11 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   }
 
   const next = structuredClone(state);
+  // 与 moveUnit/waitUnit 同口径清理瞬时战报：出征是新的部队动作，旧的建设/修补/战斗弹字不应带到场上
+  next.battleDamageReports = [];
   next.cityEffectReports = [];
+  next.facilityRepairReports = [];
+  next.strategyResultReports = [];
   const unitId = `unit-${next.month}-${next.tenDay}-${leaderId}-${Object.keys(next.units).length + 1}`;
   const departSource = input.passId ? next.passes![input.passId] : next.cities[input.cityId!];
   departSource.troops -= input.troops;

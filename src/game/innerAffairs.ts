@@ -165,6 +165,19 @@ export const CITY_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS = 500;
 /** 城外部队每旬每万人粮食消耗 */
 export const UNIT_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS = 1000;
 
+/** 野外部队每旬兵粮消耗：每 1 万兵 `UNIT_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS` 粮，
+ *  与 `turn.ts` 的 `settleUnitSupply` 同口径（出征预览阶段部队未落地、无设施补给系数，按 1 计）。 */
+export function unitFoodCostPerTenDay(troops: number): number {
+  return Math.max(0, Math.ceil((Math.max(0, troops) * UNIT_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS) / 10_000));
+}
+
+/** 部队携带兵粮可支撑的天数（按旬粒度向下取整：不足一旬记 0，两旬记 20，以此类推） */
+export function unitFoodDaysOf(food: number, troops: number): number {
+  const perTenDay = unitFoodCostPerTenDay(troops);
+  if (perTenDay <= 0) return 0;
+  return Math.floor(Math.max(0, food) / perTenDay) * 10;
+}
+
 /** 城池攻击范围（城池外1~3圈）：敌方部队进入此区域时每旬受箭矢攻击 */
 export const CITY_ATTACK_RANGE = 3;
 /** 建设用地距城池最近圈数（攻击范围外圈 + 6 = 9圈），确保远离城池 */

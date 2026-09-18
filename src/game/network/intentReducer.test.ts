@@ -294,6 +294,47 @@ describe('reduceGameIntent', () => {
     })).toEqual(expected.state);
   });
 
+  it('turns a remote repair chosen during deployment into a repair delegation', () => {
+    expect(typeof reduceGameIntent).toBe('function');
+    if (!reduceGameIntent) return;
+
+    const state = createGame('liu', 1);
+    const spawn = deploymentCells(state, 'jiangling')[0]!;
+    const input = {
+      cityId: 'jiangling' as const,
+      officerIds: ['guan-yu'],
+      troopType: 'sword' as const,
+      destination: spawn,
+      troops: 4000,
+      food: 6000,
+    };
+    // 出征后的目标设施不在出生格相邻范围：旧实现会直接调用 repairFacility 而拒绝这次操作。
+    state.facilities = {
+      repairing: {
+        id: 'repairing',
+        type: 'arrowTower',
+        forceId: 'liu',
+        q: spawn.q + 3,
+        r: spawn.r,
+        durability: 100,
+        completed: false,
+      },
+    };
+
+    const next = reduceGameIntent(state, 'liu', {
+      type: 'deployUnitAction',
+      input,
+      action: { type: 'repairFacility', facilityId: 'repairing' },
+    });
+    const unit = Object.values(next.units).find((candidate) => candidate.leaderId === 'guan-yu');
+
+    expect(unit).toBeDefined();
+    expect(unit).toMatchObject({ delegate: { kind: 'repair', facilityId: 'repairing' }, moved: true });
+    expect(unit).not.toMatchObject({ q: spawn.q, r: spawn.r });
+    expect(next.facilities?.repairing.durability).toBe(100);
+    expect(next.facilityRepairReports).toEqual([]);
+  });
+
   it('keeps transport deployment plus its follow-up action atomic (落位菜单出城即攻击)', () => {
     expect(typeof reduceGameIntent).toBe('function');
     if (!reduceGameIntent) return;

@@ -99,7 +99,9 @@ function applyDeployFollowup(
     case 'buildFacility':
       return buildFacility(state, forceId, unitId, action.facilityType, action.target);
     case 'repairFacility':
-      return repairFacility(state, forceId, unitId, action.facilityId);
+      // 出征菜单中的“修补”允许目标在出生格以外：落位后交由修补委任推进，
+      // 相邻时会立即修补，远处则先向设施的可通行邻格行军。
+      return setRepairDelegate(state, forceId, unitId, action.facilityId);
     case 'supplyUnit':
       // 出城即补给：输送队落位后直接对相邻部队结算补给（补给内部自己清 delegate、置 acted）
       return supplyUnit(state, forceId, unitId, action.targetId, action);

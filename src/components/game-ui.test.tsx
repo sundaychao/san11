@@ -161,8 +161,212 @@ describe('game interface shell', () => {
 
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
     await user.click(screen.getByTestId('map-context-proceed-button'));
+    // 出征本身即消耗该部队本旬行动（moved）→ 不算「尚未行动」，不弹确认，直接推进
+    expect(screen.queryByTestId('proceed-confirm-menu')).toBeNull();
 
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+  });
+
+  it('出征落位（本旬已移动）的部队也能选中并点击己方受损设施委任修补', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units).find((candidate) => candidate.forceId === 'liu')!;
+    // 出征落位本身就消耗了本旬行动（moved=true）—— 旧实现里这类部队既选不中、也不能委任修补
+    expect(unit.moved).toBe(true);
+    state.facilities = {
+      'repair-target': {
+        id: 'repair-target',
+        type: 'drum',
+        forceId: 'liu',
+        q: unit.q,
+        r: unit.r + 1,
+        durability: 300,
+        completed: true,
+      },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const marker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r}`)!;
+    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    // 已移动的部队同样能进入「已选中」状态（旧实现会直接清空选中）
+    const selectedMarker = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r}`)!;
+    expect(selectedMarker.getAttribute('class') ?? '').toContain('is-selected');
+
+    const facility = document.querySelector('[data-facility-id="repair-target"]')!;
+    fireEvent.pointerDown(facility, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+
+    expect(screen.getByTestId('repair-confirm-menu')).toBeVisible();
+    fireEvent.click(screen.getByTestId('repair-confirm-yes'));
+    expect(screen.queryByTestId('repair-confirm-menu')).toBeNull();
+    const afterConfirm = screen.getAllByTestId('battle-unit-marker')
+      .find((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r}`)!;
+    expect(afterConfirm.getAttribute('class') ?? '').not.toContain('is-selected');
+  });
+
+  it('未选中部队直接点击己方受损设施：设施菜单给出「委任修补」，确认后右键可推进且部队自动靠近', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units).find((candidate) => candidate.forceId === 'liu')!;
+    // 设施放在部队 2 格外（不相邻）：出征委任确认后，部队应立即向它靠近。
+    // 同时覆盖回归点：修补确认弹窗关闭后，地图右键菜单必须能再次弹出（useCallback deps 曾漏 repairConfirm，
+    // 导致确认修补后右键永远走「仅关闭弹窗」分支、玩家无法推进旬、修补委任永远不执行）。
+    state.facilities = {
+      'repair-target': {
+        id: 'repair-target',
+        type: 'drum',
+        forceId: 'liu',
+        q: unit.q,
+        r: unit.r + 2,
+        durability: 300,
+        completed: true,
+      },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    // 不点部队（不选中），直接点建筑
+    const facility = document.querySelector('[data-facility-id="repair-target"]')!;
+    fireEvent.pointerDown(facility, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+
+    expect(screen.getByTestId('facility-context-menu')).toBeVisible();
+    const repairButton = screen.getByTestId('facility-repair-button');
+    expect(repairButton).toBeEnabled();
+
+    fireEvent.click(repairButton);
+    // 设施菜单关闭，弹修补确认框（标题带自动挑中的部队名）
+    expect(screen.queryByTestId('facility-context-menu')).toBeNull();
+    expect(screen.getByTestId('repair-confirm-menu')).toBeVisible();
+    expect(screen.getByTestId('repair-confirm-menu').textContent).toContain('关羽');
+    // 距设施 2 格：出征部队仍有出征移动力，确认框提示会立即靠近
+    expect(screen.getByTestId('repair-confirm-note').textContent).toContain('立即向设施靠近');
+
+    fireEvent.click(screen.getByTestId('repair-confirm-yes'));
+    expect(screen.queryByTestId('repair-confirm-menu')).toBeNull();
+    expect(screen.queryByTestId('repair-confirm-note')).toBeNull();
+    // 出征委任修补确认后，部队应在本次确认中直接移动到设施相邻格。
+    expect(screen.getAllByTestId('battle-unit-marker')
+      .some((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r + 1}`)).toBe(true);
+    // 确认后部队立即显示「委」徽章（出征/移动过的部队挂委任也必须可见）
+    expect(screen.getAllByTestId('battle-unit-ready-badge').some((badge) => badge.textContent === '委')).toBe(true);
+
+    // 确认后地图右键菜单必须能再次弹出（stale closure 回归点），推进一旬
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
+    expect(screen.getByTestId('map-context-menu')).toBeVisible();
+    fireEvent.click(screen.getByTestId('map-context-proceed-button'));
+    expect(screen.queryByTestId('proceed-confirm-menu')).toBeNull();
+
+    // 推进一旬后继续执行委任，部队保持在设施相邻格并完成后续修补。
+    expect(screen.getAllByTestId('battle-unit-marker')
+      .some((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r + 1}`)).toBe(true);
+  });
+
+  it('部队已在设施旁：确认框说明「不会移动」，确认后部队就地修补（位置不变、显示委徽章）', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units).find((candidate) => candidate.forceId === 'liu')!;
+    // 设施放在部队正相邻格：修补无需移动，这是「显示修补了但部队没动」的正常形态
+    state.facilities = {
+      'repair-target': {
+        id: 'repair-target',
+        type: 'drum',
+        forceId: 'liu',
+        q: unit.q,
+        r: unit.r + 1,
+        durability: 300,
+        completed: true,
+      },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const facility = document.querySelector('[data-facility-id="repair-target"]')!;
+    fireEvent.pointerDown(facility, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    expect(screen.getByTestId('facility-context-menu')).toBeVisible();
+    fireEvent.click(screen.getByTestId('facility-repair-button'));
+
+    // 相邻：说明必须是「不会移动」，与远距场景的「自动前往」区分开
+    expect(screen.getByTestId('repair-confirm-note').textContent).toContain('不会移动');
+    fireEvent.click(screen.getByTestId('repair-confirm-yes'));
+    expect(screen.queryByTestId('repair-confirm-menu')).toBeNull();
+    expect(screen.getAllByTestId('battle-unit-ready-badge').some((badge) => badge.textContent === '委')).toBe(true);
+
+    // 推进一旬：部队就在旁边，就地修补 —— 位置必须不变（这正是设计行为，不是没执行）
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
+    expect(screen.getByTestId('map-context-menu')).toBeVisible();
+    fireEvent.click(screen.getByTestId('map-context-proceed-button'));
+    expect(screen.getAllByTestId('battle-unit-marker')
+      .some((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r}`)).toBe(true);
+    expect(screen.getAllByTestId('battle-unit-marker')
+      .some((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r + 1}`)).toBe(false);
+  });
+
+  it('设施菜单的「委任修补」在没有可用部队时置灰', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units).find((candidate) => candidate.forceId === 'liu')!;
+    unit.confusedTenDays = 2;
+    state.facilities = {
+      'repair-target': {
+        id: 'repair-target',
+        type: 'drum',
+        forceId: 'liu',
+        q: unit.q,
+        r: unit.r + 1,
+        durability: 300,
+        completed: true,
+      },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const facility = document.querySelector('[data-facility-id="repair-target"]')!;
+    fireEvent.pointerDown(facility, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    const repairButton = screen.getByTestId('facility-repair-button');
+    expect(repairButton).toBeDisabled();
+    expect(repairButton.textContent).toBe('无部队可修补');
   });
 
   it('renders the battle map without a raster background image by default', () => {
@@ -964,7 +1168,7 @@ describe('game interface shell', () => {
     })).toBe(true);
   });
 
-  it('点「进行」时若尚有未行动的委任部队：界面最下方弹原版式横幅、鼠标处弹是/否，点「是」才推进', async () => {
+  it('点「进行」时若尚有未行动且未委任的部队：界面最下方弹原版式横幅、鼠标处弹是/否，点「是」才推进', async () => {
     const user = userEvent.setup();
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -973,9 +1177,9 @@ describe('game interface shell', () => {
       troops: 4000,
       food: 6000,
     });
-    // 一支「已委任移动、本旬尚未行动」的部队 —— 正是原版提示的触发条件
+    // 一支「未委任、本旬尚未行动」的部队 —— 原版提示的触发条件
     const unit = Object.values(state.units)[0];
-    unit.delegate = { kind: 'move', target: { q: unit.q + 2, r: unit.r } };
+    expect(unit.delegate).toBeUndefined();
     unit.moved = false;
     unit.acted = false;
     unit.movementRemaining = 20;
@@ -1017,7 +1221,7 @@ describe('game interface shell', () => {
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
   });
 
-  it('尚未行动但未委任的部队不触发「进行」确认（判据是委任部队）', async () => {
+  it('未行动的部队都已委任时：点「进行」不弹提示，直接推进一旬', async () => {
     const user = userEvent.setup();
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -1026,9 +1230,12 @@ describe('game interface shell', () => {
       troops: 4000,
       food: 6000,
     });
+    // 唯一未行动的部队已委任 → 推进时会自动行动一步，不该再问「是否确定」
     const unit = Object.values(state.units)[0];
+    unit.delegate = { kind: 'move', target: { q: unit.q + 2, r: unit.r } };
     unit.moved = false;
     unit.acted = false;
+    unit.movementRemaining = 20;
 
     render(
       <GameProvider initialState={state} storage={window.localStorage}>
@@ -1036,9 +1243,13 @@ describe('game interface shell', () => {
       </GameProvider>,
     );
 
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
     await user.click(screen.getByTestId('map-context-proceed-button'));
+
+    // 不弹横幅、不弹是/否，直接推进
     expect(screen.queryByTestId('strategy-end-banner')).toBeNull();
+    expect(screen.queryByTestId('proceed-confirm-menu')).toBeNull();
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
   });
 

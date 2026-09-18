@@ -37,3 +37,34 @@ describe('UnitInfoPanel 士气的分母跟随科技，战力保持 100', () => {
     expect(panel).toHaveTextContent('战力70/100');
   });
 });
+
+/** 粮道状态：通畅时本城分担一半兵粮，受阻时全额自耗且每旬士气 -3；运输队不适用 */
+describe('UnitInfoPanel 粮道状态', () => {
+  it('本城存粮充足且部队在范围内时显示「通畅」', () => {
+    const state = stateWithUnit();
+    state.units.u1.q = state.cities.jiangling.gridQ;
+    state.units.u1.r = state.cities.jiangling.gridR;
+
+    render(<UnitInfoPanel unit={state.units.u1} state={state} position={{ x: 10, y: 10 }} />);
+
+    expect(screen.getByTestId('unit-grain-route')).toHaveTextContent('通畅');
+  });
+
+  it('本城存粮低于门槛时显示「受阻」', () => {
+    const state = stateWithUnit();
+    state.cities.jiangling.food = 1000;
+
+    render(<UnitInfoPanel unit={state.units.u1} state={state} position={{ x: 10, y: 10 }} />);
+
+    expect(screen.getByTestId('unit-grain-route')).toHaveTextContent('受阻');
+  });
+
+  it('运输队不适用粮道，显示占位符', () => {
+    const state = stateWithUnit();
+    state.units.u1.kind = 'transport';
+
+    render(<UnitInfoPanel unit={state.units.u1} state={state} position={{ x: 10, y: 10 }} />);
+
+    expect(screen.getByTestId('unit-grain-route')).toHaveTextContent('—');
+  });
+});

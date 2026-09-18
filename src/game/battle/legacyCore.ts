@@ -148,6 +148,20 @@ export function facilityIsCompleted(facility: Facility) {
   return facility.completed !== false;
 }
 
+/**
+ * 设施是否需要修补 —— 唯一判据是「耐久未满」，**与是否建成无关**。
+ *
+ * 已建成的设施（completed !== false）被打掉耐久后，damageFacility 只减耐久、**不改 completed**，
+ * 于是它同时是「已建成」又是「受损待修」。旧实现拿 facilityIsCompleted 当修补前置条件，把这一整类
+ * 设施挡在门外（repairFacility 报「设施不在修补范围」、setRepairDelegate 静默返回、委任一到就自清），
+ * 表现为「部队走到设施旁边却始终不修补」。规则文档口径即「设施建成时耐久初始化为满值，受损后可修补」，
+ * 故凡修补相关判定一律用本函数，不要再用 facilityIsCompleted。
+ */
+export function facilityNeedsRepair(facility: Facility): boolean {
+  const definition = facilityDefinition(facility.type);
+  return Boolean(definition && facility.durability < definition.durability);
+}
+
 function facilityBuildPower(state: GameState, unit: ArmyUnit) {
   const basePower = Math.max(1, Math.ceil((unit.troops / 10000) * FACILITY_BUILD_DURABILITY_PER_TEN_THOUSAND));
   return basePower * facilityBuildPowerMultiplier(state, unit);
@@ -160,7 +174,9 @@ function repairFacilityDurability(facility: Facility, amount: number) {
   return {
     ...facility,
     durability,
-    completed: durability >= definition.durability,
+    // completed 只表示「是否曾经建成」，一旦建成不再回退：已建成设施被打掉耐久后，修补期间效果照常生效
+    //（原版口径——耐久归零才失效）。否则会出现「不修还生效、一修反而失效」的怪象。
+    completed: facility.completed !== false ? true : durability >= definition.durability,
   };
 }
 
@@ -784,6 +800,10 @@ export function resolveFacilityUpgrade(
 /**
  * 部队建造菜单的可见选项：升级链只保留最低档作为入口，按势力科技解析成当前档位。
  * 因此玩家看到的是「阵 / 弩楼…」这些会在研究后改名的入口，而不是同时列出 阵·砦·城塞 三档。
+ *
+ * **未研究对应科技、又没有低档可退的设施整条不出现**（目前只有投石台属此类：它没有前置档位，
+ * 弹道之前点了也建不了）。有低档的（阵 / 土垒 / 箭楼 / 火种 / 火球…）上面已退到当前档位，
+ * 不会因为高档未解锁而消失。
  */
 export function unitFacilityMenuOptions(
   state: GameState | null | undefined,
@@ -794,7 +814,8 @@ export function unitFacilityMenuOptions(
     .map((facility) => {
       if (!state) return facility;
       return FACILITIES[resolveFacilityUpgrade(state, forceId, facility.type)] ?? facility;
-    });
+    })
+    .filter((facility) => !state || canBuildFacility(state, forceId, facility.type));
 }
 
 /** 该部队当前可建造的设施清单（升级档位 + 部队资金双过滤），供建造菜单使用 */
@@ -825,9 +846,7 @@ export function repairableFacilities(state: GameState, unitId: string, origin?: 
   return Object.values(state.facilities ?? {})
     .filter((facility) => {
       const canRepairOwner = facility.forceId === unit.forceId || PUBLIC_REPAIRABLE_FACILITY_TYPES.has(facility.type);
-      if (!canRepairOwner || facilityIsCompleted(facility) || gridDistanceWithin(source, facility, 1) > 1) return false;
-      const definition = facilityDefinition(facility.type);
-      return Boolean(definition && facility.durability < definition.durability);
+      return canRepairOwner && facilityNeedsRepair(facility) && gridDistanceWithin(source, facility, 1) <= 1;
     })
     .sort((a, b) => (
       gridDistanceWithin(source, a, 1) - gridDistanceWithin(source, b, 1) ||
@@ -1697,8 +1716,8 @@ export function repairFacility(state: GameState, forceId: ForceId, unitId: strin
   if (delegate) {
     const isDelegateTarget = delegate.kind === 'repair' && delegate.facilityId === facilityId;
     if (isDelegateTarget) {
-      // 委任目标建成：结束修补委任（未建成则保持，由委任自动继续修补）
-      if (facilityIsCompleted(next.facilities![facilityId])) delete next.units[unitId].delegate;
+      // 委任目标耐久已满：结束修补委任（未满则保持，由委任自动继续修补）
+      if (!facilityNeedsRepair(next.facilities![facilityId])) delete next.units[unitId].delegate;
     } else {
       // 手动修补了与委任目标不同的设施 → 视为做了其他操作，取消委任
       delete next.units[unitId].delegate;

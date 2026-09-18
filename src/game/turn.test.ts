@@ -684,8 +684,9 @@ describe('ten-day settlement', () => {
 
     expect(next.units['cao-target'].troops).toBe(2700);
     expect(next.units['liu-target'].troops).toBe(3000);
-    expect(next.units['liu-target'].energy).toBe(90);
-    expect(next.units['cao-target'].energy).toBe(85);
+    // 两队都远离各自的出发城（江陵/襄阳）→ 粮道受阻：不回复基础士气（每旬 -3），只留「乐奏」的 +5
+    expect(next.units['liu-target'].energy).toBe(82);
+    expect(next.units['cao-target'].energy).toBe(77);
     expect((next.battleDamageReports ?? []).map((report) => report.unitId)).toEqual(['cao-target']);
   });
 
@@ -880,8 +881,8 @@ describe('ten-day settlement', () => {
 
     const next = settleTenDay(state);
 
-    // 每旬回复5，气力上限120：105 + 5 = 110
-    expect(next.units['energy-tech-unit'].energy).toBe(110);
+    // 该部队远离出发城（江陵）→ 粮道受阻：不回复士气且每旬 -3，105 - 3 = 102
+    expect(next.units['energy-tech-unit'].energy).toBe(102);
   });
 
   it('公共教育（文教1级）承接原「内政4级治安回升」：换季治安下降概率减半', () => {

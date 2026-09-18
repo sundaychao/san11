@@ -615,6 +615,7 @@ button { color: inherit; }
 .unit-info-panel dl { display: grid; gap: 2px; margin: 0; }
 .unit-info-panel dd { font-family: Consolas, "Courier New", monospace; font-variant-numeric: tabular-nums; }
 .unit-info-panel dd em { margin-left: 6px; color: #f1d66e; font-style: normal; }
+.unit-info-panel dd.unit-info-grain-route.is-blocked { color: #ff8a7a; }
 .city-info-panel { position: fixed; z-index: 18; width: 176px; padding: 7px; pointer-events: none; background: rgba(12, 28, 31, 0.96); color: var(--paper); }
 .city-info-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; padding: 0 5px; border-bottom: 1px solid var(--line); }
 .city-info-panel > header strong { color: #fff6d6; font-family: STKaiti, KaiTi, serif; font-size: 17px; }
@@ -1501,7 +1502,8 @@ button { color: inherit; }
 .range-field input[type="range"] { width: 100%; accent-color: var(--gold); cursor: pointer; }
 .range-field input[type="range"]:disabled { accent-color: #6b6658; opacity: 0.45; cursor: not-allowed; }
 .range-field output.is-disabled { border-color: var(--line); color: var(--muted); }
-.range-field output { min-height: 32px; display: grid; place-items: center; padding: 0 8px; border: 1px solid var(--line); background: rgba(244, 237, 217, 0.06); color: #fff6d6; font: 12px Consolas, "Courier New", monospace; text-align: right; }
+.range-field output { min-height: 32px; display: grid; grid-auto-flow: column; place-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--line); background: rgba(244, 237, 217, 0.06); color: #fff6d6; font: 12px Consolas, "Courier New", monospace; text-align: right; }
+.range-field output .deploy-food-days { color: var(--gold); }
 
 /* 输送编制（复刻原版输送界面）：左侧「武将面板 + 兵装/资源拖动条」，右侧「部队能力 + 据点库存」 */
 .transport-dialog { width: min(840px, calc(100vw - 376px)); max-height: min(700px, calc(100dvh - 72px)); grid-template-columns: minmax(300px, 1.2fr) minmax(230px, 0.8fr); gap: 10px 12px; padding: 12px; }

@@ -1,5 +1,6 @@
-import type { CSSProperties } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { effectiveUnitAbilities } from '../game/battle/actions';
+import { grainRouteBlockedOf } from '../game/battle/grainRoute';
 import { moraleCapOf } from '../game/techs';
 import type { ArmyUnit, GameState } from '../game/types';
 
@@ -18,9 +19,14 @@ export function UnitInfoPanel({ unit, state, position, strategyChance, onPointer
   const deputies = officerIds.slice(1).map((id) => state.officers[id]?.name).filter(Boolean);
   const abilities = effectiveUnitAbilities(state, unit);
   const aptitude = abilities.aptitude.grade ?? '—';
+  // 粮道受阻：每旬全额自耗兵粮且士气 -3（运输队不适用粮道）。范围只随局面变，与鼠标位置无关。
+  const grainRouteBlocked = useMemo(
+    () => (unit.kind === 'transport' ? false : grainRouteBlockedOf(state, unit)),
+    [state, unit],
+  );
   const style = {
     left: Math.max(8, Math.min(position.x, window.innerWidth - 166)),
-    top: Math.max(8, Math.min(position.y, window.innerHeight - 226)),
+    top: Math.max(8, Math.min(position.y, window.innerHeight - 248)),
   } as CSSProperties;
 
   return (
@@ -52,6 +58,16 @@ export function UnitInfoPanel({ unit, state, position, strategyChance, onPointer
         <div><dt>兵粮</dt><dd>{unit.food.toLocaleString('en-US')}</dd></div>
         <div><dt>士气</dt><dd>{unit.energy}/{moraleCapOf(state, unit.forceId)}</dd></div>
         <div><dt>战力</dt><dd>{unit.stamina === undefined ? '—' : `${Math.round(unit.stamina)}/100`}</dd></div>
+        <div>
+          <dt>粮道</dt>
+          <dd
+            data-testid="unit-grain-route"
+            className={grainRouteBlocked ? 'unit-info-grain-route is-blocked' : 'unit-info-grain-route'}
+            title={grainRouteBlocked ? '粮道受阻：兵粮全额自耗，每旬士气 -3' : '粮道通畅：本城分担一半兵粮'}
+          >
+            {unit.kind === 'transport' ? '—' : grainRouteBlocked ? '受阻' : '通畅'}
+          </dd>
+        </div>
       </dl>
     </aside>
   );

@@ -4,14 +4,14 @@ import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { effectiveUnitAbilities, harmfulStrategySuccessChance, deployUnitPreviewWithId, deployTransportUnitWithId, FACILITY_BUILD_COSTS, suppliableUnits, unitFacilities, unitFacilityMenuOptions, unitIsIncapacitated, unitStrategies, type StrategyId, type SupplyArmament, type TacticId } from '../game/battle/actions';
 import type { CSSProperties } from 'react';
 import { gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
-import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticCityTargets, getTacticFacilityTargets, getTacticPassTargets, getTacticPlotTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
-import { plotTargetKey } from '../game/battle/targetRules';
-import { computeDelegatePath, hasExecutableDelegation } from '../game/battle/delegate';
+import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairDelegateTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticCityTargets, getTacticFacilityTargets, getTacticPassTargets, getTacticPlotTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
+import { gridDistanceWithin, plotTargetKey } from '../game/battle/targetRules';
+import { canUnitReachRepairFacility, computeDelegatePath, hasExecutableDelegation, hasUnactedNonDelegatedUnits } from '../game/battle/delegate';
+import { facilityNeedsRepair } from '../game/battle/facilities';
 import { chooseDelegateSpawnCell } from '../game/battle/deployment';
 import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { canBuildPlotAtCoord, hasEnemyUnitsNear, isPlotOccupiedByOtherCity, PLOT_GOLD_COST, PLOT_LABELS, startBuildCityPlot, type PlotType } from '../game/innerAffairs';
 import { cityCenter, ownCityAt, unoccupiedCityAt } from '../game/battle/movementRules';
-import { canBuildFacility } from '../game/techs';
 import { ownPassAt, passAt, passBlockedKeys, unoccupiedPassAt } from '../game/passes';
 import { allPassAnchorKeys } from '../game/battle/movementRules';
 import { useGame } from '../game/store/GameProvider';
@@ -218,14 +218,15 @@ export function GameShell() {
     | null
   >(null);
   /**
-   * 「进行」前的原版式确认弹窗（右键菜单点「进行」时本方尚有未行动的委任部队）：
+   * 「进行」前的原版式确认弹窗（右键菜单点「进行」时本方尚有**未行动、且未委任**的部队）。
    * 界面最下方显示原版式横幅「有尚未行动的部队存在，请问是否确定？」，鼠标右键处弹「是 / 否」，
    * 点「是」才推进一旬；点「否」或右键/点别处即取消。
+   * 委任部队推进时会自动行动，不算忘下令，故不触发提示。
    */
   const [proceedConfirm, setProceedConfirm] = useState<{ position: { x: number; y: number } } | null>(null);
   /** 委任修补确认弹窗（移动模式下点击未完成的己方设施后弹出） */
   const [repairConfirm, setRepairConfirm] = useState<
-    | { unitId: string; facilityId: string; label: string; position: { x: number; y: number } }
+    | { unitId: string; facilityId: string; label: string; position: { x: number; y: number }; deployInput?: DeployConfirmInput & { destination?: GridCoord } }
     | null
   >(null);
   const [mapContextMenu, setMapContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -255,6 +256,13 @@ export function GameShell() {
   const canExecuteDelegation = canOperateCurrentTurn
     && online.mode !== 'online'
     && Boolean(state && hasExecutableDelegation(state, state.playerForceId));
+  /**
+   * 「进行」前是否弹原版式确认：本方尚有未行动、且**未委任**的部队。
+   * 与上面的 `canExecuteDelegation`（右键菜单「委任部队行动」可用性）是两个不同口径，
+   * 别混用：委任部队推进时会自动行动，不该让玩家以为「还要下令」。
+   */
+  const shouldConfirmProceed = canOperateCurrentTurn
+    && Boolean(state && hasUnactedNonDelegatedUnits(state, state.playerForceId));
   /** 命令/培育宿主：关隘宿主用其归辖城充当 cityId，否则用当前选中城池 */
   const activeHostPass = activeCommandPassId ? state?.passes?.[activeCommandPassId] : undefined;
   const activeHostCityId = activeHostPass ? activeHostPass.homeCityId : selectedCityId;
@@ -495,6 +503,11 @@ export function GameShell() {
   const unitMenuQuery = useMemo(() => (
     unitMenuState && unitMenuUnitId ? getUnitActionQuery(unitMenuState, unitMenuUnitId, unitMenuDestination) : null
   ), [unitMenuDestination, unitMenuState, unitMenuUnitId]);
+  // 出征落位菜单中的修补可以选择远处、但可委任抵达的己方待修设施。
+  const pendingDeployRepairTargets = useMemo(() => (
+    pendingDeployPreview ? getRepairDelegateTargets(pendingDeployPreview.state, pendingDeployPreview.unitId) : []
+  ), [pendingDeployPreview]);
+  const canStartDeployRepair = isPendingDeployCommandMenu && pendingDeployRepairTargets.length > 0;
   const unitMenuStrategies = unitMenuQuery?.availableStrategies ?? [];
   const unitMenuFacilities = unitMenuQuery?.availableFacilities ?? [];
   // 部队建造菜单的可见项：升级链（阵→砦→城塞 / 土垒→石墙 / 箭楼→连弩楼）只保留当前档位那一个入口，
@@ -565,9 +578,15 @@ export function GameShell() {
     if (!targetState) return [];
     if (targetingAttack && !targetingAttack.joint) return getUnitActionQuery(targetState, targetingAttack.unitId, targetingAttack.origin).attackFacilities.map((facility) => facility.id);
     if (targetingTactic) return getTacticFacilityTargets(targetState, targetingTactic.unitId, targetingTactic.tacticId, targetingTactic.origin).map((facility) => facility.id);
-    if (targetingRepair) return getRepairTargets(targetState, targetingRepair.unitId, targetingRepair.origin).map((facility) => facility.id);
+    if (targetingRepair) {
+      const isPendingDeploymentRepair = pendingDeployAction?.unitId === targetingRepair.unitId;
+      return (isPendingDeploymentRepair
+        ? getRepairDelegateTargets(targetState, targetingRepair.unitId)
+        : getRepairTargets(targetState, targetingRepair.unitId, targetingRepair.origin)
+      ).map((facility) => facility.id);
+    }
     return [];
-  }, [pendingDeployActionPreview, state, targetingAttack, targetingRepair, targetingTactic]);
+  }, [pendingDeployAction, pendingDeployActionPreview, state, targetingAttack, targetingRepair, targetingTactic]);
   const attackTargetPlotKeys = useMemo(() => {
     const targetState = pendingDeployActionPreview?.state ?? state;
     if (!targetState) return new Set<string>();
@@ -664,7 +683,10 @@ export function GameShell() {
     setHoveredUnit(null);
     if (!state) return;
     const unit = state.units[unitId];
-    if (!canOperateCurrentTurn || !unit || unit.forceId !== state.playerForceId || unit.moved || unit.acted || unitIsIncapacitated(unit) || unit.movementRemaining <= 0) {
+    // 本旬已行动 / 已移动（含出征落位）的部队同样允许选中：本旬不能再下令（再次点击也不会
+    // 弹命令菜单，见下方分支），但仍可给它下达「下个旬起自动执行」的委任（例如点击己方受损
+    // 设施委任修补）。这正是「出征后 / 移动后没法委任修补」的根因所在。
+    if (!canOperateCurrentTurn || !unit || unit.forceId !== state.playerForceId || unitIsIncapacitated(unit)) {
       setSelectedUnitId(null);
       setUnitCommandMenu(null);
       setUnitIntelMenu(null);
@@ -698,7 +720,12 @@ export function GameShell() {
     setDelegateFacilityMenu(null);
     setDelegatePath([]);
     if (selectedUnitId === unitId) {
-      setUnitCommandMenu({ unitId, position });
+      // 再次点击已选中的部队才弹命令菜单 —— 只有「本旬还能下令」的部队才弹。
+      // 已移动 / 已行动（含出征落位）的部队只保持选中状态：它们的命令会被引擎拒绝，
+      // 但仍可以继续点击己方受损设施下达「下个旬起自动执行」的修补委任。
+      if (!unit.moved && !unit.acted && unit.movementRemaining > 0) {
+        setUnitCommandMenu({ unitId, position });
+      }
       return;
     }
     setUnitCommandMenu(null);
@@ -917,7 +944,8 @@ export function GameShell() {
   }, [beginPendingDeployAction, canOperateCurrentTurn, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuState, unitMenuUnitId]);
 
   const executeUnitRepairCommand = useCallback(() => {
-    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || !unitMenuQuery?.commandAvailability.repair) return;
+    if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId
+      || (!unitMenuQuery?.commandAvailability.repair && !canStartDeployRepair)) return;
     const deployAction = isPendingDeployCommandMenu ? beginPendingDeployAction() : null;
     const commandUnitId = deployAction?.unitId ?? unitMenuUnitId;
     setSelectedUnitId(commandUnitId);
@@ -931,7 +959,7 @@ export function GameShell() {
     setUnitStrategyMenu(null);
     setUnitFacilityMenu(null);
     setUnitCommandMenu(null);
-  }, [beginPendingDeployAction, canOperateCurrentTurn, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuUnitId]);
+  }, [beginPendingDeployAction, canOperateCurrentTurn, canStartDeployRepair, isPendingDeployCommandMenu, unitCommandMenu, unitMenuDestination, unitMenuQuery, unitMenuUnitId]);
 
   const executeUnitDuelCommand = useCallback(() => {
     if (!canOperateCurrentTurn || !unitCommandMenu || !unitMenuUnitId || !unitMenuQuery?.commandAvailability.duel) return;
@@ -1507,30 +1535,110 @@ export function GameShell() {
     setReturnCityConfirm(null);
   }, [emitAudioEvent]);
 
-  /** 弹出委任修补确认（移动模式下点击未完成的己方设施） */
-  const promptRepairConfirm = useCallback((facilityId: string, position: { x: number; y: number }) => {
-    if (!canOperateCurrentTurn || !selectedUnitId || !state) return;
-    const unit = state.units[selectedUnitId];
-    if (!unit || unit.acted || unit.moved || unitIsIncapacitated(unit)) return;
+  /** 为受损设施挑一支可执行修补委任的我方部队：优先当前选中的部队，否则取可达部队中最近的一支。
+   * 供「未选中部队直接点击建筑 → 设施菜单 → 委任修补」的入口使用 —— 玩家不必先选中部队。 */
+  const pickRepairCandidateUnit = useCallback((facilityId: string): string | null => {
+    if (!state) return null;
     const facility = state.facilities?.[facilityId];
-    if (!facility || facility.forceId !== state.playerForceId) return;
+    if (!facility) return null;
+    const candidates = Object.entries(state.units)
+      .filter(([, unit]) => unit.forceId === state.playerForceId && !unitIsIncapacitated(unit))
+      .map(([unitId, unit]) => ({
+        unitId,
+        reachable: canUnitReachRepairFacility(state, unitId, facilityId),
+        dist: Math.abs(unit.q - facility.q) + Math.abs(unit.r - facility.r),
+      }))
+      .filter((candidate) => candidate.reachable)
+      .sort((a, b) => a.dist - b.dist);
+    return candidates[0]?.unitId ?? null;
+  }, [state]);
+
+  /** 出征落位中点修补设施：拼出「出征+修补委任」一次结算所需的部署参数；非出征场景返回 null。
+   * 出征预览部队不在 state.units 里，若按普通口径走「其他真实部队」的委任会扑空 ——
+   * 玩家看到的「部队一直停在城池中心、没有委字、也不移动」正是这条岔路。
+   * 这里与落位菜单的「修补」同链路：出征 → 落位 → setRepairDelegate 立即向设施行军。 */
+  const pendingDeployRepairInput = useCallback((facility: { id: string; q: number; r: number }): (DeployConfirmInput & { destination?: GridCoord }) | null => {
+    if (!state) return null;
+    let input: (DeployConfirmInput & { destination?: GridCoord }) | null = null;
+    // 落位菜单里已点「修补」进入选目标模式：直接用挂起的出征参数（destination 已含落位格）
+    if (pendingDeployAction?.kind === 'combat') {
+      input = { ...pendingDeployAction.input };
+    } else if (pendingDeployCommand?.kind === 'combat') {
+      // 已点落位格、命令菜单打开时点设施菜单的「委任修补」：用玩家选的落位格
+      input = { ...pendingDeployCommand.input, destination: pendingDeployCommand.destination };
+    } else if (selectedUnitId === PENDING_DEPLOY_UNIT_ID && pendingDeploy) {
+      // 尚未点落位格（出征预览停在城池中心）：出生格取朝设施最近的部署格（与出征超距委任同口径）
+      const deployCells = getDeploymentTargets(state, {
+        cityId: pendingDeploy.cityId,
+        passId: pendingDeploy.passId,
+        troopType: pendingDeploy.troopType,
+        officerIds: pendingDeploy.officerIds,
+      });
+      const spawn = chooseDelegateSpawnCell(deployCells, { q: facility.q, r: facility.r });
+      if (!spawn) return null;
+      input = { ...pendingDeploy, destination: spawn };
+    }
+    if (!input) return null;
+    // 与真实部队的修补委任同口径做可达性预检：落位后必须能委任抵达该设施
+    try {
+      const preview = deployUnitPreviewWithId(state, state.playerForceId, input);
+      if (!getRepairDelegateTargets(preview.state, preview.unitId).some((candidate) => candidate.id === facility.id)) return null;
+      return input;
+    } catch {
+      return null;
+    }
+  }, [pendingDeploy, pendingDeployAction, pendingDeployCommand, selectedUnitId, state]);
+
+  /** 弹出委任修补确认（选中己方部队后点击耐久未满的己方设施；或从设施菜单的「委任修补」进入）。
+   * 未选中部队时自动挑最近的可达部队 —— 玩家「直接点击建筑」就能发起修补委任。 */
+  const promptRepairConfirm = useCallback((facilityId: string, position: { x: number; y: number }) => {
+    if (!canOperateCurrentTurn || !state) return;
+    const facility = state.facilities?.[facilityId];
+    // 与引擎 setRepairDelegate 同口径：己方设施且耐久未满，否则确认后会被静默拒绝
+    if (!facility || facility.forceId !== state.playerForceId || !facilityNeedsRepair(facility)) return;
+    // 出征落位中：修补作为出征跟随动作一次结算（deployUnitAction + repairFacility）
+    const pendingInput = pendingDeployRepairInput(facility);
+    if (pendingInput) {
+      const leaderName = state.officers[pendingInput.officerIds[0]]?.name ?? '出征部队';
+      emitAudioEvent({ type: 'menu-click-on' });
+      const facilityName = UNIT_FACILITIES.find((f) => f.type === facility.type)?.name ?? '设施';
+      setRepairConfirm({ unitId: PENDING_DEPLOY_UNIT_ID, facilityId, label: `${facilityName}（${leaderName}出征部队）`, position, deployInput: pendingInput });
+      return;
+    }
+    const selected = selectedUnitId
+      && state.units[selectedUnitId]
+      && state.units[selectedUnitId].forceId === state.playerForceId
+      && !unitIsIncapacitated(state.units[selectedUnitId])
+      && canUnitReachRepairFacility(state, selectedUnitId, facilityId)
+      ? selectedUnitId
+      : pickRepairCandidateUnit(facilityId);
+    if (!selected) return;
+    const unitName = state.officers[state.units[selected].leaderId]?.name ?? '我方部队';
     emitAudioEvent({ type: 'menu-click-on' });
     const facilityName = UNIT_FACILITIES.find((f) => f.type === facility.type)?.name ?? '设施';
-    setRepairConfirm({ unitId: selectedUnitId, facilityId, label: facilityName, position });
-  }, [canOperateCurrentTurn, emitAudioEvent, selectedUnitId, state]);
+    setRepairConfirm({ unitId: selected, facilityId, label: `${facilityName}（${unitName}）`, position });
+  }, [canOperateCurrentTurn, emitAudioEvent, pendingDeployRepairInput, pickRepairCandidateUnit, selectedUnitId, state]);
 
-  /** 确认委任修补：部队移动到设施旁并持续修补 */
+  /** 确认委任修补：部队移动到设施旁并持续修补；
+   * 出征落位中的确认则把「出征 + 修补委任」一次结算，出征后立即向设施行军 */
   const confirmRepair = useCallback(() => {
     if (!repairConfirm) return;
     emitAudioEvent({ type: 'project-started' });
     try {
-      setRepairDelegate(repairConfirm.unitId, repairConfirm.facilityId);
+      if (repairConfirm.deployInput) {
+        deployUnitAction(repairConfirm.deployInput, { type: 'repairFacility', facilityId: repairConfirm.facilityId });
+        setPendingDeployAction(null);
+        setPendingDeployCommand(null);
+        setPendingDeploy(null);
+      } else {
+        setRepairDelegate(repairConfirm.unitId, repairConfirm.facilityId);
+      }
       setSelectedUnitId(null);
     } catch (error) {
       console.warn('委任修补失败:', error);
     }
     setRepairConfirm(null);
-  }, [emitAudioEvent, repairConfirm, setRepairDelegate]);
+  }, [deployUnitAction, emitAudioEvent, repairConfirm, setRepairDelegate]);
 
   /** 取消委任修补 */
   const dismissRepairConfirm = useCallback(() => {
@@ -1621,7 +1729,7 @@ export function GameShell() {
     setTargetingRepair(null);
     setShowMapIntelOptions(false);
     setMapContextMenu(position);
-  }, [cancelConfirm, cityMenu, delegateFacilityMenu, delegateMenu, delegatePath, deployCityId, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, plotContextMenu, proceedConfirm, returnCityConfirm, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingSupply, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
+  }, [cancelConfirm, cityMenu, delegateFacilityMenu, delegateMenu, delegatePath, deployCityId, emitAudioEvent, facilityContextMenu, mapContextMenu, pendingDeploy, pendingDeployAction, pendingTransport, plotContextMenu, proceedConfirm, repairConfirm, returnCityConfirm, selectedUnitId, targetingAttack, targetingFacility, targetingFirePlot, targetingRepair, targetingSupply, targetingTactic, targetingUnitStrategy, transportCityId, unitCommandMenu, unitFacilityMenu, unitStrategyMenu, unitTacticMenu]);
 
   const proceedTenDayFromMap = useCallback(() => {
     const position = mapContextMenu;
@@ -1636,13 +1744,13 @@ export function GameShell() {
     setTargetingUnitStrategy(null);
     setSelectedUnitId(null);
     if (!canOperateCurrentTurn) return;
-    // 尚有未行动的委任部队 → 先弹原版式确认（横幅在界面最下方、是/否在鼠标右键处），点「是」才推进
-    if (canExecuteDelegation) {
+    // 尚有未行动、且未委任的部队 → 先弹原版式确认（横幅在界面最下方、是/否在鼠标右键处），点「是」才推进
+    if (shouldConfirmProceed) {
       setProceedConfirm({ position: position ?? { x: 12, y: 12 } });
       return;
     }
     endTenDay();
-  }, [canExecuteDelegation, canOperateCurrentTurn, endTenDay, mapContextMenu]);
+  }, [canOperateCurrentTurn, endTenDay, mapContextMenu, shouldConfirmProceed]);
 
   /** 确认「进行」：原版式提示点「是」→ 直接推进一旬 */
   const confirmProceedTenDay = useCallback(() => {
@@ -2469,6 +2577,28 @@ export function GameShell() {
             }}
           >
             <div className="city-command-secondary">
+              {facilityObject && state
+                && facilityObject.forceId === state.playerForceId
+                && facilityNeedsRepair(facilityObject)
+                && (() => {
+                  const hasUnit = Boolean(pickRepairCandidateUnit(facilityObject.id) || pendingDeployRepairInput(facilityObject));
+                  return (
+                    <button
+                      type="button"
+                      data-testid="facility-repair-button"
+                      disabled={!hasUnit}
+                      className={hasUnit ? undefined : 'is-disabled'}
+                      onClick={() => {
+                        emitAudioEvent({ type: 'menu-click-on' });
+                        const position = { ...facilityContextMenu.position };
+                        setFacilityContextMenu(null);
+                        promptRepairConfirm(facilityObject.id, position);
+                      }}
+                    >
+                      {hasUnit ? '委任修补' : '无部队可修补'}
+                    </button>
+                  );
+                })()}
               <button
                 type="button"
                 data-testid="facility-dismantle-button"
@@ -2610,6 +2740,30 @@ export function GameShell() {
           >
             <div className="city-command-secondary">
               <div className="city-command-menu-title">是否委任修补{repairConfirm.label}？</div>
+              {(() => {
+                const facility = state?.facilities?.[repairConfirm.facilityId];
+                if (!facility) return null;
+                if (repairConfirm.deployInput) {
+                  return (
+                    <div className="city-command-menu-title" data-testid="repair-confirm-note" style={{ fontWeight: 400, opacity: 0.85 }}>
+                      部队出征后立即赶赴该设施修补，直至耐久修满
+                    </div>
+                  );
+                }
+                const unit = state?.units[repairConfirm.unitId];
+                if (!unit) return null;
+                return (
+                  <div className="city-command-menu-title" data-testid="repair-confirm-note" style={{ fontWeight: 400, opacity: 0.85 }}>
+                    {gridDistanceWithin(unit, facility, 1) <= 1
+                      ? unit.moved && !unit.acted && unit.movementRemaining > 0
+                        ? '出征部队已在设施旁：确认后直接修补，部队不会移动'
+                        : '部队已在设施旁：下个旬起就地修补，部队不会移动'
+                      : unit.moved && !unit.acted && unit.movementRemaining > 0
+                      ? '出征部队确认后立即向设施靠近，本旬不再执行其他行动'
+                      : '下个旬起部队将自动前往修补，直到耐久修满'}
+                  </div>
+                );
+              })()}
               <button type="button" data-testid="repair-confirm-yes" onClick={confirmRepair}>是</button>
               <button type="button" data-testid="repair-confirm-no" onClick={dismissRepairConfirm}>否</button>
             </div>
@@ -2664,7 +2818,7 @@ export function GameShell() {
               command === '单挑' ? !availability?.duel :
               command === '计略' ? !availability?.strategy :
               command === '设置' ? !availability?.facility :
-              command === '修补' ? !availability?.repair :
+              command === '修补' ? (!availability?.repair && !canStartDeployRepair) :
               command === '补给' ? !availability?.supply : true;
             const onClick =
               command === '待命' ? executeUnitWaitCommand :
@@ -2755,21 +2909,15 @@ export function GameShell() {
             setDelegateFacilityMenu(null);
           }}
         >
-          {facilityMenuOptions.map((facility) => {
-            // 科技未解锁的设施在委任菜单里同样置灰（与部队设置菜单、validateCommand 同一口径）
-            const enabled = !state || canBuildFacility(state, facilityMenuForceId, facility.type);
-            return (
-              <button
-                key={facility.type}
-                type="button"
-                disabled={!enabled}
-                title={enabled ? undefined : '尚未研究出建造该设施的科技'}
-                onClick={() => executeDelegateFacilitySelect(facility.type)}
-              >
-                {facility.name}（{FACILITY_BUILD_COSTS[facility.type]}）
-              </button>
-            );
-          })}
+          {facilityMenuOptions.map((facility) => (
+            <button
+              key={facility.type}
+              type="button"
+              onClick={() => executeDelegateFacilitySelect(facility.type)}
+            >
+              {facility.name}（{FACILITY_BUILD_COSTS[facility.type]}金）
+            </button>
+          ))}
         </nav>
       )}
       {unitStrategyMenu && unitMenuState && (

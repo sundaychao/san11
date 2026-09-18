@@ -531,7 +531,7 @@ export type FacilityType =
 /** 部队委任（自动行动，点击「进行」时对未手动操作且有委任的部队自动执行）：
  * - move：沿最优路径向目标移动，到达后结束；
  * - build：先移动到目标建设格相邻处，自动设置设施，建设完成后转为修补委任；
- * - repair：自动修补指定未完成设施，建成后结束。 */
+ * - repair：自动靠近指定设施并持续修补，耐久修满后结束（含建成后被打掉耐久的设施）。 */
 export type UnitDelegate =
   | { kind: 'move'; target: { q: number; r: number } }
   | { kind: 'build'; target: { q: number; r: number }; facility: FacilityType }

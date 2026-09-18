@@ -2,6 +2,7 @@ import { AlertCircle, Swords, X } from 'lucide-react';
 import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import { armamentLabelFor, armamentsOf, siegeWeaponKindOf, TROOP_ARMAMENT, TROOP_LABELS, TROOP_MOVEMENT, vehicleLabelFor } from '../game/armaments';
+import { unitFoodDaysOf } from '../game/innerAffairs';
 import { DEPLOY_AP_COST } from '../game/battle/actions';
 import type { TroopCombatForm } from '../game/battle/catalog';
 import { troopCombatRating } from '../game/battle/officerAbilities';
@@ -209,6 +210,8 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
   const troopAmount = toAmount(activeTroops);
   const goldAmount = toAmount(activeGold);
   const foodAmount = toAmount(activeFood);
+  // 携带兵粮可支撑天数（随兵粮/士兵拖动实时刷新，按旬粒度取整）
+  const foodDays = unitFoodDaysOf(foodAmount, troopAmount);
   const ability = useMemo(
     () => officerAbility(state, ownerForceId, activeOfficers, troopType, siegeWeapon),
     [state, ownerForceId, activeOfficers, troopType, siegeWeapon],
@@ -330,7 +333,7 @@ export function DeployDialog({ cityId, passId, onClose, onConfirm }: DeployDialo
             <label className="range-field">
               <span>兵粮</span>
               <input id="deploy-food" aria-label="出征兵粮" type="range" min="0" max={foodMax} step="100" value={activeFood} onChange={(event) => setFood(event.target.value)} />
-              <output htmlFor="deploy-food" data-testid="deploy-food-value">{Number(activeFood).toLocaleString('en-US')} / {foodMax.toLocaleString('en-US')}</output>
+              <output htmlFor="deploy-food" data-testid="deploy-food-value">{Number(activeFood).toLocaleString('en-US')} / {foodMax.toLocaleString('en-US')}<span data-testid="deploy-food-days" className="deploy-food-days" title="携带兵粮可支撑天数（按旬取整）"> {foodDays}</span></output>
             </label>
             <label className="range-field">
               <span>资金</span>

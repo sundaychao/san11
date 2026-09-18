@@ -4,6 +4,7 @@ import { unitIsIncapacitated } from '../game/battle/actions';
 import { SIEGE_WEAPON_KIND_LABELS, siegeWeaponKindOf, vehicleLabelFor, type SiegeWeaponKind } from '../game/armaments';
 import { unitAuraRange } from '../game/battle/aura';
 import { CATAPULT_TOWER_MAX_RANGE, CATAPULT_TOWER_MIN_RANGE, FORMATION_RANGE, FORT_RANGE, isWaterTerrain } from '../game/battle/catalog';
+import { facilityNeedsRepair } from '../game/battle/facilities';
 import { coordsWithinRange, gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { plotTargetKey } from '../game/battle/targetRules';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
@@ -1055,7 +1056,8 @@ export function StrategicMap({
           <text className="battle-unit-model-glyph" x={centerX} y={centerY + 4}>{texture.glyph}</text>
         </g>
         <text className="battle-unit-troops" x={centerX} y={centerY + 24}>{unit.troops.toLocaleString('en-US')}</text>
-        {canActThisTurn && !preview && (
+        {/* 挂委任的部队始终显示徽章（委）—— 出征/移动当旬下达的委任也要可见，否则玩家会以为什么都没发生 */}
+        {(canActThisTurn || (unit.delegate && unit.forceId === state.turnForceId)) && !preview && (
           <text className="battle-unit-ready-badge" data-testid="battle-unit-ready-badge" x={centerX + 17} y={centerY - 15}>{unit.delegate ? '委' : '未'}</text>
         )}
         {isAttackTarget && (
@@ -1648,8 +1650,11 @@ export function StrategicMap({
                     onFacilityTargetSelect?.(facility.id);
                     return;
                   }
-                  // 移动模式下点击未完成的己方军事设施：交给上层询问是否委任修补（优先于打开设施菜单）
-                  if (moveMode && selectedUnitId && !isCompleted && state && facility.forceId === state.playerForceId) {
+                  // 已选中己方部队时，点击「己方且耐久未满」的军事设施：交给上层询问是否委任修补（优先于打开设施菜单）。
+                  // 判据用 facilityNeedsRepair 而非 !isCompleted —— 已建成但被打掉耐久的设施同样需要修补。
+                  // 不再要求处于移动模式（moveMode 需要部队本旬还有移动力）：出征落位/本旬已移动过的部队
+                  // 同样要能下修补委任 —— 委任是「下个旬起自动执行」的指令，与本旬是否已经动过无关。
+                  if (selectedUnitId && state && facility.forceId === state.playerForceId && facilityNeedsRepair(facility)) {
                     onFacilityRepairPrompt?.(facility.id, { x: event.clientX + 10, y: event.clientY + 4 });
                     return;
                   }

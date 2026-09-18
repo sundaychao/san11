@@ -1274,6 +1274,16 @@ describe('command interface', { timeout: 30000 }, () => {
     expect(foodSlider).toHaveValue('2000');
     expect(within(dialog).getByTestId('deploy-troop-value')).toHaveTextContent('1,000');
     expect(within(dialog).getByTestId('deploy-food-value')).toHaveTextContent('2,000');
+    // 携带粮可支撑天数：1000 兵每旬耗 100 粮，2000 粮 = 20 旬 = 200 天
+    expect(within(dialog).getByTestId('deploy-food-days')).toHaveTextContent('200');
+
+    // 拖动实时刷新：兵粮拖到 500 → 5 旬 = 50 天
+    fireEvent.change(foodSlider, { target: { value: '500' } });
+    expect(within(dialog).getByTestId('deploy-food-days')).toHaveTextContent('50');
+
+    // 士兵变化也刷新：拖到 1500 兵（每旬 150 粮）→ 500 粮撑 3 旬 = 30 天
+    fireEvent.change(troopSlider, { target: { value: '1500' } });
+    expect(within(dialog).getByTestId('deploy-food-days')).toHaveTextContent('30');
   });
 
   it('uses a gold slider for combat deployment and carries that gold on the unit', async () => {
@@ -1384,8 +1394,8 @@ describe('command interface', { timeout: 30000 }, () => {
     for (const upgraded of ['砦（', '城塞（', '连弩楼（']) {
       expect(labels.some((label) => label.startsWith(upgraded))).toBe(false);
     }
-    // 投石台与陷阱型不是升级链，仍然是独立条目
-    expect(labels.some((label) => label.startsWith('投石台（'))).toBe(true);
+    // 投石台不是升级链，也因此没有低档可退：未研究「弹道」时整条不出现
+    expect(labels.some((label) => label.startsWith('投石台（'))).toBe(false);
   });
 
   it('renames each upgrade-chain entry to the tier unlocked by 石工术/建筑学', async () => {
@@ -1401,6 +1411,16 @@ describe('command interface', { timeout: 30000 }, () => {
     }
     // 升级后的条目用高档造价
     expect(labels.some((label) => label.startsWith('城塞（900）'))).toBe(true);
+    // 石工术/建筑学都不通「弹道」→ 投石台仍不出现
+    expect(labels.some((label) => label.startsWith('投石台（'))).toBe(false);
+  });
+
+  it('lists 投石台 in the 部队设置 menu only after 弹道 is researched', async () => {
+    const state = createGame('liu', 1);
+    state.forces.liu.techNodes = ['shigongshu', 'jianzhuxue', 'dandao'];
+    const labels = facilityLabels(await openUnitFacilityMenu(state));
+
+    expect(labels.some((label) => label.startsWith('投石台（900）'))).toBe(true);
   });
 
   it('caps weapon troop slider at available armament stock and disables it below 1000', async () => {

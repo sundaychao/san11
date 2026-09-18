@@ -121,8 +121,8 @@ describe('city traits and specialties', () => {
 
     const next = settleTenDay(state);
 
-    // 零陵=蛮荒城（刘表领地）：刘备军驻其领土，士气 80+5回复-2蛮荒=83
-    expect(next.units['wilderness-probe']?.energy).toBe(83);
+    // 零陵=蛮荒城（刘表领地）：刘备军驻其领土，士气 80 - 3（远离江陵→粮道受阻，不回复） - 2 蛮荒 = 75
+    expect(next.units['wilderness-probe']?.energy).toBe(75);
   });
 
   it('exposes traits and specialty lookups for the UI', () => {

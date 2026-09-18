@@ -4,6 +4,7 @@ import {
   attackableUnits,
   deploymentCellsForStronghold,
   facilityBuildTargets,
+  facilityNeedsRepair,
   jointAttackableUnits,
   movementCells,
   repairableFacilities,
@@ -29,6 +30,7 @@ import { suppliableUnits } from './supply';
 import { movementAllowanceForProfile } from './definitions';
 import type { GridCoord } from './grid';
 import { attackablePlots, attackablePasses, type PlotAttackTarget } from './targetRules';
+import { canUnitReachRepairFacility } from './delegate';
 import { strategyEnergyCostForUnit } from './strategies';
 import { STRATEGY_MIN_TROOPS } from './catalog';
 import { formationMovementAllowanceBonus } from '../skills';
@@ -171,6 +173,19 @@ export function getRepairTargets(state: GameState, unitId: string, origin?: Grid
   return repairableFacilities(state, unitId, origin);
 }
 
+/** 出征跟随修补的目标：允许选择当前不相邻、但部队可以委任抵达的己方受损设施。 */
+export function getRepairDelegateTargets(state: GameState, unitId: string): Facility[] {
+  const unit = state.units[unitId];
+  if (!unit) return [];
+  return Object.values(state.facilities ?? {})
+    .filter((facility) => (
+      facility.forceId === unit.forceId
+      && facilityNeedsRepair(facility)
+      && canUnitReachRepairFacility(state, unitId, facility.id)
+    ))
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
 export function getUnitTacticOptions(state: GameState, unitId: string, origin?: GridCoord): UnitTacticOption[] {
   return unitTactics(state, unitId).map((tactic) => ({
     tactic,
@@ -227,6 +242,9 @@ export function getUnitActionQuery(state: GameState, unitId: string, origin?: Gr
   const availableFacilities = unitFacilityMenuOptions(state, unit.forceId).filter((facility) => (
     facilityBuildTargets(state, unitId, origin, facility.type).length > 0
   ));
+  // 只按 acted 判定：**不能**改成 `acted || moved` —— 出征落位预览部队（deployUnitPreviewWithId）
+  // 本身就是 moved: true / acted: false，改成后者会把它的命令菜单（待命/攻击/计略…）整条置灰。
+  // 「已移动的部队不弹命令菜单」由 GameShell.selectUnit 在打开菜单那一处把关（见那里的注释）。
   const hasActed = unit.acted;
   const commandAvailability: UnitCommandAvailability = hasActed
     ? emptyCommandAvailability()

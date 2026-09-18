@@ -4,6 +4,7 @@ import { ABILITY_NODE_MAP, applyCultivation } from './abilityResearch';
 import { ARMAMENT_LABELS, armamentsOf } from './armaments';
 import { TECHP_CITY_POP_DIVISOR, TECHP_RURAL_POP_DIVISOR, addTechP, completeTechResearch, energyCapOf, maxDurabilityBonus, movementTechBonus, orderDropResist, populationGrowthMultiplier } from './techs';
 import { movementAllowanceForUnit, reconcileFacilityUpgrades, unitSupplyMultiplier } from './battle/actions';
+import { GRAIN_ROUTE_MORALE_LOSS_PER_TEN_DAY, grainRouteBlockedOf } from './battle/grainRoute';
 import { unitMaxPolitics } from './battle/legacyCore';
 import { applyGroundFireDamageToCities, applyGroundFireDamageToFacilities, applyGroundFireDamageToPasses, applyGroundFireDamageToPlots, applyGroundFireDamageToUnits } from './battle/fire';
 import { cellAt } from './battle/movementRules';
@@ -19,10 +20,10 @@ import { settleLoyaltyDrift, settleServiceYears, recruitWillOf, willSuccessChanc
 import { resolveRumor } from './rumor';
 import { settleCaptives } from './captives';
 import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
-import { settleLegionAutomation, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, cityQuarterlyFoodIncome, DEFAULT_OFFICER_SALARY } from './innerAffairs';
+import { settleLegionAutomation, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, cityQuarterlyFoodIncome, DEFAULT_OFFICER_SALARY, CITY_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS, UNIT_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS, unitFoodCostPerTenDay } from './innerAffairs';
 import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
 import { settlePassRangedAttack } from './passes';
-import { executeDelegations, delegationMergedOfficerIds, keepDelegationMergedOfficersActed } from './battle/delegate';
+import { executeDelegations, prepareDelegationsForExecution, delegationMergedOfficerIds, keepDelegationMergedOfficersActed } from './battle/delegate';
 import { addOfficerMerit, MERIT_PER_MONTH, positionDefinition, rankDefinition, rankForCityCount, rankIndex } from './ranks';
 import { settleForceTurnStart } from './skills/rules/turn';
 import { cityIncomeMultiplier } from './skills/rules/city';
@@ -48,12 +49,12 @@ const EVENTS: CityEvent[] = [
 ];
 
 const BASE_TEN_DAY_ACTION_POINTS = 80;
-const CITY_FOOD_PER_TEN_THOUSAND_TROOPS = 500;
 /**
  * 野外部队每旬兵粮消耗：每 1 万兵 1000 粮（`settleUnitSupply` 用）。
- * 导出是为了让输送编制界面能预告「押运的兵粮可支撑多少日」，两处同一口径。
+ * 口径唯一出处是 `innerAffairs.UNIT_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS`，
+ * 这里保留旧名以免打断输送/编制界面（它们预告「押运的兵粮可支撑多少日」，须与旬结算同一口径）。
  */
-export const UNIT_FOOD_PER_TEN_THOUSAND_TROOPS = 1000;
+export const UNIT_FOOD_PER_TEN_THOUSAND_TROOPS = UNIT_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS;
 
 function isQuarterStartMonth(month: number) {
   return (month - 1) % 3 === 0;
@@ -414,7 +415,7 @@ function settleCitySupply(next: GameState, city: City) {
     .reduce((lowest, { effect }) => Math.min(lowest, effect.multiplier), 1);
   // 军马与士兵按同一口粮标准消耗
   const horses = city.armaments?.cavalry ?? 0;
-  const foodCost = Math.max(0, Math.ceil(((city.troops + horses) * CITY_FOOD_PER_TEN_THOUSAND_TROOPS * foodMultiplier) / 10000));
+  const foodCost = Math.max(0, Math.ceil(((city.troops + horses) * CITY_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS * foodMultiplier) / 10000));
   if (city.food >= foodCost) {
     city.food -= foodCost;
   } else {
@@ -453,18 +454,28 @@ function settleCitySupply(next: GameState, city: City) {
   }
 }
 
-function settleUnitSupply(next: GameState, unit: ArmyUnit) {
+function settleUnitSupply(next: GameState, unit: ArmyUnit, grainRoutes?: Map<string, Set<string>>) {
   const energyCap = unit.forceId ? energyCapOf(next, unit.forceId) : 100;
   const energyRegen = 5;
   // 战力回复：每旬恢复 部队最高政治×12% 的战力（运输队无战力属性，跳过）
   if (unit.stamina !== undefined) {
     unit.stamina = Math.min(100, (unit.stamina ?? 0) + unitMaxPolitics(next, unit) * 0.12);
   }
-  const baseFoodCost = Math.max(0, Math.ceil((unit.troops * UNIT_FOOD_PER_TEN_THOUSAND_TROOPS) / 10000));
-  const foodCost = Math.ceil(baseFoodCost * unitSupplyMultiplier(next, unit));
-  if (unit.food >= foodCost) {
-    unit.food -= foodCost;
-    unit.energy = Math.min(energyCap, unit.energy + energyRegen);
+  const foodCost = Math.ceil(unitFoodCostPerTenDay(unit.troops) * unitSupplyMultiplier(next, unit));
+  // 粮道（运输队不适用：运输队本就不靠城池补给）：通 → 另一半由出发城负担，部队正常回复士气；
+  // 阻（范围外 / 出发城易主 / 出发城存粮低于门槛）→ 部队全额自耗、不回复士气且每旬士气 -3
+  const supplyLineApplies = unit.kind !== 'transport';
+  const blockedByGrainRoute = supplyLineApplies && grainRouteBlockedOf(next, unit, grainRoutes);
+  const unitCost = supplyLineApplies && !blockedByGrainRoute ? Math.floor(foodCost / 2) : foodCost;
+  if (blockedByGrainRoute) unit.energy = Math.max(0, unit.energy - GRAIN_ROUTE_MORALE_LOSS_PER_TEN_DAY);
+  if (unit.food >= unitCost) {
+    unit.food -= unitCost;
+    if (unitCost < foodCost) {
+      // 粮道通：由本城补上另一半（本城存粮不足时能补多少补多少）
+      const home = next.cities[unit.homeCityId];
+      if (home) home.food = Math.max(0, home.food - Math.min(home.food, foodCost - unitCost));
+    }
+    if (!blockedByGrainRoute) unit.energy = Math.min(energyCap, unit.energy + energyRegen);
   } else {
     unit.food = 0;
     unit.energy = Math.max(0, unit.energy - 20);
@@ -1054,7 +1065,9 @@ export function settleTenDay(state: GameState): GameState {
     settleCitySupply(next, city);
     // 市场/基础收入统一在每月结算（settleMonth）按新公式计入，此旬不再单独产出
   }
-  for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit);
+  // 粮道范围按城缓存：一次旬结算内同城的部队共用一份 Dijkstra 结果
+  const grainRoutes = new Map<string, Set<string>>();
+  for (const unit of [...Object.values(next.units)]) settleUnitSupply(next, unit, grainRoutes);
   applyGroundFireDamageToUnits(next, 'ten-day-fire');
   applyGroundFireDamageToFacilities(next);
   applyGroundFireDamageToPlots(next);
@@ -1130,7 +1143,10 @@ export function advanceTenDay(state: GameState, options: TenDayAdvanceOptions = 
   for (const forceId of delegatedForceIds) {
     const before = next;
     const beforeReports = before.facilityRepairReports ?? [];
-    next = executeDelegations(next, forceId);
+    // 执行前先清掉委任部队的上旬行动标记：手动行动类指令都会清委任，结算时仍挂委任的
+    // 部队必是「下委任后未再手动操作」的，其委任应在本次结算准时执行（否则出征/移动
+    // 当旬下的委任要被上旬 moved 吞掉一拍，等两次结算才生效）。
+    next = executeDelegations(prepareDelegationsForExecution(next, forceId), forceId);
     const afterReports = next.facilityRepairReports ?? [];
     if (afterReports !== beforeReports && afterReports.length > 0) repairReports.push(...afterReports);
     // 委任自动进驻/回城的武将：旬末会重置全部「本旬已行动」，需在推进后补回标记

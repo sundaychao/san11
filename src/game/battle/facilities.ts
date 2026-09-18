@@ -5,6 +5,7 @@ export {
   FACILITY_BUILD_COSTS,
   facilityBuildTargets,
   facilityIsCompleted,
+  facilityNeedsRepair,
   facilityProtectionForUnit,
   reconcileFacilityUpgrades,
   repairableFacilities,

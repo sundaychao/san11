@@ -65,7 +65,9 @@ export function cityCenter(city: City): GridCoord {
   return { q: city.gridQ, r: city.gridR };
 }
 
-function controlledZoneKeysForForce(state: GameState, forceId: ForceId) {
+/** 敌方控制区（ZOC）格集合：敌方部队（运输队/混乱者除外）、敌方城 footprint、敌方 ZOC 设施的相邻格。
+ *  粮道计算（grainRoute）与每旬移动共用本口径。 */
+export function controlledZoneKeysForForce(state: GameState, forceId: ForceId) {
   const keys = new Set<string>();
   const addNeighbors = (coord: GridCoord) => {
     for (const neighbor of neighborsOf(coord.q, coord.r)) keys.add(gridKey(neighbor));
@@ -87,6 +89,28 @@ function controlledZoneKeysForForce(state: GameState, forceId: ForceId) {
     addNeighbors(facility);
   }
 
+  return keys;
+}
+
+/**
+ * 「进入即被迫当旬停留」的格集合（对该部队而言）。
+ *
+ * 即敌方控制区里**该部队无法忽略**的部分：飞将（陆地忽略）/ 推进（水上忽略）这类特技
+ * 只豁免对应地形的 ZOC，故本函数按 `unitIgnoresEnemyZocTerrain` 逐格剔除。
+ * 与 `reachableCostsFrom` 内的 `isWater → ignoresZocHere → continue` 判据同规则，
+ * 供委任落点选取（delegate 的反向距离搜索）复用以保持正反向口径一致。
+ */
+export function forceStopKeysForUnit(state: GameState, unit: ArmyUnit): Set<string> {
+  const zocKeys = controlledZoneKeysForForce(state, unit.forceId);
+  const ignore = unitIgnoresEnemyZocTerrain(state, unit);
+  if (!ignore) return zocKeys;
+  const keys = new Set<string>();
+  for (const key of zocKeys) {
+    const [q, r] = key.split(',').map(Number);
+    const isWater = isWaterTerrain(cellAt(state, { q, r })?.terrain);
+    const ignoresHere = ignore === 'land' ? !isWater : isWater;
+    if (!ignoresHere) keys.add(key);
+  }
   return keys;
 }
 

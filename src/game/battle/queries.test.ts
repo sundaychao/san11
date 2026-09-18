@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { deployUnit } from './actions';
-import { getDeploymentTargets, getUnitActionQuery } from './queries';
+import { getDeploymentTargets, getRepairDelegateTargets, getRepairTargets, getUnitActionQuery } from './queries';
 import { createGame } from '../scenario/jingxiang208';
 
 function combatState() {
@@ -132,6 +132,24 @@ describe('battle queries', () => {
     });
 
     expect(targets.length).toBeGreaterThan(0);
+  });
+
+  it('returns a reachable remote unfinished facility for deployment repair delegation', () => {
+    const { state, attacker } = combatState();
+    state.facilities = {
+      remote: {
+        id: 'remote',
+        type: 'arrowTower',
+        forceId: 'liu',
+        q: 4,
+        r: 23,
+        durability: 100,
+        completed: false,
+      },
+    };
+
+    expect(getRepairTargets(state, attacker.id)).toEqual([]);
+    expect(getRepairDelegateTargets(state, attacker.id).map((facility) => facility.id)).toEqual(['remote']);
   });
 
   it('disables every unit command after the unit has acted', () => {

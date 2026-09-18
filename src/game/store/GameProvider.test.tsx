@@ -573,9 +573,9 @@ describe('GameProvider', () => {
 
     expect(screen.getByLabelText('first-target-troops')).toHaveTextContent('2700');
     expect(screen.getByLabelText('second-target-troops')).toHaveTextContent('2700');
-    // 刘备部队：每旬+5 + 乐奏+5 = 90；曹部队：每旬+5 + 乐奏+5 = 50（军乐台只回战力不回气力）
-    expect(screen.getByLabelText('first-target-energy')).toHaveTextContent('90');
-    expect(screen.getByLabelText('second-target-energy')).toHaveTextContent('50');
+    // 两队都远离各自出发城 → 粮道受阻：不回复基础士气（每旬 -3），各只剩「乐奏」的 +5；军乐台只回战力不回气力
+    expect(screen.getByLabelText('first-target-energy')).toHaveTextContent('82');
+    expect(screen.getByLabelText('second-target-energy')).toHaveTextContent('42');
     expect(screen.getByLabelText('damage-reports')).toHaveTextContent('cao-target');
   });
 

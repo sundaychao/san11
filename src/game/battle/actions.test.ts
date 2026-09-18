@@ -769,7 +769,8 @@ describe('battle deployment and movement actions', () => {
     state.units[unit.id].troops = 10_000;
     state.facilities = {
       building: { id: 'building', type: 'arrowTower', forceId: 'liu', q: 11, r: 10, durability: 150, completed: false },
-      damagedCompleted: { id: 'damagedCompleted', type: 'musicTower', forceId: 'liu', q: 10, r: 11, durability: 500, completed: true },
+      // 已建成且耐久已满：已无可修补空间，不列入可修补集（受损的已建成设施见下方专门用例）
+      damagedCompleted: { id: 'damagedCompleted', type: 'musicTower', forceId: 'liu', q: 10, r: 11, durability: 800, completed: true },
       enemyBuilding: { id: 'enemyBuilding', type: 'arrowTower', forceId: 'cao', q: 9, r: 10, durability: 150, completed: false },
       enemyEarthwork: { id: 'enemyEarthwork', type: 'earthwork', forceId: 'cao', q: 10, r: 9, durability: 150, completed: false },
       enemyFireSeed: { id: 'enemyFireSeed', type: 'fireSeed', forceId: 'cao', q: 9, r: 9, durability: 100, completed: false },
@@ -791,6 +792,30 @@ describe('battle deployment and movement actions', () => {
     expect(() => repairFacility(state, 'liu', unit.id, 'damagedCompleted')).toThrow(/修补范围|淇ˉ鑼冨洿/);
   });
 
+  it('repairs a completed-but-damaged facility and keeps it effective while patching', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      troops: 7000,
+      food: 6000,
+    });
+    setUniformTerrain(state, 'plain');
+    const unit = Object.values(state.units)[0];
+    readyUnitAt(state, unit.id, { q: 10, r: 10 }, 'sword');
+    state.units[unit.id].troops = 1000;
+    // 已建成的太鼓台（上限 800）被打掉 500 耐久：仍是「已建成」，但耐久未满，应当可修补
+    state.facilities = {
+      drum: { id: 'drum', type: 'drum', forceId: 'liu', q: 11, r: 10, durability: 300, completed: true },
+    };
+
+    expect(repairableFacilities(state, unit.id).map((facility) => facility.id)).toEqual(['drum']);
+
+    const repaired = repairFacility(state, 'liu', unit.id, 'drum');
+    // 只补了一部分：耐久上升，且 completed 不得回退（否则会出现「不修还生效、一修反而失效」）
+    expect(repaired.facilities!.drum.durability).toBeGreaterThan(300);
+    expect(repaired.facilities!.drum.durability).toBeLessThan(800);
+    expect(repaired.facilities!.drum.completed).not.toBe(false);
+  });
   it('lets units attack enemy facilities and lets owners dismantle their own facilities', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
@@ -959,7 +984,8 @@ describe('battle deployment and movement actions', () => {
       .toBe(base.units[defender.id].troops - normal.units[defender.id].troops);
 
     const settled = settleTenDay(withUnfinished);
-    expect(settled.units[defender.id].energy).toBe(55);
+    // 本用例把 grid 换成 4 格假图，守军落在江陵粮道之外 → 粮道受阻：不回复士气且每旬 -3（50 - 3）
+    expect(settled.units[defender.id].energy).toBe(47);
     expect(settled.units[defender.id].food).toBe(4500);
     expect(movementCells(withUnfinished, defender.id)).toContainEqual({ q: 12, r: 11 });
   });
@@ -1007,8 +1033,8 @@ describe('battle deployment and movement actions', () => {
 
     const next = settleTenDay(state);
 
-    // 气力仅按基础值每旬恢复 +5；军乐台只回战力不回气力
-    expect(next.units[unit.id].energy).toBe(55);
+    // 部队在 (10,10) 远离出发城江陵 → 粮道受阻：不回复基础士气且每旬 -3；军乐台只回战力不回气力
+    expect(next.units[unit.id].energy).toBe(47);
     // 战力：每旬回复最高政治12%（关羽政 62×12%=7.44）+ 军乐台 +6
     expect(next.units[unit.id].stamina).toBeCloseTo(50 + state.officers['guan-yu'].stats.politics * 0.12 + 6);
     expect(next.units['arrow-target'].troops).toBeLessThan(3000);
@@ -1219,9 +1245,12 @@ describe('battle deployment and movement actions', () => {
     expect(menuNames()).toEqual(expect.arrayContaining(['城塞', '石墙', '连弩楼']));
     expect(menuNames()).not.toContain('砦');
     expect(menuNames()).not.toContain('箭楼');
-    // 投石台是独立选项（非升级链）；陷阱型与据点/阻挡/攻击型一样走升级链：
-    // 默认只列基础档「火种/火球」，火焰/业火高档不单独出现
-    expect(menuNames()).toEqual(expect.arrayContaining(['投石台', '火种', '火球']));
+    // 投石台是独立选项（非升级链），也因此没有低档可退：弹道之前整条不出现，研究后才冒出来
+    expect(menuNames()).not.toContain('投石台');
+    state.forces.liu.techNodes = ['shigongshu', 'jianzhuxue', 'dandao'];
+    expect(menuNames()).toContain('投石台');
+    // 陷阱型与据点/阻挡/攻击型一样走升级链：默认只列基础档「火种/火球」，火焰/业火高档不单独出现
+    expect(menuNames()).toEqual(expect.arrayContaining(['火种', '火球']));
     for (const hidden of ['火焰种', '火焰球', '业火种', '业火球']) expect(menuNames()).not.toContain(hidden);
 
     // 火药：火种 → 火焰种、火球 → 火焰球（入口改名并升级）

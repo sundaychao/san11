@@ -830,7 +830,9 @@ describe('online room session', () => {
     // cao 箭楼位于襄阳（要塞特性、cao 领地）境内，伤害 300×1.5=450；liu 箭楼在敌方境内无加成，伤害 300
     expect(guestDone.room.state?.units['liu-target'].troops).toBe(2550);
     expect(guestDone.room.state?.units['cao-target'].troops).toBe(2700);
-    expect(guestDone.room.state?.units['host-musician'].energy).toBe(90);
+    // 刘备部队在 (0,0)，落在江陵粮道之外 → 受阻：不回复基础士气（每旬 -3），只留「乐奏」的 +5；
+    // 曹部队在 (15,32)，仍在襄阳粮道内 → 通畅，正常 +5 + 乐奏 +5
+    expect(guestDone.room.state?.units['host-musician'].energy).toBe(82);
     expect(guestDone.room.state?.units['guest-musician'].energy).toBe(90);
     expect((guestDone.room.state?.battleDamageReports ?? []).map((report) => report.unitId)).toEqual(['cao-target']);
   });
@@ -884,8 +886,8 @@ describe('online room session', () => {
 
     expect(guestDone.ok).toBe(true);
     if (!guestDone.ok) return;
-    // 气力：每旬基础 +5 + 乐奏 +5；军乐台只回战力（+6），不回气力
-    expect(guestDone.room.state?.units['biao-musician'].energy).toBe(70);
+    // 气力：该部队远离出发城襄阳 → 粮道受阻，不回复基础士气（每旬 -3），只留「乐奏」的 +5；军乐台只回战力（+6），不回气力
+    expect(guestDone.room.state?.units['biao-musician'].energy).toBe(62);
     expect(guestDone.room.state?.units['biao-musician'].stamina).toBe(40 + (room.state?.officers['biao-musician-leader'].stats.politics ?? 0) * 0.12 + 6);
   });
 });

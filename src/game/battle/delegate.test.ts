@@ -16,6 +16,7 @@ import {
   delegationMergedOfficerIds,
   executeDelegations,
   hasExecutableDelegation,
+  hasUnactedNonDelegatedUnits,
   keepDelegationMergedOfficersActed,
   optimalPathCells,
   runDelegatedUnits,
@@ -615,6 +616,33 @@ describe('部队委任', () => {
       expect(cursor.units['delegate-unit'].delegate).toBeUndefined();
     });
 
+    it('本旬已行动部队确认修补委任：只登记委任且清除残留的建设弹字', () => {
+      const state = createGame('liu', 1);
+      const spawn = findBuildSpawn(state);
+      expect(spawn).toBeDefined();
+      if (!spawn) return;
+      injectUnit(state, spawn, { gold: 2000 });
+      const buildTarget = facilityBuildTargets(state, 'delegate-unit', undefined, 'fireSeed')[0];
+      expect(buildTarget).toBeDefined();
+      if (!buildTarget) return;
+
+      // 建设后部队 acted=true，且产生一条「+N build」耐久弹字
+      const built = setBuildDelegate(state, 'liu', 'delegate-unit', buildTarget, 'fireSeed');
+      const facilityId = Object.keys(built.facilities ?? {})[0];
+      expect(built.units['delegate-unit'].acted).toBe(true);
+      expect(built.facilityRepairReports?.length).toBeGreaterThan(0);
+
+      // 本旬已行动的部队再确认修补委任：本旬不移动也不修补（下个旬起执行），
+      // 但残留的建设弹字必须立即清除 —— 否则玩家会误读成「已修补而耐久没加」
+      const next = setRepairDelegate(built, 'liu', 'delegate-unit', facilityId);
+      expect(next.units['delegate-unit'].delegate).toEqual({ kind: 'repair', facilityId });
+      expect(next.units['delegate-unit'].q).toBe(built.units['delegate-unit'].q);
+      expect(next.units['delegate-unit'].r).toBe(built.units['delegate-unit'].r);
+      expect(next.facilityRepairReports).toEqual([]);
+      // 耐久确实没有被本次确认改动
+      expect(next.facilities![facilityId].durability).toBe(built.facilities![facilityId].durability);
+    });
+
     it('远方建设点：先自动移动到相接格，再自动建设并转修补委任', () => {
       const state = createGame('liu', 1);
       const spawn = findBuildSpawn(state);
@@ -746,6 +774,35 @@ describe('部队委任', () => {
       expect(hasExecutableDelegation(state, 'liu')).toBe(true);
     });
 
+    it('hasUnactedNonDelegatedUnits：「未行动且未委任」才算未下令（委任 / 已行动 / 已移动都不算）', () => {
+      const state = createGame('liu', 1);
+      const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
+        .find((n) => cellAt(state, n))!;
+      const target = { q: spawn.q + 4, r: spawn.r };
+
+      // 无部队 → false
+      expect(hasUnactedNonDelegatedUnits(state, 'liu')).toBe(false);
+
+      // 未行动、未委任 → true（「进行」前原版提示的触发条件）
+      injectUnit(state, spawn);
+      expect(hasUnactedNonDelegatedUnits(state, 'liu')).toBe(true);
+      expect(hasUnactedNonDelegatedUnits(state, 'cao')).toBe(false);
+
+      // 已委任 → false：推进时会自动行动一步，不该再问「是否确定」
+      const delegated = structuredClone(state);
+      delegated.units['delegate-unit'].delegate = { kind: 'move', target };
+      expect(hasUnactedNonDelegatedUnits(delegated, 'liu')).toBe(false);
+
+      // 已行动 / 已移动 → false：与部队列表「已行动」显示口径（acted || moved）一致
+      const acted = structuredClone(state);
+      acted.units['delegate-unit'].acted = true;
+      expect(hasUnactedNonDelegatedUnits(acted, 'liu')).toBe(false);
+
+      const moved = structuredClone(state);
+      moved.units['delegate-unit'].moved = true;
+      expect(hasUnactedNonDelegatedUnits(moved, 'liu')).toBe(false);
+    }, 30000);
+
     it('runDelegatedUnits：委任部队各行动一步，且不推进回合；行动后无可执行委任', () => {
       const state = createGame('liu', 1);
       const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
@@ -805,5 +862,181 @@ describe('部队委任', () => {
       expect(after.officers['liu-bei'].acted).toBe(true);
       expect(cityAvailableOfficers(after, 'liu', targetCity.id).map((officer) => officer.id)).not.toContain('liu-bei');
     }, 30000);
+  });
+
+  /**
+   * 用户实测（08 号存档）：关羽在 (79,125)、敌方张辽在 (78,124)、未建成的太鼓台在 (78,121)。
+   * 场景地形全为草地（消耗 4/格），移动力 22 —— 手动移动可越过张辽的控制区绕到 (78,122)。
+   */
+  describe('委任落点与敌方 ZOC（进入即被迫停留的格不能当跳板）', () => {
+    /** 关羽 (79,125) + 张辽 (78,124)（敌方）+ 未建成太鼓台 (78,121) */
+    function zocRepairScene() {
+      const state = createGame('liu', 1);
+      state.units = {};
+      state.facilities = {
+        drum: { id: 'drum', type: 'drum', forceId: 'liu', q: 78, r: 121, durability: 300, completed: false },
+      };
+      state.units['delegate-unit'] = makeUnit('liu', 'jiangling', 79, 125, { leaderId: 'guan-yu' });
+      state.units['enemy-unit'] = makeUnit('cao', 'wan', 78, 124, { id: 'enemy-unit' });
+      return state;
+    }
+
+    it('委任修补首步走到本旬可达的设施邻格，而不是停在 ZOC 死角（只挪一格）', () => {
+      const state = zocRepairScene();
+      state.units['delegate-unit'].movementRemaining = movementAllowanceForUnit(state.units['delegate-unit']);
+
+      // 手动移动本旬可以摸到设施邻格 (78,122) —— 委任必须同样走到这里
+      expect(movementCells(state, 'delegate-unit')).toContainEqual({ q: 78, r: 122 });
+
+      const next = setRepairDelegate(state, 'liu', 'delegate-unit', 'drum');
+      expect(next.units['delegate-unit']).toMatchObject({ q: 78, r: 122 });
+      expect(next.units['delegate-unit'].delegate).toEqual({ kind: 'repair', facilityId: 'drum' });
+    });
+
+    it('委任修补随后每旬自动修补，直至太鼓台建成并清除委任', () => {
+      const state = zocRepairScene();
+      let cursor = setRepairDelegate(state, 'liu', 'delegate-unit', 'drum');
+      const facilityId = 'drum';
+      expect(cursor.facilities![facilityId].durability).toBe(300);
+
+      let guard = 0;
+      while (cursor.units['delegate-unit']?.delegate && guard < 10) {
+        cursor = executeDelegations(freshTurn(cursor));
+        guard += 1;
+      }
+
+      expect(cursor.facilities![facilityId].durability).toBe(800);
+      expect(cursor.facilities![facilityId].completed).not.toBe(false);
+      expect(cursor.units['delegate-unit'].delegate).toBeUndefined();
+      expect(cursor.units['delegate-unit']).toMatchObject({ q: 78, r: 122 });
+    });
+
+    it('目标被敌方 ZOC 完全隔断时仍挪一步靠近，不会原地冻住委任', () => {
+      const state = createGame('liu', 1);
+      state.units = {};
+      state.facilities = {};
+      injectUnit(state, { q: 79, r: 130 }, { movementRemaining: 22 });
+      // 两名敌军把目标 (79,122) 的六个邻格全部纳入控制区：本旬无任何「落点后仍能继续推进」的格
+      state.units['enemy-a'] = makeUnit('cao', 'wan', 78, 122, { id: 'enemy-a' });
+      state.units['enemy-b'] = makeUnit('cao', 'wan', 80, 123, { id: 'enemy-b' });
+      expect(reachableCosts(state, state.units['delegate-unit']).has('79,122')).toBe(false);
+
+      const next = setMoveDelegate(state, 'liu', 'delegate-unit', { q: 79, r: 122 });
+      expect(next.units['delegate-unit']).toMatchObject({ q: 79, r: 125, delegate: { kind: 'move', target: { q: 79, r: 122 } } });
+    });
+  });
+
+  /**
+   * 用户实测（08 号存档）：太鼓台建成后被打掉耐久，旧实现拿 facilityIsCompleted 当修补前置条件，
+   * 把「已建成但受损」整类设施挡在门外 —— 部队走到旁边也始终不修补。
+   * 判据改为「耐久未满」（facilityNeedsRepair）后应能委任修补至满。
+   */
+  describe('已建成设施被打掉耐久后的修补', () => {
+    /** 关羽 (79,125) + 张辽 (78,124)（敌方）+ 已建成但受损（300/800）的太鼓台 (78,121) */
+    function damagedCompletedScene() {
+      const state = createGame('liu', 1);
+      state.units = {};
+      state.facilities = {
+        drum: { id: 'drum', type: 'drum', forceId: 'liu', q: 78, r: 121, durability: 300, completed: true },
+      };
+      state.units['delegate-unit'] = makeUnit('liu', 'jiangling', 79, 125, { leaderId: 'guan-yu' });
+      state.units['enemy-unit'] = makeUnit('cao', 'wan', 78, 124, { id: 'enemy-unit' });
+      return state;
+    }
+
+    it('委任修补已建成的受损设施：走到邻格后持续修补，且修补期间 completed 不回退', () => {
+      const cursor0 = setRepairDelegate(damagedCompletedScene(), 'liu', 'delegate-unit', 'drum');
+      expect(cursor0.units['delegate-unit']).toMatchObject({ q: 78, r: 122, delegate: { kind: 'repair', facilityId: 'drum' } });
+
+      let cursor = executeDelegations(freshTurn(cursor0));
+      expect(cursor.facilities!.drum.durability).toBeGreaterThan(300);
+      expect(cursor.facilities!.drum.completed).not.toBe(false);
+
+      let guard = 0;
+      while (cursor.units['delegate-unit']?.delegate && guard < 10) {
+        cursor = executeDelegations(freshTurn(cursor));
+        guard += 1;
+      }
+      expect(cursor.facilities!.drum).toMatchObject({ durability: 800 });
+      expect(cursor.facilities!.drum.completed).not.toBe(false);
+      expect(cursor.units['delegate-unit'].delegate).toBeUndefined();
+      expect(cursor.units['delegate-unit']).toMatchObject({ q: 78, r: 122 });
+    });
+
+    it('已建成且耐久已满的设施无需修补：委任被拒绝且部队原地不动', () => {
+      const state = damagedCompletedScene();
+      state.facilities!.drum.durability = 800;
+      const next = setRepairDelegate(state, 'liu', 'delegate-unit', 'drum');
+      expect(next.units['delegate-unit']).toMatchObject({ q: 79, r: 125 });
+      expect(next.units['delegate-unit'].delegate).toBeUndefined();
+    });
+  });
+
+  /**
+   * 用户实测：出征落位（deployUnit 会把部队标记为 moved）或本旬手动移动过的部队，都应能下修补委任。
+   * 手动移动后移动力已清零，本旬只登记委任；出征落位仍保留出征移动力时，则立即向设施靠近。
+   */
+  describe('本旬已行动/已移动（含出征落位）的部队也能下修补委任', () => {
+    /** 关羽 (79,125)（moved，本旬已出征落位）+ 张辽 (78,124)（敌方）+ 已建成受损（300/800）太鼓台 (78,121) */
+    function movedScene() {
+      const state = createGame('liu', 1);
+      state.units = {};
+      state.facilities = {
+        drum: { id: 'drum', type: 'drum', forceId: 'liu', q: 78, r: 121, durability: 300, completed: true },
+      };
+      state.units['delegate-unit'] = makeUnit('liu', 'jiangling', 79, 125, {
+        leaderId: 'guan-yu',
+        moved: true,
+        movementRemaining: 0,
+      });
+      state.units['enemy-unit'] = makeUnit('cao', 'wan', 78, 124, { id: 'enemy-unit' });
+      return state;
+    }
+
+    it('已移动的部队：只登记委任、本旬不再挪动（不产生第二次行动）', () => {
+      const next = setRepairDelegate(movedScene(), 'liu', 'delegate-unit', 'drum');
+      expect(next.units['delegate-unit'].delegate).toEqual({ kind: 'repair', facilityId: 'drum' });
+      expect(next.units['delegate-unit']).toMatchObject({ q: 79, r: 125, moved: true });
+      expect(next.facilities!.drum.durability).toBe(300);
+    });
+
+    it('出征落位仍有出征移动力时：确认委任后立即向设施靠近', () => {
+      const state = movedScene();
+      // deployUnit 的出征落位状态：moved=true，但移动力尚未被普通移动消耗。
+      state.units['delegate-unit'].movementRemaining = 20;
+
+      const next = setRepairDelegate(state, 'liu', 'delegate-unit', 'drum');
+
+      expect(next.units['delegate-unit']).toMatchObject({ q: 78, r: 122, moved: true, movementRemaining: 0 });
+      expect(next.units['delegate-unit'].delegate).toEqual({ kind: 'repair', facilityId: 'drum' });
+      expect(next.facilities!.drum.durability).toBe(300);
+    });
+
+    it('下一旬起自动靠近并修补，直至耐久修满并清除委任', () => {
+      let cursor = setRepairDelegate(movedScene(), 'liu', 'delegate-unit', 'drum');
+      let guard = 0;
+      while (cursor.units['delegate-unit']?.delegate && guard < 12) {
+        cursor = executeDelegations(freshTurn(cursor));
+        guard += 1;
+      }
+      expect(cursor.facilities!.drum).toMatchObject({ durability: 800 });
+      expect(cursor.facilities!.drum.completed).not.toBe(false);
+      expect(cursor.units['delegate-unit'].delegate).toBeUndefined();
+      expect(cursor.units['delegate-unit']).toMatchObject({ q: 78, r: 122 });
+    });
+
+    it('已移动的部队委任敌方设施：仍被拒绝', () => {
+      const state = movedScene();
+      state.facilities!.drum.forceId = 'cao';
+      const next = setRepairDelegate(state, 'liu', 'delegate-unit', 'drum');
+      expect(next.units['delegate-unit'].delegate).toBeUndefined();
+    });
+
+    it('混乱（无法行动）的部队仍然不能下委任', () => {
+      const state = movedScene();
+      state.units['delegate-unit'].confusedTenDays = 2;
+      const next = setRepairDelegate(state, 'liu', 'delegate-unit', 'drum');
+      expect(next.units['delegate-unit'].delegate).toBeUndefined();
+    });
   });
 });
