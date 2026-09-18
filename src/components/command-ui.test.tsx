@@ -3443,7 +3443,7 @@ describe('兵器部队命令菜单', () => {
       .toEqual(['待命', '战法', '单挑', '计略']);
   });
 
-  it('井阑点战法直接进选目标：不弹二级菜单，第 2 格的敌部队被高亮', async () => {
+  it('井阑点战法先弹二级菜单，选「火矢」后第 2 格的敌部队被高亮', async () => {
     const user = userEvent.setup();
     const { state, spot } = siegeState({ siegeWeapon: 'tower' });
     const origin = { q: spot.q, r: spot.r };
@@ -3481,7 +3481,12 @@ describe('兵器部队命令菜单', () => {
     expect(tacticButton).toBeEnabled();
     await user.click(tacticButton);
 
-    expect(screen.queryByTestId('unit-tactic-menu')).not.toBeInTheDocument();
+    // 兵器也先弹二级菜单：列出该兵器的战法，点选后才进选目标（未选前不该有任何目标高亮）
+    const tacticMenu = screen.getByTestId('unit-tactic-menu');
+    expect(within(tacticMenu).getAllByRole('button').map((button) => button.textContent)).toEqual(['火矢']);
+    expect(screen.queryAllByTestId('attack-target-arrow')).toHaveLength(0);
+    await user.click(within(tacticMenu).getByRole('button', { name: '火矢' }));
+
     // 部队攻击目标的可视标记是头顶的 ▼ 箭头（与普攻/战法同一口径），不属于 is-attack-target 类
     const foeMarker = screen.getAllByTestId('battle-unit-marker')
       .find((candidate) => candidate.getAttribute('data-grid-position') === `${target.q},${target.r}`)!;
@@ -3525,8 +3530,11 @@ describe('兵器部队命令菜单', () => {
     fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' }));
 
-    // 冲车只有「破碎」一条战法：不弹二级菜单，敌城直接高亮
-    expect(screen.queryByTestId('unit-tactic-menu')).not.toBeInTheDocument();
+    // 冲车只有「破碎」一条战法，但仍要先在二级菜单里显示出来，点选后才进选目标
+    const tacticMenu = screen.getByTestId('unit-tactic-menu');
+    expect(within(tacticMenu).getAllByRole('button').map((button) => button.textContent)).toEqual(['破碎']);
+    await user.click(within(tacticMenu).getByRole('button', { name: '破碎' }));
+
     expect(screen.getByTestId('attack-city-target-arrow')).toBeVisible();
     const xiangyang = screen.getAllByTestId('city-marker')
       .find((candidate) => candidate.textContent?.includes('襄阳'))!;
@@ -3557,6 +3565,7 @@ describe('兵器部队命令菜单', () => {
     fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
     fireEvent.pointerDown(marker, { button: 0, buttons: 1 });
     await user.click(within(screen.getByTestId('unit-command-menu')).getByRole('button', { name: '战法' }));
+    await user.click(within(screen.getByTestId('unit-tactic-menu')).getByRole('button', { name: '破碎' }));
 
     // 开发设施靠 is-attack-target 类高亮（城池是箭头、部队是 ▼）
     const overlayOf = () => screen.queryAllByTestId('city-plot-overlay')

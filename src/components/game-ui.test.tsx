@@ -6,6 +6,7 @@ import { deployUnit } from '../game/battle/actions';
 import { GRID_HEIGHT as DEFAULT_GRID_HEIGHT, GRID_WIDTH as DEFAULT_GRID_WIDTH } from '../game/battle/scenario';
 import { cityPlots, PLOT_BASE_VALUE } from '../game/innerAffairs';
 import { initialArmaments } from '../game/armaments';
+import { addSessionMap, removeSessionMap } from '../game/mapRegistry';
 import { createGame } from '../game/scenario/jingxiang208';
 import { GameProvider } from '../game/store/GameProvider';
 import type { CityId } from '../game/types';
@@ -87,6 +88,33 @@ describe('game interface shell', () => {
     expect(screen.getByText('孙权', { selector: '.top-force-name' })).toBeVisible();
     expect(screen.getByTestId('action-points')).toBeVisible();
     expect(screen.getByRole('region', { name: '军情与政务' })).toBeVisible();
+  });
+
+  it('start 模式把「无有主城池」的自定义地图列出但置灰，不再静默隐藏', async () => {
+    const user = userEvent.setup();
+    signInForStartScreen();
+    const size = 20;
+    const grid = Array.from({ length: size * size }, (_, index) => ({
+      q: index % size, r: Math.floor(index / size), terrain: 'plain' as const,
+    }));
+    const mapId = addSessionMap({
+      schemaVersion: 2, width: size, height: size, backgroundImage: '', grid,
+      cities: [{ id: 'city-empty', label: '空城', q: 10, r: 10, type: 'city', forceId: null }],
+      name: '我的空图',
+    }, '我的空图');
+
+    try {
+      render(<App />);
+      await user.click(screen.getByRole('button', { name: /重新开始新游戏/ }));
+
+      const card = screen.getByTestId(`map-card-${mapId}`);
+      expect(card).toBeDisabled();
+      expect(card.getAttribute('title')).toContain('没有有主城池');
+      // 内置地图不受影响
+      expect(screen.getByTestId('map-card-china42x')).toBeEnabled();
+    } finally {
+      removeSessionMap(mapId);
+    }
   });
 
   it('offers continue only for a valid autosave', () => {

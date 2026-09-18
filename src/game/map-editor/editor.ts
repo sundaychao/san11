@@ -1,5 +1,6 @@
 import { sevenCellCityFootprint } from '../battle/grid';
 import { GRID_HEIGHT, GRID_WIDTH } from '../battle/scenario';
+import { PLOT_COUNT_BY_SIZE, autoSearchCityPlots } from '../innerAffairs';
 import type { ForceId, GridCell, TerrainType } from '../types';
 
 export interface EditableCityMarker {
@@ -32,6 +33,13 @@ export interface EditorMapPayload {
   cities: EditorStrongholdMarker[];
   /** 手动指定的建设用地归属（缺省=全部交给进游戏时的自动回退） */
   plots?: EditorCityPlot[];
+  /**
+   * `true`＝本图的建设用地由编辑器（人）说了算，**含刻意留空的城**：
+   * 单机/联网开局原样照搬图上 `plots`，对没有圈地的城不再自动搜索补齐。
+   * 编辑器每次保存都会写入 `true`；早先保存的自定义图与第三方导入图没有该字段，
+   * 开局仍按 `initConstructionPlots` 的自动搜索补齐（老图不会突然变成没有建设用地）。
+   */
+  plotsSpecified?: boolean;
   name?: string;
 }
 
@@ -293,6 +301,8 @@ function parseEditorJsonPayload(json: string): EditorMapPayload {
     grid: cloneGrid(value.grid),
     cities,
     plots,
+    // 「建设用地由编辑器指定」的标记随图保留：导入编辑器再保存时会重新写入
+    plotsSpecified: value.plotsSpecified === true,
     name: typeof value.name === 'string' ? value.name : undefined,
   };
 }
@@ -437,6 +447,59 @@ export function createBlankMap(width: number = 200, height: number = 200): MapEd
   };
 }
 
+/**
+ * 为缺少建设用地的城池自动圈定建设用地（与开局 `initConstructionPlots` 同一算法）。
+ * 编辑器新建的空白地图没有原版 interior 数据，此前必须逐格手动圈地；这里按默认「中城」
+ * 规模自动分配（与开局默认人口 40 万对应的档位一致），用户仍可用「建设用地」工具手动增删。
+ * - 关隘不分配（关隘不开放建设）；
+ * - 已有建设用地的城池（手动圈定 / 上次自动分配）保持原样，不重算也不追加；
+ * - 传 `onlyCityId` 时只处理该城：新落地的城池补一份，改归属 / 改名的既有城池不受影响
+ *   （否则会把用户刻意清空的圈地又补回来）。
+ */
+export function autoAssignEditorPlots(state: MapEditorState, onlyCityId?: string): MapEditorState {
+  const cities = state.cities.filter((marker) => (marker.type ?? 'city') === 'city');
+  if (cities.length === 0) return state;
+  const taken = new Set(state.plots.map((plot) => `${plot.q},${plot.r}`));
+  const alreadyHasPlots = new Set(state.plots.map((plot) => plot.cityId));
+  const targets = onlyCityId ? cities.filter((city) => city.id === onlyCityId) : cities;
+  const additions: EditorCityPlot[] = [];
+  for (const city of targets) {
+    if (alreadyHasPlots.has(city.id)) continue;
+    const picked = autoSearchCityPlots(
+      { id: city.id, gridQ: city.q, gridR: city.r, count: PLOT_COUNT_BY_SIZE.medium },
+      cities.map((entry) => ({ id: entry.id, gridQ: entry.q, gridR: entry.r })),
+      state.grid,
+      taken,
+    );
+    for (const coord of picked) {
+      const key = `${coord.q},${coord.r}`;
+      if (taken.has(key)) continue;
+      taken.add(key);
+      additions.push({ cityId: city.id, q: coord.q, r: coord.r });
+    }
+  }
+  return additions.length === 0 ? state : { ...state, plots: [...state.plots, ...additions] };
+}
+
+/**
+ * 重新算一份某城「中城档」的自动圈地（忽略它自己现有的地格，故可整体替换成标准一份）。
+ * 供编辑器的「自动圈地」按钮使用：把本城重置为标准 9 格，仍走草稿 → 确定流程。
+ */
+export function autoPlotsForCity(state: MapEditorState, cityId: string): EditorCityPlot[] {
+  const cities = state.cities.filter((marker) => (marker.type ?? 'city') === 'city');
+  const city = cities.find((candidate) => candidate.id === cityId);
+  if (!city) return [];
+  const taken = new Set(
+    state.plots.filter((plot) => plot.cityId !== cityId).map((plot) => `${plot.q},${plot.r}`),
+  );
+  return autoSearchCityPlots(
+    { id: city.id, gridQ: city.q, gridR: city.r, count: PLOT_COUNT_BY_SIZE.medium },
+    cities.map((entry) => ({ id: entry.id, gridQ: entry.q, gridR: entry.r })),
+    state.grid,
+    taken,
+  ).map((coord) => ({ cityId: city.id, q: coord.q, r: coord.r }));
+}
+
 export function undoEditor(state: MapEditorState): MapEditorState {
   const previous = state.history.at(-1);
   if (!previous) return state;
@@ -525,6 +588,8 @@ export function setEditorBackgroundImage(state: MapEditorState, backgroundImage:
   });
 }
 
+/** 导出地图 JSON：`plots` 与 `plotsSpecified` 一律写出（哪怕圈地为空），
+ *  这样「进游戏时以图上圈地为准、不再自动补地」这件事能随图落盘 */
 export function exportEditorJson(state: MapEditorState, name?: string): string {
   const payload: EditorMapPayload = {
     schemaVersion: 2,
@@ -533,7 +598,8 @@ export function exportEditorJson(state: MapEditorState, name?: string): string {
     backgroundImage: state.backgroundImage,
     grid: state.grid,
     cities: state.cities,
-    ...(state.plots.length ? { plots: state.plots } : {}),
+    plots: state.plots,
+    plotsSpecified: true,
     ...(name ? { name } : {}),
   };
   return JSON.stringify(payload, null, 2);

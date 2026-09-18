@@ -10,6 +10,7 @@ import {
   writeSave,
 } from './persistence';
 import { relationTierOf } from './diplomacy';
+import { PLOT_COUNT_BY_SIZE } from './innerAffairs';
 import { createGame } from './scenario/jingxiang208';
 import { createGameFromMap } from './scenario/customMap';
 import type { EditorMapPayload } from './map-editor/editor';
@@ -118,6 +119,62 @@ describe('persistence', () => {
     expect(gridByKey.get('11,11')).toBe('construction');
     // 邻城按其手动归属落位，而不是争夺 11,11
     expect((cities['city-16-16'.toLowerCase()]?.plots ?? []).map((plot) => `${plot.q},${plot.r}`)).toEqual(['17,16']);
+  });
+
+  it('编辑器保存过的图（plotsSpecified）以圈地为唯一口径：刻意留空的城就是 0 格', () => {
+    const width = 40;
+    const height = 40;
+    const grid = [];
+    for (let r = 0; r < height; r++) {
+      for (let q = 0; q < width; q++) grid.push({ q, r, terrain: 'plain' as const });
+    }
+    const map: EditorMapPayload = {
+      schemaVersion: 2,
+      width,
+      height,
+      backgroundImage: '',
+      grid,
+      cities: [
+        { type: 'city', id: 'city-10-10', label: '都城', q: 10, r: 10, forceId: 'liu' },
+        { type: 'city', id: 'city-30-30', label: '空城', q: 30, r: 30, forceId: 'cao' },
+      ],
+      plotsSpecified: true,
+      plots: [{ cityId: 'city-10-10', q: 10, r: 20 }],
+    };
+
+    const state = createGameFromMap(map, 'liu', 5);
+    const cities = state.cities as Record<string, { plots?: Array<{ q: number; r: number }> }>;
+
+    expect((cities['city-10-10'].plots ?? []).map((plot) => `${plot.q},${plot.r}`)).toEqual(['10,20']);
+    // 刻意留空的城不再被自动补地
+    expect(cities['city-30-30'].plots ?? []).toEqual([]);
+    expect(state.grid.filter((cell) => cell.terrain === 'construction')).toHaveLength(1);
+  });
+
+  it('旧图没有 plotsSpecified 标记时仍然自动补齐建设用地', () => {
+    const width = 40;
+    const height = 40;
+    const grid = [];
+    for (let r = 0; r < height; r++) {
+      for (let q = 0; q < width; q++) grid.push({ q, r, terrain: 'plain' as const });
+    }
+    const map: EditorMapPayload = {
+      schemaVersion: 2,
+      width,
+      height,
+      backgroundImage: '',
+      grid,
+      cities: [
+        { type: 'city', id: 'city-10-10', label: '都城', q: 10, r: 10, forceId: 'liu' },
+        { type: 'city', id: 'city-30-30', label: '空城', q: 30, r: 30, forceId: 'cao' },
+      ],
+    };
+
+    const state = createGameFromMap(map, 'liu', 5);
+    const cities = state.cities as Record<string, { plots?: Array<{ q: number; r: number }> }>;
+
+    expect(cities['city-10-10'].plots).toHaveLength(PLOT_COUNT_BY_SIZE.medium);
+    expect(cities['city-30-30'].plots).toHaveLength(PLOT_COUNT_BY_SIZE.medium);
   });
 
   it('normalizes legacy china42x pass cells from construction to pass on load', () => {

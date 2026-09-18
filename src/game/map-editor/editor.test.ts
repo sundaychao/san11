@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { PLOT_COUNT_BY_SIZE } from '../innerAffairs';
 import { createBattleGrid, GRID_HEIGHT, GRID_WIDTH } from '../battle/scenario';
 import type { GridCell } from '../types';
 import {
   assignPlot,
+  autoAssignEditorPlots,
+  autoPlotsForCity,
   clearEditor,
   createBlankMap,
   createEditorState,
@@ -316,5 +319,108 @@ describe('map editor 建设用地归属 (plots)', () => {
   it('exported svg includes plot-cell markers', () => {
     const svg = exportEditorSvg(assignPlot(base(), 'city-a', { q: 9, r: 8 }));
     expect(svg).toContain('data-plot-cell="city-a:9,8"');
+  });
+});
+
+describe('autoAssignEditorPlots（新建地图自动分配建设用地）', () => {
+  const build = (cities: Parameters<typeof createEditorState>[1]) =>
+    createEditorState(createBattleGrid(), cities, GRID_WIDTH, GRID_HEIGHT);
+
+  it('为没有建设用地的城池自动圈地，规模取默认中城档位', () => {
+    const next = autoAssignEditorPlots(build([{ id: 'city-a', label: '甲城', q: 8, r: 8, type: 'city' }]));
+
+    expect(next.plots).toHaveLength(PLOT_COUNT_BY_SIZE.medium);
+    expect(next.plots.every((plot) => plot.cityId === 'city-a')).toBe(true);
+    // 城址 7 格内不得占用
+    expect(next.plots.every((plot) => Math.abs(plot.q - 8) + Math.abs(plot.r - 8) > 1)).toBe(true);
+  });
+
+  it('幂等：已有建设用地的城池不重算也不追加', () => {
+    const once = autoAssignEditorPlots(build([{ id: 'city-a', label: '甲城', q: 8, r: 8, type: 'city' }]));
+
+    expect(autoAssignEditorPlots(once)).toBe(once);
+  });
+
+  it('多城各自圈地且不重叠（一格一主）', () => {
+    const next = autoAssignEditorPlots(build([
+      { id: 'city-a', label: '甲城', q: 8, r: 8, type: 'city' },
+      { id: 'city-b', label: '乙城', q: 20, r: 20, type: 'city' },
+    ]));
+    const keys = next.plots.map((plot) => `${plot.q},${plot.r}`);
+
+    expect(next.plots).toHaveLength(PLOT_COUNT_BY_SIZE.medium * 2);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(next.plots.filter((plot) => plot.cityId === 'city-a')).toHaveLength(PLOT_COUNT_BY_SIZE.medium);
+    expect(next.plots.filter((plot) => plot.cityId === 'city-b')).toHaveLength(PLOT_COUNT_BY_SIZE.medium);
+  });
+
+  it('关隘不分配建设用地', () => {
+    const next = autoAssignEditorPlots(build([{ id: 'pass-a', label: '关', q: 8, r: 8, type: 'pass' }]));
+
+    expect(next.plots).toEqual([]);
+  });
+
+  it('没有城池时不改动原状态', () => {
+    const state = build([]);
+
+    expect(autoAssignEditorPlots(state)).toBe(state);
+  });
+
+  it('全为水面时无处可选，不强行分配', () => {
+    const grid = createBlankMap(40, 40).grid.map((cell) => ({ ...cell, terrain: 'sea' as const }));
+    const state = createEditorState(grid, [{ id: 'city-a', label: '海城', q: 20, r: 20, type: 'city' }], 40, 40);
+
+    expect(autoAssignEditorPlots(state).plots).toEqual([]);
+  });
+});
+
+describe('map editor 建设用地的归属口径', () => {
+  const build = (cities: Parameters<typeof createEditorState>[1]) =>
+    createEditorState(createBattleGrid(), cities, GRID_WIDTH, GRID_HEIGHT);
+
+  it('导出总是写出 plots 与 plotsSpecified（圈地为空也写）', () => {
+    const json = JSON.parse(exportEditorJson(createBlankMap(8, 8), '空白图')) as {
+      plots?: unknown[];
+      plotsSpecified?: boolean;
+    };
+
+    expect(json.plots).toEqual([]);
+    expect(json.plotsSpecified).toBe(true);
+
+    // 导入编辑器后再次保存，标记仍在（不会因为一次导入就丢掉口径）
+    const imported = importEditorJson(createBlankMap(8, 8), JSON.stringify(json));
+    const reexported = JSON.parse(exportEditorJson(imported)) as { plotsSpecified?: boolean };
+    expect(reexported.plotsSpecified).toBe(true);
+  });
+
+  it('autoAssignEditorPlots 传 cityId 时只补该城，留空的其他城保持原样', () => {
+    const cities = [
+      { id: 'city-a', label: '甲城', q: 8, r: 8, type: 'city' as const },
+      { id: 'city-b', label: '乙城', q: 20, r: 20, type: 'city' as const },
+    ];
+    const next = autoAssignEditorPlots(build(cities), 'city-a');
+
+    expect(next.plots).toHaveLength(PLOT_COUNT_BY_SIZE.medium);
+    expect(next.plots.every((plot) => plot.cityId === 'city-a')).toBe(true);
+  });
+
+  it('autoPlotsForCity 忽略本城现有地格，可把本城整体重置为标准一份', () => {
+    const assigned = assignPlot(
+      build([{ id: 'city-a', label: '甲城', q: 8, r: 8, type: 'city' }]),
+      'city-a',
+      { q: 8, r: 20 },
+    );
+    const picked = autoPlotsForCity(assigned, 'city-a');
+    const keys = picked.map((plot) => `${plot.q},${plot.r}`);
+
+    expect(picked).toHaveLength(PLOT_COUNT_BY_SIZE.medium);
+    expect(picked.every((plot) => plot.cityId === 'city-a')).toBe(true);
+    expect(new Set(keys).size).toBe(keys.length);
+    // 重置后只剩标准一份，不含原来那格更远的手工圈地
+    expect(keys).not.toContain('8,20');
+  });
+
+  it('autoPlotsForCity 对不存在的城返回空', () => {
+    expect(autoPlotsForCity(build([{ id: 'city-a', label: '甲城', q: 8, r: 8, type: 'city' }]), 'city-z')).toEqual([]);
   });
 });

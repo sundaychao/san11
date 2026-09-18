@@ -232,14 +232,15 @@ export function createGameFromMap(
   };
 
   assignInitialRanks(state);
-  // 建设用地：优先采用编辑器手动圈定的归属（map.plots，方案甲），其余城市走现成 fallback 自动搜索
+  // 建设用地：编辑器保存过的图（plotsSpecified）以图上圈地为唯一口径，留空的城就是 0 格；
+  // 旧图 / 第三方导入图没有这个标记，没有圈地的城回退为现成 fallback 自动搜索
   const manualPlotsByCity = new Map<string, { q: number; r: number }[]>();
   for (const plot of map.plots ?? []) {
     const list = manualPlotsByCity.get(plot.cityId);
     if (list) list.push({ q: plot.q, r: plot.r });
     else manualPlotsByCity.set(plot.cityId, [{ q: plot.q, r: plot.r }]);
   }
-  initConstructionPlots(state, undefined, manualPlotsByCity);
+  initConstructionPlots(state, undefined, manualPlotsByCity, map.plotsSpecified !== true);
   initCityPopulation(state);
   return state;
 }

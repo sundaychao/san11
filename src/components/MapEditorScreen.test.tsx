@@ -190,7 +190,8 @@ describe('MapEditorScreen 既有地图的保存', () => {
 
   it('内置图改名后缓存保存会生成新的自定义地图，不再刷新即丢', () => {
     render(<MapEditorScreen mapId="china42x" onSave={vi.fn()} onBack={vi.fn()} />);
-    expect(screen.getByLabelText('地图名')).toHaveValue('荆襄地图');
+    // 内置图预填「原名（副本）」：保存一律另存为新自定义图，不会覆盖内置图
+    expect(screen.getByLabelText('地图名')).toHaveValue('荆襄地图（副本）');
 
     fireEvent.change(screen.getByLabelText('地图名'), { target: { value: '我的荆襄' } });
     fireEvent.click(screen.getByTestId('editor-save-cache'));
@@ -218,5 +219,158 @@ describe('MapEditorScreen 既有地图的保存', () => {
     expect(expectedCount).toBeGreaterThan(0);
     expect(payload.plots).toHaveLength(expectedCount);
     expect(payload.plots?.some((plot) => plot.cityId === 'xiangping' && plot.q === 176 && plot.r === 21)).toBe(true);
+  });
+});
+
+describe('MapEditorScreen 建设用地自动分配', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  /** 新建指定边长的空白地图（默认 200 边长的真实流程由 renderEditor 覆盖，这里要够大才放得下建设用地） */
+  function renderSizedEditor(size: number) {
+    const onSave = vi.fn();
+    render(<MapEditorScreen mapId="new" onSave={onSave} onBack={vi.fn()} />);
+    fireEvent.change(screen.getByTestId('editor-size-width'), { target: { value: String(size) } });
+    fireEvent.change(screen.getByTestId('editor-size-height'), { target: { value: String(size) } });
+    fireEvent.click(screen.getByTestId('editor-size-create'));
+    return { onSave };
+  }
+
+  it('没有有主城池时给出无法开局的提示', () => {
+    renderSizedEditor(40);
+
+    expect(screen.getByTestId('editor-force-count').textContent).toContain('无法用于单机开局');
+  });
+
+  it('放置城池后自动圈定建设用地，保存时写入地图荷载', () => {
+    const { onSave } = renderSizedEditor(40);
+
+    placeAt();
+    fireEvent.click(screen.getByTestId('placement-force-曹操'));
+    fireEvent.change(screen.getByTestId('editor-name-input'), { target: { value: '许昌' } });
+    fireEvent.click(screen.getByTestId('editor-name-confirm'));
+
+    // 归属已设置 → 该图可开局
+    expect(screen.getByTestId('editor-force-count').textContent).toContain('有主城池 1 座');
+
+    fillMapName('自动分配图');
+    fireEvent.click(screen.getByTestId('editor-save-cache'));
+
+    const payload = savedPayload(onSave);
+    expect(payload.plots?.length ?? 0).toBeGreaterThan(0);
+    expect(payload.plots?.every((plot) => plot.cityId === 'city-1-1')).toBe(true);
+  });
+
+  it('无归属的城池（无主）不计入可开局的势力', () => {
+    renderSizedEditor(40);
+
+    placeAt();
+    fireEvent.click(screen.getByTestId('placement-force-无主'));
+    fireEvent.change(screen.getByTestId('editor-name-input'), { target: { value: '空城' } });
+    fireEvent.click(screen.getByTestId('editor-name-confirm'));
+
+    expect(screen.getByTestId('editor-force-count').textContent).toContain('无法用于单机开局');
+  });
+});
+
+describe('MapEditorScreen 建设用地以圈地为准', () => {
+  const SIZE = 40;
+
+  beforeEach(() => vi.clearAllMocks());
+
+  function plainGrid() {
+    const grid: Array<{ q: number; r: number; terrain: 'plain' }> = [];
+    for (let q = 0; q < SIZE; q += 1) {
+      for (let r = 0; r < SIZE; r += 1) grid.push({ q, r, terrain: 'plain' });
+    }
+    return grid;
+  }
+
+  /** 编辑器保存过的图（plotsSpecified）：甲城有 2 格圈地，乙城刻意留空 */
+  function seedSpecifiedMap(): string {
+    return addSessionMap({
+      schemaVersion: 2,
+      width: SIZE,
+      height: SIZE,
+      backgroundImage: '',
+      grid: plainGrid(),
+      cities: [
+        { id: 'city-10-10', label: '甲城', q: 10, r: 10, type: 'city', forceId: 'cao' },
+        { id: 'city-30-30', label: '乙城', q: 30, r: 30, type: 'city', forceId: 'liu' },
+      ],
+      plotsSpecified: true,
+      plots: [
+        { cityId: 'city-10-10', q: 10, r: 20 },
+        { cityId: 'city-10-10', q: 10, r: 21 },
+      ],
+    }, '留空图');
+  }
+
+  it('打开保存过的图不再自动补地：刻意留空的城保持 0 格', () => {
+    const id = seedSpecifiedMap();
+    const onSave = vi.fn();
+    render(<MapEditorScreen mapId={id} onSave={onSave} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('editor-save-cache'));
+
+    const payload = savedPayload(onSave);
+    expect(payload.plots).toEqual([
+      { cityId: 'city-10-10', q: 10, r: 20 },
+      { cityId: 'city-10-10', q: 10, r: 21 },
+    ]);
+    expect(payload.plotsSpecified).toBe(true);
+  });
+
+  it('没有标记的旧图打开时仍自动补一份建设用地', () => {
+    const id = addSessionMap({
+      schemaVersion: 2,
+      width: SIZE,
+      height: SIZE,
+      backgroundImage: '',
+      grid: plainGrid(),
+      cities: [{ id: 'city-10-10', label: '甲城', q: 10, r: 10, type: 'city', forceId: 'cao' }],
+    }, '旧图');
+    const onSave = vi.fn();
+    render(<MapEditorScreen mapId={id} onSave={onSave} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('editor-save-cache'));
+
+    expect(savedPayload(onSave).plots?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it('内置图沿用原名保存也会另存为「（副本）」，不覆盖内置图', () => {
+    render(<MapEditorScreen mapId="china42x" onSave={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('地图名'), { target: { value: '荆襄地图' } });
+    fireEvent.click(screen.getByTestId('editor-save-cache'));
+
+    expect(listMaps().filter((map) => !map.builtin).map((map) => map.name)).toEqual(['荆襄地图（副本）']);
+    expect(listMaps().some((map) => map.builtin && map.id === 'china42x')).toBe(true);
+  });
+
+  it('建设用地工具里的「自动圈地」把本城重置为标准一份', () => {
+    const onSave = vi.fn();
+    render(<MapEditorScreen mapId="new" onSave={onSave} onBack={vi.fn()} />);
+    fireEvent.change(screen.getByTestId('editor-size-width'), { target: { value: String(SIZE) } });
+    fireEvent.change(screen.getByTestId('editor-size-height'), { target: { value: String(SIZE) } });
+    fireEvent.click(screen.getByTestId('editor-size-create'));
+
+    // 放城 (1,1) —— mock 画布的固定落点
+    placeAt();
+    fireEvent.click(screen.getByTestId('placement-force-曹操'));
+    fireEvent.change(screen.getByTestId('editor-name-input'), { target: { value: '许昌' } });
+    fireEvent.click(screen.getByTestId('editor-name-confirm'));
+
+    fireEvent.click(screen.getByRole('button', { name: '建设用地' }));
+    fireEvent.click(screen.getByTestId('mock-paint')); // 点城址：选中该城作为圈地归属
+    expect(screen.getByRole('button', { name: '确定' })).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('editor-plot-auto'));
+    // 产生草稿：确定按钮可用；确定后落到图上
+    expect(screen.getByRole('button', { name: '确定' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '确定' }));
+
+    fireEvent.change(screen.getByLabelText('地图名'), { target: { value: '自动图' } });
+    fireEvent.click(screen.getByTestId('editor-save-cache'));
+
+    // 重置而非叠加：仍是中城档标准一份 9 格，不是 18 格
+    expect(savedPayload(onSave).plots).toHaveLength(9);
+    expect(savedPayload(onSave).plots?.every((plot) => plot.cityId === 'city-1-1')).toBe(true);
   });
 });

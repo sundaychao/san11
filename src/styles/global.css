@@ -266,6 +266,10 @@ button { color: inherit; }
 .map-card-forces { display: flex; align-items: center; gap: 6px; min-height: 13px; }
 .map-card-forces i { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.35); }
 .map-card-empty { color: var(--muted); font-size: 12px; font-style: normal; }
+/* 无法开局的地图（无有主城池）：列出但灰显、不可点，免得用户以为刚保存的图丢了 */
+.map-card.is-unplayable { cursor: not-allowed; opacity: 0.45; }
+.map-card.is-unplayable:hover, .map-card.is-unplayable:focus-visible { border-color: var(--line); background: rgba(244, 237, 217, 0.06); }
+.map-card.is-unplayable .map-card-empty { color: var(--paper); }
 .map-card-new { justify-content: center; align-items: center; gap: 8px; border-style: dashed; }
 .map-card-new svg { width: 30px; height: 30px; color: var(--gold); }
 .map-card-new .map-card-name { color: var(--gold); }
@@ -402,7 +406,7 @@ button { color: inherit; }
 .battle-grid-overlay.is-editing .battle-cell { cursor: crosshair; fill: rgba(232, 214, 134, 0.22); stroke: rgba(255, 250, 218, 0.9); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-plain { fill: rgba(174, 174, 174, 0.72); stroke: rgba(202, 202, 202, 0.9); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-grass { fill: rgba(146, 204, 116, 0.72); stroke: rgba(198, 240, 168, 0.9); stroke-width: 0.9; }
-.battle-grid-overlay.is-editing .terrain-road { fill: rgba(222, 222, 222, 0.75); stroke: rgba(246, 246, 246, 0.9); stroke-width: 0.9; }
+.battle-grid-overlay.is-editing .terrain-road { fill: rgba(255, 255, 255, 0.88); stroke: rgba(255, 255, 255, 0.94); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-path { fill: rgba(200, 172, 120, 0.72); stroke: rgba(238, 216, 168, 0.9); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-plank { fill: rgba(160, 110, 60, 0.78); stroke: rgba(224, 172, 108, 0.9); stroke-width: 0.9; }
 .battle-grid-overlay.is-editing .terrain-sand { fill: rgba(242, 228, 176, 0.72); stroke: rgba(252, 244, 206, 0.9); stroke-width: 0.9; }
@@ -428,7 +432,7 @@ button { color: inherit; }
 .battle-grid-overlay.is-construction-targeting { pointer-events: auto; }
 .terrain-plain { fill: rgba(174, 174, 174, 0.4); stroke: rgba(202, 202, 202, 0.5); }
 .terrain-grass { fill: rgba(146, 204, 116, 0.4); stroke: rgba(198, 240, 168, 0.5); }
-.terrain-road { fill: rgba(222, 222, 222, 0.5); stroke: rgba(246, 246, 246, 0.6); }
+.terrain-road { fill: rgba(255, 255, 255, 0.62); stroke: rgba(255, 255, 255, 0.78); }
 .terrain-path { fill: rgba(200, 172, 120, 0.42); stroke: rgba(238, 216, 168, 0.52); }
 .terrain-plank { fill: rgba(160, 110, 60, 0.46); stroke: rgba(224, 172, 108, 0.56); }
 .terrain-sand { fill: rgba(242, 228, 176, 0.42); stroke: rgba(252, 244, 206, 0.52); }
@@ -683,6 +687,8 @@ button { color: inherit; }
 .map-editor-step { display: grid; gap: 8px; padding: 10px; border: 1px solid rgba(146, 136, 115, 0.5); background: rgba(12, 28, 31, 0.48); }
 .map-editor-step h3 { margin: 0; color: var(--gold); font-size: 13px; font-weight: 700; }
 .map-editor-step p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.map-editor-force-count { color: var(--paper) !important; font-weight: 700; }
+.map-editor-force-count.is-warning { color: #e0a24a !important; }
 .map-editor-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .map-editor-tools button { min-height: 36px; display: grid; grid-template-columns: 17px 1fr; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 2px; background: rgba(244, 237, 217, 0.07); color: var(--paper); text-align: left; cursor: pointer; }
 .map-editor-tools .terrain-tool-plain { background: rgba(189, 189, 189, 0.34); border-color: rgba(232, 232, 232, 0.7); }

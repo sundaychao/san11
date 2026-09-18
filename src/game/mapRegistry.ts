@@ -195,6 +195,8 @@ function loadStoredCustomMaps(): void {
     if (!Array.isArray(parsed)) return;
     for (const entry of parsed) {
       if (entry?.id && entry?.payload && entry.payload.width > 0 && entry.payload.height > 0) {
+        // 会话内已注册（含本次 addSessionMap 刚写入的）→ 跳过，避免同一张图在列表里出现两次
+        if (sessionMaps.some((map) => map.id === entry.id)) continue;
         sessionMaps.push({ id: entry.id, name: entry.name ?? entry.payload.name ?? '未命名', builtin: false, payload: entry.payload });
       }
     }

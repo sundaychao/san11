@@ -10,6 +10,10 @@ export interface MapEditorPanelProps {
   activeTool: MapEditorTool;
   /** 既有地图的原名，进入编辑时预填地图名输入框；新建地图为空串 */
   defaultName: string;
+  /** 本图「有主城池」座数：0 表示无法用于单机开局，需提示用户给城池设归属势力 */
+  forceCityCount?: number;
+  /** 编辑对象是内置图：无法覆盖保存，保存会另存为新的自定义地图 */
+  builtinSource?: boolean;
   canRedo: boolean;
   canUndo: boolean;
   plotCity?: { id: string; label: string } | null;
@@ -17,6 +21,8 @@ export interface MapEditorPanelProps {
   onBack(): void;
   onClear(): void;
   onClearPlotCity(): void;
+  /** 把当前选中的城重置为「自动圈地」的标准一份（作为草稿，确定后才入库） */
+  onAutoPlots?(): void;
   onConfirmPlots(): void;
   onRedo(): void;
   /** cache＝仅写入浏览器缓存；local＝写入缓存并下载 JSON 文件 */
@@ -50,10 +56,13 @@ export const TERRAIN_TOOLS: Array<{ tool: TerrainType; label: string; icon: type
 export function MapEditorPanel({
   activeTool,
   defaultName,
+  forceCityCount,
+  builtinSource,
   canRedo,
   canUndo,
   plotCity,
   canConfirmPlots,
+  onAutoPlots,
   onBack,
   onClear,
   onClearPlotCity,
@@ -148,6 +157,17 @@ export function MapEditorPanel({
                   >
                     确定
                   </button>
+                  {onAutoPlots && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      data-testid="editor-plot-auto"
+                      title="把本城重置为自动圈定的标准一份（中城 9 格）"
+                      onClick={onAutoPlots}
+                    >
+                      自动圈地
+                    </button>
+                  )}
                   <button type="button" className="secondary-button" onClick={onClearPlotCity}>取消选择</button>
                 </div>
               </>
@@ -165,7 +185,26 @@ export function MapEditorPanel({
 
       <section className="map-editor-step">
         <h3>保存</h3>
-        <p>改名保存会另存为新地图，沿用原名则覆盖原图。缓存保存仅写入浏览器；本地保存同时下载 JSON 文件。</p>
+        {typeof forceCityCount === 'number' && (
+          <p
+            className={forceCityCount > 0 ? 'map-editor-force-count' : 'map-editor-force-count is-warning'}
+            data-testid="editor-force-count"
+          >
+            {forceCityCount > 0
+              ? `本图有主城池 ${forceCityCount} 座，可用于单机开局。`
+              : '本图还没有「有主城池」，无法用于单机开局 —— 放置城池时请选择归属势力。'}
+          </p>
+        )}
+        {builtinSource && (
+          <p className="map-editor-force-count is-warning" data-testid="editor-builtin-hint">
+            这是内置地图：单机开局恒走内置场景，直接改它不会生效 —— 保存将另存为新的自定义地图。
+          </p>
+        )}
+        <p>
+          {builtinSource
+            ? '内置图不能覆盖保存，保存会另存为新的自定义地图（默认名加「（副本）」）。缓存保存仅写入浏览器；本地保存同时下载 JSON 文件。'
+            : '改名保存会另存为新地图，沿用原名则覆盖原图。缓存保存仅写入浏览器；本地保存同时下载 JSON 文件。'}
+        </p>
         <label className="map-editor-background-field">
           <span>地图名</span>
           <input

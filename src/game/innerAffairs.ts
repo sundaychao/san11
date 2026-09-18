@@ -540,45 +540,113 @@ function growCluster(
   return result;
 }
 
-/** 初始化场景中的建设用地地形和各城地格坐标。
- *  优先使用原版地图数据（china42x.json 提取的 interior 平面坐标，距城心由近到远）：
- *  按原版格数全量落位（长安22格/洛阳20格/会稽4格等，城市规格即原版空地数），
- *  标记为 construction 并写入 CityPlot.q/r，与原版游戏的建设用地数量和位置完全一致。
- *  无原版数据的城市（编辑器地图等）回退为在城址外围自动搜索可用空地（按规模档位取数）。
- *  已有地格的城市跳过，避免覆盖存档中已建设的设施。 */
-export function initConstructionPlots(
-  state: GameState,
-  interiorByCityId?: ReadonlyMap<string, GridCoord[]>,
-  manualPlotsByCity?: ReadonlyMap<string, GridCoord[]>,
-): void {
-  const grid = state.grid ?? [];
+/**
+ * 自动搜索一座城池的建设用地（不依赖 GameState，开局与地图编辑器共用同一口径）。
+ * - 候选格＝距城心 `PLOT_MIN_DISTANCE_FROM_CITY` ~ +2 圈（数量不够时再向外延伸 3~4 圈）；
+ * - 排除水面/山崖/毒泉/渡口/关所、任意城池的 7 格城址、他城领地，以及 `takenKeys` 中已占用的格；
+ * - 优先取靠近城心且地形好的格作起点，用 BFS 扩展出 `count` 个互相邻接的格；
+ * - BFS 被地形阻隔而失败时，回落为直接取前 `count` 个候选。
+ */
+export function autoSearchCityPlots(
+  city: { id: string; gridQ: number; gridR: number; count: number },
+  allCities: ReadonlyArray<{ id: string; gridQ: number; gridR: number }>,
+  grid: GridCell[],
+  takenKeys: ReadonlySet<string>,
+): GridCoord[] {
   const cellByKey = new Map<string, GridCell>();
   for (const cell of grid) cellByKey.set(gridKey(cell), cell);
 
-  // 计算所有城市已占用格子（城址 7 格 footprint）
-  const allCityFootprintKeys = new Set<string>();
-  for (const city of Object.values(state.cities)) {
-    for (const coord of sevenCellCityFootprint({ q: city.gridQ, r: city.gridR })) {
-      allCityFootprintKeys.add(gridKey(coord));
-    }
+  const footprint = new Set(sevenCellCityFootprint({ q: city.gridQ, r: city.gridR }).map(gridKey));
+  const allFootprintKeys = new Set<string>();
+  for (const other of allCities) {
+    for (const coord of sevenCellCityFootprint({ q: other.gridQ, r: other.gridR })) allFootprintKeys.add(gridKey(coord));
   }
 
-  // 偏移坐标转轴向坐标的工具函数（用于计算六角格距离）
   const toAxialR = (qVal: number, rVal: number) => rVal - Math.floor(qVal / 2);
-  const cityList = Object.values(state.cities);
-
-  // 六角格距离（偏移坐标）
   const hexDistance = (q1: number, r1: number, q2: number, r2: number) => {
     const aq = q1 - q2;
     const ar = toAxialR(q1, r1) - toAxialR(q2, r2);
     return (Math.abs(aq) + Math.abs(ar) + Math.abs(aq + ar)) / 2;
   };
+  const isNearestToThisCity = (coord: GridCoord) => {
+    const distToThis = hexDistance(coord.q, coord.r, city.gridQ, city.gridR);
+    return !allCities.some((other) => other.id !== city.id
+      && hexDistance(coord.q, coord.r, other.gridQ, other.gridR) < distToThis);
+  };
+
+  const candidates: GridCoord[] = [];
+  const seen = new Set<string>();
+  const collect = (distance: number) => {
+    for (const coord of ringCoordsWithinRange({ q: city.gridQ, r: city.gridR }, distance)) {
+      const key = gridKey(coord);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (footprint.has(key)) continue;
+      if (allFootprintKeys.has(key)) continue;
+      if (takenKeys.has(key)) continue;
+      const cell = cellByKey.get(key);
+      if (!cell) continue;
+      if (!isCityPlotEligible(cell.terrain)) continue;
+      if (!isNearestToThisCity(coord)) continue;
+      candidates.push(coord);
+    }
+  };
+  for (let distance = PLOT_MIN_DISTANCE_FROM_CITY; distance <= PLOT_MIN_DISTANCE_FROM_CITY + 2; distance += 1) collect(distance);
+  if (candidates.length < city.count) {
+    const fallbackStart = PLOT_MIN_DISTANCE_FROM_CITY + 3;
+    for (let distance = fallbackStart; distance <= fallbackStart + 2; distance += 1) collect(distance);
+  }
+
+  const terrainPriority: Partial<Record<TerrainType, number>> = {
+    road: 0, plain: 1, grass: 2, path: 3, sand: 4, wasteland: 5,
+    forest: 6, hill: 7, wetland: 8, plank: 9, shallow: 10,
+  };
+  candidates.sort((a, b) => {
+    const da = Math.abs(a.q - city.gridQ) + Math.abs(a.r - city.gridR);
+    const db = Math.abs(b.q - city.gridQ) + Math.abs(b.r - city.gridR);
+    if (da !== db) return da - db;
+    const ta = terrainPriority[cellByKey.get(gridKey(a))?.terrain ?? 'plain'] ?? 5;
+    const tb = terrainPriority[cellByKey.get(gridKey(b))?.terrain ?? 'plain'] ?? 5;
+    return ta - tb;
+  });
+
+  const candidateKeys = new Set(candidates.map(gridKey));
+  for (const start of candidates.slice(0, 6)) {
+    const cluster = growCluster(start, city.count, candidateKeys, cellByKey);
+    if (cluster.length >= city.count) return cluster.slice(0, city.count);
+  }
+  return candidates.slice(0, city.count);
+}
+
+/** 初始化场景中的建设用地地形和各城地格坐标。
+ *  优先使用原版地图数据（china42x.json 提取的 interior 平面坐标，距城心由近到远）：
+ *  按原版格数全量落位（长安22格/洛阳20格/会稽4格等，城市规格即原版空地数），
+ *  标记为 construction 并写入 CityPlot.q/r，与原版游戏的建设用地数量和位置完全一致。
+ *  无原版数据的城市（编辑器地图等）回退为在城址外围自动搜索可用空地（按规模档位取数）。
+ *  `autoFallbackPlots` 为 `false` 时不做这步回退 —— 编辑器保存的图（payload.plotsSpecified）
+ *  以图上圈地为准，刻意留空的城就是 0 格建设用地。
+ *  已有地格的城市跳过，避免覆盖存档中已建设的设施。 */
+export function initConstructionPlots(
+  state: GameState,
+  interiorByCityId?: ReadonlyMap<string, GridCoord[]>,
+  manualPlotsByCity?: ReadonlyMap<string, GridCoord[]>,
+  autoFallbackPlots = true,
+): void {
+  const grid = state.grid ?? [];
+  const cellByKey = new Map<string, GridCell>();
+  for (const cell of grid) cellByKey.set(gridKey(cell), cell);
+
+  const cityList = Object.values(state.cities);
+
+  // 已被任何城市占用的建设用地格（原版 interior / 手动圈地 / 前面城的自动分配），供后续避让
+  const assignedKeys = new Set<string>();
 
   // 标记 construction 地形并写入城市地格坐标
   const applyCityPlots = (city: City, picked: GridCoord[]) => {
     for (const coord of picked) {
       const cell = cellByKey.get(gridKey(coord));
       if (cell) cell.terrain = 'construction';
+      assignedKeys.add(gridKey(coord));
     }
     city.plots = picked.map((coord, i) => ({
       id: `${city.id}-plot-${i}`,
@@ -630,87 +698,15 @@ export function initConstructionPlots(
       continue;
     }
 
-    const needed = cityPlotCount(city);
-
-    const footprint = new Set(sevenCellCityFootprint({ q: city.gridQ, r: city.gridR }).map(gridKey));
-
-    // 判断候选格是否以本市为最近城市（避免建设用地落入他城领地）
-    const isNearestToThisCity = (coord: GridCoord) => {
-      const distToThis = hexDistance(coord.q, coord.r, city.gridQ, city.gridR);
-      return !cityList.some((c) => c.id !== city.id && hexDistance(coord.q, coord.r, c.gridQ, c.gridR) < distToThis);
-    };
-
-    // 收集候选格：距城心 PLOT_MIN_DISTANCE_FROM_CITY ~ +2 圈（恰好该圈圆环），非水/山/他城址
-    const candidates: GridCoord[] = [];
-    const seen = new Set<string>();
-    for (let distance = PLOT_MIN_DISTANCE_FROM_CITY; distance <= PLOT_MIN_DISTANCE_FROM_CITY + 2; distance += 1) {
-      const ring = ringCoordsWithinRange({ q: city.gridQ, r: city.gridR }, distance);
-      for (const coord of ring) {
-        const key = gridKey(coord);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (footprint.has(key)) continue;
-        if (allCityFootprintKeys.has(key)) continue;
-        const cell = cellByKey.get(key);
-        if (!cell) continue;
-        if (!isCityPlotEligible(cell.terrain)) continue;
-        if (cell.terrain === 'construction') continue; // 已被其他城市选中
-        if (!isNearestToThisCity(coord)) continue; // 不分配到其他城市的领地
-        candidates.push(coord);
-      }
-    }
-
-    if (candidates.length < needed) {
-      // 候选格不足，向外延伸 3~4 圈补充（同样是恰好某圈的圆环）
-      const fallbackStart = PLOT_MIN_DISTANCE_FROM_CITY + 3;
-      for (let distance = fallbackStart; distance <= fallbackStart + 2; distance += 1) {
-        const ring = ringCoordsWithinRange({ q: city.gridQ, r: city.gridR }, distance);
-        for (const coord of ring) {
-          const key = gridKey(coord);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          if (footprint.has(key)) continue;
-          if (allCityFootprintKeys.has(key)) continue;
-          const cell = cellByKey.get(key);
-          if (!cell) continue;
-          if (!isCityPlotEligible(cell.terrain)) continue;
-          if (cell.terrain === 'construction') continue; // 已被其他城市选中
-          if (!isNearestToThisCity(coord)) continue; // 不分配到其他城市的领地
-          candidates.push(coord);
-        }
-      }
-    }
-
-    // 优先选靠近城心、地形好的候选格作为"起始中心"
-    const terrainPriority: Partial<Record<TerrainType, number>> = {
-      road: 0, plain: 1, grass: 2, path: 3, sand: 4, wasteland: 5,
-      forest: 6, hill: 7, wetland: 8, plank: 9, shallow: 10,
-    };
-    candidates.sort((a, b) => {
-      const da = Math.abs(a.q - city.gridQ) + Math.abs(a.r - city.gridR);
-      const db = Math.abs(b.q - city.gridQ) + Math.abs(b.r - city.gridR);
-      if (da !== db) return da - db;
-      const ta = terrainPriority[cellByKey.get(gridKey(a))?.terrain ?? 'plain'] ?? 5;
-      const tb = terrainPriority[cellByKey.get(gridKey(b))?.terrain ?? 'plain'] ?? 5;
-      return ta - tb;
-    });
-
-    // 从最佳起始格开始，BFS 扩展选取互相邻接的 needed 个格子
-    const candidateKeys = new Set(candidates.map(gridKey));
-    let picked: GridCoord[] = [];
-    // 尝试前几个候选作为起点，找到能选出 needed 个邻接格子的
-    for (const start of candidates.slice(0, 6)) {
-      const cluster = growCluster(start, needed, candidateKeys, cellByKey);
-      if (cluster.length >= needed) {
-        picked = cluster.slice(0, needed);
-        break;
-      }
-    }
-    // 如果 BFS 失败（地形阻隔），回退到直接取前 needed 个候选
-    if (picked.length < needed) {
-      picked = candidates.slice(0, needed);
-    }
-
+    // 既无原版数据也无手动圈地（编辑器地图等）：在城址外围自动搜索，与编辑器共用同一口径。
+    // autoFallbackPlots=false（编辑器保存过的图）时不做这步：图上圈地是唯一口径，留空的城就是 0 格
+    if (!autoFallbackPlots) continue;
+    const picked = autoSearchCityPlots(
+      { id: city.id, gridQ: city.gridQ, gridR: city.gridR, count: cityPlotCount(city) },
+      cityList.map((entry) => ({ id: entry.id, gridQ: entry.gridQ, gridR: entry.gridR })),
+      grid,
+      assignedKeys,
+    );
     applyCityPlots(city, picked);
   }
 }

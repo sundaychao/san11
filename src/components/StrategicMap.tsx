@@ -147,7 +147,7 @@ const MINIMAP_PIXELS_PER_CELL = 2;
 const MINIMAP_BASE_RGB = [0x5f, 0x6d, 0x5f] as const;
 /** 地形填充色（RGB + alpha），数值与 global.css 的 .terrain-* 规则保持同源 */
 const MINIMAP_TERRAIN_FILL: Record<TerrainType, readonly [number, number, number, number]> = {
-  road: [222, 222, 222, 0.5],
+  road: [255, 255, 255, 0.62],
   path: [200, 172, 120, 0.42],
   plank: [160, 110, 60, 0.46],
   plain: [174, 174, 174, 0.4],

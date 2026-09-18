@@ -5,6 +5,8 @@ import { GameProvider } from '../game/store/GameProvider';
 import {
   createBlankMap,
   createEditorState,
+  autoAssignEditorPlots,
+  autoPlotsForCity,
   commitPlots,
   eraseStronghold,
   exportEditorJson,
@@ -71,14 +73,18 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
   const { emit: emitAudioEvent } = useAudioEventAdapter();
   const [editor, setEditor] = useState<MapEditorState>(() => {
     if (mapId === 'new') return createBlankMap(200, 200);
-    // 重新编辑已有地图（内置或自定义）：直接以当前荷载进入编辑器
+    // 重新编辑已有地图（内置或自定义）：直接以当前荷载进入编辑器。
+    // 保存过的图（payload.plotsSpecified）以图上的圈地为唯一口径，打开时不再自动补 —— 刻意删光的城保持为空；
+    // 早先保存的旧图没有该标记，按开局同一口径自动补齐一份，便于查看与调整
     const payload = getMap(mapId)?.payload;
-    return payload
-      ? createEditorState(payload.grid, payload.cities, payload.width, payload.height, payload.plots ?? [])
-      : createBlankMap(200, 200);
+    if (!payload) return createBlankMap(200, 200);
+    const loaded = createEditorState(payload.grid, payload.cities, payload.width, payload.height, payload.plots ?? []);
+    return payload.plotsSpecified ? loaded : autoAssignEditorPlots(loaded);
   });
   // 既有地图的原名：进入编辑时预填地图名输入框，保存时用于判断「是否改名另存」
   const [originalName] = useState(() => (mapId === 'new' ? '' : getMap(mapId)?.name ?? ''));
+  // 内置图（如荆襄地图）不能覆盖写回：单机开局对内置图恒走内置场景，直接改它不会生效
+  const builtinSource = mapId !== 'new' && getMap(mapId)?.builtin === true;
   // 新建地图时先确认尺寸（宽×高格数）；已有地图编辑时为哨兵值，跳过尺寸输入页
   const [requestedDims, setRequestedDims] = useState<{ w: number; h: number } | null>(() =>
     mapId === 'new' ? null : { w: 0, h: 0 },
@@ -126,6 +132,20 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
     setEditor((current) => (current ? commitPlots(current, draftAdds, draftRemoves) : current));
     resetPlotDraft();
     setPlotCityId(null);
+  };
+
+  /** 把当前选中的城重置为自动圈定的标准一份（先落草稿，确定后才入库；旧圈地整批取消） */
+  const fillPlotsForCity = () => {
+    if (!plotCityId) return;
+    const picked = autoPlotsForCity(editor, plotCityId);
+    const pickKeys = new Set(picked.map((plot) => `${plot.q},${plot.r}`));
+    emitAudioEvent({ type: 'menu-click-on' });
+    setDraftAdds(picked);
+    setDraftRemoves(
+      editor.plots
+        .filter((plot) => plot.cityId === plotCityId && !pickKeys.has(`${plot.q},${plot.r}`))
+        .map((plot) => `${plot.q},${plot.r}`),
+    );
   };
 
   const handleSelectTool = (tool: MapEditorTool) => {
@@ -193,8 +213,12 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
     const isCity = pendingPlacement.tool === 'city';
     setEditor((current) => {
       if (!current) return current;
+      const alreadyExists = current.cities.some((marker) => marker.id === id);
       const marker = { id, label, q: coord.q, r: coord.r, forceId };
-      return isCity ? placeCity(current, marker) : placePass(current, marker);
+      const next = isCity ? placeCity(current, marker) : placePass(current, marker);
+      // 新城落地即自动圈定建设用地（新建的空白图没有原版 interior 数据）；
+      // 既有城池只改归属 / 改名时不动它的圈地 —— 否则会把用户刻意清空的城又补回来
+      return isCity && !alreadyExists ? autoAssignEditorPlots(next, id) : next;
     });
     setPendingPlacement(null);
     setPendingName(null);
@@ -226,15 +250,17 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
   /**
    * 保存：cache＝仅浏览器缓存；local＝缓存 + 下载 JSON。
    * 改名即「另存为新地图」（生成新的自定义图，原图保留）；原名则原地更新。
-   * 内置图无法覆盖写回，改名后同样会落到一张新的自定义图上，否则刷新即丢。
+   * 内置图无法覆盖写回（开局恒走内置场景），一律另存为新的自定义图，否则刷新即丢。
    */
   const handleSave = (name: string, mode: 'cache' | 'local') => {
-    const payload = JSON.parse(exportEditorJson(editor, name)) as EditorMapPayload;
-    const renamed = name !== originalName;
-    if (mapId === 'new' || renamed) addSessionMap(payload, name);
+    // 内置图沿用原名时补「（副本）」，免得列表里出现与内置图同名的自定义图、分不清
+    const finalName = builtinSource && name === originalName ? `${name}（副本）` : name;
+    const payload = JSON.parse(exportEditorJson(editor, finalName)) as EditorMapPayload;
+    const renamed = finalName !== originalName;
+    if (mapId === 'new' || renamed || builtinSource) addSessionMap(payload, finalName);
     else updateSessionMap(mapId, payload);
-    if (mode === 'local') downloadTextFile(`${name}.json`, JSON.stringify(payload, null, 2));
-    onSave(payload, name);
+    if (mode === 'local') downloadTextFile(`${finalName}.json`, JSON.stringify(payload, null, 2));
+    onSave(payload, finalName);
   };
 
   const forceName = (forceId: ForceId | null | undefined) =>
@@ -280,11 +306,14 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
         </div>
         <MapEditorPanel
           activeTool={activeTool}
-          defaultName={originalName}
+          defaultName={builtinSource ? `${originalName}（副本）` : originalName}
+          forceCityCount={editor.cities.filter((marker) => (marker.type ?? 'city') === 'city' && marker.forceId).length}
+          builtinSource={builtinSource}
           canUndo={editor.history.length > 0}
           canRedo={editor.future.length > 0}
           plotCity={plotCity ? { id: plotCity.id, label: plotCity.label } : null}
           canConfirmPlots={hasPlotDraft}
+          onAutoPlots={fillPlotsForCity}
           onBack={onBack}
           onClear={() => {
             selectPlotCity(null);

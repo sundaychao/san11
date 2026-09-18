@@ -26,9 +26,10 @@ export function MapListScreen({ mode, onSelect, onCreateNew, onBack }: MapListSc
     return () => { active = false; };
   }, []);
 
-  const available = mode === 'start'
-    ? maps.filter((map) => forcesOfMap(map.payload).length > 0)
-    : maps;
+  // start 模式下「没有有主城池」的地图无法开局：仍然列出但置灰（见 unplayableForStart），
+  // 不直接过滤掉 —— 过滤会让用户以为刚保存的地图丢了
+  const unplayableForStart = (map: SessionMap) => mode === 'start' && forcesOfMap(map.payload).length === 0;
+  const unplayableCount = maps.filter(unplayableForStart).length;
 
   const handleImportClick = () => fileInputRef.current?.click();
   const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -66,6 +67,9 @@ export function MapListScreen({ mode, onSelect, onCreateNew, onBack }: MapListSc
         <button type="button" className="secondary-button" onClick={onBack}>{'< 返回'}</button>
         <h1>{mode === 'edit' ? '编辑地图' : '选择地图'}</h1>
         {mode === 'edit' && <p>自定义地图自动保存到浏览器本地；也可以导出 JSON 备份、导入他人地图。</p>}
+        {mode === 'start' && unplayableCount > 0 && (
+          <p>灰显的地图没有「有主城池」，无法开局 —— 到「编辑地图」里给城池设置归属势力即可。</p>
+        )}
       </header>
 
       {mode === 'edit' && (
@@ -94,14 +98,17 @@ export function MapListScreen({ mode, onSelect, onCreateNew, onBack }: MapListSc
       )}
 
       <div className="map-list-grid" aria-label="可用地图">
-        {available.map((map) => {
+        {maps.map((map) => {
           const forces = forcesOfMap(map.payload);
+          const unplayable = unplayableForStart(map);
           return (
             <div key={map.id} className="map-card-wrapper">
               <button
                 type="button"
-                className="map-card"
+                className={unplayable ? 'map-card is-unplayable' : 'map-card'}
                 data-testid={`map-card-${map.id}`}
+                disabled={unplayable}
+                title={unplayable ? '该地图没有有主城池，无法开局 —— 请先到「编辑地图」给城池设置归属势力' : undefined}
                 onClick={() => onSelect(map.id)}
               >
                 <span className="map-card-name">{map.name}</span>

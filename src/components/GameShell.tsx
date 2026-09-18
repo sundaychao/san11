@@ -951,27 +951,9 @@ export function GameShell() {
     emitAudioEvent({ type: 'menu-click-on' });
     const deployAction = isPendingDeployCommandMenu ? beginPendingDeployAction() : null;
     setUnitStrategyMenu(null);
-    // 兵器部队只有一条战法（破碎/放射/火矢/投石）：跳过二级菜单直接进选目标。
-    // 注意：这里的判据必须是「兵器部队」本身，而不是「可用战法只有一种」——
-    // 普通部队常因适性/战力只解锁一种战法，那种情况仍要弹二级菜单把锁定项与原因显示出来。
-    const tactics = unitMenuQuery.availableTactics;
-    if (isSiegeUnit(unitMenuQuery.unit) && tactics.length === 1) {
-      setUnitTacticMenu(null);
-      setUnitFacilityMenu(null);
-      setSelectedUnitId(deployAction?.unitId ?? unitMenuUnitId);
-      setTargetingAttack(null);
-      setTargetingTactic({
-        unitId: deployAction?.unitId ?? unitMenuUnitId,
-        tacticId: tactics[0].id,
-        origin: deployAction ? undefined : unitMenuDestination,
-      });
-      setTargetingFirePlot(null);
-      setTargetingUnitStrategy(null);
-      setTargetingFacility(null);
-      setTargetingRepair(null);
-      setUnitCommandMenu(null);
-      return;
-    }
+    // 所有部队一视同仁：先弹二级菜单列出该部队的战法（含锁定项与原因），选完再进选目标。
+    // 兵器部队虽然每种兵器只有一条战法（冲车破碎 / 木兽放射 / 井阑火矢 / 投石车投石），
+    // 也照样弹一次——玩家需要先看到这条战法的名字，才知道自己点的是什么。
     setUnitTacticMenu({
       unitId: deployAction?.unitId ?? unitMenuUnitId,
       position: { x: unitCommandMenu.position.x + 108, y: unitCommandMenu.position.y },
