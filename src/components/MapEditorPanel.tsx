@@ -17,6 +17,8 @@ export interface MapEditorPanelProps {
   canRedo: boolean;
   canUndo: boolean;
   plotCity?: { id: string; label: string } | null;
+  /** 当前选中城池已圈定的建设用地格数（放城不再自动分配，这里让玩家看清现有几格） */
+  plotCount?: number;
   canConfirmPlots: boolean;
   onBack(): void;
   onClear(): void;
@@ -61,6 +63,7 @@ export function MapEditorPanel({
   canRedo,
   canUndo,
   plotCity,
+  plotCount,
   canConfirmPlots,
   onAutoPlots,
   onBack,
@@ -148,6 +151,11 @@ export function MapEditorPanel({
             {plotCity ? (
               <>
                 <span>为「<strong>{plotCity.label}</strong>」圈地（点击地块归属此城，再次点击同一地块取消）</span>
+                <span data-testid="editor-plot-count">
+                  {typeof plotCount === 'number'
+                    ? `本城已圈 ${plotCount} 格${plotCount === 0 ? ' —— 放城不再自动分配，没圈地就是 0 格，可用「自动圈地」一键取标准 9 格' : ''}`
+                    : null}
+                </span>
                 <div className="map-editor-plot-actions">
                   <button
                     type="button"

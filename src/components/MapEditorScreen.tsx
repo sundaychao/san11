@@ -75,7 +75,7 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
     if (mapId === 'new') return createBlankMap(200, 200);
     // 重新编辑已有地图（内置或自定义）：直接以当前荷载进入编辑器。
     // 保存过的图（payload.plotsSpecified）以图上的圈地为唯一口径，打开时不再自动补 —— 刻意删光的城保持为空；
-    // 早先保存的旧图没有该标记，按开局同一口径自动补齐一份，便于查看与调整
+    // 早先保存的旧图没有该标记，按开局同一口径自动补齐一份（否则这张图在玩家眼里会突然全城没有建设用地）
     const payload = getMap(mapId)?.payload;
     if (!payload) return createBlankMap(200, 200);
     const loaded = createEditorState(payload.grid, payload.cities, payload.width, payload.height, payload.plots ?? []);
@@ -213,12 +213,10 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
     const isCity = pendingPlacement.tool === 'city';
     setEditor((current) => {
       if (!current) return current;
-      const alreadyExists = current.cities.some((marker) => marker.id === id);
       const marker = { id, label, q: coord.q, r: coord.r, forceId };
-      const next = isCity ? placeCity(current, marker) : placePass(current, marker);
-      // 新城落地即自动圈定建设用地（新建的空白图没有原版 interior 数据）；
-      // 既有城池只改归属 / 改名时不动它的圈地 —— 否则会把用户刻意清空的城又补回来
-      return isCity && !alreadyExists ? autoAssignEditorPlots(next, id) : next;
+      // 建设用地不自动分配：放城只落地标记，地格一律由「建设用地」工具手动圈
+      // （选中该城后点「自动圈地」可一键拿标准一份）
+      return isCity ? placeCity(current, marker) : placePass(current, marker);
     });
     setPendingPlacement(null);
     setPendingName(null);
@@ -312,6 +310,7 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
           canUndo={editor.history.length > 0}
           canRedo={editor.future.length > 0}
           plotCity={plotCity ? { id: plotCity.id, label: plotCity.label } : null}
+          plotCount={plotCityId ? editor.plots.filter((plot) => plot.cityId === plotCityId).length : undefined}
           canConfirmPlots={hasPlotDraft}
           onAutoPlots={fillPlotsForCity}
           onBack={onBack}

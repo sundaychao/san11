@@ -12,9 +12,9 @@ import {
   type DeployInput,
   type TransportInput,
 } from './legacyCore';
-import { cellAt, deploymentCellsForStronghold, spawnCellFor } from './movementRules';
+import { cellAt, deploymentCellsForStronghold, deploymentCostsForStronghold, spawnCellFor } from './movementRules';
 
-export { deploymentCells, deploymentCellsForStronghold } from './movementRules';
+export { deploymentCells, deploymentCellsForStronghold, deploymentCostsForStronghold } from './movementRules';
 export type { DeployInput, TransportInput } from './legacyCore';
 
 /**
@@ -34,7 +34,7 @@ function deploySourceOf(state: GameState, input: { cityId?: CityId; passId?: Pas
  * 楼船/斗舰按水军口径取「罗盘」+6（与每旬重置 turn.ts 的 movementTechBonus 一致），
  * 斗舰再额外 +4（造船术，`battleShipMovementBonus`）——罗盘的 +6 不重复给。
  */
-function deploymentMovementAllowance(
+export function deploymentMovementAllowance(
   state: GameState,
   forceId: ForceId,
   officerIds: string[],
@@ -144,9 +144,13 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
       : spawnCellFor(state, source as City, target, troopType, vehicle))
     : preferredSpawnCell(state, source, movementAllowance, troopType, vehicle));
   if (!spawn) throw new Error('没有合法出生格');
+  const deploymentCosts = deploymentCostsForStronghold(state, source.id, movementAllowance, troopType, vehicle);
   if (!deploymentCellsForStronghold(state, source.id, movementAllowance, troopType, vehicle).some((coord) => coord.q === spawn.q && coord.r === spawn.r)) {
     throw new Error('出征位置超出移动范围');
   }
+  // 落位本身就是本旬位移：从出征移动力预算中扣除到达落位格的消耗，
+  // 剩余移动力才留给本旬随后的委任行军/修补靠近，保证总位移不超过显示的可移动范围。
+  const spawnMovementRemaining = Math.max(0, movementAllowance - (deploymentCosts.get(`${spawn.q},${spawn.r}`) ?? movementAllowance));
 
   const next = structuredClone(state);
   // 与 moveUnit/waitUnit 同口径清理瞬时战报：出征是新的部队动作，旧的建设/修补/战斗弹字不应带到场上
@@ -187,7 +191,7 @@ export function deployUnit(state: GameState, forceId: ForceId, input: DeployInpu
   next.units[unitId] = {
     id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.passId ? (source as Pass).homeCityId : input.cityId!,
     troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: initialEnergy, stamina: initialStamina,
-    movementRemaining: movementAllowance, moved: true, acted: false,
+    movementRemaining: spawnMovementRemaining, moved: true, acted: false,
     // 记下本次带走的兵装：部队回城/进关并账时原样返还（未记录者不返还）
     ...(Object.keys(carriedArmaments).length > 0 ? { armaments: carriedArmaments } : {}),
   };
@@ -213,6 +217,8 @@ export function deployUnitPreviewWithId(state: GameState, forceId: ForceId, inpu
   const movementAllowance = deploymentMovementAllowance(state, forceId, officerIds, troopType, vehicle);
   const spawn = input.destination ?? preferredSpawnCell(state, source!, movementAllowance, troopType, vehicle);
   if (!source || !leaderId || !spawn) throw new Error('无法创建出征预览');
+  // 与 deployUnit 同口径：预览部队的剩余移动力 = 出征移动力 − 到达落位格的消耗
+  const previewSpawnCost = deploymentCostsForStronghold(state, source.id, movementAllowance, troopType, vehicle).get(`${spawn.q},${spawn.r}`) ?? movementAllowance;
   const next = structuredClone(state);
   const unitId = `preview-deploy-${leaderId}`;
   const previewOfficers = officerIds.map((officerId) => state.officers[officerId]);
@@ -224,7 +230,7 @@ export function deployUnitPreviewWithId(state: GameState, forceId: ForceId, inpu
   next.units[unitId] = {
     id: unitId, kind: 'combat', forceId, leaderId, officerIds: [...officerIds], homeCityId: input.passId ? (source as Pass).homeCityId : input.cityId!,
     troopType, vehicle, siegeWeapon: troopType === 'siege' ? input.siegeWeapon : undefined, q: spawn.q, r: spawn.r, troops: input.troops, gold, food: input.food, energy: previewEnergy, stamina: initialStamina,
-    movementRemaining: movementAllowance, moved: true, acted: false,
+    movementRemaining: Math.max(0, movementAllowance - previewSpawnCost), moved: true, acted: false,
   };
   return { state: next, unitId };
 }

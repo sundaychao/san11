@@ -330,6 +330,7 @@ function delegateMoveStep(state: GameState, forceId: ForceId, unitId: string, ta
   if (!dest) return state; // 不可达或本回合无法前进：保留委任
   const next = moveUnit(state, forceId, unitId, dest);
   if (!next.units[unitId]) return next; // 回城/进驻：部队消失，委任自然结束
+  next.units[unitId].delegateActed = true; // 本旬已执行过委任行动：隐藏徽章，且「进行」不再重复执行
   if (preserveDelegate) {
     // 建设/修补委任：移动后保持原委任，未到达目标格前持续靠近
     next.units[unitId].delegate = preserveDelegate;
@@ -351,6 +352,7 @@ function delegateBuildStep(state: GameState, forceId: ForceId, unitId: string, t
       && facilityBuildTargets(state, unitId, undefined, facility).some((coord) => coord.q === target.q && coord.r === target.r)) {
       const next = buildFacility(state, forceId, unitId, facility, target);
       // buildFacility 内部已按建成情况设置/清除修补委任
+      if (next.units[unitId]) next.units[unitId].delegateActed = true;
       return next;
     }
     // 已相邻但资金不足/位置暂不可建设：保持委任，每旬重试
@@ -403,6 +405,7 @@ function delegateRepairStep(state: GameState, forceId: ForceId, unitId: string, 
   if (repairableFacilities(state, unitId).some((candidate) => candidate.id === facilityId)) {
     const next = repairFacility(state, forceId, unitId, facilityId);
     // repairFacility 内部已按建成情况保持/清除修补委任
+    if (next.units[unitId]) next.units[unitId].delegateActed = true;
     return next;
   }
   // 未相邻：沿最优路径靠近到「设施相接的可通行格」（approachTarget 本身即邻格，
@@ -415,12 +418,14 @@ function delegateRepairStep(state: GameState, forceId: ForceId, unitId: string, 
 /** 旬结算执行委任前的预备：把本势力挂委任部队的本旬行动标记清掉、移动力恢复（与旬初重置同口径）。
  * 手动行动类指令（移动/攻击/战法/计略等）都会清委任，故结算时仍挂着委任的部队一定是
  * 「下委任后未再手动操作」的 —— 它们的委任应当在本次结算准时执行，而不是被上旬的
- * moved 标记吞掉一拍（否则出征/移动当旬下的委任要等两次结算才生效）。 */
+ * moved 标记吞掉一拍（否则出征/移动当旬下的委任要等两次结算才生效）。
+ * delegateActed 的部队本旬已执行过委任行动（下达即时行动或「委任部队行动」），
+ * 不重置、不再执行：一旬只行动一次。 */
 export function prepareDelegationsForExecution(state: GameState, forceId: ForceId): GameState {
   let changed = false;
   const next = structuredClone(state);
   for (const unit of Object.values(next.units)) {
-    if (unit.forceId !== forceId || !unit.delegate) continue;
+    if (unit.forceId !== forceId || !unit.delegate || unit.delegateActed) continue;
     if (!unit.moved && !unit.acted && unit.movementRemaining > 0) continue;
     unit.moved = false;
     unit.acted = false;
@@ -430,10 +435,10 @@ export function prepareDelegationsForExecution(state: GameState, forceId: ForceI
   return changed ? next : state;
 }
 
-/** 执行单个部队的委任（仅未手动操作、未混乱的部队） */
+/** 执行单个部队的委任（仅未手动操作、未混乱、本旬未执行过委任的部队） */
 export function executeUnitDelegation(state: GameState, forceId: ForceId, unitId: string): GameState {
   const unit = state.units[unitId];
-  if (!unit?.delegate || unit.acted || unit.moved || unitIsIncapacitated(unit)) return state;
+  if (!unit?.delegate || unit.acted || unit.moved || unit.delegateActed || unitIsIncapacitated(unit)) return state;
   if (unit.delegate.kind === 'move') return delegateMoveStep(state, forceId, unitId, unit.delegate.target);
   if (unit.delegate.kind === 'build') return delegateBuildStep(state, forceId, unitId, unit.delegate.target, unit.delegate.facility);
   return delegateRepairStep(state, forceId, unitId, unit.delegate.facilityId);
@@ -478,6 +483,7 @@ export function hasExecutableDelegation(state: GameState, forceId: ForceId = sta
     && Boolean(unit.delegate)
     && !unit.acted
     && !unit.moved
+    && !unit.delegateActed
     && !unitIsIncapacitated(unit)
   ));
 }
@@ -485,6 +491,7 @@ export function hasExecutableDelegation(state: GameState, forceId: ForceId = sta
 /**
  * 手动执行委任：不推进回合，只让委任部队各行动一步（右键菜单「委任部队行动」）。
  * 与 advanceTenDay 的第一步同源；因为不经过旬末重置，这里直接补上"委任进驻/回城的武将标记已行动"。
+ * 行动过的部队由 delegate*Step 记 delegateActed：本旬隐藏「委」徽章、「进行」不再重复执行，下一旬旬初恢复。
  */
 export function runDelegatedUnits(state: GameState, forceId: ForceId = state.turnForceId): GameState {
   const next = executeDelegations(state, forceId);
@@ -516,14 +523,24 @@ export function keepDelegationMergedOfficersActed(state: GameState, officerIds: 
   return state;
 }
 
+/** 重新下达委任即视为「新委任本旬尚未行动」：清掉上一次执行的徽章隐藏标记；
+ * 若本次下达又立即行动，delegate*Step 会重新记上。 */
+function clearDelegateActed(state: GameState, unitId: string): GameState {
+  const unit = state.units[unitId];
+  if (!unit || !unit.delegateActed) return state;
+  const next = structuredClone(state);
+  delete next.units[unitId].delegateActed;
+  return next;
+}
+
 /** 玩家发起移动委任：本回合沿最优路径移动到最远处并记录委任目标 */
 export function setMoveDelegate(state: GameState, forceId: ForceId, unitId: string, target: GridCoord): GameState {
-  return delegateMoveStep(state, forceId, unitId, target);
+  return delegateMoveStep(clearDelegateActed(state, unitId), forceId, unitId, target);
 }
 
 /** 玩家发起建设委任：先沿最优路径向建设点移动，到达相邻处自动设置设施 */
 export function setBuildDelegate(state: GameState, forceId: ForceId, unitId: string, target: GridCoord, facility: FacilityType): GameState {
-  return delegateBuildStep(state, forceId, unitId, target, facility);
+  return delegateBuildStep(clearDelegateActed(state, unitId), forceId, unitId, target, facility);
 }
 
 /** 玩家发起修补委任：先沿最优路径向受损设施移动，到达相邻处自动持续修补直至耐久修满。
@@ -538,6 +555,8 @@ export function setRepairDelegate(state: GameState, forceId: ForceId, unitId: st
   const facility = state.facilities?.[facilityId];
   if (!facility || facility.forceId !== forceId || !facilityNeedsRepair(facility)) return state;
   const next = structuredClone(state);
+  // 重新下达＝新委任本旬尚未行动；若下面立即行动，delegateRepairStep 会重新记上 delegateActed
+  delete next.units[unitId].delegateActed;
   // 与 moveUnit/waitUnit 同口径清理瞬时战报：确认委任时旧的建设/修补弹字必须立即消失，
   // 否则部队本旬不动时，残留的「+N」会被误读成「已修补但耐久没加」。
   next.battleDamageReports = [];

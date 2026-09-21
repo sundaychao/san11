@@ -4,10 +4,10 @@ import { createGame } from '../scenario/jingxiang208';
 import type { ArmyUnit, City, FacilityType } from '../types';
 import { cellAt, movementCells, ownCityTransitKeysFor, reachableCosts } from './movementRules';
 import { neighborsOf, sevenCellCityFootprint } from './grid';
-import { FACILITY_BUILD_COSTS, facilityBuildTargets, movementAllowanceForUnit } from './legacyCore';
+import { FACILITY_BUILD_COSTS, dismantleFacility, facilityBuildTargets, movementAllowanceForUnit } from './legacyCore';
 import { movementCostForCell, movementProfileForUnit } from './catalog';
-import { buildFacility } from './facilities';
-import { deployUnitWithId, deploymentCells, chooseDelegateSpawnCell } from './deployment';
+import { buildFacility, repairFacility } from './facilities';
+import { deployUnit, deployUnitWithId, deploymentCells, deploymentCostsForStronghold, deploymentMovementAllowance, chooseDelegateSpawnCell } from './deployment';
 import { getDeploymentTargets } from './queries';
 import { advanceTenDay, settleTenDay } from '../turn';
 import { cityAvailableOfficers } from '../commands';
@@ -54,6 +54,8 @@ function freshTurn(state: GameLike) {
   unit.moved = false;
   unit.acted = false;
   unit.movementRemaining = movementAllowanceForUnit(unit);
+  // 与旬初重置同口径：委任执行标记也清掉，下一旬可再次执行
+  delete unit.delegateActed;
   return state;
 }
 
@@ -184,6 +186,9 @@ describe('部队委任', () => {
       const unit = sim.state.units[sim.unitId];
       unit.moved = false;
       unit.acted = false;
+      // 出征落位按新口径已扣除到达出生格的移动力（边缘格剩余≈0）；
+      // 本用例考察的是旬初满移动力下的委任选点，手动补足移动力模拟新的一旬。
+      unit.movementRemaining = movementAllowanceForUnit(unit);
 
       const next = setMoveDelegate(sim.state, 'cao', sim.unitId, target);
       const landed = next.units[sim.unitId];
@@ -481,6 +486,39 @@ describe('部队委任', () => {
       expect(spawnNearWest.q).toBeLessThan(cityQ);
       expect(spawnNearEast.q - spawnNearWest.q).toBeGreaterThan(4);
     }, 30000);
+
+    it('出征落位消耗移动力：当旬委任行军的总位移不超过显示的可移动范围', () => {
+      const state = createGame('liu', 1);
+      const city = state.cities.jiangling;
+      const budget = deploymentMovementAllowance(state, 'liu', ['liu-bei'], 'sword', 'boat');
+      const deployCosts = deploymentCostsForStronghold(state, 'jiangling', budget, 'sword');
+      const cells = deploymentCells(state, 'jiangling', budget, 'sword');
+      // 取显示范围里消耗最大（最边缘）的落位格
+      const destination = cells.reduce((best, coord) => (
+        deployCosts.get(`${coord.q},${coord.r}`)! > deployCosts.get(`${best.q},${best.r}`)! ? coord : best
+      ));
+      const spawnCost = deployCosts.get(`${destination.q},${destination.r}`)!;
+      expect(spawnCost).toBeGreaterThan(0);
+
+      const deployed = deployUnitWithId(state, 'liu', {
+        cityId: 'jiangling', officerId: 'liu-bei', troopType: 'sword', troops: 3000, food: 6000,
+        destination,
+      });
+      const unit = deployed.state.units[deployed.unitId]!;
+      // 落位本身即本旬位移：剩余移动力 = 出征移动力 − 到达落位格的消耗
+      expect(unit.movementRemaining).toBe(budget - spawnCost);
+
+      // 与 intentReducer 的 deployUnitDelegate 同口径：放开 moved 后下达超距移动委任
+      unit.moved = false;
+      const farTarget = { q: city.gridQ + 26, r: city.gridR + 4 };
+      const after = setMoveDelegate(deployed.state, 'liu', deployed.unitId, farTarget);
+      const movedUnit = after.units[deployed.unitId];
+      expect(movedUnit).toBeDefined();
+      if (!movedUnit) return;
+      // 城心 → 最终落点的消耗（本旬总位移）不得超过出征时显示的可移动范围
+      const fullCosts = deploymentCostsForStronghold(state, 'jiangling', budget + 30, 'sword');
+      expect(fullCosts.get(`${movedUnit.q},${movedUnit.r}`)).toBeLessThanOrEqual(budget);
+    }, 30000);
   });
 
   describe('建设委任', () => {
@@ -693,6 +731,37 @@ describe('部队委任', () => {
       expect(next.units['delegate-unit'].delegate?.kind).toBe('repair');
     });
 
+    it('手动建设自动转修补委任：本旬不计入「进行」、不再修补第二次，下一旬才修补', () => {
+      const state = createGame('liu', 1);
+      const spawn = findBuildSpawn(state);
+      expect(spawn).toBeDefined();
+      if (!spawn) return;
+      injectUnit(state, spawn, { gold: 2000 });
+      const buildTarget = facilityBuildTargets(state, 'delegate-unit', undefined, 'fireSeed')[0];
+      expect(buildTarget).toBeDefined();
+      if (!buildTarget) return;
+
+      const built = buildFacility(state, 'liu', 'delegate-unit', 'fireSeed', buildTarget);
+      const facilityId = Object.keys(built.facilities!)[0];
+      expect(built.facilities![facilityId].completed).toBe(false);
+      expect(built.units['delegate-unit'].delegate).toEqual({ kind: 'repair', facilityId });
+      // 建设本身就计为「本旬的委任行动」：隐藏「委」徽章，且点「进行」不再重复执行
+      expect(built.units['delegate-unit'].delegateActed).toBe(true);
+
+      // 即使强行把 acted/moved 清掉（模拟误触「委任部队行动」），delegateActed 也会跳过本旬执行
+      const sameTenDay = structuredClone(built);
+      sameTenDay.units['delegate-unit'].acted = false;
+      sameTenDay.units['delegate-unit'].moved = false;
+      const afterSameTenDay = executeDelegations(sameTenDay);
+      expect(afterSameTenDay.facilities![facilityId].durability)
+        .toBe(built.facilities![facilityId].durability);
+
+      // 旬初重置清除标记后，新的一旬委任正常执行一次修补
+      const nextTenDay = executeDelegations(freshTurn(structuredClone(built)));
+      expect(nextTenDay.facilities![facilityId].durability)
+        .toBeGreaterThan(built.facilities![facilityId].durability);
+    });
+
     it('一次建成：清除委任', () => {
       const state = createGame('liu', 1);
       const spawn = findBuildSpawn(state);
@@ -827,6 +896,63 @@ describe('部队委任', () => {
       expect(after.turnForceId).toBe(turnForceId);
       // 行动后没有可再执行的委任 → 菜单项置灰
       expect(hasExecutableDelegation(after, 'liu')).toBe(false);
+    }, 30000);
+
+    it('委任执行标记：下达即时行动即记 delegateActed（隐藏「委」徽章），重新下达/下一旬初清除', () => {
+      const state = createGame('liu', 1);
+      const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
+        .find((n) => cellAt(state, n))!;
+      injectUnit(state, spawn);
+      const target = findRemoteLandCell(state, spawn, 12);
+      expect(target).toBeDefined();
+      if (!target) return;
+
+      // 下达移动委任 = 本旬立即行军一步：记 delegateActed → 徽章隐藏、本旬「进行」不再重复执行
+      const delegated = setMoveDelegate(state, 'liu', 'delegate-unit', target);
+      expect(delegated.units['delegate-unit'].delegateActed).toBe(true);
+
+      // 同旬重新下达（部队已行动，只登记不执行）：视为新委任尚未行动，清掉标记让徽章重新可见
+      expect(setMoveDelegate(delegated, 'liu', 'delegate-unit', target).units['delegate-unit'].delegateActed).toBeUndefined();
+
+      // 下一旬旬初重置后恢复显示
+      const settled = settleTenDay(delegated);
+      expect(settled.units['delegate-unit'].delegateActed).toBeUndefined();
+    }, 30000);
+
+    it('委任一旬只执行一次：下达时已即时修补的部队，点「进行」不再修补第二次', () => {
+      const state = deployUnit(createGame('liu', 1), 'liu', {
+        cityId: 'jiangling',
+        officerId: 'guan-yu',
+        targetCityId: 'xiangyang',
+        troopType: 'spear',
+        troops: 4000,
+        food: 6000,
+      });
+      const unit = Object.values(state.units)[0];
+      state.facilities = {
+        'repair-target': {
+          id: 'repair-target',
+          type: 'drum',
+          forceId: 'liu',
+          q: unit.q,
+          r: unit.r + 1,
+          durability: 300,
+          completed: true,
+        },
+      };
+
+      // 出征落位 + 紧邻设施：确认委任立即修补一次并记 delegateActed
+      const repaired = setRepairDelegate(state, 'liu', unit.id, 'repair-target');
+      const durabilityAfterIssue = repaired.facilities!['repair-target'].durability;
+      expect(repaired.units[unit.id].delegateActed).toBe(true);
+      expect(durabilityAfterIssue).toBeGreaterThan(300);
+
+      // 点「进行」：本旬已执行过 → 不再重复修补（旧版 prepare 重置行动标记导致一旬修两次）
+      const advanced = advanceTenDay(repaired);
+      expect(advanced.facilities!['repair-target'].durability).toBe(durabilityAfterIssue);
+      // 新旬已重置标记，委任保留，下一旬继续修补
+      expect(advanced.units[unit.id].delegateActed).toBeUndefined();
+      expect(advanced.units[unit.id].delegate).toEqual({ kind: 'repair', facilityId: 'repair-target' });
     }, 30000);
 
     it('runDelegatedUnits：无委任部队时原样返回，不做任何改动', () => {
@@ -1036,6 +1162,58 @@ describe('部队委任', () => {
       const state = movedScene();
       state.units['delegate-unit'].confusedTenDays = 2;
       const next = setRepairDelegate(state, 'liu', 'delegate-unit', 'drum');
+      expect(next.units['delegate-unit'].delegate).toBeUndefined();
+    });
+  });
+
+  /**
+   * 用户实测：A 挂着某设施的修补委任、B 把这设施修好了，A 的「委」却还挂着 —— 委任必须当场解除。
+   * 徽章口径只看 `unit.delegate`，而 delegateRepairStep 只在「A 自己轮到执行委任」时才检查目标是否还需修补，
+   * 不主动清理的话 A 会多挂一旬「委」（本旬显示 + 下一旬旬初重置 delegateActed 后再显示），
+   * 看起来像是「设施都修好了还要白跑一趟」。
+   */
+  describe('修补委任目标被他人修好/消失后自动解除', () => {
+    /** 关羽 (79,125) 挂着太鼓台 (78,121) 的修补委任（未行动）；张飞 (78,122) 站在设施旁可立刻修补 */
+    function sharedTargetScene(durability = 799) {
+      const state = createGame('liu', 1);
+      state.units = {};
+      state.facilities = {
+        drum: { id: 'drum', type: 'drum', forceId: 'liu', q: 78, r: 121, durability, completed: true },
+      };
+      state.units['delegate-unit'] = makeUnit('liu', 'jiangling', 79, 125, {
+        leaderId: 'guan-yu',
+        delegate: { kind: 'repair', facilityId: 'drum' },
+      });
+      state.units['helper-unit'] = makeUnit('liu', 'jiangling', 78, 122, { id: 'helper-unit', leaderId: 'zhang-fei' });
+      return state;
+    }
+
+    it('他部手动修补把耐久修满：委任部队立刻摘掉委任（徽章不再显示「委」）', () => {
+      const next = repairFacility(sharedTargetScene(), 'liu', 'helper-unit', 'drum');
+      expect(next.facilities!.drum.durability).toBe(800);
+      expect(next.units['delegate-unit'].delegate).toBeUndefined();
+      expect(next.units['delegate-unit']).toMatchObject({ q: 79, r: 125 });
+    });
+
+    it('他部修补但仍未修满：委任保留（该部队下个旬起继续前往修补）', () => {
+      const next = repairFacility(sharedTargetScene(100), 'liu', 'helper-unit', 'drum');
+      expect(next.facilities!.drum.durability).toBeGreaterThan(100);
+      expect(next.facilities!.drum.durability).toBeLessThan(800);
+      expect(next.units['delegate-unit'].delegate).toEqual({ kind: 'repair', facilityId: 'drum' });
+    });
+
+    it('他部委任修补执行时把设施修满：另一支部队的委任同样立刻解除', () => {
+      const state = sharedTargetScene();
+      state.units['helper-unit'].delegate = { kind: 'repair', facilityId: 'drum' };
+      const next = executeDelegations(state);
+      expect(next.facilities!.drum.durability).toBe(800);
+      expect(next.units['helper-unit'].delegate).toBeUndefined();
+      expect(next.units['delegate-unit'].delegate).toBeUndefined();
+    });
+
+    it('设施被撤销（目标消失）：挂在该设施上的委任一并解除', () => {
+      const next = dismantleFacility(sharedTargetScene(), 'liu', 'drum');
+      expect(next.facilities!.drum).toBeUndefined();
       expect(next.units['delegate-unit'].delegate).toBeUndefined();
     });
   });

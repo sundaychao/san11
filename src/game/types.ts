@@ -668,6 +668,8 @@ export interface ArmyUnit {
   acted: boolean;
   /** 部队委任（自动行动）：移动/建设/修补，未手动操作时点击「进行」自动执行 */
   delegate?: UnitDelegate;
+  /** 本旬委任已执行过（下达即时行动或「委任部队行动」）：隐藏「委」徽章且「进行」不再重复执行，旬初重置；重新下达会清掉 */
+  delegateActed?: boolean;
 }
 
 /** 外交子行动：命令菜单「外交」段的各项，也是 diplomacy 指令的 action 取值 */

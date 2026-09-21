@@ -23,7 +23,7 @@ import {
   rollRepeatNormalAttack,
   siegeDamageMultiplier,
 } from '../skills/rules/combat';
-import { applyCatapultSplash, igniteWoodenBeastAttack, tacticTargetCities, tacticTargetFacilities, tacticTargetPasses, tacticTargetPlots } from './legacyCore';
+import { applyCatapultSplash, clearSatisfiedRepairDelegations, igniteWoodenBeastAttack, tacticTargetCities, tacticTargetFacilities, tacticTargetPasses, tacticTargetPlots } from './legacyCore';
 import { attackableFacilities, attackablePlots, attackableUnits, gridDistanceWithin, jointAttackableUnits, parsePlotTargetKey } from './targetRules';
 import { isSiegeTactic, TACTICS, type TacticId } from './catalog';
 import { PLOT_MAX_DURABILITY } from '../innerAffairs';
@@ -348,7 +348,11 @@ export function attackFacility(state: GameState, forceId: ForceId, attackerId: s
   next.strategyResultReports = [];
   // 木兽：被攻击的地点着火（设施被打掉也照样烧起来）
   if (ignitesTargetOnHit(next, nextAttacker)) igniteWoodenBeastAttack(next, targetCoord);
-  if (nextFacility.durability <= 0) delete next.facilities?.[facilityId];
+  if (nextFacility.durability <= 0) {
+    delete next.facilities?.[facilityId];
+    // 设施被打爆 = 委任目标消失：挂在该设施上的修补委任一并解除（否则「委」徽章会残留到下一次执行委任）
+    clearSatisfiedRepairDelegations(next);
+  }
   return next;
 }
 

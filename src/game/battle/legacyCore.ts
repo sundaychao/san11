@@ -1362,7 +1362,11 @@ function damageFacility(next: GameState, facilityId: string, amount: number) {
   const facility = next.facilities?.[facilityId];
   if (!facility) return;
   facility.durability = Math.max(0, facility.durability - amount);
-  if (facility.durability <= 0) delete next.facilities?.[facilityId];
+  if (facility.durability <= 0) {
+    delete next.facilities?.[facilityId];
+    // 设施被打爆 = 委任目标消失：所有挂在该设施上的修补委任同时解除
+    clearSatisfiedRepairDelegations(next);
+  }
 }
 
 function damageFacilitiesAt(next: GameState, coords: GridCoord[], amount: number) {
@@ -1475,6 +1479,8 @@ function igniteFacility(
     damageUnitsAt(next, affectedCells, Math.round(seedProfile.damage * fireMultiplier), seedProfile.prefix, looter);
     damageFacilitiesAt(next, cells, FIRE_FACILITY_DAMAGE);
     delete next.facilities?.[facility.id];
+    // 火种/火球本体被消耗 = 委任目标消失：挂在该设施上的修补委任一并解除
+    clearSatisfiedRepairDelegations(next);
     return true;
   }
   // 火球/火焰球/业火球：沿施放方向贯通 3 格（fireBallCells 对所有球类同样适用）
@@ -1492,6 +1498,8 @@ function igniteFacility(
     damageUnitsAt(next, affectedCells, Math.round(ballProfile.damage * fireMultiplier), ballProfile.prefix, looter);
     damageFacilitiesAt(next, cells, FIRE_FACILITY_DAMAGE);
     delete next.facilities?.[facility.id];
+    // 火种/火球本体被消耗 = 委任目标消失：挂在该设施上的修补委任一并解除
+    clearSatisfiedRepairDelegations(next);
     return true;
   }
   return false;
@@ -1686,6 +1694,8 @@ export function buildFacility(state: GameState, forceId: ForceId, unitId: string
   next.units[unitId].acted = true;
   next.units[unitId].moved = true;
   next.units[unitId].movementRemaining = 0;
+  // 本建设即「本旬的委任行动」：自动转出的修补委任当旬不再执行、不显示「委」徽章，旬初重置
+  next.units[unitId].delegateActed = true;
   // 委任建设（或新建设施未建成）：自动转为修补委任，直到建成；一次建成则清除委任
   if (next.facilities[id].completed) {
     delete next.units[unitId].delegate;
@@ -1693,6 +1703,30 @@ export function buildFacility(state: GameState, forceId: ForceId, unitId: string
     next.units[unitId].delegate = { kind: 'repair', facilityId: id };
   }
   return next;
+}
+
+/**
+ * 清理「已达成 / 已失效」的修补委任 —— 目标设施已不存在、或耐久已满（含被**其他**部队抢先修好）时，
+ * 该委任已无意义，立刻摘掉，让部队回到普通状态（徽章不再显示「委」）。
+ *
+ * 为什么必须单独做这一步：徽章口径是 `unit.delegate && !unit.delegateActed`，而 delegateRepairStep
+ * 只在「该部队自己轮到执行委任」时才检查目标还需不需要修。于是 B 把设施修满后，A 的委任会一直挂着 ——
+ * 本旬显示「委」，下一旬旬初重置 delegateActed 后再显示一次，直到 A 自己执行委任时才发现目标已满而自清，
+ * 最长拖满一旬。玩家看到的就是「设施已经修好了，A 还挂着委任还得再跑一趟」。
+ *
+ * 调用点＝一切可能让设施「从需修变为不需修 / 直接消失」的地方：
+ * repairFacility（被修满）、damageFacility（被打爆删除）、dismantleFacility（被撤销）、
+ * reconcileFacilityUpgrades（升档后耐久按新档满值重置）。就地修改 state（调用方已克隆）。
+ */
+export function clearSatisfiedRepairDelegations(state: GameState): GameState {
+  for (const unit of Object.values(state.units)) {
+    const delegate = unit.delegate;
+    if (!delegate || delegate.kind !== 'repair') continue;
+    const facility = state.facilities?.[delegate.facilityId];
+    if (facility && facilityNeedsRepair(facility)) continue;
+    delete unit.delegate;
+  }
+  return state;
 }
 
 export function repairFacility(state: GameState, forceId: ForceId, unitId: string, facilityId: string): GameState {
@@ -1712,6 +1746,8 @@ export function repairFacility(state: GameState, forceId: ForceId, unitId: strin
   next.units[unitId].acted = true;
   next.units[unitId].moved = true;
   next.units[unitId].movementRemaining = 0;
+  // 本次修补即「本旬的委任行动」：同目标保留的修补委任当旬不再重复执行，「委」徽章隐藏，旬初重置
+  next.units[unitId].delegateActed = true;
   const delegate = next.units[unitId].delegate;
   if (delegate) {
     const isDelegateTarget = delegate.kind === 'repair' && delegate.facilityId === facilityId;
@@ -1723,6 +1759,8 @@ export function repairFacility(state: GameState, forceId: ForceId, unitId: strin
       delete next.units[unitId].delegate;
     }
   }
+  // 本次修补把设施修满了：其他部队挂在该设施上的修补委任同样已达成，一并摘掉
+  clearSatisfiedRepairDelegations(next);
   return next;
 }
 
@@ -1738,6 +1776,8 @@ export function dismantleFacility(state: GameState, forceId: ForceId, facilityId
 
   const next = structuredClone(state);
   delete next.facilities?.[facilityId];
+  // 设施被撤销 = 委任目标消失：挂在该设施上的修补委任一并解除
+  clearSatisfiedRepairDelegations(next);
   return next;
 }
 
@@ -1763,6 +1803,8 @@ export function reconcileFacilityUpgrades(state: GameState, forceId?: ForceId): 
     facility.completed = true;
     upgraded += 1;
   }
+  // 升档后耐久按新档满值重置：原本挂着修补委任的受损设施可能直接变成「不需修」，同步解除委任
+  if (upgraded > 0) clearSatisfiedRepairDelegations(state);
   return upgraded;
 }
 

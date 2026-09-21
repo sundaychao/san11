@@ -12,6 +12,7 @@ import {
   supplyUnit,
 } from '../battle/actions';
 import { neighborsOf } from '../battle/grid';
+import { hexGridDistance } from '../battle/deployment';
 import { plotTargetKey } from '../battle/targetRules';
 import { createGame } from '../scenario/jingxiang208';
 import type { ForceId, GameState } from '../types';
@@ -299,7 +300,10 @@ describe('reduceGameIntent', () => {
     if (!reduceGameIntent) return;
 
     const state = createGame('liu', 1);
-    const spawn = deploymentCells(state, 'jiangling')[0]!;
+    // 落位会消耗出征移动力：选离城心最近的部署格，保证本旬还有剩余移动力立即朝设施靠近
+    const center = { q: state.cities.jiangling.gridQ, r: state.cities.jiangling.gridR };
+    const spawn = deploymentCells(state, 'jiangling')
+      .reduce((best, cell) => (hexGridDistance(cell, center) < hexGridDistance(best, center) ? cell : best));
     const input = {
       cityId: 'jiangling' as const,
       officerIds: ['guan-yu'],

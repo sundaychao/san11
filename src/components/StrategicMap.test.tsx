@@ -728,6 +728,26 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     expect(screen.queryByTestId('battle-unit-ready-badge')).not.toBeInTheDocument();
   });
 
+  it('hides the delegate badge for the rest of the ten-day after the delegation acted (delegateActed)', () => {
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const waiting = settleTenDay(deployed);
+    const unit = Object.values(waiting.units)[0];
+    unit.delegate = { kind: 'move', target: { q: unit.q + 3, r: unit.r } };
+    // 本旬已用「委任部队行动」执行过：moved + delegateActed，徽章应隐藏，下一旬旬初重置后才重新显示
+    unit.moved = true;
+    unit.delegateActed = true;
+    renderGame(waiting);
+
+    expect(screen.queryByTestId('battle-unit-ready-badge')).not.toBeInTheDocument();
+  });
+
   it('blocks city and unit command entry while another player is active', async () => {
     const user = userEvent.setup();
     const deployed = deployUnit(createGame('liu', 1), 'liu', {

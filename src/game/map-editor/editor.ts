@@ -449,21 +449,19 @@ export function createBlankMap(width: number = 200, height: number = 200): MapEd
 
 /**
  * 为缺少建设用地的城池自动圈定建设用地（与开局 `initConstructionPlots` 同一算法）。
- * 编辑器新建的空白地图没有原版 interior 数据，此前必须逐格手动圈地；这里按默认「中城」
- * 规模自动分配（与开局默认人口 40 万对应的档位一致），用户仍可用「建设用地」工具手动增删。
+ * **只在打开没有 `plotsSpecified` 标记的旧图时使用**：让编辑器里看到的圈地与开局实际
+ * 采用的完全一致，避免旧图「一看没有地、进游戏又冒出来」。编辑器内不再有任何自动分配 ——
+ * 放城不给地，全部由「建设用地」工具手动圈（或点「自动圈地」取标准一份）。
  * - 关隘不分配（关隘不开放建设）；
- * - 已有建设用地的城池（手动圈定 / 上次自动分配）保持原样，不重算也不追加；
- * - 传 `onlyCityId` 时只处理该城：新落地的城池补一份，改归属 / 改名的既有城池不受影响
- *   （否则会把用户刻意清空的圈地又补回来）。
+ * - 已有建设用地的城池（手动圈定 / 上次自动分配）保持原样，不重算也不追加。
  */
-export function autoAssignEditorPlots(state: MapEditorState, onlyCityId?: string): MapEditorState {
+export function autoAssignEditorPlots(state: MapEditorState): MapEditorState {
   const cities = state.cities.filter((marker) => (marker.type ?? 'city') === 'city');
   if (cities.length === 0) return state;
   const taken = new Set(state.plots.map((plot) => `${plot.q},${plot.r}`));
   const alreadyHasPlots = new Set(state.plots.map((plot) => plot.cityId));
-  const targets = onlyCityId ? cities.filter((city) => city.id === onlyCityId) : cities;
   const additions: EditorCityPlot[] = [];
-  for (const city of targets) {
+  for (const city of cities) {
     if (alreadyHasPlots.has(city.id)) continue;
     const picked = autoSearchCityPlots(
       { id: city.id, gridQ: city.q, gridR: city.r, count: PLOT_COUNT_BY_SIZE.medium },

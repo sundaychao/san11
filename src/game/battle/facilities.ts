@@ -1,6 +1,7 @@
 export {
   buildableFacilitiesForUnit,
   buildFacility,
+  clearSatisfiedRepairDelegations,
   dismantleFacility,
   FACILITY_BUILD_COSTS,
   facilityBuildTargets,

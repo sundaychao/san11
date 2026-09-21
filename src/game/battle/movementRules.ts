@@ -330,21 +330,48 @@ export function movementCells(state: GameState, unitId: string): GridCoord[] {
     .sort((a, b) => a.q - b.q || a.r - b.r);
 }
 
-export function deploymentCells(state: GameState, cityId: CityId, movement?: number, profile: MovementProfile = 'sword', vehicle?: 'boat' | 'ship'): GridCoord[] {
-  const city = state.cities[cityId];
-  if (!city) return [];
+/**
+ * 从据点（城池中心或关隘锚点）可达的落位格与其移动消耗（键为 gridKey）。
+ * deploymentCells / deploymentCellsForStronghold 与出征落位扣减移动力共用同一口径，
+ * 保证「实际行军不会超出出征时显示的可移动范围」。
+ */
+export function deploymentCostsForStronghold(
+  state: GameState,
+  sourceId: CityId | PassId,
+  movement?: number,
+  profile: MovementProfile = 'sword',
+  vehicle?: 'boat' | 'ship',
+): Map<string, number> {
   const movementBudget = movement ?? movementAllowanceForProfile(profile);
+  const pass = state.passes?.[sourceId as PassId];
+  if (pass) {
+    const start = { q: pass.q, r: pass.r };
+    return reachableCostsFrom(state, start, movementBudget, profile, {
+      allowedCityTransitKeys: new Set([gridKey(start)]),
+      movingForceId: pass.ownerId ?? undefined,
+      vehicle,
+    });
+  }
+  const city = state.cities[sourceId as CityId];
+  if (!city) return new Map();
   const start = cityCenter(city);
   const ownCityKeys = new Set(sevenCellCityFootprint(start).map(gridKey));
-  const cityKeys = allCityKeys(state);
-  const costs = reachableCostsFrom(state, start, movementBudget, profile, {
+  return reachableCostsFrom(state, start, movementBudget, profile, {
     allowedCityTransitKeys: ownCityKeys,
     movingForceId: city.ownerId ?? undefined,
     vehicle,
   });
+}
+
+/** 从城池出发可放置部队的格子：消耗不超过移动力预算，且不含任何城池格 */
+export function deploymentCells(state: GameState, cityId: CityId, movement?: number, profile: MovementProfile = 'sword', vehicle?: 'boat' | 'ship'): GridCoord[] {
+  const city = state.cities[cityId];
+  if (!city) return [];
+  const costs = deploymentCostsForStronghold(state, cityId, movement, profile, vehicle);
+  const cityKeys = allCityKeys(state);
 
   return [...costs.entries()]
-    .filter(([key]) => key !== gridKey(start) && !cityKeys.has(key))
+    .filter(([key]) => key !== gridKey(cityCenter(city)) && !cityKeys.has(key))
     .map(([key]) => {
       const [q, r] = key.split(',').map(Number);
       return { q, r };
@@ -370,14 +397,9 @@ export function deploymentCellsForStronghold(
 ): GridCoord[] {
   const pass = state.passes?.[sourceId as PassId];
   if (!pass) return deploymentCells(state, sourceId as CityId, movement, profile, vehicle);
-  const movementBudget = movement ?? movementAllowanceForProfile(profile);
+  const costs = deploymentCostsForStronghold(state, sourceId, movement, profile, vehicle);
   const start = { q: pass.q, r: pass.r };
   const excluded = new Set([...allCityKeys(state), ...passBlockedKeys(state), ...allPassAnchorKeys(state)]);
-  const costs = reachableCostsFrom(state, start, movementBudget, profile, {
-    allowedCityTransitKeys: new Set([gridKey(start)]),
-    movingForceId: pass.ownerId ?? undefined,
-    vehicle,
-  });
   return [...costs.entries()]
     .filter(([key]) => key !== gridKey(start) && !excluded.has(key))
     .map(([key]) => {

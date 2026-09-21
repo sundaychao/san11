@@ -11,7 +11,7 @@ import { settleTenDay } from '../turn';
 import type { FacilityType, TroopType } from '../types';
 import * as skillHandlers from '../skills/handlers';
 import { tacticCriticalMode } from '../skills';
-import { applyCatapultSplash, attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackPlot, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, reconcileFacilityUpgrades, repairableFacilities, repairFacility, resolveFacilityUpgrade, settleBattleFacilities, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitFacilityMenuOptions, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
+import { applyCatapultSplash, attackableCities, attackableFacilities, attackableUnits, attackCity, attackFacility, attackPlot, attackUnit, buildFacility, deployTransportUnit, deployUnit, deployUnitPreviewWithId, deploymentCells, deploymentCostsForStronghold, deploymentMovementAllowance, dismantleFacility, effectiveUnitAbilities, FACILITY_BUILD_COSTS, facilityBuildTargets, fireStrategySuccessChance, harmfulStrategySuccessChance, jointAttackableUnits, jointAttackUnit, moveUnit, movementCells, reconcileFacilityUpgrades, repairableFacilities, repairFacility, resolveFacilityUpgrade, settleBattleFacilities, strategyTargetCells, strategyTargetUnits, tacticCriticalChance, tacticTargetFacilities, unitCanUseTactic, unitFacilities, unitFacilityMenuOptions, unitStrategies, tacticTargetUnits, unitTactics, useFirePlot, useUnitStrategy, useUnitTactic, waitUnit } from './actions';
 import { attackablePlots } from './targetRules';
 import { applyGroundFireDamageToCities, applyImmediateFireDamageToCityAndPlot, GROUND_FIRE_CITY_DURABILITY } from './fire';
 import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
@@ -249,13 +249,17 @@ describe('battle deployment and movement actions', () => {
       destination,
     });
     const unit = Object.values(deployed.units)[0];
-    expect(unit.movementRemaining).toBe(movementAllowanceForProfile('spear') + 5);
+    // 落位消耗移动力：剩余 = 出征移动力预算 − 到达落位格的消耗
+    const budget = deploymentMovementAllowance(state, 'liu', ['liu-bei'], 'spear', 'boat');
+    const spawnCost = deploymentCostsForStronghold(state, 'jiangling', budget, 'spear').get(gridKey(destination!))!;
+    expect(spawnCost).toBeGreaterThan(movementAllowanceForProfile('spear')); // 只有强化后的范围才够得到
+    expect(unit.movementRemaining).toBe(budget - spawnCost);
 
     const preview = deployUnitPreviewWithId(state, 'liu', {
       cityId: 'jiangling', officerIds: ['liu-bei'], troopType: 'spear', troops: 3000, food: 3000,
       destination,
     });
-    expect(preview.state.units[preview.unitId].movementRemaining).toBe(movementAllowanceForProfile('spear') + 5);
+    expect(preview.state.units[preview.unitId].movementRemaining).toBe(budget - spawnCost);
   });
 
   it('deploys one officer as a one-cell unit outside the seven-cell city footprint', () => {
@@ -281,10 +285,14 @@ describe('battle deployment and movement actions', () => {
       food: 6000,
       // 部队士气 = 出发城池士气（两者是同一资源）
       energy: beforeCity.training,
-      movementRemaining: movementAllowanceForProfile('sword'),
       moved: true,
       acted: false,
     });
+    // 落位消耗移动力：剩余 = 出征移动力预算 − 到达出生格的消耗
+    const swordBudget = deploymentMovementAllowance(state, 'liu', ['guan-yu'], 'sword', 'boat');
+    const swordSpawnCost = deploymentCostsForStronghold(state, 'jiangling', swordBudget, 'sword').get(gridKey(unit))!;
+    expect(unit.movementRemaining).toBe(swordBudget - swordSpawnCost);
+    expect(swordSpawnCost).toBeGreaterThan(0);
     expect(cityFootprint.has(gridKey(unit))).toBe(false);
     expect(next.cities.jiangling.troops).toBe(beforeCity.troops - 4000);
     expect(next.cities.jiangling.food).toBe(beforeCity.food - 6000);

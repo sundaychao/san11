@@ -71,7 +71,7 @@ describe('委任修补：弹字必须与耐久实际变化一致', () => {
     vi.stubGlobal('Audio', AudioMock);
   }
 
-  it('出征部队委任修补建设中设施：推进一旬后 +200 弹字伴随耐久真实增加', async () => {
+  it('出征部队委任修补建设中设施：下达当旬已用于靠近，再推进一旬才首次修补（+200 弹字伴随耐久真实增加）', async () => {
     mockAudio();
     const user = userEvent.setup();
     const state = setupDeployedRepairState({ facilityOffset: 2 });
@@ -83,11 +83,14 @@ describe('委任修补：弹字必须与耐久实际变化一致', () => {
 
     await confirmRepairViaMenu(user);
 
-    // 推进一旬：委任自动执行（靠近并修补）
+    // 推进一旬：确认时的「靠近」已消耗本旬的委任行动（一旬只执行一次），本次结算不再修补
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
     await user.click(screen.getByTestId('map-context-proceed-button'));
+    expect(screen.queryByTestId('facility-repair-number')).toBeNull();
 
-    // 弹字 +200 与面板耐久 400/800 必须同时成立（弹字不得脱离实际耐久）
+    // 再推进一旬（下一旬结算）：首次修补，弹字 +200 与面板耐久 400/800 必须同时成立（弹字不得脱离实际耐久）
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
+    await user.click(screen.getByTestId('map-context-proceed-button'));
     expect(screen.getByTestId('facility-repair-number').textContent).toBe('+200');
     expect(readFacilityDurability()).toBe('400/800');
   });
@@ -163,12 +166,50 @@ describe('委任修补：弹字必须与耐久实际变化一致', () => {
     expect(screen.getByTestId('repair-confirm-note').textContent).toBe('部队出征后立即赶赴该设施修补，直至耐久修满');
     await user.click(screen.getByTestId('repair-confirm-yes'));
 
-    // 部队真正出征：预览消失，真实部队带「委」徽章且已抵达设施旁（不再停在城池中心）
+    // 部队真正出征：预览消失，真实部队已抵达设施旁（不再停在城池中心）。
+    // 出征+靠近就是本旬的委任行动（delegateActed）：「委」徽章隐藏，下一旬旬初重新显示
     expect(screen.queryByTestId('deploy-preview-marker')).toBeNull();
     const unitMarker = screen.getByTestId('battle-unit-marker');
-    expect(screen.getByTestId('battle-unit-ready-badge').textContent).toBe('委');
+    expect(screen.queryByTestId('battle-unit-ready-badge')).not.toBeInTheDocument();
     const [unitQ, unitR] = unitMarker.getAttribute('data-grid-position')!.split(',').map(Number);
     // 出生格取朝设施最近的部署格（可能就是设施格），委任立即把部队贴近到设施旁：距离 ≤ 1，下个旬起就地修补
     expect(hexGridDistance({ q: unitQ, r: unitR }, facilityPos)).toBeLessThanOrEqual(1);
+  });
+
+  it('委任修补的设施被其他部队抢先修好：原委任部队立刻恢复正常（徽章不再显示「委」）', async () => {
+    mockAudio();
+    const user = userEvent.setup();
+    const state = setupDeployedRepairState({ facilityOffset: 2 });
+    const delegatedUnit = Object.values(state.units).find((candidate) => candidate.forceId === 'liu')!;
+    // 设施只差 1 点耐久：任何部队补一次就修满
+    state.facilities!['repair-target'] = {
+      ...state.facilities!['repair-target'],
+      durability: 799,
+      completed: true,
+    };
+    // 关羽（远处）挂着修补委任 —— 此时应显示「委」
+    delegatedUnit.delegate = { kind: 'repair', facilityId: 'repair-target' };
+    delete delegatedUnit.delegateActed;
+    delegatedUnit.moved = false;
+    delegatedUnit.acted = false;
+    // 张飞（第二支部队）就站在设施旁，可当场把它修满
+    const helperUnit = { ...delegatedUnit, id: 'helper-unit', leaderId: 'zhang-fei', r: delegatedUnit.r + 1 };
+    delete helperUnit.delegate;
+    state.units['helper-unit'] = helperUnit;
+
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const badgeTexts = () => screen.queryAllByTestId('battle-unit-ready-badge').map((badge) => badge.textContent);
+    expect(badgeTexts()).toContain('委');
+
+    // 委任张飞修补：他当场把设施修满 → 关羽的委任已无意义，必须立刻解除
+    await confirmRepairViaMenu(user);
+
+    expect(readFacilityDurability()).toBe('800/800');
+    expect(badgeTexts()).not.toContain('委');
   });
 });

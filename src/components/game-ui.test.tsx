@@ -269,8 +269,8 @@ describe('game interface shell', () => {
     // 出征委任修补确认后，部队应在本次确认中直接移动到设施相邻格。
     expect(screen.getAllByTestId('battle-unit-marker')
       .some((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r + 1}`)).toBe(true);
-    // 确认后部队立即显示「委」徽章（出征/移动过的部队挂委任也必须可见）
-    expect(screen.getAllByTestId('battle-unit-ready-badge').some((badge) => badge.textContent === '委')).toBe(true);
+    // 下达即已行动（本旬已执行委任一步）：「委」徽章隐藏，下一旬旬初才重新显示
+    expect(screen.queryAllByTestId('battle-unit-ready-badge').filter((badge) => badge.textContent === '委')).toHaveLength(0);
 
     // 确认后地图右键菜单必须能再次弹出（stale closure 回归点），推进一旬
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
@@ -283,7 +283,7 @@ describe('game interface shell', () => {
       .some((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r + 1}`)).toBe(true);
   });
 
-  it('部队已在设施旁：确认框说明「不会移动」，确认后部队就地修补（位置不变、显示委徽章）', () => {
+  it('部队已在设施旁：确认框说明「不会移动」，确认后部队就地修补（位置不变，本旬已执行故不显示委徽章）', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -321,7 +321,8 @@ describe('game interface shell', () => {
     expect(screen.getByTestId('repair-confirm-note').textContent).toContain('不会移动');
     fireEvent.click(screen.getByTestId('repair-confirm-yes'));
     expect(screen.queryByTestId('repair-confirm-menu')).toBeNull();
-    expect(screen.getAllByTestId('battle-unit-ready-badge').some((badge) => badge.textContent === '委')).toBe(true);
+    // 确认即完成本旬修补（delegateActed）：「委」徽章隐藏，下一旬旬初重新显示
+    expect(screen.queryAllByTestId('battle-unit-ready-badge').filter((badge) => badge.textContent === '委')).toHaveLength(0);
 
     // 推进一旬：部队就在旁边，就地修补 —— 位置必须不变（这正是设计行为，不是没执行）
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });

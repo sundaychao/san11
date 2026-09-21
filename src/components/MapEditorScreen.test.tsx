@@ -222,7 +222,7 @@ describe('MapEditorScreen 既有地图的保存', () => {
   });
 });
 
-describe('MapEditorScreen 建设用地自动分配', () => {
+describe('MapEditorScreen 建设用地手动分配', () => {
   beforeEach(() => vi.clearAllMocks());
 
   /** 新建指定边长的空白地图（默认 200 边长的真实流程由 renderEditor 覆盖，这里要够大才放得下建设用地） */
@@ -241,7 +241,7 @@ describe('MapEditorScreen 建设用地自动分配', () => {
     expect(screen.getByTestId('editor-force-count').textContent).toContain('无法用于单机开局');
   });
 
-  it('放置城池后自动圈定建设用地，保存时写入地图荷载', () => {
+  it('放置城池不再自动分配建设用地，保存时 plots 为空（需手动圈地）', () => {
     const { onSave } = renderSizedEditor(40);
 
     placeAt();
@@ -249,15 +249,30 @@ describe('MapEditorScreen 建设用地自动分配', () => {
     fireEvent.change(screen.getByTestId('editor-name-input'), { target: { value: '许昌' } });
     fireEvent.click(screen.getByTestId('editor-name-confirm'));
 
-    // 归属已设置 → 该图可开局
+    // 归属已设置 → 该图可开局；但建设用地一格都没有
     expect(screen.getByTestId('editor-force-count').textContent).toContain('有主城池 1 座');
 
-    fillMapName('自动分配图');
+    fillMapName('手动圈地图');
     fireEvent.click(screen.getByTestId('editor-save-cache'));
 
     const payload = savedPayload(onSave);
-    expect(payload.plots?.length ?? 0).toBeGreaterThan(0);
-    expect(payload.plots?.every((plot) => plot.cityId === 'city-1-1')).toBe(true);
+    expect(payload.plots).toEqual([]);
+    expect(payload.plotsSpecified).toBe(true);
+  });
+
+  it('建设用地工具选中有主城池时显示本城已圈格数', () => {
+    renderSizedEditor(40);
+
+    placeAt();
+    fireEvent.click(screen.getByTestId('placement-force-曹操'));
+    fireEvent.change(screen.getByTestId('editor-name-input'), { target: { value: '许昌' } });
+    fireEvent.click(screen.getByTestId('editor-name-confirm'));
+
+    fireEvent.click(screen.getByRole('button', { name: '建设用地' }));
+    expect(screen.queryByTestId('editor-plot-count')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-paint')); // 点城址：选中归属城
+    expect(screen.getByTestId('editor-plot-count')).toHaveTextContent('本城已圈 0 格');
   });
 
   it('无归属的城池（无主）不计入可开局的势力', () => {

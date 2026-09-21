@@ -503,6 +503,7 @@ function settleUnitSupply(next: GameState, unit: ArmyUnit, grainRoutes?: Map<str
     + battleShipMovementBonus(next, unit);
   unit.moved = false;
   unit.acted = false;
+  delete unit.delegateActed;
   tickUnitStatus(unit, 'confusedTenDays');
   tickUnitStatus(unit, 'falseReportedTenDays');
   tickUnitStatus(unit, 'burningTenDays');

@@ -1056,8 +1056,9 @@ export function StrategicMap({
           <text className="battle-unit-model-glyph" x={centerX} y={centerY + 4}>{texture.glyph}</text>
         </g>
         <text className="battle-unit-troops" x={centerX} y={centerY + 24}>{unit.troops.toLocaleString('en-US')}</text>
-        {/* 挂委任的部队始终显示徽章（委）—— 出征/移动当旬下达的委任也要可见，否则玩家会以为什么都没发生 */}
-        {(canActThisTurn || (unit.delegate && unit.forceId === state.turnForceId)) && !preview && (
+        {/* 挂委任且本旬尚未执行的部队显示徽章（委）—— 只登记未执行的委任（如移动后「设置」）也要可见；
+            本旬已执行过委任行动（delegateActed：下达即时行动或「委任部队行动」）则隐藏，下一旬旬初重新显示 */}
+        {(canActThisTurn || (unit.delegate && !unit.delegateActed && unit.forceId === state.turnForceId)) && !preview && (
           <text className="battle-unit-ready-badge" data-testid="battle-unit-ready-badge" x={centerX + 17} y={centerY - 15}>{unit.delegate ? '委' : '未'}</text>
         )}
         {isAttackTarget && (

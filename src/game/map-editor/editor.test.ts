@@ -322,7 +322,7 @@ describe('map editor 建设用地归属 (plots)', () => {
   });
 });
 
-describe('autoAssignEditorPlots（新建地图自动分配建设用地）', () => {
+describe('autoAssignEditorPlots（打开旧图时按开局口径补齐建设用地）', () => {
   const build = (cities: Parameters<typeof createEditorState>[1]) =>
     createEditorState(createBattleGrid(), cities, GRID_WIDTH, GRID_HEIGHT);
 
@@ -391,17 +391,6 @@ describe('map editor 建设用地的归属口径', () => {
     const imported = importEditorJson(createBlankMap(8, 8), JSON.stringify(json));
     const reexported = JSON.parse(exportEditorJson(imported)) as { plotsSpecified?: boolean };
     expect(reexported.plotsSpecified).toBe(true);
-  });
-
-  it('autoAssignEditorPlots 传 cityId 时只补该城，留空的其他城保持原样', () => {
-    const cities = [
-      { id: 'city-a', label: '甲城', q: 8, r: 8, type: 'city' as const },
-      { id: 'city-b', label: '乙城', q: 20, r: 20, type: 'city' as const },
-    ];
-    const next = autoAssignEditorPlots(build(cities), 'city-a');
-
-    expect(next.plots).toHaveLength(PLOT_COUNT_BY_SIZE.medium);
-    expect(next.plots.every((plot) => plot.cityId === 'city-a')).toBe(true);
   });
 
   it('autoPlotsForCity 忽略本城现有地格，可把本城整体重置为标准一份', () => {

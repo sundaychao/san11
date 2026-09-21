@@ -12,9 +12,9 @@ import {
 } from '../armaments';
 import { createGame } from '../scenario/jingxiang208';
 import type { ArmyUnit, GameState, TechNodeId } from '../types';
-import { attackCity, attackFacility, attackPass, attackPlot, attackUnit, deployUnit } from './actions';
+import { attackCity, attackFacility, attackPass, attackPlot, attackUnit, deployUnit, deploymentCostsForStronghold, deploymentMovementAllowance } from './actions';
 import { battleShipMovementBonus } from './catalog';
-import { neighborsOf } from './grid';
+import { gridKey, neighborsOf } from './grid';
 import { damageRoll } from './shared';
 import {
   attackableCities,
@@ -419,16 +419,22 @@ describe('斗舰（造船术 + 弹道）', () => {
       const next = deployUnit(state, 'liu', {
         cityId: 'jiangling', officerId: 'guan-yu', vehicle: 'ship', troops: 4000, food: 5000,
       });
-      return Object.values(next.units)[0];
+      const unit = Object.values(next.units)[0];
+      // 出征移动力预算单独核算；落位已消耗移动力，movementRemaining = 预算 − 到达落位格的消耗
+      const budget = deploymentMovementAllowance(state, 'liu', ['guan-yu'], 'sword', 'ship');
+      const spawnCost = deploymentCostsForStronghold(state, 'jiangling', budget, 'sword', 'ship').get(gridKey(unit)) ?? 0;
+      return { budget, spawnCost, remaining: unit.movementRemaining };
     };
 
     const boat = deployed([]);
-    expect(boat.movementRemaining).toBe(TROOP_MOVEMENT.sword);
+    expect(boat.budget).toBe(TROOP_MOVEMENT.sword);
+    expect(boat.remaining).toBe(boat.budget - boat.spawnCost);
     expect(battleShipMovementBonus(createGame('liu', 1), { forceId: 'liu', vehicle: 'ship' })).toBe(0);
 
     const battleShip = deployed(['luopan', 'zaochuanshu']);
     // 基础 22 + 罗盘 6 + 斗舰 4
-    expect(battleShip.movementRemaining).toBe(TROOP_MOVEMENT.sword + 6 + 4);
+    expect(battleShip.budget).toBe(TROOP_MOVEMENT.sword + 6 + 4);
+    expect(battleShip.remaining).toBe(battleShip.budget - battleShip.spawnCost);
   });
 
   it('弹道解锁斗舰投石：射程 3、对据点按兵器倍率结算', () => {
