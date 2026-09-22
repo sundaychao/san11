@@ -1,6 +1,6 @@
 import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
-import { unitIsIncapacitated } from '../game/battle/actions';
+import { unitUntouchedThisTenDay } from '../game/battle/actions';
 import { SIEGE_WEAPON_KIND_LABELS, siegeWeaponKindOf, vehicleLabelFor, type SiegeWeaponKind } from '../game/armaments';
 import { unitAuraRange } from '../game/battle/aura';
 import { CATAPULT_TOWER_MAX_RANGE, CATAPULT_TOWER_MIN_RANGE, FORMATION_RANGE, FORT_RANGE, isWaterTerrain } from '../game/battle/catalog';
@@ -931,7 +931,7 @@ export function StrategicMap({
           : TROOP_TEXTURES[troopType];
     const centerX = position.x + CELL_SIZE / 2;
     const centerY = position.y + CELL_SIZE / 2;
-    const canActThisTurn = unit.forceId === state.turnForceId && !unit.moved && !unit.acted && !unitIsIncapacitated(unit) && unit.movementRemaining > 0;
+    const canActThisTurn = unit.forceId === state.turnForceId && unitUntouchedThisTenDay(unit);
     const isAttackTarget = attackTargetUnitIdSet.has(unit.id);
     const isSupplyTarget = !preview && supplyTargetUnitIdSet.has(unit.id);
     const isFirePlotTarget = firePlotTargetKeys.has(`${unit.q},${unit.r}`);
@@ -941,7 +941,7 @@ export function StrategicMap({
       unit.falseReportedTenDays ? 'false-report' : null,
       unit.burningTenDays ? 'burning' : null,
     ].filter(Boolean).join(' ');
-    const statusLabel = unit.confusedTenDays ? '乱' : unit.falseReportedTenDays ? '报' : unit.burningTenDays ? '火' : '';
+    const statusLabel = unit.confusedTenDays ? '乱' : unit.falseReportedTenDays ? '伪' : unit.burningTenDays ? '火' : '';
     return (
       <g
         key={unit.id}

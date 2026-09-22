@@ -8,7 +8,8 @@ import { GameProvider } from '../game/store/GameProvider';
 import { GameShell } from './GameShell';
 import type { GameState } from '../game/types';
 
-/** 出征一支部队，并在其出生点附近放一座建设中的己方设施 */
+/** 出征一支部队，并在其出生点附近放一座受损的己方设施（本旬已移动的部队不能被点击选中，
+ *  修补委任一律经设施菜单自动挑选下达 —— 与真实操作一致） */
 function setupDeployedRepairState(opts: { facilityOffset: number; unitActed?: boolean }): GameState {
   const state = deployUnit(createGame('liu', 1), 'liu', {
     cityId: 'jiangling',
@@ -32,13 +33,13 @@ function setupDeployedRepairState(opts: { facilityOffset: number; unitActed?: bo
       q: unit.q,
       r: unit.r + opts.facilityOffset,
       durability: 200,
-      completed: false,
+      completed: true,
     },
   };
   return state;
 }
 
-/** 通过设施菜单发起并确认委任修补 */
+/** 通过设施菜单发起并确认委任修补（自动挑选最近的可达部队，含本旬已行动的出征部队） */
 async function confirmRepairViaMenu(user: ReturnType<typeof userEvent.setup>) {
   const facility = document.querySelector('[data-facility-id="repair-target"]')!;
   fireEvent.pointerDown(facility, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
@@ -71,7 +72,7 @@ describe('委任修补：弹字必须与耐久实际变化一致', () => {
     vi.stubGlobal('Audio', AudioMock);
   }
 
-  it('出征部队委任修补建设中设施：下达当旬已用于靠近，再推进一旬才首次修补（+200 弹字伴随耐久真实增加）', async () => {
+  it('出征落位（本旬已移动）部队的修补委任：下达当旬已用于靠近，再推进一旬才首次修补（+200 弹字伴随耐久真实增加）', async () => {
     mockAudio();
     const user = userEvent.setup();
     const state = setupDeployedRepairState({ facilityOffset: 2 });
@@ -163,7 +164,8 @@ describe('委任修补：弹字必须与耐久实际变化一致', () => {
     fireEvent.pointerDown(facility, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
     const confirmMenu = screen.getByTestId('repair-confirm-menu');
     expect(confirmMenu).toHaveTextContent('出征部队');
-    expect(screen.getByTestId('repair-confirm-note').textContent).toBe('部队出征后立即赶赴该设施修补，直至耐久修满');
+    // 出征落位部队在 state 里还不存在（unitId 是占位），确认框不再附带额外说明文字
+    expect(screen.queryByTestId('repair-confirm-note')).toBeNull();
     await user.click(screen.getByTestId('repair-confirm-yes'));
 
     // 部队真正出征：预览消失，真实部队已抵达设施旁（不再停在城池中心）。

@@ -136,10 +136,9 @@ function reduceIntent(
       return deployUnit(state, forceId, intent.input);
     case 'deployUnitDelegate': {
       // 出征到指定部署格后立即沿最优路径行军到本旬最远处（与普通移动的超距委任一致），
-      // 并记录移动/建设委任：部署时 moved=true 会挡住 delegateMoveStep，先放开让部队行军，
-      // moveUnit 内部会重新置 moved=true 并清空剩余移动力，防止本旬二次行动。
+      // 并记录移动/建设委任。出征落位残留的 moved=true 由委任链路内部放开（delegate.withMovableUnit），
+      // 这里不再手动置 false —— 出征部队与已存在部队走同一套委任逻辑。
       const deployed = deployUnitWithId(state, forceId, intent.input);
-      deployed.state.units[deployed.unitId].moved = false;
       const next = intent.facility
         ? setBuildDelegate(deployed.state, forceId, deployed.unitId, intent.target, intent.facility)
         : setMoveDelegate(deployed.state, forceId, deployed.unitId, intent.target);

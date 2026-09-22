@@ -153,6 +153,28 @@ function runOpponentTurns(state: GameState) {
   return next;
 }
 
+/**
+ * 读档时丢弃「一次性飘字战报」：`battleDamageReports` / `cityEffectReports` /
+ * `strategyResultReports` / `facilityRepairReports` 只是某一帧的展示数据（它们会随存档落盘），
+ * 而 GameShell 的战报 effect 在 state 引用变化时会重新显示一次 —— 于是从存档进入游戏时，
+ * 上一局最后一批飘字会被原样重放（如建设中的箭塔又飘一遍「+350」）。读档不应重现上一局的飘字。
+ */
+function withoutTransientReports(state: GameState): GameState {
+  if (
+    !state.battleDamageReports?.length &&
+    !state.cityEffectReports?.length &&
+    !state.strategyResultReports?.length &&
+    !state.facilityRepairReports?.length
+  ) return state;
+  return {
+    ...state,
+    battleDamageReports: [],
+    cityEffectReports: [],
+    strategyResultReports: [],
+    facilityRepairReports: [],
+  };
+}
+
 function applyEditorMapToState(state: GameState, map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number }): GameState {
   const markersById = new Map(map.cities.map((city) => [city.id, city]));
   const cities = Object.fromEntries(Object.entries(state.cities).map(([id, city]) => {
@@ -267,7 +289,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
   const loadGame = useCallback((slot: SaveSlot): LoadResult => {
     const result = loadSave(storage, slot);
     if (result.ok) {
-      let loaded = result.state;
+      let loaded = withoutTransientReports(result.state);
       // 旧存档兼容：遗留的AI舌战会话（招募者非玩家势力）立即自动演算结算，不弹给玩家
       const staleSession = loaded.debateSession;
       if (staleSession?.status === 'ongoing'
@@ -318,7 +340,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
       setError(result.reason);
       return { ok: false as const, reason: result.reason };
     }
-    let loaded = result.state;
+    let loaded = withoutTransientReports(result.state);
     // 旧存档兼容：遗留的AI舌战会话（招募者非玩家势力）立即自动演算结算，不弹给玩家
     const staleSession = loaded.debateSession;
     if (staleSession?.status === 'ongoing'

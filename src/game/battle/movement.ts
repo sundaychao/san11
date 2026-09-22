@@ -1,7 +1,9 @@
 export {
   deploymentCells,
   movementCells,
+  unitCanStepThisTenDay,
   unitIsIncapacitated,
+  unitUntouchedThisTenDay,
 } from './movementRules';
 export { movementAllowanceForProfile, movementAllowanceForUnit } from './catalog';
 export type { MovementProfile } from './catalog';
@@ -15,8 +17,15 @@ import { mergeUnitIntoStronghold } from '../strongholds';
 import { ownPassAt, unoccupiedPassAt } from '../passes';
 import { TECHP_PER_CITY_CAPTURE, addTechP } from '../techs';
 
-export function moveUnit(state: GameState, forceId: ForceId, unitId: string, destination: GridCoord): GameState {
-  const unit = assertUnitTurn(state, forceId, unitId);
+/** 普通移动。`options.allowIncapacitated` 仅供系统强制移动（伪报部队撤退）使用，玩家路径不要传。 */
+export function moveUnit(
+  state: GameState,
+  forceId: ForceId,
+  unitId: string,
+  destination: GridCoord,
+  options: { allowIncapacitated?: boolean } = {},
+): GameState {
+  const unit = assertUnitTurn(state, forceId, unitId, options);
   if (unit.moved) throw new Error('部队已经移动');
   // 目标格为本方城池格 → 回城；为无守军无主城格 → 进驻占领（isLegalUnitCell 会拒绝一切城池格，此处放行）
   const returnCity = ownCityAt(state, forceId, destination);

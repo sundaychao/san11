@@ -1,13 +1,13 @@
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import { effectiveUnitAbilities, harmfulStrategySuccessChance, deployUnitPreviewWithId, deployTransportUnitWithId, FACILITY_BUILD_COSTS, suppliableUnits, unitFacilities, unitFacilityMenuOptions, unitIsIncapacitated, unitStrategies, type StrategyId, type SupplyArmament, type TacticId } from '../game/battle/actions';
+import { effectiveUnitAbilities, unitStrategySuccessChance, deployUnitPreviewWithId, deployTransportUnitWithId, FACILITY_BUILD_COSTS, suppliableUnits, unitFacilities, unitFacilityMenuOptions, unitIsIncapacitated, unitStrategies, unitUntouchedThisTenDay, type StrategyId, type SupplyArmament, type TacticId } from '../game/battle/actions';
 import type { CSSProperties } from 'react';
 import { gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/grid';
 import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairDelegateTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticCityTargets, getTacticFacilityTargets, getTacticPassTargets, getTacticPlotTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
-import { gridDistanceWithin, plotTargetKey } from '../game/battle/targetRules';
+import { plotTargetKey } from '../game/battle/targetRules';
 import { canUnitReachRepairFacility, computeDelegatePath, hasExecutableDelegation, hasUnactedNonDelegatedUnits } from '../game/battle/delegate';
-import { facilityNeedsRepair } from '../game/battle/facilities';
+import { facilityIsCompleted, facilityNeedsRepair } from '../game/battle/facilities';
 import { chooseDelegateSpawnCell } from '../game/battle/deployment';
 import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { canBuildPlotAtCoord, hasEnemyUnitsNear, isPlotOccupiedByOtherCity, PLOT_GOLD_COST, PLOT_LABELS, startBuildCityPlot, type PlotType } from '../game/innerAffairs';
@@ -552,7 +552,8 @@ export function GameShell() {
     if (!source || !target || !strategy) return undefined;
     return {
       name: strategy.name,
-      percent: harmfulStrategySuccessChance(
+      percent: unitStrategySuccessChance(
+        strategy.id,
         effectiveUnitAbilities(targetState, source).intelligence.value,
         effectiveUnitAbilities(targetState, target).intelligence.value,
       ),
@@ -683,9 +684,10 @@ export function GameShell() {
     setHoveredUnit(null);
     if (!state) return;
     const unit = state.units[unitId];
-    // 本旬已行动 / 已移动（含出征落位）的部队同样允许选中：本旬不能再下令（再次点击也不会
-    // 弹命令菜单，见下方分支），但仍可给它下达「下个旬起自动执行」的委任（例如点击己方受损
-    // 设施委任修补）。这正是「出征后 / 移动后没法委任修补」的根因所在。
+    // 本旬已行动 / 已移动（含出征落位）的部队：点击不做任何反应 —— 不选中、不高亮、不播音效。
+    // 它本旬已无法再接受任何指令，选中只会误导（还能给谁下令？）；给它下「下个旬起执行」的
+    // 修补委任不需要选中 —— 直接点己方受损设施，设施菜单的「委任修补」会自动挑最近的可达部队。
+    if (unit && unit.forceId === state.playerForceId && (unit.acted || unit.moved)) return;
     if (!canOperateCurrentTurn || !unit || unit.forceId !== state.playerForceId || unitIsIncapacitated(unit)) {
       setSelectedUnitId(null);
       setUnitCommandMenu(null);
@@ -723,7 +725,7 @@ export function GameShell() {
       // 再次点击已选中的部队才弹命令菜单 —— 只有「本旬还能下令」的部队才弹。
       // 已移动 / 已行动（含出征落位）的部队只保持选中状态：它们的命令会被引擎拒绝，
       // 但仍可以继续点击己方受损设施下达「下个旬起自动执行」的修补委任。
-      if (!unit.moved && !unit.acted && unit.movementRemaining > 0) {
+      if (unitUntouchedThisTenDay(unit)) {
         setUnitCommandMenu({ unitId, position });
       }
       return;
@@ -2579,6 +2581,9 @@ export function GameShell() {
             <div className="city-command-secondary">
               {facilityObject && state
                 && facilityObject.forceId === state.playerForceId
+                // 建设中的设施不给「委任修补」：它本来就还在建设流程里，菜单只留「撤销」，多一个入口是多余的
+                // （要继续建下去：选中部队后直接点设施，或由当初下建设委任的部队自动续建）
+                && facilityIsCompleted(facilityObject)
                 && facilityNeedsRepair(facilityObject)
                 && (() => {
                   const hasUnit = Boolean(pickRepairCandidateUnit(facilityObject.id) || pendingDeployRepairInput(facilityObject));
@@ -2740,30 +2745,6 @@ export function GameShell() {
           >
             <div className="city-command-secondary">
               <div className="city-command-menu-title">是否委任修补{repairConfirm.label}？</div>
-              {(() => {
-                const facility = state?.facilities?.[repairConfirm.facilityId];
-                if (!facility) return null;
-                if (repairConfirm.deployInput) {
-                  return (
-                    <div className="city-command-menu-title" data-testid="repair-confirm-note" style={{ fontWeight: 400, opacity: 0.85 }}>
-                      部队出征后立即赶赴该设施修补，直至耐久修满
-                    </div>
-                  );
-                }
-                const unit = state?.units[repairConfirm.unitId];
-                if (!unit) return null;
-                return (
-                  <div className="city-command-menu-title" data-testid="repair-confirm-note" style={{ fontWeight: 400, opacity: 0.85 }}>
-                    {gridDistanceWithin(unit, facility, 1) <= 1
-                      ? unit.moved && !unit.acted && unit.movementRemaining > 0
-                        ? '出征部队已在设施旁：确认后直接修补，部队不会移动'
-                        : '部队已在设施旁：下个旬起就地修补，部队不会移动'
-                      : unit.moved && !unit.acted && unit.movementRemaining > 0
-                      ? '出征部队确认后立即向设施靠近，本旬不再执行其他行动'
-                      : '下个旬起部队将自动前往修补，直到耐久修满'}
-                  </div>
-                );
-              })()}
               <button type="button" data-testid="repair-confirm-yes" onClick={confirmRepair}>是</button>
               <button type="button" data-testid="repair-confirm-no" onClick={dismissRepairConfirm}>否</button>
             </div>

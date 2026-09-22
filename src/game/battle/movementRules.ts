@@ -61,6 +61,30 @@ export function unitIsIncapacitated(unit: Pick<ArmyUnit, 'confusedTenDays' | 'fa
   return Boolean(unit.confusedTenDays || unit.falseReportedTenDays);
 }
 
+type UnitTurnState = Pick<ArmyUnit, 'acted' | 'moved' | 'movementRemaining' | 'confusedTenDays' | 'falseReportedTenDays'>;
+
+/**
+ * 部队本旬还能否再走一步（继续消耗移动力）——**只看「未行动 + 未混乱 + 还有移动力」，不看 `moved`**。
+ *
+ * `moved` 的语义是「本旬已经动过」（UI 据此决定还弹不弹命令菜单），**不等于移动力已耗尽**：
+ * 出征落位会把 `moved` 置 true，但只从出征移动力里扣掉走到出生格的消耗，剩余部分仍然可用
+ * （委任行军、靠近设施修补）。所以「委任能不能在本旬走一步」与「这支部队是不是出征来的」无关，
+ * 只由移动力余量决定 —— 判据统一放这一处，别在调用方再写一份 `moved && !acted && remaining > 0`。
+ *
+ * `options.allowIncapacitated`：给**系统强制移动**用（伪报部队撤退回出发地）—— 它绕开「混乱/伪报不能行动」，
+ * 因为撤退正是伪报状态本身带来的行为。玩家操作永远不该传这个参数。
+ */
+export function unitCanStepThisTenDay(unit: UnitTurnState, options: { allowIncapacitated?: boolean } = {}) {
+  return !unit.acted
+    && (Boolean(options.allowIncapacitated) || !unitIsIncapacitated(unit))
+    && unit.movementRemaining > 0;
+}
+
+/** 部队本旬是否「一动未动」：命令菜单 / 可操作判定的口径 = 还能走 **且** `moved` 还是 false。 */
+export function unitUntouchedThisTenDay(unit: UnitTurnState) {
+  return !unit.moved && unitCanStepThisTenDay(unit);
+}
+
 export function cityCenter(city: City): GridCoord {
   return { q: city.gridQ, r: city.gridR };
 }
@@ -74,7 +98,8 @@ export function controlledZoneKeysForForce(state: GameState, forceId: ForceId) {
   };
 
   for (const unit of Object.values(state.units)) {
-    if (unit.forceId === forceId || unit.kind === 'transport' || unitIsIncapacitated(unit)) continue;
+    // 混乱部队失去控制区；**伪报部队仍然占着 ZOC**（它只是自己不能动，阵地还在）
+    if (unit.forceId === forceId || unit.kind === 'transport' || unit.confusedTenDays) continue;
     addNeighbors(unit);
   }
 
@@ -144,6 +169,25 @@ function enemyTerritoryMoveCost(state: GameState, coord: GridCoord, movingForceI
 /** 开路军研究后，川（stream）按可涉渡的浅水处理：可通行（消耗 5）且不再触发水域边界规则 */
 function streamFordableByForce(state: GameState, coord: GridCoord, forceId?: ForceId): boolean {
   return cellAt(state, coord)?.terrain === 'stream' && canCrossRoughTerrain(state, forceId);
+}
+
+/**
+ * 一步 `from → to` 是否跨越水陆边界（河/海/湖 ↔ 陆地/岸边）。
+ * 川在「开路军」研究后按陆地算（可涉渡），不算跨界。
+ *
+ * **正向（`reachableCostsFrom`）与反向（`delegate.minCostToTarget`）必须共用这一个判据**：
+ * 正向对跨界收「整旬移动力」（进入即当旬终止），反向若只按地形消耗算，
+ * 就会把「绕对岸走」估得比「真的渡过去」便宜，落点评价函数因此不单调 ——
+ * 实测表现为部队在河/湿地交界的两格之间反复来回移动，永远不过河。
+ */
+export function waterCrossingStep(state: GameState, from: GridCoord, to: GridCoord, forceId?: ForceId): boolean {
+  const toIsWater = streamFordableByForce(state, to, forceId) ? false : isWaterTerrain(cellAt(state, to)?.terrain);
+  return isWaterTerrain(cellAt(state, from)?.terrain) !== toIsWater;
+}
+
+/** 渡口桥接：任一端是渡口即视为架桥，跨水不受「旬初必须停在边界格」限制（与正向 `viaFerry` 同口径） */
+export function ferryBridgesWaterCrossing(state: GameState, from: GridCoord, to: GridCoord): boolean {
+  return cellAt(state, from)?.terrain === 'ferry' || cellAt(state, to)?.terrain === 'ferry';
 }
 
 function movementCostForForce(
@@ -233,16 +277,12 @@ function reachableCostsFrom(
       if (blockedPassKeys.has(key)) continue;
       // 敌方关隘中心格不可通行（己方/无主关隘可通行）
       if (passCenterBlockedFor(state, neighbor, options.movingForceId)) continue;
-      const neighborTerrain = cellAt(state, neighbor)?.terrain;
 
       // 横跨水域边界：陆地<->水域（河/海/川；浅滩/渡所是地面不算水面）。
-      const currentIsWater = isWaterTerrain(currentTerrain);
-      const neighborIsWater = streamFordableByForce(state, neighbor, options.movingForceId)
-        ? false
-        : isWaterTerrain(neighborTerrain);
-      const crossesWaterBoundary = currentIsWater !== neighborIsWater;
+      // 判据与反向搜索共用 `waterCrossingStep`，别在这里另写一套。
+      const crossesWaterBoundary = waterCrossingStep(state, current, neighbor, options.movingForceId);
       // 经渡口横跨允许继续（渡口桥接），不受"需停留边界"限制
-      const viaFerry = crossesWaterBoundary && (currentTerrain === 'ferry' || neighborTerrain === 'ferry' || ferryChain.has(currentKey));
+      const viaFerry = crossesWaterBoundary && (ferryBridgesWaterCrossing(state, current, neighbor) || ferryChain.has(currentKey));
       if (viaFerry) {
         ferryChain.add(currentKey);
         ferryChain.add(key);

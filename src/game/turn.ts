@@ -23,7 +23,7 @@ import { applyIllness, settleAgingDeaths, settleOfficerHealth } from './health';
 import { settleLegionAutomation, settlePlotConstruction, settleCityRangedAttack, isCityBlocked, cityMonthlyGoldIncome, cityQuarterlyFoodIncome, DEFAULT_OFFICER_SALARY, CITY_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS, UNIT_TROOPS_FOOD_PER_TEN_THOUSAND_PER_TEN_DAYS, unitFoodCostPerTenDay } from './innerAffairs';
 import { officerSkillNames, effectsOfKind, resolveCitySkills } from './skills';
 import { settlePassRangedAttack } from './passes';
-import { executeDelegations, prepareDelegationsForExecution, delegationMergedOfficerIds, keepDelegationMergedOfficersActed } from './battle/delegate';
+import { executeDelegations, prepareDelegationsForExecution, delegationMergedOfficerIds, keepDelegationMergedOfficersActed, retreatFalseReportedUnits } from './battle/delegate';
 import { addOfficerMerit, MERIT_PER_MONTH, positionDefinition, rankDefinition, rankForCityCount, rankIndex } from './ranks';
 import { settleForceTurnStart } from './skills/rules/turn';
 import { cityIncomeMultiplier } from './skills/rules/city';
@@ -1158,6 +1158,8 @@ export function advanceTenDay(state: GameState, options: TenDayAdvanceOptions = 
   if (options.prepareSettle) next = options.prepareSettle(next);
 
   next = settleTenDay(next);
+  // 新旬开始：仍处于伪报的部队自动按委任规则向出发地撤退一步（旬初状态刚重置，移动力是满的）
+  next = retreatFalseReportedUnits(next);
   keepDelegationMergedOfficersActed(next, mergedOfficerIds);
   if (repairReports.length > 0) {
     next.facilityRepairReports = [...(next.facilityRepairReports ?? []), ...repairReports];

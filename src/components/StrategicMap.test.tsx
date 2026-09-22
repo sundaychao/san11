@@ -807,6 +807,29 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     expect(screen.queryByTestId(/move-target-/)).not.toBeInTheDocument();
   });
 
+  it('shows the 伪 badge for a false-reported unit and keeps commands closed', async () => {
+    const user = userEvent.setup();
+    const deployed = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const waiting = settleTenDay(deployed);
+    const unit = Object.values(waiting.units)[0];
+    waiting.units[unit.id].falseReportedTenDays = 2;
+    renderGame(waiting);
+
+    expect(screen.getByTestId('battle-unit-status-badge')).toHaveTextContent('伪');
+    expect(screen.queryByTestId('battle-unit-ready-badge')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('battle-unit-marker'));
+    expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId(/move-target-/)).not.toBeInTheDocument();
+  });
+
   it('shows the active opponent unit ready badge while another player is active', async () => {
     const user = userEvent.setup();
     const initial = createGame('liu', 1);

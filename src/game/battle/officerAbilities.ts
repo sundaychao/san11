@@ -131,6 +131,25 @@ export function harmfulStrategySuccessChance(source: number, target: number) {
   return clamp(70 + source - target, 10, 95);
 }
 
+/**
+ * 伪报成功率：**比扰乱（`harmfulStrategySuccessChance`）更难中** —— 基准低 15 点、上限低 5 点。
+ * 扰乱是「目标当旬直接不能动」的通用控制，伪报额外附带强制撤退，故命中门槛更高；
+ * 必中类技能（言毒 / 虚实 / 神算 / 火攻）不经过本公式，仍然是必中。
+ */
+export function falseReportStrategySuccessChance(source: number, target: number) {
+  return clamp(55 + source - target, 10, 90);
+}
+
+/**
+ * 部队计略成功率的**统一入口**：引擎结算与 UI 悬浮提示都走这里，避免两边各写一份公式。
+ * 只覆盖「对部队」的计略（火计另有 `fireStrategySuccessChance`，且目标不同）。
+ */
+export function unitStrategySuccessChance(strategyId: string, source: number, target: number) {
+  return strategyId === 'false-report'
+    ? falseReportStrategySuccessChance(source, target)
+    : harmfulStrategySuccessChance(source, target);
+}
+
 export function fireStrategySuccessChance(source: number) {
   return clamp(Math.round(55 + (source - 50) * 0.8), 55, 95);
 }

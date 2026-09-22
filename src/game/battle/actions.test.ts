@@ -17,7 +17,7 @@ import { applyGroundFireDamageToCities, applyImmediateFireDamageToCityAndPlot, G
 import { movementAllowanceForProfile, movementAllowanceForUnit } from './definitions';
 import { gridKey, neighborsOf, sevenCellCityFootprint } from './grid';
 import { damageRoll } from './shared';
-import { unitCombatRating } from './officerAbilities';
+import { unitCombatRating, unitStrategySuccessChance } from './officerAbilities';
 import { strategyEnergyCostForUnit } from './strategies';
 import { executeCommand } from '../commands';
 import { isGameState } from '../persistence';
@@ -195,7 +195,8 @@ function probabilisticStrategyState(strategyId: ProbabilisticStrategyId) {
   const sourceIntelligence = effectiveUnitAbilities(state, unit).intelligence.value;
   const chance = strategyId === 'fire'
     ? fireStrategySuccessChance(sourceIntelligence)
-    : harmfulStrategySuccessChance(
+    : unitStrategySuccessChance(
+      strategyId,
       sourceIntelligence,
       effectiveUnitAbilities(state, state.units['strategy-target']).intelligence.value,
     );
@@ -2237,7 +2238,9 @@ describe('battle deployment and movement actions', () => {
     expect(extinguished.units[unit.id]).toMatchObject({ stamina: 40, acted: true });
 
     const falseReported = useUnitStrategy(state, 'liu', unit.id, 'false-report', { targetUnitId: 'enemy-plot' });
-    expect(falseReported.units['enemy-plot'].falseReportedTenDays).toBe(1);
+    // 伪报与扰乱同规则：1~3 旬掷点
+    expect(falseReported.units['enemy-plot'].falseReportedTenDays).toBeGreaterThanOrEqual(1);
+    expect(falseReported.units['enemy-plot'].falseReportedTenDays).toBeLessThanOrEqual(3);
     expect(falseReported.units[unit.id]).toMatchObject({ stamina: 35, acted: true });
     expect(() => waitUnit(falseReported, 'cao', 'enemy-plot')).toThrow(/伪报|混乱/);
 
@@ -2270,14 +2273,17 @@ describe('battle deployment and movement actions', () => {
 
     const next = useUnitStrategy(state, 'liu', unit.id, strategyId, selection);
 
-    expect(next.rngCursor).toBe(state.rngCursor + (strategyId === 'disturb' || strategyId === 'fire' ? 2 : 1));
+    expect(next.rngCursor).toBe(state.rngCursor + (strategyId === 'disturb' || strategyId === 'false-report' || strategyId === 'fire' ? 2 : 1));
     expect(next.units[unit.id]).toMatchObject({ stamina: 100 - cost, acted: true });
     expect(next.strategyResultReports).toEqual([expect.objectContaining({
       strategyId, label, succeeded: true, q: target.q, r: target.r,
     })]);
     if (strategyId === 'fire') expect(next.firePlots).toContainEqual(expect.objectContaining(target));
     if (strategyId === 'false-report') expect(targetStatus.falseReportedTenDays).toBeUndefined();
-    if (strategyId === 'false-report') expect(next.units['strategy-target'].falseReportedTenDays).toBe(1);
+    if (strategyId === 'false-report') {
+      expect(next.units['strategy-target'].falseReportedTenDays).toBeGreaterThanOrEqual(1);
+      expect(next.units['strategy-target'].falseReportedTenDays).toBeLessThanOrEqual(3);
+    }
     if (strategyId === 'disturb') {
       expect(next.units['strategy-target'].confusedTenDays).toBeGreaterThanOrEqual(1);
       expect(next.units['strategy-target'].confusedTenDays).toBeLessThanOrEqual(3);
@@ -2296,6 +2302,30 @@ describe('battle deployment and movement actions', () => {
 
     expect(next.units['strategy-target'].confusedTenDays).toBe(duration);
     expect(next.rngCursor).toBe(2);
+  });
+
+  it.each([1, 2, 3])('assigns a successful false report a deterministic random duration of %i ten-day turns', (duration) => {
+    const { state, unit, selection, chance } = probabilisticStrategyState('false-report');
+    state.seed = seedForTwoRolls(
+      (value) => value < chance / 100,
+      (value) => Math.floor(value * 3) + 1 === duration,
+    );
+
+    const next = useUnitStrategy(state, 'liu', unit.id, 'false-report', selection);
+
+    expect(next.units['strategy-target'].falseReportedTenDays).toBe(duration);
+    expect(next.rngCursor).toBe(2);
+  });
+
+  it('makes false report harder to land than disturb', () => {
+    // 同一对智力：伪报基准比扰乱低 15 点（55 + 智力差 vs 70 + 智力差）
+    expect(unitStrategySuccessChance('false-report', 80, 70)).toBe(65);
+    expect(harmfulStrategySuccessChance(80, 70)).toBe(80);
+    // 上限也更低（10~90 vs 10~95）
+    expect(unitStrategySuccessChance('false-report', 200, 1)).toBe(90);
+    expect(harmfulStrategySuccessChance(200, 1)).toBe(95);
+    // 扰乱仍走原公式：只有伪报被下调
+    expect(unitStrategySuccessChance('disturb', 80, 70)).toBe(harmfulStrategySuccessChance(80, 70));
   });
 
   it.each([
@@ -3597,7 +3627,7 @@ describe('strategy officer skills', () => {
   });
 
   it.each([
-    ['false-report', 'falseReportedTenDays', 1],
+    ['false-report', 'falseReportedTenDays', 2],
     ['disturb', 'confusedTenDays', 2],
   ] as const)('chains one successful %s duration without extra cost or RNG', (strategyId, statusKey, expectedCursor) => {
     const { state, caster, target } = strategySkillState('连环');

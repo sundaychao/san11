@@ -519,6 +519,28 @@ describe('部队委任', () => {
       const fullCosts = deploymentCostsForStronghold(state, 'jiangling', budget + 30, 'sword');
       expect(fullCosts.get(`${movedUnit.q},${movedUnit.r}`)).toBeLessThanOrEqual(budget);
     }, 30000);
+
+    it('跨河委任：不会在河/岸边交界反复来回，逐旬渡河抵达对岸', () => {
+      // 回归用例：china42x 上 (49,104) 是岸边、(49,105)(49,106) 是河、(49,107) 是河对岸。
+      // 跨水域边界「进入即当旬终止、消耗整旬移动力」，若反向搜索只按地形消耗估算，
+      // 就会把「沿同岸绕」算得比「真的渡过去」便宜 → 部队在 49,104 ↔ 50,105 之间无限来回。
+      const state = injectUnit(createGame('liu', 1), { q: 49, r: 104 });
+      const target = { q: 49, r: 107 };
+      expect(cellAt(state, { q: 49, r: 104 })?.terrain).toBe('shore');
+      expect(cellAt(state, { q: 49, r: 105 })?.terrain).toBe('river');
+      expect(cellAt(state, target)?.terrain).toBe('shore');
+
+      let cur = setMoveDelegate(state, 'liu', 'delegate-unit', target);
+      const positions: string[] = [];
+      for (let index = 0; index < 4; index += 1) {
+        cur = advanceTenDay(cur);
+        const unit = cur.units['delegate-unit'];
+        positions.push(`${unit.q},${unit.r}`);
+      }
+
+      // 逐旬渡河：入水 → 顺流 → 登岸；到岸后停在原地不再动
+      expect(positions).toEqual(['49,105', '49,106', '49,107', '49,107']);
+    }, 30000);
   });
 
   describe('建设委任', () => {
@@ -898,7 +920,7 @@ describe('部队委任', () => {
       expect(hasExecutableDelegation(after, 'liu')).toBe(false);
     }, 30000);
 
-    it('委任执行标记：下达即时行动即记 delegateActed（隐藏「委」徽章），重新下达/下一旬初清除', () => {
+    it('委任执行标记：下达即时行动即记 delegateActed（隐藏「委」徽章），同旬重下达保持标记、下一旬初清除', () => {
       const state = createGame('liu', 1);
       const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
         .find((n) => cellAt(state, n))!;
@@ -911,12 +933,68 @@ describe('部队委任', () => {
       const delegated = setMoveDelegate(state, 'liu', 'delegate-unit', target);
       expect(delegated.units['delegate-unit'].delegateActed).toBe(true);
 
-      // 同旬重新下达（部队已行动，只登记不执行）：视为新委任尚未行动，清掉标记让徽章重新可见
-      expect(setMoveDelegate(delegated, 'liu', 'delegate-unit', target).units['delegate-unit'].delegateActed).toBeUndefined();
+      // 同旬重新下达：该部队本旬的行动已经用掉（moved + 移动力耗尽），新委任本旬同样不会执行 ——
+      // 仍记 delegateActed，徽章保持隐藏（显示「委」会误导成「本旬还会再动一次」）
+      expect(setMoveDelegate(delegated, 'liu', 'delegate-unit', target).units['delegate-unit'].delegateActed).toBe(true);
 
       // 下一旬旬初重置后恢复显示
       const settled = settleTenDay(delegated);
       expect(settled.units['delegate-unit'].delegateActed).toBeUndefined();
+    }, 30000);
+
+    it('出征落位已把移动力走完：委任本旬不执行（无「委」徽章），点「进行」也不补走一步', () => {
+      // 用户口径：出征本身已经是本旬的行动，部队都出城了还挂「委」、点「进行」又走一大段 = 一旬走两次
+      const state = createGame('liu', 1);
+      const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
+        .find((n) => cellAt(state, n))!;
+      // 模拟出征落位：moved=true，且出征移动力已经全部花在到达出生格上
+      injectUnit(state, spawn, { moved: true, movementRemaining: 0 });
+      const target = findRemoteLandCell(state, spawn, 12);
+      expect(target).toBeDefined();
+      if (!target) return;
+
+      const issued = setMoveDelegate(state, 'liu', 'delegate-unit', target);
+      const unit = issued.units['delegate-unit'];
+      // 委任必须登记（否则玩家的指令静默丢失），但本旬已经执行过 → 徽章隐藏、本旬「进行」不再补走
+      expect(unit.delegate).toEqual({ kind: 'move', target });
+      expect(unit.delegateActed).toBe(true);
+      expect(unit.q).toBe(spawn.q);
+      expect(unit.r).toBe(spawn.r);
+
+      // 点「进行」：本旬不再移动（旧实现会把移动力恢复成满值，让它再走一大段）
+      const advanced = advanceTenDay(issued);
+      expect(advanced.units['delegate-unit']).toMatchObject({ q: spawn.q, r: spawn.r });
+      // 新旬已重置标记，委任保留，下一旬起正常执行
+      expect(advanced.units['delegate-unit'].delegateActed).toBeUndefined();
+      expect(advanced.units['delegate-unit'].delegate).toEqual({ kind: 'move', target });
+      const next = advanceTenDay(advanced);
+      expect(next.units['delegate-unit'].q !== spawn.q || next.units['delegate-unit'].r !== spawn.r).toBe(true);
+    }, 30000);
+
+    it('出征落位只剩零头移动力（不够走一步）：同样不显示「委」、点「进行」不补走', () => {
+      // 实测踩过的变体：出征到朝目标最近的部署格后剩 2 点移动力（步兵最便宜的地形也要 4），
+      // 委任当旬走不动 → 旧实现点「进行」时把移动力恢复成满值，部队同一旬又跳一大段
+      const state = createGame('liu', 1);
+      const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
+        .find((n) => cellAt(state, n))!;
+      injectUnit(state, spawn, { moved: true, movementRemaining: 2 });
+      const target = findRemoteLandCell(state, spawn, 12);
+      expect(target).toBeDefined();
+      if (!target) return;
+
+      const issued = setMoveDelegate(state, 'liu', 'delegate-unit', target);
+      const unit = issued.units['delegate-unit'];
+      expect(unit.delegate).toEqual({ kind: 'move', target });
+      // 零头移动力不允许在本旬再花：委任本旬的机会已用掉（徽章隐藏）
+      expect(unit.delegateActed).toBe(true);
+
+      // 点「进行」：2 点移动力本来就走不到任何格（步兵最便宜 4 点），更不许恢复成满值再走
+      const advanced = advanceTenDay(issued);
+      expect(advanced.units['delegate-unit']).toMatchObject({ q: spawn.q, r: spawn.r });
+      // 新旬重置后正常执行
+      expect(advanced.units['delegate-unit'].delegateActed).toBeUndefined();
+      const next = advanceTenDay(advanced);
+      expect(next.units['delegate-unit'].q !== spawn.q || next.units['delegate-unit'].r !== spawn.r).toBe(true);
     }, 30000);
 
     it('委任一旬只执行一次：下达时已即时修补的部队，点「进行」不再修补第二次', () => {

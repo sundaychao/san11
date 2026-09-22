@@ -30,7 +30,7 @@ import { committedTroops } from './frontline';
 import { applyImmediateFireDamageToCityAndPlot } from './fire';
 import { allCityKeys, cellAt, cityCenter, deploymentCells, isLegalUnitCell, occupiedFacilityKeys, occupiedUnitKeys, reachableCosts, spawnCellFor, unitIsIncapacitated } from './movementRules';
 import { areAdjacent, attackableCities, attackableFacilities, attackablePlots, attackableUnits, gridDistanceWithin, isCityInAttackRange, jointAttackableUnits, type PlotAttackTarget } from './targetRules';
-import { effectiveNavyAptitude, effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance, unitCombatRating } from './officerAbilities';
+import { effectiveNavyAptitude, effectiveUnitAbilities, fireStrategySuccessChance, harmfulStrategySuccessChance, maxTacticTier, tacticCriticalChance, unitCombatRating, unitStrategySuccessChance } from './officerAbilities';
 import {
   ARROW_TOWER_DAMAGE,
   BATTLESHIP_WATER_ATTACK_MULTIPLIER,
@@ -314,13 +314,22 @@ export function dispatchTerritoryDefenseForForce(state: GameState, forceId: Forc
   return state;
 }
 
-export function assertUnitTurn(state: GameState, forceId: ForceId, unitId: string): ArmyUnit {
+/** 校验部队本旬可行动。`options.allowIncapacitated` 只给**系统强制移动**用
+ * （伪报部队撤退回出发地 —— 撤退本身就是伪报状态带来的行为，不是玩家操作）。 */
+export function assertUnitTurn(
+  state: GameState,
+  forceId: ForceId,
+  unitId: string,
+  options: { allowIncapacitated?: boolean } = {},
+): ArmyUnit {
   const unit = state.units[unitId];
   if (!unit) throw new Error('部队不存在');
   if (unit.forceId !== forceId) throw new Error('只能操作己方部队');
   if (unit.acted) throw new Error('部队已经行动');
-  if (unit.confusedTenDays) throw new Error('部队混乱中，无法行动');
-  if (unit.falseReportedTenDays) throw new Error('部队伪报中，无法行动');
+  if (!options.allowIncapacitated) {
+    if (unit.confusedTenDays) throw new Error('部队混乱中，无法行动');
+    if (unit.falseReportedTenDays) throw new Error('部队伪报中，无法行动');
+  }
   return unit;
 }
 
@@ -1552,7 +1561,8 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
       )
       : fireStrategySuccessChance(sourceIntelligence)
     : probabilistic && targetUnit
-      ? harmfulStrategySuccessChance(sourceIntelligence, effectiveUnitAbilities(state, targetUnit).intelligence.value)
+      // 伪报 / 扰乱的命中公式不同，统一走 unitStrategySuccessChance（与 UI 悬浮提示同源）
+      ? unitStrategySuccessChance(strategyId, sourceIntelligence, effectiveUnitAbilities(state, targetUnit).intelligence.value)
       : 100;
   const skillTarget = occupiedFireTarget ?? targetUnit;
   const skillRules = resolveStrategySkillRules(state, unit, skillTarget, strategyId, strategy.cost);
@@ -1567,10 +1577,11 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
   next.cityEffectReports = [];
   next.facilityRepairReports = [];
   if (roll) next.rngCursor = roll.cursor;
-  const disturbDurationRoll = strategyId === 'disturb' && succeeded
+  // 状态计略（扰乱 / 伪报）的持续旬数掷点：1~3 旬，两者同一规则
+  const statusDurationRoll = (strategyId === 'disturb' || strategyId === 'false-report') && succeeded
     ? nextRandom(next.seed, next.rngCursor)
     : undefined;
-  if (disturbDurationRoll) next.rngCursor = disturbDurationRoll.cursor;
+  if (statusDurationRoll) next.rngCursor = statusDurationRoll.cursor;
   spendStrategyCost(next, unitId, { ...strategy, cost: staminaCost });
   next.strategyResultReports = [strategyReport(next, unitId, strategy, targetCoord, succeeded)];
   // 反计：敌方对本部队的计略失败且敌将智力不高于本部队主将时，将计略反作用到施计方
@@ -1615,11 +1626,12 @@ export function useUnitStrategy(state: GameState, forceId: ForceId, unitId: stri
   const target = next.units[targetUnit!.id];
   if (!target) throw new Error('计略目标不存在');
 
-  const sharedDuration = strategyId === 'disturb' && disturbDurationRoll
-    ? Math.floor(disturbDurationRoll.value * 3) + 1
+  const isStatusStrategy = strategyId === 'disturb' || strategyId === 'false-report';
+  const sharedDuration = isStatusStrategy && statusDurationRoll
+    ? Math.floor(statusDurationRoll.value * 3) + 1
     : 1;
-  // 深谋/秘计：计略暴击使状态持续时间翻倍
-  const statusDuration = skillRules.critical && strategyId === 'disturb' ? sharedDuration * 2 : sharedDuration;
+  // 深谋/秘计：计略暴击使状态持续时间翻倍（扰乱与伪报同规则）
+  const statusDuration = skillRules.critical && isStatusStrategy ? sharedDuration * 2 : sharedDuration;
   const sharedOutcome = { statusDuration, successRollValue: roll?.value };
   const applySuccessfulStatus = (targetId: string, duration: number) => {
     const nextCaster = next.units[unitId];

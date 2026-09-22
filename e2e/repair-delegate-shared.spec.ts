@@ -35,9 +35,8 @@ test('委任修补的设施被另一支部队抢先修好后，原委任部队�
   await page.getByTestId('facility-repair-button').click();
 
   await expect(page.getByTestId('repair-confirm-menu')).toBeVisible();
-  const note = await page.getByTestId('repair-confirm-note').textContent();
-  console.log('[e2e] confirm note:', note);
-  expect(note).toContain('已在设施旁');
+  // 确认框只有标题与「是/否」，不带任何说明文字
+  await expect(page.getByTestId('repair-confirm-note')).toHaveCount(0);
   await page.getByTestId('repair-confirm-yes').click();
   await expect(page.getByTestId('repair-confirm-menu')).toHaveCount(0);
 

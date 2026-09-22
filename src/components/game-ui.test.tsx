@@ -167,7 +167,8 @@ describe('game interface shell', () => {
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
   });
 
-  it('出征落位（本旬已移动）的部队也能选中并点击己方受损设施委任修补', () => {
+  it('出征落位（本旬已移动）的部队点击无反应；修补委任改由设施菜单自动挑选它', async () => {
+    const user = userEvent.setup();
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -177,7 +178,7 @@ describe('game interface shell', () => {
       food: 6000,
     });
     const unit = Object.values(state.units).find((candidate) => candidate.forceId === 'liu')!;
-    // 出征落位本身就消耗了本旬行动（moved=true）—— 旧实现里这类部队既选不中、也不能委任修补
+    // 出征落位本身就消耗了本旬行动（moved=true）—— 本旬已动过的部队点击不应有任何反应
     expect(unit.moved).toBe(true);
     state.facilities = {
       'repair-target': {
@@ -199,21 +200,26 @@ describe('game interface shell', () => {
 
     const marker = screen.getAllByTestId('battle-unit-marker')
       .find((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r}`)!;
-    fireEvent.pointerDown(marker, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
-    // 已移动的部队同样能进入「已选中」状态（旧实现会直接清空选中）
-    const selectedMarker = screen.getAllByTestId('battle-unit-marker')
+    await user.click(marker);
+    // 本旬已动过：不选中、不弹命令菜单、不播音效（这里以「无选中框、无菜单」为据）
+    const afterClick = screen.getAllByTestId('battle-unit-marker')
       .find((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r}`)!;
-    expect(selectedMarker.getAttribute('class') ?? '').toContain('is-selected');
+    expect(afterClick.getAttribute('class') ?? '').not.toContain('is-selected');
+    expect(screen.queryByTestId('unit-command-menu')).not.toBeInTheDocument();
 
+    // 但修补委任仍然下得出去：不选中部队，直接点设施 → 设施菜单「委任修补」自动挑最近的可达部队
     const facility = document.querySelector('[data-facility-id="repair-target"]')!;
     fireEvent.pointerDown(facility, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+    await user.click(within(screen.getByTestId('facility-context-menu')).getByTestId('facility-repair-button'));
+    await user.click(screen.getByTestId('repair-confirm-yes'));
+    expect(screen.queryByTestId('repair-confirm-menu')).not.toBeInTheDocument();
 
-    expect(screen.getByTestId('repair-confirm-menu')).toBeVisible();
-    fireEvent.click(screen.getByTestId('repair-confirm-yes'));
-    expect(screen.queryByTestId('repair-confirm-menu')).toBeNull();
-    const afterConfirm = screen.getAllByTestId('battle-unit-marker')
-      .find((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r}`)!;
-    expect(afterConfirm.getAttribute('class') ?? '').not.toContain('is-selected');
+    // 委任确实落到了出征部队头上（自动挑选包含本旬已行动的部队）
+    const saved = JSON.parse(window.localStorage.getItem('jingxiang-208-autosave-v1')!) as {
+      units: Record<string, { delegate?: { kind: string; facilityId?: string } }>;
+    };
+    const delegated = Object.values(saved.units).find((candidate) => candidate.delegate?.kind === 'repair');
+    expect(delegated?.delegate).toEqual({ kind: 'repair', facilityId: 'repair-target' });
   });
 
   it('未选中部队直接点击己方受损设施：设施菜单给出「委任修补」，确认后右键可推进且部队自动靠近', () => {
@@ -260,8 +266,8 @@ describe('game interface shell', () => {
     expect(screen.queryByTestId('facility-context-menu')).toBeNull();
     expect(screen.getByTestId('repair-confirm-menu')).toBeVisible();
     expect(screen.getByTestId('repair-confirm-menu').textContent).toContain('关羽');
-    // 距设施 2 格：出征部队仍有出征移动力，确认框提示会立即靠近
-    expect(screen.getByTestId('repair-confirm-note').textContent).toContain('立即向设施靠近');
+    // 距设施 2 格：确认框同样不带任何说明文字
+    expect(screen.queryByTestId('repair-confirm-note')).toBeNull();
 
     fireEvent.click(screen.getByTestId('repair-confirm-yes'));
     expect(screen.queryByTestId('repair-confirm-menu')).toBeNull();
@@ -317,8 +323,8 @@ describe('game interface shell', () => {
     expect(screen.getByTestId('facility-context-menu')).toBeVisible();
     fireEvent.click(screen.getByTestId('facility-repair-button'));
 
-    // 相邻：说明必须是「不会移动」，与远距场景的「自动前往」区分开
-    expect(screen.getByTestId('repair-confirm-note').textContent).toContain('不会移动');
+    // 确认框只有一句「是否委任修补…？」，不再有任何说明文字
+    expect(screen.queryByTestId('repair-confirm-note')).toBeNull();
     fireEvent.click(screen.getByTestId('repair-confirm-yes'));
     expect(screen.queryByTestId('repair-confirm-menu')).toBeNull();
     // 确认即完成本旬修补（delegateActed）：「委」徽章隐藏，下一旬旬初重新显示
@@ -368,6 +374,44 @@ describe('game interface shell', () => {
     const repairButton = screen.getByTestId('facility-repair-button');
     expect(repairButton).toBeDisabled();
     expect(repairButton.textContent).toBe('无部队可修补');
+  });
+
+  it('建设中的军事设施：设施菜单只给「撤销」，不显示「委任修补」', () => {
+    const state = deployUnit(createGame('liu', 1), 'liu', {
+      cityId: 'jiangling',
+      officerId: 'guan-yu',
+      targetCityId: 'xiangyang',
+      troopType: 'spear',
+      troops: 4000,
+      food: 6000,
+    });
+    const unit = Object.values(state.units).find((candidate) => candidate.forceId === 'liu')!;
+    // 箭塔还差一截耐久（completed=false = 建设中）：它本来就在建设流程里，不需要「委任修补」入口
+    state.facilities = {
+      'repair-target': {
+        id: 'repair-target',
+        type: 'arrowTower',
+        forceId: 'liu',
+        q: unit.q,
+        r: unit.r + 1,
+        durability: 100,
+        completed: false,
+      },
+    };
+
+    render(
+      <GameProvider initialState={state} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    const facility = document.querySelector('[data-facility-id="repair-target"]')!;
+    fireEvent.pointerDown(facility, { button: 0, buttons: 1, clientX: 240, clientY: 180 });
+
+    const menu = screen.getByTestId('facility-context-menu');
+    expect(menu).toBeVisible();
+    expect(within(menu).getByTestId('facility-dismantle-button')).toBeEnabled();
+    expect(within(menu).queryByTestId('facility-repair-button')).not.toBeInTheDocument();
   });
 
   it('renders the battle map without a raster background image by default', () => {
@@ -824,7 +868,8 @@ describe('game interface shell', () => {
       .find((marker) => marker.getAttribute('data-grid-position') === '11,10')!;
     fireEvent.pointerEnter(targetMarker, { clientX: 300, clientY: 180 });
 
-    expect(screen.getByTestId('unit-info-panel')).toHaveTextContent('伪报成功率 76%');
+    // 伪报比扰乱低 15 点基准：70 + 智力差 → 55 + 智力差
+    expect(screen.getByTestId('unit-info-panel')).toHaveTextContent('伪报成功率 61%');
   });
 
   it('keeps hover and detail information scroll-contained inside short viewports', () => {
@@ -1509,6 +1554,43 @@ describe('game interface shell', () => {
       expect(screen.queryByTestId('save-load-dialog')).not.toBeInTheDocument();
     });
     expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+  });
+
+  it('从存档进入游戏不会重放上一局的飘字：建设中的设施不再飘一次 +350', async () => {
+    const user = userEvent.setup();
+    const saved = createGame('liu', 1);
+    // 存档里带着上一旬的建设飘字战报（建设进度每旬都会产生一条，会随存档落盘）
+    const city = saved.cities.jiangling;
+    saved.facilityRepairReports = [{
+      id: 'facility-repair-build-tower',
+      facilityId: 'tower-under-construction',
+      q: city.gridQ + 3,
+      r: city.gridR,
+      amount: 350,
+      kind: 'build',
+    }];
+    await writeSlot(window.localStorage, 9, saved, buildSlotMeta(saved, { slot: 9 }));
+
+    render(
+      <GameProvider initialState={createGame('liu', 1)} storage={window.localStorage}>
+        <GameShell />
+      </GameProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
+    await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '载入' }));
+    const dialog = await screen.findByTestId('save-load-dialog');
+    await user.click(within(dialog).getByTestId('save-slot-9'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('save-load-dialog')).not.toBeInTheDocument();
+    });
+    // 等战报 effect 跑完一轮再断言（否则可能读到尚未 flush 的旧值，断言会假通过）
+    await waitFor(() => {
+      expect(screen.getByTestId('ten-day-label')).toBeInTheDocument();
+    });
+    // 读档不是「刚发生了一次建设/修补」：存档里的旧飘字必须丢掉，不重放
+    expect(screen.queryByTestId('facility-repair-number')).not.toBeInTheDocument();
   });
 
   it('warns before overwriting an occupied save slot', async () => {

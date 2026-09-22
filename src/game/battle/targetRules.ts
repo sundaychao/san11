@@ -6,7 +6,7 @@ import { effectsOfKind, resolveUnitSkills } from '../skills';
 import { rangedTargetBlockedByForest } from '../skills/rules/combat';
 import { CATAPULT_TOWER_MAX_RANGE, CATAPULT_TOWER_MIN_RANGE, isWaterTerrain } from './catalog';
 import { gridKey, neighborsOf, sevenCellCityFootprint, type GridCoord } from './grid';
-import { cellAt, cityCenter, unitIsIncapacitated } from './movementRules';
+import { cellAt, cityCenter, unitUntouchedThisTenDay } from './movementRules';
 
 export function areAdjacent(a: GridCoord, b: GridCoord) {
   return neighborsOf(a.q, a.r).some((coord) => coord.q === b.q && coord.r === b.r);
@@ -119,7 +119,7 @@ function isFacilityInAttackRange(state: GameState, attacker: ArmyUnit, facility:
 }
 
 function isActionableFriendlyUnit(unit: ArmyUnit, forceId: ArmyUnit['forceId']) {
-  return unit.forceId === forceId && unit.kind !== 'transport' && !unit.moved && !unit.acted && !unitIsIncapacitated(unit) && unit.movementRemaining > 0;
+  return unit.forceId === forceId && unit.kind !== 'transport' && unitUntouchedThisTenDay(unit);
 }
 
 /**

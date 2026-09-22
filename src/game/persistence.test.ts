@@ -16,7 +16,7 @@ import { createGameFromMap } from './scenario/customMap';
 import type { EditorMapPayload } from './map-editor/editor';
 import china42Data from './scenario/china42.json';
 import china42xData from './scenario/maps/china42x.json';
-import type { ForceId, GridCell, OfficerLocation } from './types';
+import type { City, ForceId, GridCell, OfficerLocation } from './types';
 import { createMobileDuelGame } from './scenario/mobileDuel';
 
 class MemoryStorage implements SaveAdapter {
@@ -38,6 +38,39 @@ function envoyLocation(): OfficerLocation {
     phase: 'outbound',
     remainingTenDays: 5,
   };
+}
+
+/** 全平地自定义地图荷载：城池归属固定，供存档校验用例复用 */
+function customMapPayload(
+  cities: Array<{ id: string; label: string; q: number; r: number; forceId: ForceId | null }>,
+): EditorMapPayload {
+  const width = 40;
+  const height = 40;
+  const grid: GridCell[] = [];
+  for (let r = 0; r < height; r += 1) {
+    for (let q = 0; q < width; q += 1) grid.push({ q, r, terrain: 'plain' });
+  }
+  return {
+    schemaVersion: 2,
+    width,
+    height,
+    backgroundImage: '',
+    grid,
+    cities: cities.map((city) => ({ ...city, type: 'city' as const })),
+  };
+}
+
+/** 把城里第一块地格改成指定设施（征兵要兵舍、生产兵装要锻冶厂等） */
+function withPlotFacility(state: ReturnType<typeof createGameFromMap>, cityId: string, type: string) {
+  const city = (state.cities as Record<string, City>)[cityId];
+  const plots = city.plots ?? (city.plots = []);
+  plots[0] = { ...plots[0], id: `test-${type}`, type: type as never, level: 1, constructing: undefined };
+  return state;
+}
+
+/** 该城可行动的武将 */
+function availableOfficer(state: ReturnType<typeof createGameFromMap>, cityId: string, forceId: ForceId) {
+  return Object.values(state.officers).find((officer) => officer.cityId === cityId && officer.forceId === forceId && !officer.acted)!;
 }
 
 describe('persistence', () => {
@@ -81,6 +114,61 @@ describe('persistence', () => {
 
     writeSave(storage, 'auto', state); // 不应抛「拒绝写入无效存档」
     expect(storage.getItem(AUTO_SAVE_KEY)).not.toBeNull();
+  });
+
+  it('自定义地图：征兵战报里的自定义城 id 不会让存档失格（曾抛「拒绝写入无效存档」）', () => {
+    const map = customMapPayload([
+      { id: 'city-10-10', label: '我方城', q: 10, r: 10, forceId: 'liu' },
+      { id: 'city-30-30', label: '敌方城', q: 30, r: 30, forceId: 'cao' },
+    ]);
+    const state = withPlotFacility(createGameFromMap(map, 'liu', 5), 'city-10-10', 'barracks');
+    const officer = availableOfficer(state, 'city-10-10', 'liu');
+
+    const next = executeCommand(state, 'liu', {
+      type: 'recruit',
+      cityId: 'city-10-10' as never,
+      officerIds: [officer.id],
+    });
+
+    // 战报带着自定义城 id，存档校验必须按「自定义地图」放行（否则征兵后自动存档被拒、手动存档点确认没反应）
+    expect(next.cityEffectReports?.[0]?.cityId).toBe('city-10-10');
+    writeSave(storage, 'auto', next);
+    expect(loadSave(storage, 'auto').ok).toBe(true);
+  });
+
+  it('自定义地图：生产兵装战报同样可存档', () => {
+    const map = customMapPayload([
+      { id: 'city-10-10', label: '我方城', q: 10, r: 10, forceId: 'liu' },
+      { id: 'city-30-30', label: '敌方城', q: 30, r: 30, forceId: 'cao' },
+    ]);
+    const state = withPlotFacility(createGameFromMap(map, 'liu', 5), 'city-10-10', 'forge');
+    const officer = availableOfficer(state, 'city-10-10', 'liu');
+
+    const next = executeCommand(state, 'liu', {
+      type: 'produceArmament',
+      cityId: 'city-10-10' as never,
+      officerIds: [officer.id],
+      armamentType: 'crossbow',
+    });
+
+    expect(next.cityEffectReports?.[0]?.kind).toBe('armament');
+    writeSave(storage, 'auto', next);
+    expect(loadSave(storage, 'auto').ok).toBe(true);
+  });
+
+  it('内置剧本的战报仍拒绝未知城 id：放行只对自定义地图生效', () => {
+    const state = createGame('liu', 3);
+    state.cityEffectReports = [{
+      id: 'bogus',
+      cityId: 'city-10-10' as never,
+      q: 0,
+      r: 0,
+      amount: 1,
+      label: '士兵',
+      kind: 'recruit',
+    }];
+
+    expect(() => writeSave(storage, 'auto', state)).toThrow('拒绝写入无效存档');
   });
 
   it('honors editor-designated construction plots (map.plots) over auto-fallback', () => {

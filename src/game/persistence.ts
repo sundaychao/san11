@@ -300,11 +300,12 @@ function validBattleDamageReport(value: unknown): value is BattleDamageReport {
     (report.label === undefined || typeof report.label === 'string');
 }
 
-function validCityEffectReport(value: unknown): value is CityEffectReport {
+/** 战报里的据点 id：自定义地图（`custom-map`）的城池 id 由编辑器生成，不在内置白名单里，必须放行 */
+function validCityEffectReport(value: unknown, custom?: boolean): value is CityEffectReport {
   if (!value || typeof value !== 'object') return false;
   const report = value as Partial<CityEffectReport>;
   return typeof report.id === 'string' &&
-    CITY_IDS.includes(report.cityId!) &&
+    (custom || CITY_IDS.includes(report.cityId!)) &&
     (report.passId === undefined || typeof report.passId === 'string') &&
     Number.isInteger(report.q) &&
     Number.isInteger(report.r) &&
@@ -477,7 +478,7 @@ export function isGameState(value: unknown): value is GameState {
     )) &&
     (state.cityEffectReports === undefined || (
       Array.isArray(state.cityEffectReports) &&
-      state.cityEffectReports.every(validCityEffectReport)
+      state.cityEffectReports.every((report) => validCityEffectReport(report, isCustom))
     )) &&
     (state.facilityRepairReports === undefined || (
       Array.isArray(state.facilityRepairReports) &&
