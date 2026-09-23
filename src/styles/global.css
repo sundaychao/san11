@@ -596,8 +596,6 @@ button { color: inherit; }
 /* 出征编成确认后、落位前：出发城中心的待出发部队预览标牌（纯展示，不响应点击） */
 .deploy-preview-marker { position: absolute; z-index: 4; display: flex; align-items: center; gap: 3px; padding: 1px 4px; border: 1px solid rgba(244, 237, 217, 0.85); border-radius: 2px; background: rgba(12, 28, 31, 0.82); color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 11px; font-weight: 700; line-height: 1.2; white-space: nowrap; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 0 4px rgba(0, 0, 0, 0.5); }
 .deploy-preview-marker::before { content: ''; width: 6px; height: 6px; background: var(--force-color, #f2c238); }
-.map-tools { position: absolute; z-index: 6; top: 14px; left: 14px; display: flex; gap: 5px; padding: 5px; }
-.map-tools .icon-button { background: rgba(24, 37, 33, 0.9); }
 .hover-coordinate { position: fixed; z-index: 16; left: 50%; bottom: 16px; min-width: 118px; padding: 7px 14px; transform: translateX(-50%); color: #fff6d6; font-family: Consolas, "Courier New", monospace; font-size: 13px; font-weight: 700; text-align: center; pointer-events: none; }
 .unit-info-panel { position: fixed; z-index: 18; width: 154px; max-height: calc(100dvh - 16px); padding: 5px; overflow-y: auto; overscroll-behavior: contain; pointer-events: auto; touch-action: pan-y; background: rgba(12, 28, 31, 0.96); color: var(--paper); scrollbar-width: thin; }
 .unit-info-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 5px; min-height: 24px; padding: 0 4px; border-bottom: 1px solid var(--line); }
@@ -763,12 +761,6 @@ button { color: inherit; }
 .force-overview-row.has-acted { color: #8f8a7c; }
 .force-overview-row.has-acted small { color: #858074; }
 .force-overview-blank { padding: 18px 4px; color: var(--muted); font-size: 11px; text-align: center; }
-.battle-panel { position: fixed; z-index: 14; right: 16px; top: 78px; display: grid; gap: 8px; width: 170px; padding: 10px; }
-.battle-panel header { display: flex; align-items: center; gap: 8px; }
-.battle-panel header svg { width: 18px; color: var(--gold); }
-.battle-panel header p { margin: 0; color: var(--muted); font-size: 11px; }
-.battle-panel header strong { font-size: 18px; }
-.battle-panel .primary-button { width: 100%; min-height: 36px; padding: 0 10px; font-size: 12px; }
 .city-command-menu { position: fixed; z-index: 35; display: flex; align-items: flex-start; padding: 4px; }
 /* 单独弹出的二级面板（撤销菜单/确认弹窗）：去掉贴靠一级菜单用的左边框和偏移 */
 .city-command-menu > .city-command-secondary:only-child { margin-left: 0; border-left: 0; }
@@ -2202,8 +2194,6 @@ button { color: inherit; }
   .csp-label { font-size: 16px; min-height: 26px; }
   .csp-value { font-size: 15px; min-height: 26px; }
   .mini-map { display: none; }
-  .map-tools { top: 8px; left: 8px; }
-  .map-tools .icon-button { width: 36px; min-height: 36px; }
   .event-log { display: none; }
 }
 

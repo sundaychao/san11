@@ -1,4 +1,3 @@
-import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import { unitUntouchedThisTenDay } from '../game/battle/actions';
 import { SIEGE_WEAPON_KIND_LABELS, siegeWeaponKindOf, vehicleLabelFor, type SiegeWeaponKind } from '../game/armaments';
@@ -580,8 +579,8 @@ export function StrategicMap({
       if (!region) return;
       const target = event.target as Node | null;
       const hoverEl = target instanceof HTMLElement ? target : null;
-      // 悬停在地图工具/小地图/按钮上时不滚动
-      if (hoverEl?.closest?.('button, .map-tools, .mini-map')) {
+      // 悬停在小地图/按钮上时不滚动
+      if (hoverEl?.closest?.('button, .mini-map')) {
         panDirection.x = 0;
         panDirection.y = 0;
         return;
@@ -1855,12 +1854,6 @@ export function StrategicMap({
           {damageReports.map(renderDamageNumber)}
           {strategyResultReports.map(renderStrategyResultLabel)}
         </svg>
-      </div>
-
-      <div className="map-tools tool-panel" aria-label="地图工具">
-        <button type="button" className="icon-button" aria-label="放大地图" title="放大地图" onClick={() => zoom(1)}><ZoomIn /></button>
-        <button type="button" className="icon-button" aria-label="缩小地图" title="缩小地图" onClick={() => zoom(-1)}><ZoomOut /></button>
-        <button type="button" className="icon-button" aria-label="复位地图" title="复位地图" onClick={() => setView(resetView())}><Maximize2 /></button>
       </div>
 
       <div

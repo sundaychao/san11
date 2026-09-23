@@ -59,8 +59,11 @@ function panViewport(dx: number, dy: number) {
 }
 
 function resetCamera() {
-  // 单机开局镜头会自动居中到君主所在城池；需要以“地图中心”为基准的平移/可见性断言先复位镜头
-  fireEvent.click(screen.getByRole('button', { name: '复位地图' }));
+  // 左上角的「复位地图」按钮已移除：改为把镜头拖回原点（data-view-x/y 归零 = 地图居中、当前缩放不变）
+  const content = screen.getByTestId('map-content');
+  const viewX = Number.parseFloat(content.getAttribute('data-view-x')!);
+  const viewY = Number.parseFloat(content.getAttribute('data-view-y')!);
+  if (viewX !== 0 || viewY !== 0) panViewport(-viewX, -viewY);
 }
 
 /** 断言镜头正中落在指定城池的中心格上（默认按测试环境视口回退 1280×720，与镜头钳制同一口径） */
@@ -385,13 +388,12 @@ describe('StrategicMap', { timeout: 30000 }, () => {
   });
 
   it('keeps zoom within the supported range', async () => {
-    const user = userEvent.setup();
     renderGame();
 
-    const zoomOut = screen.getByRole('button', { name: '缩小地图' });
-    for (let index = 0; index < 5; index += 1) await user.click(zoomOut);
+    // 滚轮连续缩小不会低于最高角度（30 格视野，scale≈6.67）—— 缩放只走滚轮，按钮已移除
+    const viewport = screen.getByTestId('map-viewport');
+    for (let index = 0; index < 5; index += 1) fireEvent.wheel(viewport, { deltaY: 100 });
 
-    // 连续缩小不会低于最高角度（30 格视野，scale≈6.67）
     expect(screen.getByTestId('map-content').style.getPropertyValue('--map-scale')).toBe('6.67');
   });
 

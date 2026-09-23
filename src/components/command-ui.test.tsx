@@ -83,13 +83,18 @@ function proceedTenDayByMapMenuSync() {
 // 默认最高角度视野约 30 格且中心在地图中心 (100,100)；测试视口 fallback 1280×720。
 // 地图层等比（方格不变形）渲染：横向 1 格约 42.7px，纵向每格与横向相同。
 function panMapTo(q: number, r: number) {
-  // 单机开局镜头会自动居中到君主城池；先复位到地图中心，保证下面的平移量计算成立
-  fireEvent.click(screen.getByRole('button', { name: '复位地图' }));
-  const cellPxX = (1280 * 6.67) / 200;
+  // 左上角「复位地图」按钮已移除：从当前镜头位置直接拖差值到与旧「复位后平移」完全一致的目标位
+  const content = screen.getByTestId('map-content');
+  const viewX = Number.parseFloat(content.getAttribute('data-view-x')!);
+  const viewY = Number.parseFloat(content.getAttribute('data-view-y')!);
+  const scale = Number.parseFloat(content.style.getPropertyValue('--map-scale')) || 6.67;
+  const cellPxX = (1280 * scale) / 200;
   const cellPxY = cellPxX; // 等比后纵向每格像素 = 横向每格像素
+  const targetX = (100 - q) * cellPxX;
+  const targetY = (100 - r) * cellPxY;
   const viewport = screen.getByTestId('map-viewport');
   fireEvent.pointerDown(viewport, { pointerId: 1, button: 0, buttons: 1, clientX: 640, clientY: 360 });
-  fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 640 + (100 - q) * cellPxX, clientY: 360 + (100 - r) * cellPxY });
+  fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 640 + (targetX - viewX), clientY: 360 + (targetY - viewY) });
   fireEvent.pointerUp(viewport, { pointerId: 1 });
 }
 

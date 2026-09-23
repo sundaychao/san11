@@ -18,7 +18,6 @@ import { useGame } from '../game/store/GameProvider';
 import { territoryForceAt } from '../game/territory';
 import type { MapCamera } from '../game/saveSlots';
 import type { BattleDamageReport, CityEffectReport, CityId, DiplomacyAction, ForceId, FacilityRepairReport, FacilityType, GameCommand, GameState, GridCell, PassId, StrategyResultReport, TerrainType } from '../game/types';
-import { BattlePanel } from './BattlePanel';
 import { CityInfoPanel } from './CityInfoPanel';
 import { CityInfoDialog } from './CityInfoDialog';
 import { PassInfoDialog } from './PassInfoDialog';
@@ -2376,7 +2375,6 @@ export function GameShell() {
       {state && passStatusId && state.passes?.[passStatusId]?.ownerId === state.playerForceId && (
         <PassStatusPanel pass={state.passes[passStatusId]} state={state} />
       )}
-      <BattlePanel />
       <EventLog />
       {positionPanelOpen && state && (
         <PositionPanel

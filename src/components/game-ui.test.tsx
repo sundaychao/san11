@@ -1652,8 +1652,11 @@ describe('game interface shell', () => {
     // 保存完成即退出到游戏界面
     await waitFor(() => expect(screen.queryByTestId('save-load-dialog')).not.toBeInTheDocument());
 
-    // 把镜头复位到地图中心，确保接下来的还原真的来自存档而不是残留状态
-    await user.click(screen.getByRole('button', { name: '复位地图' }));
+    // 把镜头拖回原点（「复位地图」按钮已移除），确保接下来的还原真的来自存档而不是残留状态
+    const currentView = readView();
+    fireEvent.pointerDown(viewport, { pointerId: 1, button: 0, buttons: 1, clientX: 640, clientY: 360 });
+    fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 640 - currentView.x, clientY: 360 - currentView.y });
+    fireEvent.pointerUp(viewport, { pointerId: 1 });
     expect(readView().x).toBeCloseTo(0, 0);
 
     fireEvent.contextMenu(viewport, { clientX: 320, clientY: 240 });
