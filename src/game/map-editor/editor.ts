@@ -1,7 +1,9 @@
+import { FORCE_IDS } from '../scenario/jingxiang208';
 import { sevenCellCityFootprint } from '../battle/grid';
+import { BLOCKED_TERRAINS, FACILITIES, isWaterTerrain, type UnitFacility } from '../battle/catalog';
 import { GRID_HEIGHT, GRID_WIDTH } from '../battle/scenario';
 import { PLOT_COUNT_BY_SIZE, autoSearchCityPlots } from '../innerAffairs';
-import type { ForceId, GridCell, TerrainType } from '../types';
+import type { FacilityType, ForceId, GridCell, TerrainType } from '../types';
 
 export interface EditableCityMarker {
   id: string;
@@ -23,6 +25,34 @@ export interface EditorCityPlot {
   r: number;
 }
 
+/** 军事设施标记（schema v2 可选字段）：归属势力随所选城池，进游戏即为已建成的成品设施 */
+export interface EditorFacilityMarker {
+  type: FacilityType;
+  forceId: ForceId | null;
+  /** 归属城（编辑器展示用；进游戏时设施只认势力，不绑城） */
+  cityId?: string;
+  q: number;
+  r: number;
+}
+
+/**
+ * 编辑器设施菜单的可选项：**catalog 里的全部野外设施**（名称取自 `FACILITIES`，单一出处）。
+ *
+ * 与游戏内建造菜单不同，这里不按 `UPGRADED_FACILITY_TYPES` 只列「当前档」：编辑器摆的是
+ * 已建成的成品设施（进游戏即成品，见 `facilitiesFromEditorMarkers`），地图上本来就没有科技档位可言。
+ * 按当前档过滤会让 砦 / 城塞 / 石墙 / 连弩楼 / 业火种 / 业火球 这些高档设施在编辑器里根本摆不出来，
+ * 而开局与存档校验其实都接受它们。catalog 新增设施时会自动出现在菜单里，无需再同步第二份表。
+ */
+export const EDITOR_FACILITY_CHOICES: Array<{ type: FacilityType; label: string }> = Object.values(FACILITIES)
+  .filter((definition): definition is UnitFacility => Boolean(definition))
+  .map((definition) => ({ type: definition.type, label: definition.name }));
+
+function isPlaceableFacilityTerrain(grid: GridCell[], q: number, r: number): boolean {
+  const cell = grid.find((candidate) => candidate.q === q && candidate.r === r);
+  if (!cell) return false;
+  return !BLOCKED_TERRAINS.has(cell.terrain) && !isWaterTerrain(cell.terrain);
+}
+
 /** 可持久化的地图载荷（schema v2） */
 export interface EditorMapPayload {
   schemaVersion: 2;
@@ -40,6 +70,8 @@ export interface EditorMapPayload {
    * 开局仍按 `initConstructionPlots` 的自动搜索补齐（老图不会突然变成没有建设用地）。
    */
   plotsSpecified?: boolean;
+  /** 编辑器摆放的军事设施（缺省=图上没有设施） */
+  facilities?: EditorFacilityMarker[];
   name?: string;
 }
 
@@ -48,6 +80,7 @@ interface EditorSnapshot {
   grid: GridCell[];
   cities: EditorStrongholdMarker[];
   plots: EditorCityPlot[];
+  facilities: EditorFacilityMarker[];
   width: number;
   height: number;
 }
@@ -57,13 +90,14 @@ export interface MapEditorState {
   grid: GridCell[];
   cities: EditorStrongholdMarker[];
   plots: EditorCityPlot[];
+  facilities: EditorFacilityMarker[];
   width: number;
   height: number;
   history: EditorSnapshot[];
   future: EditorSnapshot[];
 }
 
-export type MapEditorTool = TerrainType | 'city' | 'pass' | 'erase' | 'plot';
+export type MapEditorTool = TerrainType | 'city' | 'pass' | 'erase' | 'plot' | 'facility';
 
 export type TerrainMaskLayer = 'water' | 'mountain' | 'forest' | 'road' | 'city';
 
@@ -156,12 +190,17 @@ function clonePlots(plots: EditorCityPlot[]) {
   return plots.map((plot) => ({ ...plot }));
 }
 
-function snapshot(state: Pick<MapEditorState, 'backgroundImage' | 'grid' | 'cities' | 'plots' | 'width' | 'height'>): EditorSnapshot {
+function cloneFacilities(facilities: EditorFacilityMarker[]) {
+  return facilities.map((facility) => ({ ...facility }));
+}
+
+function snapshot(state: Pick<MapEditorState, 'backgroundImage' | 'grid' | 'cities' | 'plots' | 'facilities' | 'width' | 'height'>): EditorSnapshot {
   return {
     backgroundImage: state.backgroundImage,
     grid: cloneGrid(state.grid),
     cities: cloneCities(state.cities),
     plots: clonePlots(state.plots),
+    facilities: cloneFacilities(state.facilities),
     width: state.width,
     height: state.height,
   };
@@ -216,6 +255,110 @@ function isEditableCityMarker(value: unknown, width: number, height: number): va
     city.q! < width &&
     city.r! >= 0 &&
     city.r! < height;
+}
+
+/**
+ * 栅格修整：把来源不可信（旧版本地缓存、热拔插 JSON、手改过的文件）的格子数组修整成
+ * `width × height` 一份完整栅格 —— 越界 / 未知地形 / 重复坐标的格子丢弃，缺失的格子补平地。
+ * 已经是完整合法栅格时原样克隆：编辑器自己导出的图走这条快路径，格子顺序与内容一个不动。
+ */
+function repairGrid(raw: unknown, width: number, height: number): GridCell[] {
+  const cells: unknown[] = Array.isArray(raw) ? raw : [];
+  const seen = new Set<string>();
+  const complete = cells.length === width * height && cells.every((cell) => {
+    if (!isGridCell(cell, width, height)) return false;
+    const key = `${cell.q},${cell.r}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (complete) return cloneGrid(cells as GridCell[]);
+
+  const byKey = new Map<string, GridCell>();
+  for (const cell of cells) {
+    if (!isGridCell(cell, width, height)) continue;
+    const key = `${cell.q},${cell.r}`;
+    if (!byKey.has(key)) byKey.set(key, { q: cell.q, r: cell.r, terrain: cell.terrain });
+  }
+  const grid: GridCell[] = [];
+  for (let q = 0; q < width; q += 1) {
+    for (let r = 0; r < height; r += 1) {
+      grid.push(byKey.get(`${q},${r}`) ?? { q, r, terrain: 'plain' });
+    }
+  }
+  return grid;
+}
+
+/**
+ * 据点标记修整：id / 名字 / 坐标非法的项在画布上无法定位，一律丢弃（id 重复只留首个）；
+ * `type` 缺省为城池、`forceId` 缺省为无主 —— 与 v1 载荷升级时的补齐口径一致。
+ * 旧版载荷把关隘单独放在 `passes` 数组里，这里一并合入。
+ */
+function repairStrongholds(rawCities: unknown, rawPasses: unknown, width: number, height: number): EditorStrongholdMarker[] {
+  const result: EditorStrongholdMarker[] = [];
+  const seen = new Set<string>();
+  const append = (entry: unknown, forcedType?: 'pass') => {
+    if (!isEditableCityMarker(entry, width, height)) return;
+    if (seen.has(entry.id)) return;
+    seen.add(entry.id);
+    const marker = entry as EditorStrongholdMarker;
+    result.push({ ...marker, type: forcedType ?? (marker.type === 'pass' ? 'pass' : 'city'), forceId: marker.forceId ?? null });
+  };
+  if (Array.isArray(rawCities)) for (const entry of rawCities) append(entry);
+  if (Array.isArray(rawPasses)) for (const entry of rawPasses) append(entry, 'pass');
+  return result;
+}
+
+/** 建设用地归属修整（`plots` 可选字段）：只保留坐标合法、且确指向已存在城池（type==='city'）的项；
+ *  同一格出现多次时保留首次（一格一主），指向关隘 / 不存在 id 的项静默丢弃。 */
+function sanitizePlots(value: unknown, cities: EditorStrongholdMarker[], width: number, height: number): EditorCityPlot[] {
+  const cityIds = new Set(cities.filter((city) => city.type === 'city').map((city) => city.id));
+  const seenPlotKeys = new Set<string>();
+  const plots: EditorCityPlot[] = [];
+  if (!Array.isArray(value)) return plots;
+  for (const plot of value as Array<Partial<EditorCityPlot>>) {
+    if (
+      !plot || typeof plot !== 'object' ||
+      typeof plot.cityId !== 'string' || !cityIds.has(plot.cityId) ||
+      !Number.isInteger(plot.q) || !Number.isInteger(plot.r) ||
+      plot.q! < 0 || plot.q! >= width || plot.r! < 0 || plot.r! >= height
+    ) continue;
+    const key = `${plot.q},${plot.r}`;
+    if (seenPlotKeys.has(key)) continue;
+    seenPlotKeys.add(key);
+    plots.push({ cityId: plot.cityId, q: plot.q!, r: plot.r! });
+  }
+  return plots;
+}
+
+/** 军事设施修整（`facilities` 可选字段）：类型合法、坐标在界、地形可放置、一格一设施；非法项静默丢弃。 */
+function sanitizeFacilities(value: unknown, grid: unknown, width: number, height: number): EditorFacilityMarker[] {
+  const facilityTypes = new Set(Object.keys(FACILITIES));
+  const cells: GridCell[] = Array.isArray(grid) ? (grid as GridCell[]) : [];
+  const seenFacilityKeys = new Set<string>();
+  const facilities: EditorFacilityMarker[] = [];
+  if (!Array.isArray(value)) return facilities;
+  for (const facility of value as Array<Partial<EditorFacilityMarker>>) {
+    if (
+      !facility || typeof facility !== 'object' ||
+      typeof facility.type !== 'string' || !facilityTypes.has(facility.type) ||
+      (facility.forceId !== null && facility.forceId !== undefined && !FORCE_IDS.includes(facility.forceId)) ||
+      !Number.isInteger(facility.q) || !Number.isInteger(facility.r) ||
+      facility.q! < 0 || facility.q! >= width || facility.r! < 0 || facility.r! >= height ||
+      !isPlaceableFacilityTerrain(cells, facility.q!, facility.r!)
+    ) continue;
+    const key = `${facility.q},${facility.r}`;
+    if (seenFacilityKeys.has(key)) continue;
+    seenFacilityKeys.add(key);
+    facilities.push({
+      type: facility.type as FacilityType,
+      forceId: facility.forceId ?? null,
+      ...(typeof facility.cityId === 'string' ? { cityId: facility.cityId } : {}),
+      q: facility.q!,
+      r: facility.r!,
+    });
+  }
+  return facilities;
 }
 
 function parseEditorJsonPayload(json: string): EditorMapPayload {
@@ -273,25 +416,9 @@ function parseEditorJsonPayload(json: string): EditorMapPayload {
     throw new Error('地图 JSON 无效');
   }
 
-  // 建设用地归属（v2 可选字段）：只保留坐标合法、且确指向已存在城池（type==='city'）的项；
-  // 同一格出现多次时保留首次（一格一主），指向城池/非城 id 的项静默丢弃
-  const cityIds = new Set(cities.filter((city) => city.type === 'city').map((city) => city.id));
-  const seenPlotKeys = new Set<string>();
-  const plots: EditorCityPlot[] = [];
-  if (Array.isArray(value.plots)) {
-    for (const plot of value.plots as Array<Partial<EditorCityPlot>>) {
-      if (
-        !plot || typeof plot !== 'object' ||
-        typeof plot.cityId !== 'string' || !cityIds.has(plot.cityId) ||
-        !Number.isInteger(plot.q) || !Number.isInteger(plot.r) ||
-        plot.q! < 0 || plot.q! >= width || plot.r! < 0 || plot.r! >= height
-      ) continue;
-      const key = `${plot.q},${plot.r}`;
-      if (seenPlotKeys.has(key)) continue;
-      seenPlotKeys.add(key);
-      plots.push({ cityId: plot.cityId, q: plot.q!, r: plot.r! });
-    }
-  }
+  const plots = sanitizePlots(value.plots, cities, width, height);
+
+  const facilities = sanitizeFacilities(value.facilities, value.grid, width, height);
 
   return {
     schemaVersion: 2,
@@ -301,18 +428,63 @@ function parseEditorJsonPayload(json: string): EditorMapPayload {
     grid: cloneGrid(value.grid),
     cities,
     plots,
+    facilities,
     // 「建设用地由编辑器指定」的标记随图保留：导入编辑器再保存时会重新写入
     plotsSpecified: value.plotsSpecified === true,
     name: typeof value.name === 'string' ? value.name : undefined,
   };
 }
 
-export function createEditorState(grid: GridCell[], cities: EditorStrongholdMarker[] = [], width: number = GRID_WIDTH, height: number = GRID_HEIGHT, plots: EditorCityPlot[] = []): MapEditorState {
+/**
+ * 载荷归一化（地块注册表用）：把来源不可信的 EditorMapPayload（本地缓存、热拔插 JSON、旧版文件）
+ * 修整成编辑器与开局都吃的 schema v2 —— **不抛异常**，一律优雅降级：
+ * - 缺 `plots` / `facilities` 按空处理；
+ * - `cities` 缺 `type` 按城池补、缺 `forceId` 按无主补，旧版单独的 `passes` 数组合并进来；
+ * - 栅格缺格补平地、越界 / 未知地形的格子丢弃（`grid: []` 的空白图补成整片平地，仍可编辑）；
+ * - `plotsSpecified` 缺省为 `false`（旧图开局仍自动补建设用地，口径不变）。
+ *
+ * 只有「宽高不是 1~512 的整数 / 根本没有栅格数组」这种连图都算不上的载荷返回 `null`，
+ * 调用方据此在**列表页**就把它过滤掉，而不是等玩家点进编辑器再炸白屏。
+ */
+export function normalizeEditorPayload(raw: unknown): EditorMapPayload | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Partial<EditorMapPayload> & { passes?: unknown };
+  const { width, height } = value;
+  if (
+    typeof width !== 'number' || typeof height !== 'number' ||
+    !Number.isInteger(width) || !Number.isInteger(height) ||
+    width < 1 || height < 1 || width > MAX_EDITOR_GRID_SIZE || height > MAX_EDITOR_GRID_SIZE
+  ) return null;
+  if (!Array.isArray(value.grid)) return null;
+
+  const grid = repairGrid(value.grid, width, height);
+  const cities = repairStrongholds(value.cities, value.passes, width, height);
+  return {
+    schemaVersion: 2,
+    width,
+    height,
+    backgroundImage: typeof value.backgroundImage === 'string' ? value.backgroundImage : '',
+    grid,
+    cities,
+    plots: sanitizePlots(value.plots, cities, width, height),
+    facilities: sanitizeFacilities(value.facilities, grid, width, height),
+    plotsSpecified: value.plotsSpecified === true,
+    ...(typeof value.name === 'string' ? { name: value.name } : {}),
+  };
+}
+
+/**
+ * 由栅格 + 据点标记构造编辑器状态。
+ * 入参来自真实载荷，可能缺字段或带脏数据（旧版本地缓存、第三方 JSON）：这里统一走修整，
+ * 缺格补平地、非法据点丢弃、`type`/`forceId` 补默认值 —— 编辑器不会因为一张脏图直接白屏。
+ */
+export function createEditorState(grid: GridCell[], cities: EditorStrongholdMarker[] = [], width: number = GRID_WIDTH, height: number = GRID_HEIGHT, plots: EditorCityPlot[] = [], facilities: EditorFacilityMarker[] = []): MapEditorState {
   return {
     backgroundImage: '',
-    grid: cloneGrid(grid),
-    cities: cloneCities(cities),
-    plots: clonePlots(plots),
+    grid: repairGrid(grid, width, height),
+    cities: repairStrongholds(cities, undefined, width, height),
+    plots: Array.isArray(plots) ? clonePlots(plots) : [],
+    facilities: Array.isArray(facilities) ? cloneFacilities(facilities) : [],
     width,
     height,
     history: [],
@@ -331,6 +503,7 @@ export function paintTerrain(state: MapEditorState, coord: { q: number; r: numbe
     grid: state.grid.map((cell) => (cell.q === coord.q && cell.r === coord.r ? { ...cell, terrain } : { ...cell })),
     cities: cloneCities(state.cities),
     plots: clonePlots(state.plots),
+    facilities: cloneFacilities(state.facilities),
   });
 }
 
@@ -348,6 +521,7 @@ export function placeCity(state: MapEditorState, city: EditorStrongholdMarker): 
     grid: cloneGrid(state.grid),
     cities: [...state.cities.filter((candidate) => candidate.id !== normalized.id).map((candidate) => ({ ...candidate })), { ...normalized }],
     plots: clonePlots(state.plots),
+    facilities: cloneFacilities(state.facilities),
   });
 }
 
@@ -374,6 +548,7 @@ export function assignPlot(state: MapEditorState, cityId: string | null, coord: 
       grid: cloneGrid(state.grid),
       cities: cloneCities(state.cities),
       plots: next,
+      facilities: cloneFacilities(state.facilities),
       width: state.width,
       height: state.height,
     });
@@ -396,6 +571,7 @@ export function assignPlot(state: MapEditorState, cityId: string | null, coord: 
       grid: cloneGrid(state.grid),
       cities: cloneCities(state.cities),
       plots: next,
+      facilities: cloneFacilities(state.facilities),
       width: state.width,
       height: state.height,
     });
@@ -406,6 +582,7 @@ export function assignPlot(state: MapEditorState, cityId: string | null, coord: 
     grid: cloneGrid(state.grid),
     cities: cloneCities(state.cities),
     plots: [...clonePlots(state.plots), { cityId, q: coord.q, r: coord.r }],
+    facilities: cloneFacilities(state.facilities),
     width: state.width,
     height: state.height,
   });
@@ -426,10 +603,55 @@ export function eraseStronghold(state: MapEditorState, id: string): MapEditorSta
     grid: nextGrid,
     cities: state.cities.filter((candidate) => candidate.id !== id).map((candidate) => ({ ...candidate })),
     plots: clonePlots(state.plots.filter((plot) => plot.cityId !== id)),
+    facilities: cloneFacilities(state.facilities),
   });
 }
 
-/** 新建全平地空白地图（默认 200×200） */
+/**
+ * 放置军事设施标记（编辑器「军事设施」工具）：同格已有设施则整体替换。
+ * 地形需可放置（山崖/川/水面不可），且不得落在城池 7 格 footprint 或关隘标记上 ——
+ * 与游戏内 `isBuildableFacilityCell` 的「不可在城内建设」口径一致。
+ */
+export function placeFacility(state: MapEditorState, marker: EditorFacilityMarker): MapEditorState {
+  const definition = FACILITIES[marker.type];
+  if (!definition) return state;
+  if (marker.q < 0 || marker.q >= state.width || marker.r < 0 || marker.r >= state.height) return state;
+  if (!isPlaceableFacilityTerrain(state.grid, marker.q, marker.r)) return state;
+  if (state.cities.some((city) => city.q === marker.q && city.r === marker.r)) return state;
+  const occupied = new Set(
+    state.cities.flatMap((city) => sevenCellCityFootprint({ q: city.q, r: city.r }).map((coord) => `${coord.q},${coord.r}`)),
+  );
+  if (occupied.has(`${marker.q},${marker.r}`)) return state;
+  const cityIds = new Set(state.cities.filter((city) => city.type === 'city').map((city) => city.id));
+  if (marker.cityId !== undefined && !cityIds.has(marker.cityId)) return state;
+
+  const rest = state.facilities.filter((facility) => facility.q !== marker.q || facility.r !== marker.r);
+  return withHistory(state, {
+    backgroundImage: state.backgroundImage,
+    width: state.width,
+    height: state.height,
+    grid: cloneGrid(state.grid),
+    cities: cloneCities(state.cities),
+    plots: clonePlots(state.plots),
+    facilities: [...rest, { ...marker, forceId: marker.forceId ?? null }],
+  });
+}
+
+/** 移除某格上的军事设施标记（编辑器擦除工具/设施菜单「拆除」用） */
+export function removeFacilityAt(state: MapEditorState, coord: { q: number; r: number }): MapEditorState {
+  if (!state.facilities.some((facility) => facility.q === coord.q && facility.r === coord.r)) return state;
+  return withHistory(state, {
+    backgroundImage: state.backgroundImage,
+    width: state.width,
+    height: state.height,
+    grid: cloneGrid(state.grid),
+    cities: cloneCities(state.cities),
+    plots: clonePlots(state.plots),
+    facilities: state.facilities.filter((facility) => facility.q !== coord.q || facility.r !== coord.r),
+  });
+}
+
+
 export function createBlankMap(width: number = 200, height: number = 200): MapEditorState {
   const grid: GridCell[] = [];
   for (let q = 0; q < width; q += 1) {
@@ -440,6 +662,7 @@ export function createBlankMap(width: number = 200, height: number = 200): MapEd
     grid,
     cities: [],
     plots: [],
+    facilities: [],
     width,
     height,
     history: [],
@@ -507,6 +730,7 @@ export function undoEditor(state: MapEditorState): MapEditorState {
     grid: cloneGrid(previous.grid),
     cities: cloneCities(previous.cities),
     plots: clonePlots(previous.plots),
+    facilities: cloneFacilities(previous.facilities),
     width: previous.width,
     height: previous.height,
     history: state.history.slice(0, -1).map(snapshot),
@@ -523,6 +747,7 @@ export function redoEditor(state: MapEditorState): MapEditorState {
     grid: cloneGrid(next.grid),
     cities: cloneCities(next.cities),
     plots: clonePlots(next.plots),
+    facilities: cloneFacilities(next.facilities),
     width: next.width,
     height: next.height,
     history: [...state.history.map(snapshot), snapshot(state)],
@@ -538,6 +763,7 @@ export function clearEditor(state: MapEditorState, terrain: TerrainType = 'plain
     grid: state.grid.map((cell) => ({ ...cell, terrain })),
     cities: [],
     plots: [],
+    facilities: [],
   });
 }
 
@@ -568,6 +794,7 @@ export function commitPlots(state: MapEditorState, adds: EditorCityPlot[], remov
     grid: cloneGrid(state.grid),
     cities: cloneCities(state.cities),
     plots,
+    facilities: cloneFacilities(state.facilities),
     width: state.width,
     height: state.height,
   });
@@ -583,6 +810,7 @@ export function setEditorBackgroundImage(state: MapEditorState, backgroundImage:
     grid: cloneGrid(state.grid),
     cities: cloneCities(state.cities),
     plots: clonePlots(state.plots),
+    facilities: cloneFacilities(state.facilities),
   });
 }
 
@@ -597,6 +825,7 @@ export function exportEditorJson(state: MapEditorState, name?: string): string {
     grid: state.grid,
     cities: state.cities,
     plots: state.plots,
+    facilities: state.facilities,
     plotsSpecified: true,
     ...(name ? { name } : {}),
   };
@@ -610,6 +839,7 @@ export function importEditorJson(state: MapEditorState, json: string): MapEditor
     grid: payload.grid,
     cities: payload.cities,
     plots: payload.plots ?? [],
+    facilities: payload.facilities ?? [],
     width: payload.width,
     height: payload.height,
   });

@@ -521,6 +521,12 @@ export const PUBLIC_REPAIRABLE_FACILITY_TYPES = new Set<FacilityType>([
   'earthwork', 'stoneWall', 'fireSeed', 'fireBall', 'flameSeed', 'flameBall', 'hellfireSeed', 'hellfireBall',
 ]);
 
+/**
+ * 可摆放军事设施的地形：**只有平地、草地、主径、沙地**。
+ * 其余地形（小径、栈道、荒地、湿地、森林、丘陵、崖、浅滩、渡所、水/川/河/海等）一律不可建造。
+ */
+export const MILITARY_FACILITY_TERRAINS = new Set<TerrainType>(['plain', 'grass', 'road', 'sand']);
+
 export function movementProfileForUnit(unit: Pick<ArmyUnit, 'kind' | 'troopType'>): MovementProfile {
   return unit.kind === 'transport' ? 'transport' : unit.troopType ?? 'sword';
 }

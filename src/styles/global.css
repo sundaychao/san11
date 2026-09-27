@@ -190,6 +190,8 @@ button { color: inherit; }
 .editor-size-fields button[type='button'] { grid-column: 1 / 2; }
 .editor-size-fields button.secondary-button { grid-column: 2 / 3; }
 /* 编辑器建设用地覆盖层：半透明淡蓝方框，不拦截点击（pointer-events none 交由底层格刷格） */
+.editor-facility-cell { fill: rgba(196,120,60,0.4); stroke: #e0a050; stroke-width: 1.5; pointer-events: none; }
+.editor-facility-label { fill: #ffe2b8; font-size: 9px; font-family: STKaiti, KaiTi, serif; pointer-events: none; }
 .editor-plot-cell {
   fill: rgba(110, 176, 220, 0.42);
   stroke: #7ac0e0;

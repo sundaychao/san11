@@ -12,7 +12,7 @@ import { battleShipMovementBonus } from './battle/catalog';
 import { nextRandom } from './random';
 import { FORCE_IDS } from './scenario/jingxiang208';
 import { hasCityTrait } from './cityTraits';
-import { territoryCityAt } from './territory';
+import { territoryCityAtOrThrow } from './territory';
 import { movementAllowanceBonus } from './skills/rules/movement';
 import { cityPopulationOf, ruralPopulationOf } from './innerAffairs';
 import { appointSuccessorGovernor, applyFacilityLevelTech, settleDurabilityRecovery } from './innerAffairs';
@@ -483,7 +483,7 @@ function settleUnitSupply(next: GameState, unit: ArmyUnit, grainRoutes?: Map<str
   }
 
   // 蛮荒城：领土上的敌方部队每旬士气-2
-  const territoryCity = territoryCityAt(next, unit);
+  const territoryCity = territoryCityAtOrThrow(next, unit);
   if (territoryCity.ownerId && unit.forceId && unit.forceId !== territoryCity.ownerId
     && hasCityTrait(territoryCity.id, 'wilderness')) {
     unit.energy = Math.max(0, unit.energy - 2);

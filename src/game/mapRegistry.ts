@@ -1,5 +1,5 @@
 import type { ForceId } from './types';
-import type { EditorCityPlot, EditorMapPayload } from './map-editor/editor';
+import { normalizeEditorPayload, type EditorCityPlot, type EditorMapPayload } from './map-editor/editor';
 import { createScenarioCities } from './scenario/jingxiang208';
 import china42Data from './scenario/maps/china42x.json';
 
@@ -194,11 +194,14 @@ function loadStoredCustomMaps(): void {
     const parsed = JSON.parse(raw) as Array<{ id: string; name: string; payload: EditorMapPayload }>;
     if (!Array.isArray(parsed)) return;
     for (const entry of parsed) {
-      if (entry?.id && entry?.payload && entry.payload.width > 0 && entry.payload.height > 0) {
-        // 会话内已注册（含本次 addSessionMap 刚写入的）→ 跳过，避免同一张图在列表里出现两次
-        if (sessionMaps.some((map) => map.id === entry.id)) continue;
-        sessionMaps.push({ id: entry.id, name: entry.name ?? entry.payload.name ?? '未命名', builtin: false, payload: entry.payload });
-      }
+      if (!entry?.id) continue;
+      // 会话内已注册（含本次 addSessionMap 刚写入的）→ 跳过，避免同一张图在列表里出现两次
+      if (sessionMaps.some((map) => map.id === entry.id)) continue;
+      // 本地缓存是「不可信来源」：早先版本写下的图可能没有 plots / facilities、城池没有 type。
+      // 统一归一化补默认值；连栅格都没有的条目直接丢弃 —— 挡在列表页之外，不让它把编辑器打成白屏
+      const payload = normalizeEditorPayload(entry.payload);
+      if (!payload) continue;
+      sessionMaps.push({ id: entry.id, name: entry.name ?? payload.name ?? '未命名', builtin: false, payload });
     }
   } catch { /* 损坏忽略 */ }
 }
@@ -261,7 +264,11 @@ async function doLoadRuntimeMaps(): Promise<void> {
         const raw = (await mapRes.json()) as ImportMetaPayload;
         if (!raw || raw.width <= 0 || raw.height <= 0 || !Array.isArray(raw.grid)) continue;
         raw.id = id;
-        const normalized = normalizeBuiltinPayload(raw);
+        // 运行时图是手写 / 早期导出的 JSON，普遍没有 plots / plotsSpecified / facilities，
+        // 城池也可能没有 type：先按内置图口径平移（interior → plots、passes → cities），
+        // 再统一归一化补默认值；连栅格都对不上的图直接跳过，不进列表
+        const normalized = normalizeEditorPayload(normalizeBuiltinPayload(raw));
+        if (!normalized) continue;
         sessionMaps.push({ id, name: normalized.name ?? id, builtin: true, payload: normalized });
       } catch { /* 单张图解析失败忽略 */ }
     }
@@ -302,13 +309,17 @@ export function removeSessionMap(id: string): boolean {
   return true;
 }
 
-/** 导入一个 JSON 地图文件（解析后追加或覆盖同名），返回 id */
+/** 导入一个 JSON 地图文件（解析后追加或覆盖同名），返回 id。
+ *  第三方文件按不可信来源处理：归一化补齐缺字段，连图都算不上的载荷抛错由调用方提示玩家。 */
 export function importMapJson(payload: EditorMapPayload, suggestedName?: string): string {
-  const name = suggestedName ?? payload.name ?? '未命名地图';
+  const normalized = normalizeEditorPayload(payload);
+  if (!normalized) throw new Error('不是有效的地图 JSON 文件');
+  const name = suggestedName ?? normalized.name ?? '未命名地图';
+  const withName: EditorMapPayload = { ...normalized, name };
   const existing = sessionMaps.find((m) => !m.builtin && m.name === name);
   if (existing) {
-    updateSessionMap(existing.id, { ...payload, name });
+    updateSessionMap(existing.id, withName);
     return existing.id;
   }
-  return addSessionMap({ ...payload, name }, name);
+  return addSessionMap(withName, name);
 }

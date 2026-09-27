@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PLOT_COUNT_BY_SIZE } from '../innerAffairs';
+import { sevenCellCityFootprint } from '../battle/grid';
 import { createBattleGrid, GRID_HEIGHT, GRID_WIDTH } from '../battle/scenario';
 import type { GridCell } from '../types';
 import {
@@ -17,11 +18,61 @@ import {
   importEditorJson,
   paintTerrain,
   placeCity,
+  placeFacility,
   placePass,
   redoEditor,
+  removeFacilityAt,
   TERRAIN_CONTROL_COLORS,
   undoEditor,
 } from './editor';
+
+describe('map editor facilities', () => {
+  it('places a facility marker and replaces the one at the same cell', () => {
+    const state = createBlankMap(20, 20);
+    const placed = placeFacility(state, { type: 'arrowTower', forceId: 'liu', q: 5, r: 5 });
+    expect(placed.facilities).toEqual([{ type: 'arrowTower', forceId: 'liu', q: 5, r: 5 }]);
+
+    const replaced = placeFacility(placed, { type: 'drum', forceId: 'cao', q: 5, r: 5 });
+    expect(replaced.facilities).toEqual([{ type: 'drum', forceId: 'cao', q: 5, r: 5 }]);
+    expect(replaced.history).toHaveLength(2);
+  });
+
+  it('rejects facilities on city cells/footprints, water & mountain terrain, or unknown types', () => {
+    const state = createBlankMap(20, 20);
+    const withCity = placeCity(state, { id: 'city-4-4', label: '甲城', q: 4, r: 4, type: 'city', forceId: 'liu' });
+    const footprint = sevenCellCityFootprint({ q: 4, r: 4 });
+    for (const coord of footprint) {
+      expect(placeFacility(withCity, { type: 'drum', forceId: 'liu', q: coord.q, r: coord.r }).facilities).toEqual([]);
+    }
+
+    const watery = paintTerrain(withCity, { q: 8, r: 8 }, 'water');
+    expect(placeFacility(watery, { type: 'drum', forceId: 'liu', q: 8, r: 8 }).facilities).toEqual([]);
+    const cliffs = paintTerrain(withCity, { q: 8, r: 8 }, 'mountain');
+    expect(placeFacility(cliffs, { type: 'drum', forceId: 'liu', q: 8, r: 8 }).facilities).toEqual([]);
+    expect(placeFacility(withCity, { type: 'nonexistent' as never, forceId: 'liu', q: 8, r: 8 }).facilities).toEqual([]);
+  });
+
+  it('removes a facility at a cell; undo restores it and redo removes it again', () => {
+    let state = createBlankMap(20, 20);
+    state = placeFacility(state, { type: 'drum', forceId: 'liu', q: 3, r: 3 });
+    state = removeFacilityAt(state, { q: 3, r: 3 });
+    expect(state.facilities).toEqual([]);
+
+    const undone = undoEditor(state);
+    expect(undone.facilities).toEqual([{ type: 'drum', forceId: 'liu', q: 3, r: 3 }]);
+    expect(redoEditor(undone).facilities).toEqual([]);
+  });
+
+  it('round-trips facilities through export/import JSON', () => {
+    let state = createBlankMap(20, 20);
+    state = placeCity(state, { id: 'c1', label: '甲城', q: 2, r: 2, type: 'city', forceId: 'cao' });
+    state = placeFacility(state, { type: 'arrowTower', forceId: 'cao', cityId: 'c1', q: 6, r: 6 });
+    const json = exportEditorJson(state, '设施图');
+
+    const reimported = importEditorJson(createBlankMap(20, 20), json);
+    expect(reimported.facilities).toEqual([{ type: 'arrowTower', forceId: 'cao', cityId: 'c1', q: 6, r: 6 }]);
+  });
+});
 
 describe('map editor core', () => {
   it('paints a single terrain cell without mutating the source grid', () => {

@@ -11,7 +11,8 @@ import { china42Passes } from '../game/scenario/jingxiang208';
 import { passAt, passAttackRangeCoords, passBlockedKeys } from '../game/passes';
 import { PLOT_LABELS, CITY_ATTACK_RANGE, CITY_ATTACK_MIN } from '../game/innerAffairs';
 import { rulerCityOf } from '../game/territory';
-import type { EditableCityMarker, EditorCityPlot } from '../game/map-editor/editor';
+import { FACILITIES } from '../game/battle/catalog';
+import type { EditableCityMarker, EditorCityPlot, EditorFacilityMarker } from '../game/map-editor/editor';
 import type { MapCamera } from '../game/saveSlots';
 import { useGame } from '../game/store/GameProvider';
 import type { ArmyUnit, BattleDamageReport, CityEffectReport, CityId, FacilityRepairReport, FacilityType, FirePlot, GameState, GridCell, PassId, StrategyResultReport, TerrainType, TroopType } from '../game/types';
@@ -241,6 +242,7 @@ interface StrategicMapProps {
   editorGrid?: GridCell[];
   editorCities?: EditableCityMarker[];
   editorPlots?: EditorCityPlot[];
+  editorFacilities?: EditorFacilityMarker[];
   editorPlotCityId?: string | null;
   editorMode?: boolean;
   onEditorCellPaint?(coord: GridCoord): void;
@@ -321,6 +323,7 @@ export function StrategicMap({
   editorCities,
   editorGrid,
   editorPlots,
+  editorFacilities,
   editorPlotCityId,
   editorMode = false,
   firePlotTargets = [],
@@ -1475,6 +1478,34 @@ export function StrategicMap({
               />
             );
           })}
+          {/* 编辑器：摆放的军事设施覆盖层 */}
+          {editorMode && editorFacilities?.map((facility, index) => {
+            const position = displayCellPosition(facility.q, facility.r);
+            const label = FACILITIES[facility.type]?.name ?? facility.type;
+            return (
+              <g
+                key={`editor-facility-${index}-${facility.q}-${facility.r}`}
+                data-testid="editor-facility-marker"
+                data-facility-cell={`${facility.type}:${facility.q},${facility.r}`}
+              >
+                <rect
+                  x={position.x + 3}
+                  y={position.y + 3}
+                  width={CELL_SIZE - 6}
+                  height={CELL_SIZE - 6}
+                  className="editor-facility-cell"
+                />
+                <text
+                  x={position.x + CELL_SIZE / 2}
+                  y={position.y + CELL_SIZE / 2 + 3}
+                  textAnchor="middle"
+                  className="editor-facility-label"
+                >
+                  {label}
+                </text>
+              </g>
+            );
+          })}
           {displayCities.flatMap((city) => (
             sevenCellCityFootprint(city).map((coord) => {
               const position = displayCellPosition(coord.q, coord.r);
@@ -1716,8 +1747,13 @@ export function StrategicMap({
           {facilityRepairReports.map(renderFacilityRepairNumber)}
         </svg>
         <div className={`city-marker-layer${editorMode || deployMode || moveMode ? ' is-editing' : ''}`} aria-label="荆襄城市" style={zoomStyle()}>
+          {/* 本层里的游戏专用标牌（关所 / 城池）在编辑器模式下必须整体跳过：编辑器给 StrategicMap 的
+              GameState 是 MapEditorScreen 的极简 stub（`editorStub`），伪城池只有 id/name/ownerId/
+              gridQ/gridR —— 没有 troops / population / mapX / mapY。标牌会读
+              `city.troops.toLocaleString()`，一渲染就抛 TypeError 打白屏；编辑器的城池与关隘由
+              SVG 里的 displayCities / displayEditorPasses 负责呈现。 */}
           {/* 原版关所锚点（china42x 200×200 全图；单格据点；标示牌与城池一致，无都市段） */}
-          {gridWidth === 200 && gridHeight === 200 && Object.values(state.passes ?? {}).map((pass) => {
+          {!editorMode && gridWidth === 200 && gridHeight === 200 && Object.values(state.passes ?? {}).map((pass) => {
             const force = pass.ownerId ? state.forces[pass.ownerId] : undefined;
             const isAttackTarget = attackTargetPassIdSet.has(pass.id);
             const markerPosition = displayCellCenterPercent(pass.q, pass.r);
@@ -1783,7 +1819,7 @@ export function StrategicMap({
               </button>
             );
           })}
-          {Object.values(state.cities).map((city) => {
+          {!editorMode && Object.values(state.cities).map((city) => {
             const force = city.ownerId ? state.forces[city.ownerId] : undefined;
             const selected = selectedCityId === city.id;
             const isAttackTarget = attackTargetCityIdSet.has(city.id);
@@ -1883,7 +1919,9 @@ export function StrategicMap({
             aria-hidden="true"
           />
         )}
-        {gridWidth === 200 && gridHeight === 200 && PASS_ANCHORS.map((pass) => {
+        {/* 小地图上的据点圆点同样只服务游戏局：编辑器 stub 的伪城池没有 mapX/mapY（会算出 NaN%），
+            编辑器的据点由主画布 SVG 呈现，这里整体跳过 */}
+        {!editorMode && gridWidth === 200 && gridHeight === 200 && PASS_ANCHORS.map((pass) => {
           const runtimePass = state.passes?.[pass.id as PassId];
           const force = runtimePass?.ownerId ? state.forces[runtimePass.ownerId] : undefined;
           return (
@@ -1899,7 +1937,7 @@ export function StrategicMap({
             />
           );
         })}
-        {Object.values(state.cities).map((city) => (
+        {!editorMode && Object.values(state.cities).map((city) => (
           <span
             key={city.id}
             className={`mini-city-dot${selectedCityId === city.id ? ' is-selected' : ''}`}

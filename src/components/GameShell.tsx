@@ -16,6 +16,7 @@ import { ownPassAt, passAt, passBlockedKeys, unoccupiedPassAt } from '../game/pa
 import { allPassAnchorKeys } from '../game/battle/movementRules';
 import { useGame } from '../game/store/GameProvider';
 import { territoryForceAt } from '../game/territory';
+import { TERRAIN_LABELS } from '../game/terrainLabels';
 import type { MapCamera } from '../game/saveSlots';
 import type { BattleDamageReport, CityEffectReport, CityId, DiplomacyAction, ForceId, FacilityRepairReport, FacilityType, GameCommand, GameState, GridCell, PassId, StrategyResultReport, TerrainType } from '../game/types';
 import { CityInfoPanel } from './CityInfoPanel';
@@ -77,30 +78,6 @@ type PendingDeployAction =
   | { kind: 'combat'; input: DeployConfirmInput & { destination: GridCoord }; unitId: string }
   | { kind: 'transport'; input: TransportConfirmInput & { destination: GridCoord }; unitId: string };
 const HARMFUL_UNIT_STRATEGIES = new Set<StrategyId>(['false-report', 'disturb', 'discord']);
-
-const TERRAIN_LABELS: Record<TerrainType, string> = {
-  road: '主径',
-  path: '小径',
-  plank: '栈道',
-  plain: '平地',
-  grass: '草地',
-  sand: '沙地',
-  wasteland: '荒地',
-  wetland: '湿地',
-  poison: '毒泉',
-  forest: '森林',
-  hill: '丘陵',
-  mountain: '山崖',
-  shore: '岸',
-  water: '水域',
-  stream: '川',
-  river: '河',
-  sea: '海',
-  shallow: '浅滩',
-  ferry: '渡口',
-  pass: '关隘',
-  construction: '建设用地',
-};
 
 /** 出征超距点击弹出的委任菜单携带的出征参数（点击菜单项后立即出征并设置委任） */
 type DeployDelegateMenuState = {

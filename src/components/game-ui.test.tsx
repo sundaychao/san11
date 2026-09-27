@@ -157,14 +157,14 @@ describe('game interface shell', () => {
     );
 
     expect(screen.getByTestId('battle-unit-marker')).toBeVisible();
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月1号$/);
 
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
     await user.click(screen.getByTestId('map-context-proceed-button'));
     // 出征本身即消耗该部队本旬行动（moved）→ 不算「尚未行动」，不弹确认，直接推进
     expect(screen.queryByTestId('proceed-confirm-menu')).toBeNull();
 
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月11号$/);
   });
 
   it('出征落位（本旬已移动）的部队点击无反应；修补委任改由设施菜单自动挑选它', async () => {
@@ -1191,7 +1191,7 @@ describe('game interface shell', () => {
       </GameProvider>,
     );
 
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月1号$/);
 
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
     const menu = screen.getByTestId('map-context-menu');
@@ -1203,7 +1203,7 @@ describe('game interface shell', () => {
     await user.click(within(menu).getByRole('button', { name: '进行' }));
 
     expect(screen.queryByTestId('map-context-menu')).not.toBeInTheDocument();
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月11号$/);
     const eventLog = screen.getByRole('region', { name: '军情与政务' });
     const aiForceColors = ['#2088ff', '#e23d34', '#30b45a', 'rgb(32, 136, 255)', 'rgb(226, 61, 52)', 'rgb(48, 180, 90)'];
     // 默认页签只放我方军情，AI 势力的记录收在「他方」页签里
@@ -1241,12 +1241,12 @@ describe('game interface shell', () => {
       expect(screen.getByTestId('map-context-proceed-button')).toBeVisible();
     };
 
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月1号$/);
     openProceed();
     await user.click(screen.getByTestId('map-context-proceed-button'));
 
     // 尚未推进：界面最下方出现原版式横幅（势力名高亮），鼠标处出现是/否
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月1号$/);
     const banner = screen.getByTestId('strategy-end-banner');
     expect(banner).toHaveTextContent('将结束刘备军的战略，');
     expect(banner).toHaveTextContent('有尚未行动的部队存在，');
@@ -1257,14 +1257,14 @@ describe('game interface shell', () => {
     await user.click(screen.getByTestId('proceed-confirm-no'));
     expect(screen.queryByTestId('strategy-end-banner')).toBeNull();
     expect(screen.queryByTestId('proceed-confirm-menu')).toBeNull();
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月1号$/);
 
     // 再来一次，这次点「是」→ 直接推进一旬
     openProceed();
     await user.click(screen.getByTestId('map-context-proceed-button'));
     await user.click(screen.getByTestId('proceed-confirm-yes'));
     expect(screen.queryByTestId('strategy-end-banner')).toBeNull();
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月11号$/);
   });
 
   it('未行动的部队都已委任时：点「进行」不弹提示，直接推进一旬', async () => {
@@ -1289,14 +1289,14 @@ describe('game interface shell', () => {
       </GameProvider>,
     );
 
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月1号$/);
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
     await user.click(screen.getByTestId('map-context-proceed-button'));
 
     // 不弹横幅、不弹是/否，直接推进
     expect(screen.queryByTestId('strategy-end-banner')).toBeNull();
     expect(screen.queryByTestId('proceed-confirm-menu')).toBeNull();
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月11号$/);
   });
 
   it('splits the 军情与政务 info bar into 我方 / 他方 tabs and defaults to 我方', async () => {
@@ -1541,7 +1541,7 @@ describe('game interface shell', () => {
 
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 180 });
     await user.click(screen.getByTestId('map-context-proceed-button'));
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('中旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月11号$/);
 
     fireEvent.contextMenu(screen.getByTestId('map-viewport'), { clientX: 320, clientY: 240 });
     await user.click(within(screen.getByTestId('map-context-menu')).getByRole('button', { name: '载入' }));
@@ -1553,7 +1553,7 @@ describe('game interface shell', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('save-load-dialog')).not.toBeInTheDocument();
     });
-    expect(screen.getByTestId('ten-day-label')).toHaveTextContent('上旬');
+    expect(screen.getByTestId('ten-day-label')).toHaveTextContent(/^4月1号$/);
   });
 
   it('从存档进入游戏不会重放上一局的飘字：建设中的设施不再飘一次 +350', async () => {

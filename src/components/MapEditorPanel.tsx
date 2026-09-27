@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Brush, Castle, Download, Droplets, Eraser, FileText, Grid3x3, Mountain, RotateCcw, RotateCw, Save, TreePine, Waves,
+  Brush, Castle, Download, Droplets, Eraser, FileText, Grid3x3, Mountain, RotateCcw, RotateCw, Save, Swords, TreePine, Waves,
 } from 'lucide-react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
 import type { MapEditorTool } from '../game/map-editor/editor';
@@ -20,9 +20,12 @@ export interface MapEditorPanelProps {
   /** 当前选中城池已圈定的建设用地格数（放城不再自动分配，这里让玩家看清现有几格） */
   plotCount?: number;
   canConfirmPlots: boolean;
+  /** 「军事设施」工具当前选中的归属城（军事设施随城的势力） */
+  facilityCity?: { id: string; label: string; forceLabel: string } | null;
   onBack(): void;
   onClear(): void;
   onClearPlotCity(): void;
+  onClearFacilityCity(): void;
   /** 把当前选中的城重置为「自动圈地」的标准一份（作为草稿，确定后才入库） */
   onAutoPlots?(): void;
   onConfirmPlots(): void;
@@ -65,10 +68,12 @@ export function MapEditorPanel({
   plotCity,
   plotCount,
   canConfirmPlots,
+  facilityCity,
   onAutoPlots,
   onBack,
   onClear,
   onClearPlotCity,
+  onClearFacilityCity,
   onConfirmPlots,
   onRedo,
   onSave,
@@ -138,6 +143,16 @@ export function MapEditorPanel({
           </button>
           <button
             type="button"
+            className={activeTool === 'facility' ? 'is-active' : ''}
+            aria-pressed={activeTool === 'facility'}
+            data-testid="editor-tool-facility"
+            onClick={() => onSelectTool('facility')}
+          >
+            <Swords />
+            <span>军事设施</span>
+          </button>
+          <button
+            type="button"
             className={activeTool === 'erase' ? 'is-active' : ''}
             aria-pressed={activeTool === 'erase'}
             onClick={() => onSelectTool('erase')}
@@ -181,6 +196,25 @@ export function MapEditorPanel({
               </>
             ) : (
               <span>请先点击一座城池，选择要圈建设用地的归属城</span>
+            )}
+          </div>
+        )}
+        {activeTool === 'facility' && (
+          <div className="map-editor-plot-hint" data-testid="editor-facility-hint">
+            {facilityCity ? (
+              <>
+                <span>
+                  为「<strong>{facilityCity.label}</strong>」放置军事设施（归属：<strong>{facilityCity.forceLabel}</strong>）
+                </span>
+                <span>点击地图上的空地，弹出设施选项后直接放置；同一格重复放置会替换</span>
+                <div className="map-editor-plot-actions">
+                  <button type="button" className="secondary-button" data-testid="editor-facility-clear-city" onClick={onClearFacilityCity}>
+                    取消选择
+                  </button>
+                </div>
+              </>
+            ) : (
+              <span data-testid="editor-facility-need-city">请先点击一座城池，军事设施将归属该城的势力</span>
             )}
           </div>
         )}

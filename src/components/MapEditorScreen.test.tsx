@@ -1,19 +1,39 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addSessionMap, listMaps, removeSessionMap } from '../game/mapRegistry';
-import type { EditorMapPayload } from '../game/map-editor/editor';
+import { FACILITIES } from '../game/battle/catalog';
+import { EDITOR_FACILITY_CHOICES, type EditorMapPayload } from '../game/map-editor/editor';
 import china42Data from '../game/scenario/maps/china42x.json';
 import { downloadTextFile } from '../utils/download';
 import { MapEditorScreen } from './MapEditorScreen';
 
 vi.mock('../utils/download', () => ({ downloadTextFile: vi.fn() }));
 
-// 用轻量替身替换地图画布：只暴露一个「绘制格子」入口，测试聚焦编辑器逻辑本身
+// 用轻量替身替换地图画布：只暴露一个「绘制格子」入口，测试聚焦编辑器逻辑本身。
+// 需要点不同格子时改 editorPaintCoord（默认 (1,1)，既有用例不受影响）
+export const editorPaintCoord = { q: 1, r: 1 };
+/** 悬停提示测试用的独立坐标，避免污染 editorPaintCoord 影响后续用例 */
+export const editorHoverCoord = { q: 1, r: 1, terrain: 'river' };
 vi.mock('./StrategicMap', () => ({
-  StrategicMap: ({ onEditorCellPaint }: { onEditorCellPaint?(coord: { q: number; r: number }): void }) => (
-    <button type="button" data-testid="mock-paint" onClick={() => onEditorCellPaint?.({ q: 1, r: 1 })}>
-      paint
-    </button>
+  StrategicMap: ({ onEditorCellPaint, onCellHover }: {
+    onEditorCellPaint?(coord: { q: number; r: number }): void;
+    onCellHover?(cell: { q: number; r: number; terrain: string } | null): void;
+  }) => (
+    <>
+      <button type="button" data-testid="mock-paint" onClick={() => onEditorCellPaint?.({ ...editorPaintCoord })}>
+        paint
+      </button>
+      <button
+        type="button"
+        data-testid="mock-hover"
+        onClick={() => onCellHover?.({ ...editorHoverCoord })}
+      >
+        hover
+      </button>
+      <button type="button" data-testid="mock-hover-leave" onClick={() => onCellHover?.(null)}>
+        leave
+      </button>
+    </>
   ),
 }));
 
@@ -45,6 +65,97 @@ afterEach(() => {
   for (const map of listMaps()) {
     if (!map.builtin) removeSessionMap(map.id);
   }
+});
+
+describe('MapEditorScreen 军事设施', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('军事设施工具：选城 → 点地点 → 弹设施选项 → 放置并随荷载保存', () => {
+    editorPaintCoord.q = 1; editorPaintCoord.r = 1;
+    const { onSave } = renderEditor();
+    // 先放一座刘备的城（1,1）
+    fireEvent.click(screen.getByRole('button', { name: '城池' }));
+    fireEvent.click(screen.getByTestId('mock-paint'));
+    fireEvent.click(screen.getByTestId('placement-force-刘备'));
+    fireEvent.change(screen.getByTestId('editor-name-input'), { target: { value: '成都' } });
+    fireEvent.click(screen.getByTestId('editor-name-confirm'));
+
+    // 切到军事设施工具：先提示选城，点城址后归属就绪
+    fireEvent.click(screen.getByTestId('editor-tool-facility'));
+    expect(screen.getByTestId('editor-facility-need-city')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('mock-paint'));
+    const hint = screen.getByTestId('editor-facility-hint');
+    expect(hint.textContent).toContain('成都');
+    expect(hint.textContent).toContain('刘备');
+
+    // 点击别的空地 → 弹设施选项 → 选「箭楼」直接放置
+    editorPaintCoord.q = 3; editorPaintCoord.r = 1;
+    fireEvent.click(screen.getByTestId('mock-paint'));
+    const menu = screen.getByTestId('editor-facility-menu');
+    expect(within(menu).getByTestId('editor-facility-type-arrowTower')).toBeInTheDocument();
+    fireEvent.click(within(menu).getByTestId('editor-facility-type-arrowTower'));
+    expect(screen.queryByTestId('editor-facility-menu')).not.toBeInTheDocument();
+
+    fillMapName('测试图');
+    fireEvent.click(screen.getByTestId('editor-save-cache'));
+    expect(savedPayload(onSave).facilities).toEqual([
+      { type: 'arrowTower', forceId: 'liu', cityId: 'city-1-1', q: 3, r: 1 },
+    ]);
+  });
+
+  it('无主城不能归属军事设施：选城后只提示、不弹设施选项', () => {
+    editorPaintCoord.q = 1; editorPaintCoord.r = 1;
+    const { onSave } = renderEditor();
+    fireEvent.click(screen.getByRole('button', { name: '城池' }));
+    fireEvent.click(screen.getByTestId('mock-paint'));
+    fireEvent.click(screen.getByTestId('placement-force-无主'));
+    fireEvent.change(screen.getByTestId('editor-name-input'), { target: { value: '空城' } });
+    fireEvent.click(screen.getByTestId('editor-name-confirm'));
+
+    fireEvent.click(screen.getByTestId('editor-tool-facility'));
+    fireEvent.click(screen.getByTestId('mock-paint')); // 选中无主城
+    fireEvent.click(screen.getByTestId('mock-paint')); // 再点同格 → 设施工具下点城址=选城，不弹选项
+
+    expect(screen.queryByTestId('editor-facility-menu')).not.toBeInTheDocument();
+    fillMapName('测试图');
+    fireEvent.click(screen.getByTestId('editor-save-cache'));
+    expect(savedPayload(onSave).facilities).toEqual([]);
+  });
+});
+
+describe('MapEditorScreen 地形信息提示', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('悬停地图格子时在底部显示与游戏同款的坐标/地形/疆域提示', () => {
+    editorPaintCoord.q = 1; editorPaintCoord.r = 1;
+    editorHoverCoord.q = 1; editorHoverCoord.r = 1; editorHoverCoord.terrain = 'river';
+    renderEditor();
+    // 先放一座曹操的城，用来验证「疆域」按最近城池归属
+    fireEvent.click(screen.getByRole('button', { name: '城池' }));
+    fireEvent.click(screen.getByTestId('mock-paint'));
+    fireEvent.click(screen.getByTestId('placement-force-曹操'));
+    fireEvent.change(screen.getByTestId('editor-name-input'), { target: { value: '襄阳' } });
+    fireEvent.click(screen.getByTestId('editor-name-confirm'));
+
+    expect(screen.queryByTestId('hover-coordinate')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-hover'));
+    const hint = screen.getByTestId('hover-coordinate');
+    expect(hint.textContent).toContain('坐标：1,1');
+    expect(hint.textContent).toContain('地形：河');
+    expect(hint.textContent).toContain('疆域：曹操');
+
+    fireEvent.click(screen.getByTestId('mock-hover-leave'));
+    expect(screen.queryByTestId('hover-coordinate')).not.toBeInTheDocument();
+  });
+
+  it('地图上没有任何城池时疆域显示为无主', () => {
+    editorHoverCoord.q = 2; editorHoverCoord.r = 2;
+    renderEditor();
+    fireEvent.click(screen.getByTestId('mock-hover'));
+    expect(screen.getByTestId('hover-coordinate').textContent).toContain('坐标：2,2');
+    expect(screen.getByTestId('hover-coordinate').textContent).toContain('疆域：无主');
+  });
 });
 
 describe('MapEditorScreen 城池命名', () => {
@@ -105,6 +216,41 @@ describe('MapEditorScreen 城池命名', () => {
     expect(savedPayload(onSave).cities).toEqual([
       { id: 'city-1-1', type: 'city', label: '江陵', q: 1, r: 1, forceId: 'cao' },
     ]);
+  });
+
+  it('设施选项与 catalog 同步：野外设施全部可摆，科技新增的 7 个取值一个不少', () => {
+    editorPaintCoord.q = 1; editorPaintCoord.r = 1;
+    renderEditor();
+    // 先放一座有主的城（1,1），再打开设施菜单
+    fireEvent.click(screen.getByRole('button', { name: '城池' }));
+    fireEvent.click(screen.getByTestId('mock-paint'));
+    fireEvent.click(screen.getByTestId('placement-force-曹操'));
+    fireEvent.change(screen.getByTestId('editor-name-input'), { target: { value: '许昌' } });
+    fireEvent.click(screen.getByTestId('editor-name-confirm'));
+
+    fireEvent.click(screen.getByTestId('editor-tool-facility'));
+    fireEvent.click(screen.getByTestId('mock-paint')); // 选中归属城
+    editorPaintCoord.q = 3; editorPaintCoord.r = 1;
+    fireEvent.click(screen.getByTestId('mock-paint')); // 点空地 → 弹设施菜单
+    const menu = screen.getByTestId('editor-facility-menu');
+
+    // 菜单项 = catalog 全部野外设施：名称/耐久统一取自 FACILITIES（数值单一出处），不再各写一份表
+    const catalogFacilities = Object.values(FACILITIES).filter((definition): definition is NonNullable<typeof definition> => Boolean(definition));
+    expect(EDITOR_FACILITY_CHOICES.map((choice) => choice.type).sort()).toEqual(catalogFacilities.map((facility) => facility.type).sort());
+    for (const facility of catalogFacilities) {
+      expect(within(menu).getByTestId(`editor-facility-type-${facility.type}`)).toHaveTextContent(facility.name);
+    }
+
+    // 本会话新增的 7 个 FacilityType：档次型设施（砦/石墙/连弩楼/业火种/业火球）也必须在菜单里可选，
+    // 否则「地图编辑器能摆的设施」比「开局接受的设施」少一截（漏同步会在这里红）
+    const newFacilityTypes = ['formation', 'fort', 'stoneWall', 'crossbowTower', 'catapultTower', 'hellfireSeed', 'hellfireBall'] as const;
+    for (const type of newFacilityTypes) {
+      expect(FACILITIES[type], `catalog 缺少设施 ${type}`).toBeDefined();
+      expect(within(menu).getByTestId(`editor-facility-type-${type}`)).toHaveTextContent(FACILITIES[type]!.name);
+    }
+
+    // 收尾：把 mock 画布的落点还原成默认 (1,1)，后面依赖默认落点的用例不受影响
+    editorPaintCoord.q = 1; editorPaintCoord.r = 1;
   });
 });
 

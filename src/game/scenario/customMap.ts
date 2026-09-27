@@ -1,12 +1,13 @@
 import { emptyArmaments, initialArmaments } from '../armaments';
-import { gridKey, neighborsOf } from '../battle/grid';
+import { BLOCKED_TERRAINS, FACILITIES, isWaterTerrain } from '../battle/catalog';
+import { gridKey, neighborsOf, sevenCellCityFootprint } from '../battle/grid';
 import { derivePersonality } from '../debate';
 import { initCityPopulation, initConstructionPlots } from '../innerAffairs';
 import { DEFAULT_OFFICER_LOYALTY, LEADER_INITIAL_LOYALTY } from '../loyalty';
 import { INITIAL_OFFICER_MERIT, rankForCityCount } from '../ranks';
 import { TREASURES } from '../treasures';
-import type { CityArmaments, City, CityId, Force, ForceId, GameState, Officer, Pass, PassId, TreasureState } from '../types';
-import type { EditorMapPayload, EditorStrongholdMarker } from '../map-editor/editor';
+import type { CityArmaments, City, CityId, Facility, Force, ForceId, GameState, GridCell, Officer, Pass, PassId, TreasureState } from '../types';
+import type { EditorFacilityMarker, EditorMapPayload, EditorStrongholdMarker } from '../map-editor/editor';
 import {
   DEFAULT_CITY_ECONOMY,
   SCENARIO_FORCES,
@@ -112,6 +113,43 @@ export function assignInitialRanks(state: GameState): void {
     const cityCount = Object.values(state.cities).filter((city) => city.ownerId === force.id).length;
     force.rank = rankForCityCount(cityCount).id;
   }
+}
+
+/**
+ * 编辑器摆放的军事设施标记 → 战局设施表（成品：耐久满、已建成）。
+ * 与游戏内 `isBuildableFacilityCell` 同口径：水面/山崖/川不可放，城池 7 格 footprint 内不放；
+ * 同格重复取首个，非法类型静默跳过。
+ */
+export function facilitiesFromEditorMarkers(
+  markers: EditorFacilityMarker[] | undefined,
+  grid: GridCell[],
+  cityCenters: Array<{ q: number; r: number }>,
+): Record<string, Facility> {
+  const facilities: Record<string, Facility> = {};
+  if (!markers || markers.length === 0) return facilities;
+  const footprintKeys = new Set(
+    cityCenters.flatMap((center) => sevenCellCityFootprint(center).map((coord) => gridKey(coord))),
+  );
+  for (const marker of markers) {
+    const definition = FACILITIES[marker.type];
+    if (!definition) continue;
+    // 设施必须有归属势力（存档校验与战斗归属都要求）——无主城放不了军事设施
+    if (!marker.forceId) continue;
+    const key = gridKey(marker);
+    if (footprintKeys.has(key) || facilities[key]) continue;
+    const cell = grid.find((candidate) => candidate.q === marker.q && candidate.r === marker.r);
+    if (!cell || BLOCKED_TERRAINS.has(cell.terrain) || isWaterTerrain(cell.terrain)) continue;
+    facilities[`facility-${marker.q}-${marker.r}`] = {
+      id: `facility-${marker.q}-${marker.r}`,
+      type: marker.type,
+      forceId: marker.forceId,
+      q: marker.q,
+      r: marker.r,
+      durability: definition.durability,
+      completed: true,
+    };
+  }
+  return facilities;
 }
 
 /**
@@ -242,13 +280,17 @@ export function createGameFromMap(
   }
   initConstructionPlots(state, undefined, manualPlotsByCity, map.plotsSpecified !== true);
   initCityPopulation(state);
+  // 编辑器摆放的军事设施：直接以成品（耐久满、已建成）落进战局
+  const editorFacilities = facilitiesFromEditorMarkers(map.facilities, grid, cityMarkers);
+  if (Object.keys(editorFacilities).length > 0) state.facilities = editorFacilities;
   return state;
 }
 
-/** 某地图有主城池所使用的势力（供势力选择界面列出） */
+/** 某地图有主城池所使用的势力（供势力选择界面列出）。
+ *  `cities` 缺字段（手改过的载荷）时按「无有主城」处理，列表页/房间页不会因此抛错。 */
 export function forcesOfMap(map: EditorMapPayload): ForceId[] {
   const used = new Set<ForceId>();
-  for (const marker of map.cities) {
+  for (const marker of map.cities ?? []) {
     if (marker.type === 'pass') continue;
     if (marker.forceId) used.add(marker.forceId);
   }

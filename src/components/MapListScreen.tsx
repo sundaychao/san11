@@ -47,8 +47,9 @@ export function MapListScreen({ mode, onSelect, onCreateNew, onBack }: MapListSc
         // 刷新列表
         event.target.value = '';
         window.location.reload();
-      } catch {
-        alert('JSON 文件解析失败');
+      } catch (error) {
+        // 归一化失败时 importMapJson 会抛出玩家看得懂的原因，别用笼统文案盖掉
+        alert(error instanceof Error && error.message ? error.message : 'JSON 文件解析失败');
       }
     };
     reader.readAsText(file);

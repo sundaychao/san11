@@ -156,6 +156,49 @@ describe('persistence', () => {
     expect(loadSave(storage, 'auto').ok).toBe(true);
   });
 
+  it('编辑器摆放的军事设施进游戏即为成品设施（耐久满、已建成），无主/城内项跳过', () => {
+    const width = 40;
+    const height = 40;
+    const grid: GridCell[] = [];
+    for (let r = 0; r < height; r += 1) {
+      for (let q = 0; q < width; q += 1) grid.push({ q, r, terrain: 'plain' });
+    }
+    const map: EditorMapPayload = {
+      schemaVersion: 2,
+      width,
+      height,
+      backgroundImage: '',
+      grid,
+      cities: [
+        { type: 'city', id: 'city-10-10', label: '我方城', q: 10, r: 10, forceId: 'liu' },
+      ],
+      plotsSpecified: true,
+      plots: [{ cityId: 'city-10-10', q: 11, r: 10 }],
+      facilities: [
+        { type: 'arrowTower', forceId: 'liu', cityId: 'city-10-10', q: 14, r: 10 },
+        { type: 'drum', forceId: null, q: 16, r: 10 }, // 无主：跳过
+        { type: 'arrowTower', forceId: 'liu', q: 10, r: 10 }, // 城中心：跳过
+      ],
+    };
+
+    const state = createGameFromMap(map, 'liu', 5);
+    const facilities = Object.values(state.facilities ?? {});
+    expect(facilities).toHaveLength(1);
+    expect(facilities[0]).toMatchObject({
+      id: 'facility-14-10',
+      type: 'arrowTower',
+      forceId: 'liu',
+      q: 14,
+      r: 10,
+      durability: 700,
+      completed: true,
+    });
+
+    // 带设施的自定义图整局可存档
+    writeSave(storage, 'auto', state);
+    expect(loadSave(storage, 'auto').ok).toBe(true);
+  });
+
   it('内置剧本的战报仍拒绝未知城 id：放行只对自定义地图生效', () => {
     const state = createGame('liu', 3);
     state.cityEffectReports = [{

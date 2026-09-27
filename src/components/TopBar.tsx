@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { LogOut } from 'lucide-react';
 import { useGame } from '../game/store/GameProvider';
+import { calendarDateLabel, calendarYear, seasonLabel } from '../game/calendar';
 import { GameRulesDialog } from './GameRulesDialog';
 import { SkillCatalogDialog } from './SkillCatalogDialog';
 
-const MONTH_NAMES = ['四月', '五月', '六月', '七月', '八月', '九月', '十月', '冬月', '腊月', '正月', '二月', '三月'];
-const TEN_DAY_LABELS = { 1: '上旬', 2: '中旬', 3: '下旬' } as const;
-
 /**
- * 顶部信息条：只保留日期/旬/势力/行动力/技巧P 等信息展示。
+ * 顶部信息条：只保留日期/势力/行动力/技巧P 等信息展示。
+ * 日期统一显示成「6月1号」这类月号 + 日号（不再出现上/中/下旬），最左侧方印显示当前季节。
  * 武将一览、存档、结束本旬、进行下月等操作改由地图右键菜单承载，这里不再重复放置按钮。
  * 右上角的「游戏规则」「查看特技」为临时面板入口，仅用于开发期查阅。
  */
@@ -18,8 +17,9 @@ export function TopBar() {
   const [showGameRules, setShowGameRules] = useState(false);
   if (!state) return null;
   const force = state.forces[state.playerForceId];
-  const year = 13 + Math.floor((state.month + 2) / 12);
-  const monthName = MONTH_NAMES[(state.month - 1) % 12];
+  const year = calendarYear(state.month);
+  const dateLabel = calendarDateLabel(state.month, state.tenDay);
+  const season = seasonLabel(state.month);
   const isOnline = online.mode === 'online';
   const activePlayer = isOnline ? online.players.find((player) => player.id === online.activePlayerId) : undefined;
   const isMyOnlineTurn = !isOnline || !online.activePlayerId || online.activePlayerId === online.playerId;
@@ -27,9 +27,8 @@ export function TopBar() {
   return (
     <>
       <header className="top-bar">
-        <div className="imperial-seal" aria-hidden="true">汉</div>
-        <div className="date-block"><span>建安{year}年</span><strong>{monthName}</strong></div>
-        <div className="top-metric"><span>旬</span><strong data-testid="ten-day-label">{TEN_DAY_LABELS[state.tenDay]}</strong></div>
+        <div className="imperial-seal" data-testid="season-seal" data-season={season} title={`季节：${season}`} aria-label={`季节：${season}`}>{season}</div>
+        <div className="date-block"><span>建安{year}年</span><strong data-testid="ten-day-label">{dateLabel}</strong></div>
         <div className="top-metric"><span>势力</span><strong className="top-force-name" style={{ color: force.color }}>{force.name}</strong></div>
         <div className="top-metric"><span>行动力</span><strong data-testid="action-points">{state.actionPoints[state.playerForceId]}</strong></div>
         <div className="top-metric"><span>技巧P</span><strong data-testid="tech-points">{(force.techP ?? 0).toLocaleString('en-US')}</strong></div>

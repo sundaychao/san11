@@ -6,7 +6,7 @@ import { CITY_GOLD_CAP, cityTroopCap } from '../innerAffairs';
 import { PASS_TROOP_CAP } from '../passes';
 import { cityResourceCaps, strongholdsExceedCaps } from '../strongholdCapacity';
 import { createGame } from '../scenario/jingxiang208';
-import { territoryCityAt, territoryForceAt } from '../territory';
+import { territoryCityAtOrThrow, territoryForceAt } from '../territory';
 import { settleTenDay } from '../turn';
 import type { FacilityType, TroopType } from '../types';
 import * as skillHandlers from '../skills/handlers';
@@ -634,6 +634,30 @@ describe('battle deployment and movement actions', () => {
     expect(facilityBuildTargets(next, unit.id)).not.toContainEqual(target);
     readyUnitAt(next, unit.id, { q: 10, r: 10 }, 'sword');
     expect(() => moveUnit(next, 'liu', unit.id, target)).toThrow(/占用|通行|目标/);
+  });
+
+  it('军事设施只能摆放在平地／草地／主径／沙地上', () => {
+    const buildTargetsOn = (terrain: Parameters<typeof setUniformTerrain>[1]) => {
+      const state = deployUnit(createGame('liu', 1), 'liu', {
+        cityId: 'jiangling',
+        officerId: 'guan-yu',
+        troops: 4000,
+        food: 6000,
+      });
+      const unit = Object.values(state.units)[0];
+      readyUnitAt(state, unit.id, { q: 10, r: 10 }, 'sword');
+      state.units[unit.id].gold = 1000;
+      setUniformTerrain(state, terrain);
+      return facilityBuildTargets(state, unit.id, undefined, 'arrowTower');
+    };
+
+    for (const terrain of ['plain', 'grass', 'road', 'sand'] as const) {
+      expect(buildTargetsOn(terrain).length, `${terrain} 应可建造军事设施`).toBeGreaterThan(0);
+    }
+
+    for (const terrain of ['forest', 'wetland', 'path', 'plank', 'wasteland', 'hill', 'mountain', 'shallow', 'water', 'stream'] as const) {
+      expect(buildTargetsOn(terrain), `${terrain} 不可建造军事设施`).toEqual([]);
+    }
   });
 
   it('builds facilities by troop strength and marks incomplete construction as occupying only', () => {
@@ -2589,7 +2613,7 @@ describe('battle deployment and movement actions', () => {
     const destination = neighborsOf(from.q, from.r)
       .map((neighbor) => deployed.grid.find((cell) => cell.q === neighbor.q && cell.r === neighbor.r))
       .find((cell) => cell && passable(cell) && territoryForceAt(deployed, cell) === 'cao')!;
-    const defenseCity = territoryCityAt(deployed, destination);
+    const defenseCity = territoryCityAtOrThrow(deployed, destination);
     const unit = Object.values(deployed.units)[0];
     deployed.units[unit.id].q = from.q;
     deployed.units[unit.id].r = from.r;

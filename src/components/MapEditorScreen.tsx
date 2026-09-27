@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useAudioEventAdapter } from '../audio/reactAudioEventAdapter';
-import type { ForceId, GameState, TerrainType } from '../game/types';
+import type { ForceId, GameState, GridCell, TerrainType } from '../game/types';
 import { GameProvider } from '../game/store/GameProvider';
 import {
   createBlankMap,
@@ -10,17 +10,23 @@ import {
   commitPlots,
   eraseStronghold,
   exportEditorJson,
+  EDITOR_FACILITY_CHOICES,
   paintTerrain,
   placeCity,
+  placeFacility,
   placePass,
+  removeFacilityAt,
   redoEditor,
   undoEditor,
   type EditorCityPlot,
+  type EditorFacilityMarker,
   type EditorMapPayload,
   type MapEditorState,
   type MapEditorTool,
 } from '../game/map-editor/editor';
 import { SCENARIO_FORCES } from '../game/scenario/jingxiang208';
+import { TERRAIN_LABELS } from '../game/terrainLabels';
+import { territoryForceAt } from '../game/territory';
 import { addSessionMap, getMap, updateSessionMap } from '../game/mapRegistry';
 import { downloadTextFile } from '../utils/download';
 import { StrategicMap } from './StrategicMap';
@@ -28,6 +34,25 @@ import { MapEditorPanel } from './MapEditorPanel';
 
 /** 编辑器所需的极简 GameState stub：仅满足 StrategicMap editorMode 分支的字段读取 */
 function editorStub(editor: MapEditorState): GameState {
+  // 疆域提示（与游戏中同一口径）要求 cities 可读、forces 可按 key 取名：
+  // 把编辑器标记按城抽成伪 City，ownerId 用 forceId 直通，forces 则由 SCENARIO_FORCES 提供名字
+  const cities = Object.fromEntries(
+    editor.cities
+      .filter((marker) => (marker.type ?? 'city') === 'city')
+      .map((marker) => [marker.id, {
+        id: marker.id,
+        name: marker.label,
+        ownerId: marker.forceId ?? null,
+        gridQ: marker.q,
+        gridR: marker.r,
+      }]),
+  ) as GameState['cities'];
+  const forces = {} as GameState['forces'];
+  for (const marker of editor.cities) {
+    if (marker.forceId && !forces[marker.forceId]) {
+      forces[marker.forceId] = { name: SCENARIO_FORCES[marker.forceId]?.name ?? marker.forceId } as GameState['forces'][ForceId];
+    }
+  }
   return {
     schemaVersion: 3,
     scenarioId: 'jingxiang-208',
@@ -39,8 +64,8 @@ function editorStub(editor: MapEditorState): GameState {
     playerForceId: 'cao',
     phase: 'playing',
     actionPoints: { cao: 0, liu: 0, sun: 0, biao: 0 },
-    forces: {} as GameState['forces'],
-    cities: {} as GameState['cities'],
+    forces,
+    cities,
     officers: {},
     grid: editor.grid,
     gridWidth: editor.width,
@@ -78,7 +103,7 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
     // 早先保存的旧图没有该标记，按开局同一口径自动补齐一份（否则这张图在玩家眼里会突然全城没有建设用地）
     const payload = getMap(mapId)?.payload;
     if (!payload) return createBlankMap(200, 200);
-    const loaded = createEditorState(payload.grid, payload.cities, payload.width, payload.height, payload.plots ?? []);
+    const loaded = createEditorState(payload.grid, payload.cities, payload.width, payload.height, payload.plots ?? [], payload.facilities ?? []);
     return payload.plotsSpecified ? loaded : autoAssignEditorPlots(loaded);
   });
   // 既有地图的原名：进入编辑时预填地图名输入框，保存时用于判断「是否改名另存」
@@ -95,9 +120,15 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
   const [pendingName, setPendingName] = useState<{ forceId: ForceId | null } | null>(null);
   // 「建设用地」模式下当前圈地归属的城
   const [plotCityId, setPlotCityId] = useState<string | null>(null);
+  // 「军事设施」模式下当前归属城（设施随城的势力）
+  const [facilityCityId, setFacilityCityId] = useState<string | null>(null);
+  // 「军事设施」模式下已点击的落点：弹设施选项，选完直接放置
+  const [pendingFacility, setPendingFacility] = useState<{ q: number; r: number } | null>(null);
   // 「建设用地」草稿：确定前不落库，取消即整体丢弃
   const [draftAdds, setDraftAdds] = useState<EditorCityPlot[]>([]);
   const [draftRemoves, setDraftRemoves] = useState<string[]>([]);
+  // 底部地形提示：与游戏中同款（坐标 / 地形 / 疆域），悬停地图格子即显示
+  const [hoveredCell, setHoveredCell] = useState<GridCell | null>(null);
 
   const stub = useMemo(() => editorStub(editor), [editor]);
 
@@ -151,7 +182,14 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
   const handleSelectTool = (tool: MapEditorTool) => {
     setActiveTool(tool);
     if (tool !== 'plot') selectPlotCity(null);
+    if (tool !== 'facility') {
+      setFacilityCityId(null);
+      setPendingFacility(null);
+    }
   };
+
+  const facilityCity = facilityCityId ? editor.cities.find((c) => c.id === facilityCityId && c.type === 'city') : undefined;
+  const facilityAt = (q: number, r: number) => editor.facilities.find((f) => f.q === q && f.r === r);
 
   const handlePaint = (coord: { q: number; r: number }) => {
     if (activeTool === 'plot') {
@@ -182,14 +220,30 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
       });
       return;
     }
+    if (activeTool === 'facility') {
+      // 点击城址 → 选中归属城（军事设施随城的势力）；点击空地 → 弹设施选项
+      const city = editor.cities.find((c) => c.q === coord.q && c.r === coord.r && c.type === 'city');
+      if (city) {
+        emitAudioEvent({ type: 'menu-click-on' });
+        setFacilityCityId(facilityCityId === city.id ? null : city.id);
+        setPendingFacility(null);
+        return;
+      }
+      if (!facilityCityId) return;
+      emitAudioEvent({ type: 'menu-click-on' });
+      setPendingFacility({ q: coord.q, r: coord.r });
+      return;
+    }
     if (activeTool === 'erase') {
       const marker = editor.cities.find((c) => c.q === coord.q && c.r === coord.r);
       if (marker && marker.id === plotCityId) selectPlotCity(null);
+      if (marker && marker.id === facilityCityId) setFacilityCityId(null);
       setEditor((current) => {
         if (!current) return current;
         const marker = current.cities.find((c) => c.q === coord.q && c.r === coord.r);
         let next = current;
         if (marker) next = eraseStronghold(next, marker.id);
+        else if (current.facilities.some((f) => f.q === coord.q && f.r === coord.r)) next = removeFacilityAt(next, coord);
         else if (current.grid.find((cell) => cell.q === coord.q && cell.r === coord.r)?.terrain !== 'plain') {
           next = paintTerrain(next, coord, 'plain');
         }
@@ -220,6 +274,29 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
     });
     setPendingPlacement(null);
     setPendingName(null);
+  };
+
+  /** 落地军事设施：归属/城池在选城时已定，这里只补设施类型 */
+  const commitFacility = (type: EditorFacilityMarker['type']) => {
+    if (!pendingFacility || !facilityCity) return;
+    const marker: EditorFacilityMarker = {
+      type,
+      forceId: facilityCity.forceId ?? null,
+      cityId: facilityCity.id,
+      q: pendingFacility.q,
+      r: pendingFacility.r,
+    };
+    emitAudioEvent({ type: 'menu-click-on' });
+    setEditor((current) => (current ? placeFacility(current, marker) : current));
+    setPendingFacility(null);
+  };
+
+  /** 拆除该格已有的军事设施 */
+  const dismantleFacilityAt = () => {
+    if (!pendingFacility) return;
+    emitAudioEvent({ type: 'menu-click-on' });
+    setEditor((current) => (current ? removeFacilityAt(current, pendingFacility) : current));
+    setPendingFacility(null);
   };
 
   /** 选择归属：新建据点先弹命名框；已存在的据点仅改归属、保留原名 */
@@ -299,7 +376,9 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
             editorCities={editor.cities}
             editorPlots={activeTool === 'plot' ? previewPlots : editor.plots}
             editorPlotCityId={activeTool === 'plot' ? plotCityId : null}
+            editorFacilities={editor.facilities}
             onEditorCellPaint={handlePaint}
+            onCellHover={setHoveredCell}
           />
         </div>
         <MapEditorPanel
@@ -312,19 +391,29 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
           plotCity={plotCity ? { id: plotCity.id, label: plotCity.label } : null}
           plotCount={plotCityId ? editor.plots.filter((plot) => plot.cityId === plotCityId).length : undefined}
           canConfirmPlots={hasPlotDraft}
+          facilityCity={facilityCity ? { id: facilityCity.id, label: facilityCity.label, forceLabel: forceName(facilityCity.forceId) } : null}
           onAutoPlots={fillPlotsForCity}
           onBack={onBack}
           onClear={() => {
             selectPlotCity(null);
+            setFacilityCityId(null);
             setEditor((current) => (current ? eraseStrongholdCurrentMap(current) : current));
           }}
           onConfirmPlots={confirmPlots}
           onClearPlotCity={() => selectPlotCity(null)}
+          onClearFacilityCity={() => setFacilityCityId(null)}
           onRedo={() => setEditor((current) => (current ? redoEditor(current) : current))}
           onSave={handleSave}
           onSelectTool={handleSelectTool}
           onUndo={() => setEditor((current) => (current ? undoEditor(current) : current))}
         />
+
+        {hoveredCell && (
+          // 与游戏中同款的地形信息条（游戏内的实现见 GameShell 的 hover-coordinate）
+          <div className="hover-coordinate tool-panel" data-testid="hover-coordinate">
+            坐标：{hoveredCell.q},{hoveredCell.r} 地形：{TERRAIN_LABELS[hoveredCell.terrain]} 疆域：{(() => { const owner = territoryForceAt(stub, hoveredCell); return owner ? stub.forces[owner]?.name ?? owner : '无主'; })()}
+          </div>
+        )}
 
         {pendingPlacement && !pendingName && (
           <nav
@@ -368,6 +457,42 @@ export function MapEditorScreen({ mapId, onSave, onBack }: MapEditorScreenProps)
             onCancel={() => setPendingName(null)}
             onSubmit={(name) => commitPlacement(name, pendingName.forceId)}
           />
+        )}
+
+        {pendingFacility && facilityCity && (
+          <nav
+            className="city-command-menu tool-panel"
+            data-testid="editor-facility-menu"
+            style={{ left: 260, top: 120 }}
+            aria-label="放置军事设施"
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setPendingFacility(null);
+            }}
+          >
+            <div className="city-command-secondary">
+              <div className="city-command-menu-title">放置军事设施</div>
+              <div className="city-command-menu-title">
+                归属：{facilityCity.label}（{forceName(facilityCity.forceId)}）
+              </div>
+              {EDITOR_FACILITY_CHOICES.map(({ type, label }) => (
+                <button
+                  key={type}
+                  type="button"
+                  data-testid={`editor-facility-type-${type}`}
+                  onClick={() => commitFacility(type)}
+                >
+                  {facilityAt(pendingFacility.q, pendingFacility.r)?.type === type ? '✓ ' : ''}{label}
+                </button>
+              ))}
+              {facilityAt(pendingFacility.q, pendingFacility.r) && (
+                <button type="button" data-testid="editor-facility-dismantle" onClick={dismantleFacilityAt}>
+                  拆除此设施
+                </button>
+              )}
+              <button type="button" data-testid="editor-facility-cancel" onClick={() => setPendingFacility(null)}>取消</button>
+            </div>
+          </nav>
         )}
       </div>
     </GameProvider>

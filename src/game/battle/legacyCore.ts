@@ -19,7 +19,7 @@ import {
 } from '../skills/rules/combat';
 import { facilityBuildPowerMultiplier } from '../skills/rules/facility';
 import { resolveStrategySkillRules } from '../skills/rules/strategy';
-import { territoryCityAt } from '../territory';
+import { territoryCityAtOrThrow } from '../territory';
 import { hasCityTrait } from '../cityTraits';
 import { captureOfficersOnDestroy, captureCityOnCapture } from '../captives';
 import { treasureDefinition } from '../treasures';
@@ -70,6 +70,7 @@ import {
   HELLFIRE_PLOT_MAX_TEN_DAYS,
   HELLFIRE_PLOT_MIN_TEN_DAYS,
   HELLFIRE_SEED_DAMAGE,
+  MILITARY_FACILITY_TERRAINS,
   NAVAL_TACTIC_IDS,
   PUBLIC_REPAIRABLE_FACILITY_TYPES,
   SIEGE_TACTIC_OF_WEAPON,
@@ -211,7 +212,8 @@ function isInLimitedFacilitySpacing(state: GameState, coord: GridCoord, facility
 
 function isBuildableFacilityCell(state: GameState, coord: GridCoord, facilityType?: FacilityType) {
   const cell = cellAt(state, coord);
-  if (!cell || BLOCKED_TERRAINS.has(cell.terrain) || isWaterTerrain(cell.terrain)) return false;
+  // 军事设施只能摆放在平地／草地／主径／沙地上；川、崖、水域、森林、湿地、栈道等一律不可
+  if (!cell || !MILITARY_FACILITY_TERRAINS.has(cell.terrain)) return false;
   const key = gridKey(coord);
   return !allCityKeys(state).has(key) &&
     !occupiedUnitKeys(state).has(key) &&
@@ -267,7 +269,7 @@ export function dispatchTerritoryDefenseForForce(state: GameState, forceId: Forc
     const invaderCell = cellAt(state, invader);
     if (!invaderCell) continue;
 
-    const territoryCity = territoryCityAt(state, invaderCell);
+    const territoryCity = territoryCityAtOrThrow(state, invaderCell);
     if (territoryCity.ownerId !== forceId) continue;
     if (hasActiveDefenseUnit(state, territoryCity)) continue;
 
@@ -1915,7 +1917,7 @@ export function settleBattleFacilities(next: GameState, activeForceId?: ForceId)
       const profile = TOWER_PROFILES[facility.type]!;
       if (activeForceId && facility.forceId !== activeForceId) continue;
       // 要塞城：本方工事伤害+50%（箭楼/连弩楼/投石台所在领地为要塞特性城且归属同势力时生效）
-      const towerTerritory = territoryCityAt(next, facility);
+      const towerTerritory = territoryCityAtOrThrow(next, facility);
       const fortressMultiplier = towerTerritory.ownerId === facility.forceId && hasCityTrait(towerTerritory.id, 'fortress') ? 1.5 : 1;
       for (const unit of [...Object.values(next.units)]) {
         if (unit.forceId === facility.forceId) continue;

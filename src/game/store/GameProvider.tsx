@@ -36,10 +36,10 @@ import type { GridCoord } from '../battle/grid';
 import { hasExecutableDelegation, runDelegatedUnits } from '../battle/delegate';
 import { advanceTenDay, settleMonth, settleTenDay } from '../turn';
 import { createGame } from '../scenario/jingxiang208';
-import { createGameFromMap } from '../scenario/customMap';
+import { createGameFromMap, facilitiesFromEditorMarkers } from '../scenario/customMap';
 import { BUILTIN_MAP_CHINA42_ID, getMap } from '../mapRegistry';
 import { settleForceTurnStart } from '../skills/rules/turn';
-import type { EditableCityMarker, EditorMapPayload } from '../map-editor/editor';
+import type { EditableCityMarker, EditorFacilityMarker, EditorMapPayload } from '../map-editor/editor';
 import type { City, CityArmaments, CityId, FacilityType, ForceId, GameCommand, GameState, GridCell, PassId, TroopType } from '../types';
 import { createGameEngine, type GameEngine } from '../engine';
 import {
@@ -111,7 +111,7 @@ interface GameContextValue {
   debateAbandon(): void;
   dismissDebate(): void;
   waitUnit(unitId: string): void;
-  applyMapEditorMap(map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number }): void;
+  applyMapEditorMap(map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number; facilities?: EditorFacilityMarker[] }): void;
   endMonth(): void;
   endTenDay(): void;
   /** 让当前玩家的委任部队立刻行动一步（不推进回合、不结算旬末） */
@@ -175,7 +175,7 @@ function withoutTransientReports(state: GameState): GameState {
   };
 }
 
-function applyEditorMapToState(state: GameState, map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number }): GameState {
+function applyEditorMapToState(state: GameState, map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number; facilities?: EditorFacilityMarker[] }): GameState {
   const markersById = new Map(map.cities.map((city) => [city.id, city]));
   const cities = Object.fromEntries(Object.entries(state.cities).map(([id, city]) => {
     const marker = markersById.get(id);
@@ -188,6 +188,10 @@ function applyEditorMapToState(state: GameState, map: { grid: GridCell[]; cities
     gridWidth: map.width ?? state.gridWidth,
     gridHeight: map.height ?? state.gridHeight,
     grid: map.grid.map((cell) => ({ ...cell })),
+    // 编辑器摆放的军事设施随图应用（旧调用不传该字段时保持原设施不动）
+    ...(map.facilities
+      ? { facilities: facilitiesFromEditorMarkers(map.facilities, map.grid, Object.values(cities).map((city) => ({ q: city.gridQ, r: city.gridR }))) }
+      : {}),
   };
 }
 
@@ -521,7 +525,7 @@ export function GameProvider({ children, initialState = null, storage: storagePr
     dispatchIntent({ type: 'waitUnit', unitId });
   }, [dispatchIntent]);
 
-  const applyMapEditorMap = useCallback((map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number }) => {
+  const applyMapEditorMap = useCallback((map: { grid: GridCell[]; cities: EditableCityMarker[]; width?: number; height?: number; facilities?: EditorFacilityMarker[] }) => {
     if (!state) throw new Error('尚未开始游戏');
     const next = applyEditorMapToState(state, map);
     replaceGameState(next);
