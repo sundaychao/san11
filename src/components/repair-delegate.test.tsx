@@ -133,7 +133,7 @@ describe('委任修补：弹字必须与耐久实际变化一致', () => {
     expect(screen.queryByTestId('facility-repair-number')).toBeNull();
   });
 
-  it('出征落位中点设施确认修补：部队立即出征并带「委·待」徽章向设施行军', async () => {
+  it('出征落位中点设施确认修补：部队立即出征并向设施行军（本旬已行动，头顶不显示任何字）', async () => {
     mockAudio();
     const user = userEvent.setup();
     const base = createGame('liu', 1);
@@ -176,12 +176,10 @@ describe('委任修补：弹字必须与耐久实际变化一致', () => {
     await user.click(screen.getByTestId('repair-confirm-yes'));
 
     // 部队真正出征：预览消失，真实部队已抵达设施旁（不再停在城池中心）。
-    // 出征+靠近就是本旬的委任行动（delegateActed）：委任本旬不再执行，但徽章不消失 —— 转为灰色「委·待」
+    // 出征+靠近就是本旬的委任行动（delegateActed）：部队本旬行动完，头顶不显示任何字，下一旬旬初才重新出现「委」
     expect(screen.queryByTestId('deploy-preview-marker')).toBeNull();
     const unitMarker = screen.getByTestId('battle-unit-marker');
-    const pendingBadge = screen.getByTestId('battle-unit-ready-badge');
-    expect(pendingBadge).toHaveTextContent('委·待');
-    expect(pendingBadge).toHaveClass('is-awaiting-next-ten-day');
+    expect(screen.queryByTestId('battle-unit-ready-badge')).toBeNull();
     const [unitQ, unitR] = unitMarker.getAttribute('data-grid-position')!.split(',').map(Number);
     // 出生格取朝设施最近的部署格（可能就是设施格），委任立即把部队贴近到设施旁：距离 ≤ 1，下个旬起就地修补
     expect(hexGridDistance({ q: unitQ, r: unitR }, facilityPos)).toBeLessThanOrEqual(1);
@@ -278,7 +276,7 @@ describe('委任修补：弹字必须与耐久实际变化一致', () => {
     await confirmRepairViaMenu(user);
 
     expect(readFacilityDurability()).toBe('800/800');
-    // 委任解除后徽章整体消失（含灰色「委·待」）：不能只剩待执行的灰徽章
+    // 委任解除后徽章整体消失：不能只剩待执行的灰徽章
     expect(badgeTexts().filter((text) => text?.startsWith('委'))).toHaveLength(0);
   });
 });

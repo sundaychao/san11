@@ -730,7 +730,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     expect(screen.queryByTestId('battle-unit-ready-badge')).not.toBeInTheDocument();
   });
 
-  it('keeps the delegate badge visible as a gray 「委·待」 for the rest of the ten-day after the delegation acted (delegateActed)', () => {
+  it('hides every badge for the rest of the ten-day after the delegation acted (delegateActed)', () => {
     const deployed = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -742,7 +742,7 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     const waiting = settleTenDay(deployed);
     const unit = Object.values(waiting.units)[0];
     unit.delegate = { kind: 'move', target: { q: unit.q + 3, r: unit.r } };
-    // 本旬已用「委任部队行动」执行过：moved + delegateActed —— 委任本旬不再执行，但徽章必须仍然可见
+    // 本旬已用「委任部队行动」执行过：moved + delegateActed —— 玩家规则：本旬行动完就什么都不显示
     unit.moved = true;
     unit.delegateActed = true;
     renderGame(waiting);
@@ -750,12 +750,14 @@ describe('StrategicMap', { timeout: 30000 }, () => {
     resetCamera();
     panViewport(0, -1100);
 
-    // 委任已登记的证明：徽章不消失，转为灰色「委·待」，与「本旬还会再动」的亮色「委」样式不同
-    const badge = screen.getByTestId('battle-unit-ready-badge');
-    expect(badge).toHaveTextContent('委·待');
-    expect(badge).toHaveClass('is-awaiting-next-ten-day');
-    expect(badge).toHaveAttribute('data-delegate-awaiting', 'true');
-    expect(screen.queryAllByTestId('battle-unit-ready-badge').filter((candidate) => candidate.textContent === '委')).toHaveLength(0);
+    // 不显示「委」，也不显示任何字
+    expect(screen.queryAllByTestId('battle-unit-ready-badge')).toHaveLength(0);
+
+    // 下一旬旬初（清除 delegateActed 标记后）重新显示亮色「委」
+    delete unit.delegateActed;
+    unit.moved = false;
+    renderGame(structuredClone(waiting));
+    expect(screen.getAllByTestId('battle-unit-ready-badge').some((badge) => badge.textContent === '委')).toBe(true);
   });
 
   it('blocks city and unit command entry while another player is active', async () => {

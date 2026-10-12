@@ -921,7 +921,7 @@ describe('部队委任', () => {
       expect(unit.q !== before.q || unit.r !== before.r).toBe(true);
       expect(unit.moved).toBe(true);
       // 「委任部队行动」入口的徽章契约：执行即记 delegateActed（旧 UI 正是据此把徽章藏掉，
-      // 现在同一标记只让徽章转为灰色「委·待」）。若这一旬恰好走到目标，委任按规则结束（那是完成，不是隐藏）。
+      // 现在同一标记只让徽章不显示任何字）。若这一旬恰好走到目标，委任按规则结束（那是完成，不是隐藏）。
       expect(unit.delegateActed).toBe(true);
       // 不推进回合：时间与行动势力均不变
       expect(after.month).toBe(month);
@@ -931,7 +931,7 @@ describe('部队委任', () => {
       expect(hasExecutableDelegation(after, 'liu')).toBe(false);
     }, 30000);
 
-    it('委任执行标记：下达即时行动即记 delegateActed（徽章转灰「委·待」），同旬重下达保持标记、下一旬初清除', () => {
+    it('委任执行标记：下达即时行动即记 delegateActed（徽章不显示任何字），同旬重下达保持标记、下一旬初清除', () => {
       const state = createGame('liu', 1);
       const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
         .find((n) => cellAt(state, n))!;
@@ -940,12 +940,12 @@ describe('部队委任', () => {
       expect(target).toBeDefined();
       if (!target) return;
 
-      // 下达移动委任 = 本旬立即行军一步：记 delegateActed → 徽章转灰「委·待」、本旬「进行」不再重复执行
+      // 下达移动委任 = 本旬立即行军一步：记 delegateActed → 徽章不显示任何字、本旬「进行」不再重复执行
       const delegated = setMoveDelegate(state, 'liu', 'delegate-unit', target);
       expect(delegated.units['delegate-unit'].delegateActed).toBe(true);
 
       // 同旬重新下达：该部队本旬的行动已经用掉（moved + 移动力耗尽），新委任本旬同样不会执行 ——
-      // 仍记 delegateActed，徽章保持灰色「委·待」（显示亮色「委」会误导成「本旬还会再动一次」）
+      // 仍记 delegateActed，徽章保持不显示（显示亮色「委」会误导成「本旬还会再动一次」）
       expect(setMoveDelegate(delegated, 'liu', 'delegate-unit', target).units['delegate-unit'].delegateActed).toBe(true);
 
       // 下一旬旬初重置后恢复显示
@@ -953,7 +953,7 @@ describe('部队委任', () => {
       expect(settled.units['delegate-unit'].delegateActed).toBeUndefined();
     }, 30000);
 
-    it('出征落位已把移动力走完：委任本旬不执行（徽章转灰「委·待」），点「进行」也不补走一步', () => {
+    it('出征落位已把移动力走完：委任本旬不执行（徽章不显示任何字），点「进行」也不补走一步', () => {
       // 用户口径：出征本身已经是本旬的行动，部队都出城了还挂「委」、点「进行」又走一大段 = 一旬走两次
       const state = createGame('liu', 1);
       const spawn = neighborsOf(state.cities.jiangling.gridQ, state.cities.jiangling.gridR)
@@ -966,7 +966,7 @@ describe('部队委任', () => {
 
       const issued = setMoveDelegate(state, 'liu', 'delegate-unit', target);
       const unit = issued.units['delegate-unit'];
-      // 委任必须登记（否则玩家的指令静默丢失），但本旬已经执行过 → 徽章转灰「委·待」、本旬「进行」不再补走
+      // 委任必须登记（否则玩家的指令静默丢失），但本旬已经执行过 → 徽章不显示任何字、本旬「进行」不再补走
       expect(unit.delegate).toEqual({ kind: 'move', target });
       expect(unit.delegateActed).toBe(true);
       expect(unit.q).toBe(spawn.q);
@@ -982,7 +982,7 @@ describe('部队委任', () => {
       expect(next.units['delegate-unit'].q !== spawn.q || next.units['delegate-unit'].r !== spawn.r).toBe(true);
     }, 30000);
 
-    it('出征落位只剩零头移动力（不够走一步）：同样转灰「委·待」、点「进行」不补走', () => {
+    it('出征落位只剩零头移动力（不够走一步）：同样不显示任何徽章、点「进行」不补走', () => {
       // 实测踩过的变体：出征到朝目标最近的部署格后剩 2 点移动力（步兵最便宜的地形也要 4），
       // 委任当旬走不动 → 旧实现点「进行」时把移动力恢复成满值，部队同一旬又跳一大段
       const state = createGame('liu', 1);
@@ -996,7 +996,7 @@ describe('部队委任', () => {
       const issued = setMoveDelegate(state, 'liu', 'delegate-unit', target);
       const unit = issued.units['delegate-unit'];
       expect(unit.delegate).toEqual({ kind: 'move', target });
-      // 零头移动力不允许在本旬再花：委任本旬的机会已用掉（徽章转灰「委·待」）
+      // 零头移动力不允许在本旬再花：委任本旬的机会已用掉（徽章不显示任何字）
       expect(unit.delegateActed).toBe(true);
 
       // 点「进行」：2 点移动力本来就走不到任何格（步兵最便宜 4 点），更不许恢复成满值再走
@@ -1284,7 +1284,7 @@ describe('部队委任', () => {
     it('曹操本旬已移动（移动力 0）时下委任：委任登记成功（不是被清掉）、本旬不执行，下一旬立刻就地修补 150 → 300', () => {
       const confirmed = setRepairDelegate(halfBuiltDrumScene({ moved: true, movementRemaining: 0 }), 'cao', 'cao-unit', 'drum');
 
-      // 症状的真相：委任**在**（`delegate` 已登记），只是本旬的行动已用掉 → 记 delegateActed（徽章转灰「委·待」）
+      // 症状的真相：委任**在**（`delegate` 已登记），只是本旬的行动已用掉 → 记 delegateActed（徽章不显示任何字）
       expect(confirmed.units['cao-unit'].delegate).toEqual({ kind: 'repair', facilityId: 'drum' });
       expect(confirmed.units['cao-unit'].delegateActed).toBe(true);
       // 本旬不再走一步：位置与耐久都不动
@@ -1397,7 +1397,7 @@ describe('部队委任', () => {
   /**
    * 用户实测：A 挂着某设施的修补委任、B 把这设施修好了，A 的「委」却还挂着 —— 委任必须当场解除。
    * 徽章口径只看 `unit.delegate`，而 delegateRepairStep 只在「A 自己轮到执行委任」时才检查目标是否还需修补，
-   * 不主动清理的话 A 会多挂一旬「委 / 委·待」（本旬显示 + 下一旬旬初重置 delegateActed 后再显示），
+   * 不主动清理的话 A 会多挂一旬「委」字（本旬显示 + 下一旬旬初重置 delegateActed 后再显示），
    * 看起来像是「设施都修好了还要白跑一趟」。
    */
   describe('修补委任目标被他人修好/消失后自动解除', () => {

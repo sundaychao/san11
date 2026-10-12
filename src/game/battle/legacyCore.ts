@@ -1708,7 +1708,7 @@ export function buildFacility(state: GameState, forceId: ForceId, unitId: string
   next.units[unitId].acted = true;
   next.units[unitId].moved = true;
   next.units[unitId].movementRemaining = 0;
-  // 本建设即「本旬的委任行动」：自动转出的修补委任当旬不再执行、徽章转为灰色「委·待」，旬初重置
+  // 本建设即「本旬的委任行动」：自动转出的修补委任当旬不再执行、徽章不显示任何字，旬初重置
   next.units[unitId].delegateActed = true;
   // 委任建设（或新建设施未建成）：自动转为修补委任，直到建成；一次建成则清除委任
   if (next.facilities[id].completed) {
@@ -1723,9 +1723,9 @@ export function buildFacility(state: GameState, forceId: ForceId, unitId: string
  * 清理「已达成 / 已失效」的修补委任 —— 目标设施已不存在、或耐久已满（含被**其他**部队抢先修好）时，
  * 该委任已无意义，立刻摘掉，让部队回到普通状态（徽章不再显示「委」）。
  *
- * 为什么必须单独做这一步：徽章口径是 `unit.delegate`（未执行显示「委」、本旬已执行显示灰色「委·待」），
+ * 为什么必须单独做这一步：徽章口径是 `unit.delegate`（未执行显示「委」、本旬已执行不显示任何字），
  * 而 delegateRepairStep 只在「该部队自己轮到执行委任」时才检查目标还需不需要修。于是 B 把设施修满后，
- * A 的委任会一直挂着 —— 本旬显示「委」或「委·待」，下一旬旬初重置 delegateActed 后再显示一次，
+ * A 的委任会一直挂着 —— 本旬显示「委」，下一旬旬初重置 delegateActed 后再显示一次，
  * 直到 A 自己执行委任时才发现目标已满而自清，最长拖满一旬。玩家看到的就是「设施已经修好了，A 还挂着委任还得再跑一趟」。
  *
  * 调用点＝一切可能让设施「从需修变为不需修 / 直接消失」的地方：
@@ -1760,7 +1760,7 @@ export function repairFacility(state: GameState, forceId: ForceId, unitId: strin
   next.units[unitId].acted = true;
   next.units[unitId].moved = true;
   next.units[unitId].movementRemaining = 0;
-  // 本次修补即「本旬的委任行动」：同目标保留的修补委任当旬不再重复执行，徽章转为灰色「委·待」，旬初重置
+  // 本次修补即「本旬的委任行动」：同目标保留的修补委任当旬不再重复执行，徽章不显示任何字，旬初重置
   next.units[unitId].delegateActed = true;
   const delegate = next.units[unitId].delegate;
   if (delegate) {

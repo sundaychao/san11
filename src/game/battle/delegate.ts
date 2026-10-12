@@ -388,7 +388,7 @@ function delegateMoveStep(
   if (!dest) return state; // 不可达或本回合无法前进：保留委任，也不动 moved
   const next = moveUnit(withMovableUnit(state, unitId), forceId, unitId, dest, options);
   if (!next.units[unitId]) return next; // 回城/进驻：部队消失，委任自然结束
-  next.units[unitId].delegateActed = true; // 本旬已执行过委任行动：徽章转为灰色「委·待」，且「进行」不再重复执行
+  next.units[unitId].delegateActed = true; // 本旬已执行过委任行动：徽章不显示任何字，且「进行」不再重复执行
   if (preserveDelegate) {
     // 建设/修补委任：移动后保持原委任，未到达目标格前持续靠近
     next.units[unitId].delegate = preserveDelegate;
@@ -601,7 +601,7 @@ export function hasExecutableDelegation(state: GameState, forceId: ForceId = sta
 /**
  * 手动执行委任：不推进回合，只让委任部队各行动一步（右键菜单「委任部队行动」）。
  * 与 advanceTenDay 的第一步同源；因为不经过旬末重置，这里直接补上"委任进驻/回城的武将标记已行动"。
- * 行动过的部队由 delegate*Step 记 delegateActed：本旬徽章转为灰色「委·待」、「进行」不再重复执行，下一旬旬初恢复。
+ * 行动过的部队由 delegate*Step 记 delegateActed：本旬徽章不显示任何字、「进行」不再重复执行，下一旬旬初恢复。
  */
 export function runDelegatedUnits(state: GameState, forceId: ForceId = state.turnForceId): GameState {
   const next = executeDelegations(state, forceId);
@@ -645,7 +645,7 @@ function clearDelegateActed(state: GameState, unitId: string): GameState {
 
 /**
  * 本旬的「行动」已经被别的事情用掉（出征落位 / 手动移动 / 攻击 / 建设…都会置 `moved` 或 `acted`）时，
- * 把刚下达的委任记为「本旬已执行过」：徽章转为灰色「委·待」（不消失）、点「进行」也不再补走一步，下一旬旬初重置后正常执行。
+ * 把刚下达的委任记为「本旬已执行过」：徽章不显示任何字、点「进行」也不再补走一步，下一旬旬初重置后正常执行。
  *
  * 与 `buildFacility` 的口径一致 —— 「手动建设本身即计为本旬的委任行动」（那里也是直接记 delegateActed）。
  * 不加这一步会出现两件事同时错：出征委任后部队已经出城（本旬动过了）却还挂着「委」，
@@ -720,7 +720,7 @@ export function setRepairDelegate(state: GameState, forceId: ForceId, unitId: st
   next.strategyResultReports = [];
   next.units[unitId].delegate = { kind: 'repair', facilityId };
   // 本旬没有移动力（含出征已把移动力走完）：只登记委任，本旬不再执行 ——
-  // 记 delegateActed 让徽章转为灰色「委·待」、点「进行」也不补走一步，下个旬起正常执行
+  // 记 delegateActed 让徽章不显示任何字、点「进行」也不补走一步，下个旬起正常执行
   if (!unitCanStepThisTenDay(unit)) return markDelegateSpentIfNoCapacity(next, unitId);
   return markDelegateSpentIfNoCapacity(delegateRepairStep(next, forceId, unitId, facilityId), unitId);
 }

@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 /**
  * 实机验证「出征部队的修补委任会真的移动并修补」（用户四连问的端到端回归防线）：
  * 注入存档（关羽出征落位 (80,136)、受损太鼓台 (80,133) 相距 3 格）→ 继续进度 →
- * 点设施 → 设施菜单「委任修补」→ 确认（当旬即执行一步，徽章转为灰色「委·待」）→ 右键推旬 → 断言部队已到设施旁。
+ * 点设施 → 设施菜单「委任修补」→ 确认（当旬即执行一步，本旬行动完不显示任何字）→ 右键推旬 → 断言部队已到设施旁。
  * jsdom 已验证引擎链路，此 spec 排除「用户端旧代码 / 真实地图数据差异」两类嫌疑。
  * fixture 缺失时先跑：node node_modules/vitest/vitest.mjs run src/game/e2e-repair-fixture.test.ts
  */
@@ -41,12 +41,12 @@ test('出征部队下修补委任后，推旬会自动走向设施', async ({ pa
   await page.getByTestId('repair-confirm-yes').click();
   await expect(page.getByTestId('repair-confirm-menu')).toHaveCount(0);
 
-  // 确认当旬：出征落位还剩出征移动力，委任立即执行一步 —— 徽章不消失，转为灰色「委·待」（下一旬旬初恢复亮色「委」）
+  // 确认当旬：出征落位还剩出征移动力，委任立即执行一步 —— 本旬行动完不显示任何字（下一旬旬初恢复亮色「委」）
   const positionAfterConfirm = await page.getByTestId('battle-unit-marker')
     .first()
     .getAttribute('data-grid-position');
   console.log('[e2e] unit after confirm:', positionAfterConfirm);
-  await expect(page.getByTestId('battle-unit-ready-badge').filter({ hasText: '委·待' })).toHaveCount(1);
+  await expect(page.getByTestId("battle-unit-ready-badge")).toHaveCount(0);
 
   // 右键推旬（避开左上工具按钮组：取地图 45% / 20% 处，同 game.spec.ts）
   const mapBox = (await page.getByTestId('map-viewport').boundingBox())!;
