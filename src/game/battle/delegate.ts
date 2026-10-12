@@ -9,6 +9,7 @@ import {
   occupiedUnitKeys,
   ownCityTransitKeysFor,
   reachableCosts,
+  unitCanEnterCell,
   unitCanStepThisTenDay,
   unitIsIncapacitated,
   unitUntouchedThisTenDay,
@@ -209,6 +210,20 @@ function minCostToTarget(
     if (stopKeys.has(current.key)) continue;
     const [q, r] = current.key.split(',').map(Number);
     const currentCell = cellAt(state, { q, r });
+    // 反向边的一环也必须是这支部队真的能进入的格（科技「开路军」阻挡 / 兵种载具 / 占用口径与正向完全一致）：
+    // 否则「到目标的剩余消耗」会把走不通的近路估得比实际便宜，落点评价 dStart + dist 不单调 ——
+    // 实测表现为委任部队在设施旁两格之间每旬来回移动，永远进不了 repairFacility 分支。
+    if (!unitCanEnterCell(state, { q, r }, {
+      ignoredUnitId: options.ignoredUnitId,
+      profile,
+      vehicle: options.vehicle,
+      movingForceId: options.movingForceId,
+      allowedCityTransitKeys: options.allowedCityTransitKeys,
+      cityKeys,
+      unitKeys,
+      facilityKeys,
+      blockedPassKeys,
+    })) continue;
     // 反向边的权：正向从 neighbor 走进 current 时付的消耗
     const enterCurrentCost = movementCostForCell(currentCell, profile, options.vehicle);
     if (!Number.isFinite(enterCurrentCost)) continue;
@@ -373,7 +388,7 @@ function delegateMoveStep(
   if (!dest) return state; // 不可达或本回合无法前进：保留委任，也不动 moved
   const next = moveUnit(withMovableUnit(state, unitId), forceId, unitId, dest, options);
   if (!next.units[unitId]) return next; // 回城/进驻：部队消失，委任自然结束
-  next.units[unitId].delegateActed = true; // 本旬已执行过委任行动：隐藏徽章，且「进行」不再重复执行
+  next.units[unitId].delegateActed = true; // 本旬已执行过委任行动：徽章转为灰色「委·待」，且「进行」不再重复执行
   if (preserveDelegate) {
     // 建设/修补委任：移动后保持原委任，未到达目标格前持续靠近
     next.units[unitId].delegate = preserveDelegate;
@@ -391,6 +406,18 @@ function delegateBuildStep(state: GameState, forceId: ForceId, unitId: string, t
   if (!unit || unit.acted || unitIsIncapacitated(unit)) return state;
   // 与移动/修补委任同一判据：只看本旬还剩多少移动力，不看 moved
   if (!unitCanStepThisTenDay(unit)) return state;
+  // 旧存档自愈：目标格已被设施占据（历史版本会把建成后的「修补续建」委任覆盖回「建设」，
+  // 目标格永远不可再建 → 委任冻结、耐久不涨）。就地转为修补续建；已修满则结束委任。
+  const occupant = Object.values(state.facilities ?? {}).find((candidate) => candidate.q === target.q && candidate.r === target.r);
+  if (occupant) {
+    const healed = structuredClone(state);
+    if (occupant.forceId === forceId && facilityNeedsRepair(occupant)) {
+      healed.units[unitId].delegate = { kind: 'repair', facilityId: occupant.id };
+      return delegateRepairStep(healed, forceId, unitId, occupant.id);
+    }
+    delete healed.units[unitId].delegate;
+    return healed;
+  }
   const adjacent = neighborsOf(unit.q, unit.r).some((coord) => coord.q === target.q && coord.r === target.r);
   if (adjacent) {
     if ((unit.gold ?? 0) >= FACILITY_BUILD_COSTS[facility]
@@ -409,7 +436,18 @@ function delegateBuildStep(state: GameState, forceId: ForceId, unitId: string, t
   const approachTarget = path[path.length - 2];
   // 首回合发起时部队尚无委任，需用本次建设委任作为移动期间的保留委任
   const movingDelegate: UnitDelegate = unit.delegate ?? { kind: 'build', target, facility };
-  return delegateMoveStep(state, forceId, unitId, approachTarget, movingDelegate);
+  const moved = delegateMoveStep(state, forceId, unitId, approachTarget, movingDelegate);
+  if (moved === state) return state;
+  // 移动到位当旬顺手建设：移动+建设合计为本旬的一次行动（与修补委任同口径）
+  const arrived = moved.units[unitId];
+  if (arrived && !arrived.acted
+    && (arrived.gold ?? 0) >= FACILITY_BUILD_COSTS[facility]
+    && facilityBuildTargets(moved, unitId, undefined, facility).some((coord) => coord.q === target.q && coord.r === target.r)) {
+    const built = buildFacility(moved, forceId, unitId, facility, target);
+    if (built.units[unitId]) built.units[unitId].delegateActed = true;
+    return built;
+  }
+  return moved;
 }
 
 /** 设施的一个可通行的相邻格（路径接近目标）。返回距离部队最近的邻格。 */
@@ -422,18 +460,22 @@ function passableNeighborOfFacility(state: GameState, facility: { q: number; r: 
   return best?.coord;
 }
 
-/** 判断指定格是否可作为部队接近/停靠的合法格（非城市、非设施占据、非部队占据、可通行） */
+/**
+ * 判断指定格是否可作为**该部队**接近/停靠的合法格：占用判定之外，还必须过该部队真实的移动口径
+ * （兵种/载具 + 势力科技阻挡）。旧实现只问 `movementCostForCell(cell, undefined, undefined)`，
+ * 会把「这支部队永远进不去的格」当成可接近格（未研究「开路军」时的小径/浅滩/川最典型）——
+ * 于是 `pickBestDelegateStop` 只能停在这个进不去的格旁边，委任部队每旬在两格之间来回移动（实测 5,77 ↔ 6,78）、
+ * 「部队移动过去了、也有音效，但耐久一点没涨」。判据统一在 `movementRules.unitCanEnterCell`。
+ */
 function isLegalApproachCell(state: GameState, coord: GridCoord, unitId: string): boolean {
-  const cityKeys = allCityKeys(state);
-  const facilityKeys = occupiedFacilityKeys(state);
-  const unitKeys = occupiedUnitKeys(state, unitId);
-  const blockedPassKeys = passBlockedKeys(state);
-  const key = gridKey(coord);
-  if (cityKeys.has(key)) return false;
-  if (facilityKeys.has(key)) return false;
-  if (unitKeys.has(key)) return false;
-  if (blockedPassKeys.has(key)) return false;
-  return Number.isFinite(movementCostForCell(cellAt(state, coord), undefined, undefined));
+  const unit = state.units[unitId];
+  if (!unit) return false;
+  return unitCanEnterCell(state, coord, {
+    ignoredUnitId: unitId,
+    profile: movementProfileForUnit(unit),
+    vehicle: unit.vehicle,
+    movingForceId: unit.forceId,
+  });
 }
 
 /** 修补委任一步：已相邻且设施未完成则修补（内部保持委任至建成），否则沿最优路径靠近 */
@@ -460,7 +502,18 @@ function delegateRepairStep(state: GameState, forceId: ForceId, unitId: string, 
   // 需要站上去才能修补，故直接以它为移动终点，而非像建设一样停在相接格的上一格）。
   const approachTarget = passableNeighborOfFacility(state, facility, unitId);
   if (!approachTarget) return state;
-  return delegateMoveStep(state, forceId, unitId, approachTarget, unit.delegate);
+  const moved = delegateMoveStep(state, forceId, unitId, approachTarget, unit.delegate);
+  if (moved === state) return state;
+  // 移动到位当旬顺手修补：移动+修补合计为本旬的一次行动（与手动「移动后修补」同口径）。
+  // 否则到达设施的当旬被白白跳过，玩家看到的就是「部队移动过去了、音效也响了，耐久却不涨」。
+  const arrived = moved.units[unitId];
+  if (arrived && !arrived.acted
+    && repairableFacilities(moved, unitId).some((candidate) => candidate.id === facilityId)) {
+    const repaired = repairFacility(moved, forceId, unitId, facilityId);
+    if (repaired.units[unitId]) repaired.units[unitId].delegateActed = true;
+    return repaired;
+  }
+  return moved;
 }
 
 /** 旬结算执行委任前的预备：把本势力挂委任部队的本旬行动标记清掉、移动力恢复（与旬初重置同口径）。
@@ -548,7 +601,7 @@ export function hasExecutableDelegation(state: GameState, forceId: ForceId = sta
 /**
  * 手动执行委任：不推进回合，只让委任部队各行动一步（右键菜单「委任部队行动」）。
  * 与 advanceTenDay 的第一步同源；因为不经过旬末重置，这里直接补上"委任进驻/回城的武将标记已行动"。
- * 行动过的部队由 delegate*Step 记 delegateActed：本旬隐藏「委」徽章、「进行」不再重复执行，下一旬旬初恢复。
+ * 行动过的部队由 delegate*Step 记 delegateActed：本旬徽章转为灰色「委·待」、「进行」不再重复执行，下一旬旬初恢复。
  */
 export function runDelegatedUnits(state: GameState, forceId: ForceId = state.turnForceId): GameState {
   const next = executeDelegations(state, forceId);
@@ -580,7 +633,7 @@ export function keepDelegationMergedOfficersActed(state: GameState, officerIds: 
   return state;
 }
 
-/** 重新下达委任即视为「新委任本旬尚未行动」：清掉上一次执行的徽章隐藏标记；
+/** 重新下达委任即视为「新委任本旬尚未行动」：清掉上一次执行的待执行标记（徽章恢复亮色「委」）；
  * 若本次下达又立即行动，delegate*Step 会重新记上。 */
 function clearDelegateActed(state: GameState, unitId: string): GameState {
   const unit = state.units[unitId];
@@ -592,7 +645,7 @@ function clearDelegateActed(state: GameState, unitId: string): GameState {
 
 /**
  * 本旬的「行动」已经被别的事情用掉（出征落位 / 手动移动 / 攻击 / 建设…都会置 `moved` 或 `acted`）时，
- * 把刚下达的委任记为「本旬已执行过」：徽章不显示「委」、点「进行」也不再补走一步，下一旬旬初重置后正常执行。
+ * 把刚下达的委任记为「本旬已执行过」：徽章转为灰色「委·待」（不消失）、点「进行」也不再补走一步，下一旬旬初重置后正常执行。
  *
  * 与 `buildFacility` 的口径一致 —— 「手动建设本身即计为本旬的委任行动」（那里也是直接记 delegateActed）。
  * 不加这一步会出现两件事同时错：出征委任后部队已经出城（本旬动过了）却还挂着「委」，
@@ -667,7 +720,7 @@ export function setRepairDelegate(state: GameState, forceId: ForceId, unitId: st
   next.strategyResultReports = [];
   next.units[unitId].delegate = { kind: 'repair', facilityId };
   // 本旬没有移动力（含出征已把移动力走完）：只登记委任，本旬不再执行 ——
-  // 记 delegateActed 让徽章不显示「委」、点「进行」也不补走一步，下个旬起正常执行
+  // 记 delegateActed 让徽章转为灰色「委·待」、点「进行」也不补走一步，下个旬起正常执行
   if (!unitCanStepThisTenDay(unit)) return markDelegateSpentIfNoCapacity(next, unitId);
   return markDelegateSpentIfNoCapacity(delegateRepairStep(next, forceId, unitId, facilityId), unitId);
 }

@@ -933,7 +933,11 @@ export function StrategicMap({
           : TROOP_TEXTURES[troopType];
     const centerX = position.x + CELL_SIZE / 2;
     const centerY = position.y + CELL_SIZE / 2;
-    const canActThisTurn = unit.forceId === state.turnForceId && unitUntouchedThisTenDay(unit);
+    const isCurrentForceUnit = unit.forceId === state.turnForceId;
+    const canActThisTurn = isCurrentForceUnit && unitUntouchedThisTenDay(unit);
+    // 委任已登记、但本旬的行动已经用掉（delegateActed：下达即时行动 / 「委任部队行动」/ 本旬已移动攻击建设）：
+    // 委任本旬不再执行、下一旬旬初起执行 —— 徽章不能因此消失，改为灰色「委·待」。
+    const delegateAwaitingNextTenDay = isCurrentForceUnit && Boolean(unit.delegate) && Boolean(unit.delegateActed);
     const isAttackTarget = attackTargetUnitIdSet.has(unit.id);
     const isSupplyTarget = !preview && supplyTargetUnitIdSet.has(unit.id);
     const isFirePlotTarget = firePlotTargetKeys.has(`${unit.q},${unit.r}`);
@@ -1058,10 +1062,17 @@ export function StrategicMap({
           <text className="battle-unit-model-glyph" x={centerX} y={centerY + 4}>{texture.glyph}</text>
         </g>
         <text className="battle-unit-troops" x={centerX} y={centerY + 24}>{unit.troops.toLocaleString('en-US')}</text>
-        {/* 挂委任且本旬尚未执行的部队显示徽章（委）—— 只登记未执行的委任（如移动后「设置」）也要可见；
-            本旬已执行过委任行动（delegateActed：下达即时行动或「委任部队行动」）则隐藏，下一旬旬初重新显示 */}
-        {(canActThisTurn || (unit.delegate && !unit.delegateActed && unit.forceId === state.turnForceId)) && !preview && (
-          <text className="battle-unit-ready-badge" data-testid="battle-unit-ready-badge" x={centerX + 17} y={centerY - 15}>{unit.delegate ? '委' : '未'}</text>
+        {/* 挂委任的部队头顶显示委任徽章，徽章不因本旬已行动而消失：
+            本旬还会自动行动的显示亮色「委」；本旬的行动已经用掉（delegateActed）的显示灰色「委·待」，
+            表示委任已登记、下一旬旬初起执行。无委任且本旬一动未动的部队显示「未」。 */}
+        {!preview && (canActThisTurn || (unit.delegate && isCurrentForceUnit)) && (
+          <text
+            className={`battle-unit-ready-badge${delegateAwaitingNextTenDay ? ' is-awaiting-next-ten-day' : ''}`}
+            data-testid="battle-unit-ready-badge"
+            data-delegate-awaiting={delegateAwaitingNextTenDay ? 'true' : undefined}
+            x={centerX + 17}
+            y={centerY - 15}
+          >{unit.delegate ? (delegateAwaitingNextTenDay ? '委·待' : '委') : '未'}</text>
         )}
         {isAttackTarget && (
           <text className="attack-target-arrow" data-testid="attack-target-arrow" x={centerX} y={Math.max(12, position.y - 20)}>▼</text>

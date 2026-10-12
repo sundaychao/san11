@@ -145,9 +145,9 @@ function movementCost(state: GameState, coord: GridCoord, profile: MovementProfi
 
 /**
  * 科技「开路军」：小径、浅滩、川地形默认不可进入，研究后才能通行（山崖始终不可通行）。
- * 栈道不额外扣兵（开路军的「经过栈道不损失士兵」体现在这里）。
+ * 栈道不额外扣兵（开路军的「经过栈道不损失士兵」体现在这里）。导出供规则测试/委任选点核对同一份清单。
  */
-const ROUGH_TERRAINS: readonly TerrainType[] = ['path', 'shallow', 'stream'];
+export const ROUGH_TERRAINS: readonly TerrainType[] = ['path', 'shallow', 'stream'];
 
 function terrainBlockedByTech(state: GameState, coord: GridCoord, forceId?: ForceId): boolean {
   const terrain = cellAt(state, coord)?.terrain;
@@ -213,6 +213,44 @@ export function isLegalUnitCell(state: GameState, coord: GridCoord, ignoredUnitI
     !occupiedFacilityKeys(state).has(key);
 }
 
+/**
+ * 某部队能否**进入**指定格 —— 与 `reachableCostsFrom` 的逐格判定同口径（地形消耗 + 兵种/载具 + 势力科技阻挡
+ * 「开路军」的小径/浅滩/川 + 城池/关隘/部队/设施占用），是「一步能不能走进去」的唯一判据。
+ *
+ * 委任的接近格选点（`delegate.isLegalApproachCell`）与反向落点评价（`delegate.minCostToTarget`）都必须走这里：
+ * 以前它们只问 `movementCostForCell(cell, undefined, undefined)`（不判科技、不判兵种/载具），
+ * 会把「这支部队永远进不去的格」当成可接近格 —— 实测表现为委任部队在两格之间**每旬来回移动却永远修不上**
+ * （设施邻格全是未研究「开路军」时进不去的小径）。
+ */
+export function unitCanEnterCell(
+  state: GameState,
+  coord: GridCoord,
+  options: {
+    ignoredUnitId?: string;
+    profile?: MovementProfile;
+    vehicle?: 'boat' | 'ship';
+    movingForceId?: ForceId;
+    allowedCityTransitKeys?: Set<string>;
+    /** 热路径（每旬可达集 Dijkstra）传入循环外算好的占用集合，避免逐格重建 */
+    cityKeys?: Set<string>;
+    unitKeys?: Set<string>;
+    facilityKeys?: Set<string>;
+    blockedPassKeys?: Set<string>;
+  } = {},
+) {
+  const key = gridKey(coord);
+  const profile = options.profile ?? 'sword';
+  if (!Number.isFinite(movementCostForForce(state, coord, profile, options.vehicle, options.movingForceId))) return false;
+  if (terrainBlockedByTech(state, coord, options.movingForceId)) return false;
+  const cityKeys = options.cityKeys ?? allCityKeys(state);
+  if (cityKeys.has(key) && !(options.allowedCityTransitKeys?.has(key) ?? false)) return false;
+  if ((options.blockedPassKeys ?? passBlockedKeys(state)).has(key)) return false;
+  if (passCenterBlockedFor(state, coord, options.movingForceId)) return false;
+  if ((options.unitKeys ?? occupiedUnitKeys(state, options.ignoredUnitId)).has(key)) return false;
+  if ((options.facilityKeys ?? occupiedFacilityKeys(state)).has(key)) return false;
+  return true;
+}
+
 function distance(a: GridCoord, b: GridCoord) {
   return Math.abs(a.q - b.q) + Math.abs(a.r - b.r);
 }
@@ -264,19 +302,23 @@ function reachableCostsFrom(
     const currentCost = costs.get(currentKey)!;
     for (const neighbor of neighborsOf(current.q, current.r)) {
       const key = gridKey(neighbor);
-      const canTransitCity = options.allowedCityTransitKeys?.has(key) ?? false;
       const terrainCost = movementCostForForce(state, neighbor, profile, options.vehicle, options.movingForceId);
       if (!Number.isFinite(terrainCost)) continue;
-      // 科技「开路军」：未研究时小径／浅滩／川不可通行
-      if (terrainBlockedByTech(state, neighbor, options.movingForceId)) continue;
+      // 逐格「能不能走进去」的判据统一在 `unitCanEnterCell`（含科技「开路军」阻挡）；
+      // 这里把循环外算好的占用集合传进去，避免每格重建 Set。
+      if (!unitCanEnterCell(state, neighbor, {
+        ignoredUnitId: options.ignoredUnitId,
+        profile,
+        vehicle: options.vehicle,
+        movingForceId: options.movingForceId,
+        allowedCityTransitKeys: options.allowedCityTransitKeys,
+        cityKeys,
+        unitKeys,
+        facilityKeys,
+        blockedPassKeys,
+      })) continue;
       // 科技「修筑要塞」：敌军在我方领地内每种地形的移动消耗 +1
       const intrusionCost = enemyTerritoryMoveCost(state, neighbor, options.movingForceId);
-      if (!canTransitCity && cityKeys.has(key)) continue;
-      if (unitKeys.has(key)) continue;
-      if (facilityKeys.has(key)) continue;
-      if (blockedPassKeys.has(key)) continue;
-      // 敌方关隘中心格不可通行（己方/无主关隘可通行）
-      if (passCenterBlockedFor(state, neighbor, options.movingForceId)) continue;
 
       // 横跨水域边界：陆地<->水域（河/海/川；浅滩/渡所是地面不算水面）。
       // 判据与反向搜索共用 `waterCrossingStep`，别在这里另写一套。

@@ -505,6 +505,9 @@ button { color: inherit; }
 .battle-unit-crest { fill: color-mix(in srgb, var(--troop-tone) 72%, #111813); opacity: 0.96; stroke: color-mix(in srgb, var(--force-color) 86%, #fff6d6); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
 .battle-unit-model-glyph { fill: #fff6d6; font-size: 15px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(17, 24, 21, 0.88); stroke-width: 3px; }
 .battle-unit-ready-badge { pointer-events: none; fill: #ffd842; font-family: STKaiti, KaiTi, serif; font-size: 15px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(16, 19, 15, 0.96); stroke-width: 3px; vector-effect: non-scaling-stroke; }
+/* 委任已登记、但本旬的行动已经用掉（delegateActed）：徽章不消失，转为灰色小字「委·待」，
+   与「本旬还会自动行动」的亮色「委」一眼可辨（颜色 + 字号 + 文字三重区分）。 */
+.battle-unit-ready-badge.is-awaiting-next-ten-day { fill: #b6bcb2; font-size: 11px; stroke: rgba(16, 19, 15, 0.9); stroke-width: 2.4px; opacity: 0.95; }
 .attack-target-arrow { pointer-events: none; fill: #ffd842; font-size: 18px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(16, 19, 15, 0.96); stroke-width: 4px; vector-effect: non-scaling-stroke; }
 .battle-unit-status-badge { pointer-events: none; fill: #ffef91; font-family: STKaiti, KaiTi, serif; font-size: 14px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(74, 20, 18, 0.98); stroke-width: 3px; vector-effect: non-scaling-stroke; }
 .fire-cell-marker { pointer-events: none; fill: #ffcf42; font-family: STKaiti, KaiTi, "Noto Serif SC", serif; font-size: 24px; font-weight: 900; text-anchor: middle; paint-order: stroke; stroke: rgba(102, 13, 5, 0.98); stroke-width: 4px; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 5px rgba(255, 86, 36, 0.85)); }

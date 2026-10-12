@@ -143,9 +143,16 @@ function reduceIntent(
         ? setBuildDelegate(deployed.state, forceId, deployed.unitId, intent.target, intent.facility)
         : setMoveDelegate(deployed.state, forceId, deployed.unitId, intent.target);
       if (!next.units[deployed.unitId]) return next; // 行军中进驻/回城：部队消失，委任自然结束
-      // 建设/修补委任由 setBuildDelegate 内部维护；移动委任未到达目标时已由 setMoveDelegate 记录
+      // 建设/修补委任由 setBuildDelegate 内部维护（当旬建成 → 自动转修补续建；未建成 → 保持建设委任）。
+      // 只在「本旬被挡住、委任没记上」时兜底补设；无条件覆盖会把 buildFacility 刚转好的修补委任
+      // 刷回建设委任——目标格已被设施自己占据，续建永久冻结、耐久不再增加。
       if (intent.facility) {
-        next.units[deployed.unitId].delegate = { kind: 'build', target: intent.target, facility: intent.facility };
+        const unit = next.units[deployed.unitId];
+        const targetOccupied = Object.values(next.facilities ?? {})
+          .some((candidate) => candidate.q === intent.target.q && candidate.r === intent.target.r);
+        if (!unit.delegate && !targetOccupied) {
+          unit.delegate = { kind: 'build', target: intent.target, facility: intent.facility };
+        }
       } else {
         const unit = next.units[deployed.unitId];
         // 兜底：本旬行军受阻（如被围）时 delegateMoveStep 不会记录委任，补设以免委任丢失

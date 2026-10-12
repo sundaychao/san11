@@ -275,7 +275,10 @@ describe('game interface shell', () => {
     // 出征委任修补确认后，部队应在本次确认中直接移动到设施相邻格。
     expect(screen.getAllByTestId('battle-unit-marker')
       .some((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r + 1}`)).toBe(true);
-    // 下达即已行动（本旬已执行委任一步）：「委」徽章隐藏，下一旬旬初才重新显示
+    // 下达即已行动（本旬已执行委任一步）：徽章不消失，转为灰色「委·待」，下一旬旬初才恢复亮色「委」
+    const pendingBadges = screen.queryAllByTestId('battle-unit-ready-badge')
+      .filter((badge) => badge.textContent === '委·待' && badge.classList.contains('is-awaiting-next-ten-day'));
+    expect(pendingBadges).toHaveLength(1);
     expect(screen.queryAllByTestId('battle-unit-ready-badge').filter((badge) => badge.textContent === '委')).toHaveLength(0);
 
     // 确认后地图右键菜单必须能再次弹出（stale closure 回归点），推进一旬
@@ -289,7 +292,7 @@ describe('game interface shell', () => {
       .some((candidate) => candidate.getAttribute('data-grid-position') === `${unit.q},${unit.r + 1}`)).toBe(true);
   });
 
-  it('部队已在设施旁：确认框说明「不会移动」，确认后部队就地修补（位置不变，本旬已执行故不显示委徽章）', () => {
+  it('部队已在设施旁：确认框说明「不会移动」，确认后部队就地修补（位置不变，本旬已执行故徽章转为「委·待」）', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -327,7 +330,10 @@ describe('game interface shell', () => {
     expect(screen.queryByTestId('repair-confirm-note')).toBeNull();
     fireEvent.click(screen.getByTestId('repair-confirm-yes'));
     expect(screen.queryByTestId('repair-confirm-menu')).toBeNull();
-    // 确认即完成本旬修补（delegateActed）：「委」徽章隐藏，下一旬旬初重新显示
+    // 确认即完成本旬修补（delegateActed）：徽章不消失，转为灰色「委·待」，下一旬旬初恢复亮色「委」
+    const pendingBadges = screen.queryAllByTestId('battle-unit-ready-badge')
+      .filter((badge) => badge.textContent === '委·待' && badge.classList.contains('is-awaiting-next-ten-day'));
+    expect(pendingBadges).toHaveLength(1);
     expect(screen.queryAllByTestId('battle-unit-ready-badge').filter((badge) => badge.textContent === '委')).toHaveLength(0);
 
     // 推进一旬：部队就在旁边，就地修补 —— 位置必须不变（这正是设计行为，不是没执行）
@@ -376,7 +382,7 @@ describe('game interface shell', () => {
     expect(repairButton.textContent).toBe('无部队可修补');
   });
 
-  it('建设中的军事设施：设施菜单只给「撤销」，不显示「委任修补」', () => {
+  it('B 新建、还没建成的军事设施：设施菜单同样给出「委任修补」（建设中＝耐久未满，只能靠修补推进）', () => {
     const state = deployUnit(createGame('liu', 1), 'liu', {
       cityId: 'jiangling',
       officerId: 'guan-yu',
@@ -386,7 +392,9 @@ describe('game interface shell', () => {
       food: 6000,
     });
     const unit = Object.values(state.units).find((candidate) => candidate.forceId === 'liu')!;
-    // 箭塔还差一截耐久（completed=false = 建设中）：它本来就在建设流程里，不需要「委任修补」入口
+    // 箭塔只建到 100/700（completed=false = 建设中）：它同样是「耐久未满」。
+    // 当初下建设委任的部队一旦被手动移动（手动行动会清委任），这座半成品就只剩
+    // 「委任另一支部队来修」这一条路 —— 判据必须是 facilityNeedsRepair，不能是 facilityIsCompleted。
     state.facilities = {
       'repair-target': {
         id: 'repair-target',
@@ -411,7 +419,17 @@ describe('game interface shell', () => {
     const menu = screen.getByTestId('facility-context-menu');
     expect(menu).toBeVisible();
     expect(within(menu).getByTestId('facility-dismantle-button')).toBeEnabled();
-    expect(within(menu).queryByTestId('facility-repair-button')).not.toBeInTheDocument();
+    const repairButton = within(menu).getByTestId('facility-repair-button');
+    expect(repairButton).toBeEnabled();
+
+    fireEvent.click(repairButton);
+    fireEvent.click(screen.getByTestId('repair-confirm-yes'));
+    // 委任确实落到最近的可达部队头上（不选中部队也能给 B 新建的设施派工）
+    const saved = JSON.parse(window.localStorage.getItem('jingxiang-208-autosave-v1')!) as {
+      units: Record<string, { delegate?: { kind: string; facilityId?: string } }>;
+    };
+    const delegated = Object.values(saved.units).find((candidate) => candidate.delegate?.kind === 'repair');
+    expect(delegated?.delegate).toEqual({ kind: 'repair', facilityId: 'repair-target' });
   });
 
   it('renders the battle map without a raster background image by default', () => {

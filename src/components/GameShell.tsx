@@ -7,7 +7,7 @@ import { gridKey, sevenCellCityFootprint, type GridCoord } from '../game/battle/
 import { getDeploymentTargets, getFacilityBuildTargets, getMovementTargets, getRepairDelegateTargets, getRepairTargets, getStrategyCellTargets, getStrategyUnitTargets, getTacticCityTargets, getTacticFacilityTargets, getTacticPassTargets, getTacticPlotTargets, getTacticUnitTargets, getUnitActionQuery, getUnitTacticOptions } from '../game/battle/queries';
 import { plotTargetKey } from '../game/battle/targetRules';
 import { canUnitReachRepairFacility, computeDelegatePath, hasExecutableDelegation, hasUnactedNonDelegatedUnits } from '../game/battle/delegate';
-import { facilityIsCompleted, facilityNeedsRepair } from '../game/battle/facilities';
+import { facilityNeedsRepair } from '../game/battle/facilities';
 import { chooseDelegateSpawnCell } from '../game/battle/deployment';
 import { strategyEnergyCostForUnit } from '../game/battle/strategies';
 import { canBuildPlotAtCoord, hasEnemyUnitsNear, isPlotOccupiedByOtherCity, PLOT_GOLD_COST, PLOT_LABELS, startBuildCityPlot, type PlotType } from '../game/innerAffairs';
@@ -2556,11 +2556,23 @@ export function GameShell() {
             <div className="city-command-secondary">
               {facilityObject && state
                 && facilityObject.forceId === state.playerForceId
-                // 建设中的设施不给「委任修补」：它本来就还在建设流程里，菜单只留「撤销」，多一个入口是多余的
-                // （要继续建下去：选中部队后直接点设施，或由当初下建设委任的部队自动续建）
-                && facilityIsCompleted(facilityObject)
-                && facilityNeedsRepair(facilityObject)
                 && (() => {
+                  // 耐久已满：给一条**置灰**的「委任修补（耐久已满）」，而不是让菜单只剩「撤销」。
+                  // 玩家选中部队点自家设施却看不到任何修补入口时，这一句就是「为什么不能修」的答案 ——
+                  // 耐久满的设施本来就不需要修（`facilityNeedsRepair` 的唯一判据是耐久未满，
+                  // 与是否建成无关；建设委任会自动续建到满，太鼓台满耐久 800，很容易在某旬悄悄修满）。
+                  if (!facilityNeedsRepair(facilityObject)) {
+                    return (
+                      <button type="button" data-testid="facility-repair-button" disabled className="is-disabled">
+                        委任修补（耐久已满）
+                      </button>
+                    );
+                  }
+                  // 判据统一用 facilityNeedsRepair（耐久未满），**不要再用 facilityIsCompleted**。
+                  // 「建设中」（completed:false）的设施同样是耐久未满，而且它只能靠修补推进：
+                  // 当初下建设委任的部队一旦被手动移动（手动行动会清掉委任），这座半成品设施就只剩
+                  // 「委任另一支部队来修」这条路。旧实现把它挡在设施菜单外，玩家看到的就是
+                  // 「委任 A 修补 B 新建的军事设施」没有入口 / 没效果（只剩「撤销」）。
                   const hasUnit = Boolean(pickRepairCandidateUnit(facilityObject.id) || pendingDeployRepairInput(facilityObject));
                   return (
                     <button

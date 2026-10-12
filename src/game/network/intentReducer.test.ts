@@ -6,11 +6,13 @@ import {
   deployTransportUnitWithId,
   deployUnitWithId,
   deploymentCells,
+  facilityBuildTargets,
   moveUnit,
   movementAllowanceForUnit,
   movementCells,
   supplyUnit,
 } from '../battle/actions';
+import { advanceTenDay } from '../turn';
 import { neighborsOf } from '../battle/grid';
 import { hexGridDistance } from '../battle/deployment';
 import { plotTargetKey } from '../battle/targetRules';
@@ -295,6 +297,68 @@ describe('reduceGameIntent', () => {
     })).toEqual(expected.state);
   });
 
+  it('出征落位即建设施：委任转为修补续建不被建设委任覆盖（否则建设中设施永久冻结，耐久不再增加）', () => {
+    expect(typeof reduceGameIntent).toBe('function');
+    if (!reduceGameIntent) return;
+
+    const state = createGame('cao', 1);
+    state.forces.cao.techNodes = [...(state.forces.cao.techNodes ?? []), 'goulou'];
+    const zhang = state.officers['zhang-liao'];
+    const cityId = (zhang.location as { cityId: string }).cityId;
+    const city = state.cities[cityId as keyof typeof state.cities];
+    city.troops = 60000;
+    city.gold = 3000;
+    city.armaments = { ...city.armaments, spear: 30000 } as typeof city.armaments;
+
+    // 找一个「落位后紧邻可建设点」的部署格（与用户流程一致：出城的时候就建）
+    const input = { cityId: cityId as never, officerIds: ['zhang-liao'] as string[], troopType: 'spear' as const, troops: 5000, food: 6000, gold: 2000 };
+    let destination: { q: number; r: number } | undefined;
+    let buildTarget: { q: number; r: number } | undefined;
+    for (const cell of deploymentCells(state, cityId as never, undefined, 'spear')) {
+      const sim = deployUnitWithId(state, 'cao', { ...input, destination: cell });
+      const t = facilityBuildTargets(sim.state, sim.unitId, undefined, 'drum')[0];
+      if (t) {
+        destination = cell;
+        buildTarget = t;
+        break;
+      }
+    }
+    expect(destination).toBeDefined();
+    expect(buildTarget).toBeDefined();
+    if (!destination || !buildTarget) return;
+
+    const reduced = reduceGameIntent(state, 'cao', {
+      type: 'deployUnitDelegate',
+      input: { ...input, destination },
+      target: buildTarget,
+      facility: 'drum',
+    });
+    const unit = Object.values(reduced.units).find((u) => u.leaderId === 'zhang-liao')!;
+    const drum = Object.values(reduced.facilities ?? {}).find((f) => f.type === 'drum')!;
+    // 当旬已建成第一锤：设施存在
+    expect(drum).toBeDefined();
+    expect(drum.completed).toBe(false);
+    // 委任必须是修补续建（修复前会被覆盖回 build → 目标格已被设施占据 → 永久冻结）
+    expect(unit.delegate).toEqual({ kind: 'repair', facilityId: drum.id });
+
+    // 推进若干旬：耐久必须持续增长直至建成（下达当旬已用于建设，第一旬允许不涨）
+    let cursor = reduced;
+    let guard = 0;
+    const startDurability = drum.durability;
+    let previous = startDurability;
+    let growthCount = 0;
+    while (!cursor.facilities![drum.id].completed && guard < 12) {
+      cursor = advanceTenDay(cursor);
+      guard += 1;
+      const now = cursor.facilities![drum.id].durability;
+      if (now > previous) growthCount += 1;
+      previous = now;
+    }
+    expect(growthCount).toBeGreaterThanOrEqual(2); // 不是只动了一次的偶发
+    expect(cursor.facilities![drum.id].completed).toBe(true);
+    expect(cursor.units[unit.id]?.delegate).toBeUndefined();
+  }, 30000);
+
   it('turns a remote repair chosen during deployment into a repair delegation', () => {
     expect(typeof reduceGameIntent).toBe('function');
     if (!reduceGameIntent) return;
@@ -335,8 +399,10 @@ describe('reduceGameIntent', () => {
     expect(unit).toBeDefined();
     expect(unit).toMatchObject({ delegate: { kind: 'repair', facilityId: 'repairing' }, moved: true });
     expect(unit).not.toMatchObject({ q: spawn.q, r: spawn.r });
-    expect(next.facilities?.repairing.durability).toBe(100);
-    expect(next.facilityRepairReports).toEqual([]);
+    // 到达当旬顺手修补（移动+修补合计一次行动）：耐久真的上涨，并产生一条修补报告
+    expect(next.facilities?.repairing.durability).toBeGreaterThan(100);
+    expect(next.facilityRepairReports?.length).toBe(1);
+    expect(next.facilityRepairReports?.[0]).toMatchObject({ facilityId: 'repairing', kind: 'repair' });
   });
 
   it('keeps transport deployment plus its follow-up action atomic (落位菜单出城即攻击)', () => {
