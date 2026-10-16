@@ -12,9 +12,13 @@
     "map:china": "tsx scripts/generate-china-map.ts"
   },
   "keywords": [],
-  "author": "",
-  "license": "UNLICENSED",
-  "private": true,
+  "author": "sundaychao",
+  "license": "MIT",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sundaychao/san11.git"
+  },
   "type": "module",
   "dependencies": {
     "lucide-react": "^1.24.0",
